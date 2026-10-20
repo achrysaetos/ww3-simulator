@@ -85,10 +85,7 @@ const specs = defineMunitions([
   { id: 'df21c', name: 'DF-21C (CSS-5 Mod 4, conventional)', kind: 'mrbm', producers: ['CHN'], rangeKm: 1750, speedMach: 10, warheadKg: 600, cepM: 50, pk: srbmPk, interceptDifficulty: 0.75, unitCostUsdM: 6, weightKg: 14700 },
   { id: 'hf2', name: 'Hsiung Feng II', kind: 'antiship_cruise', producers: ['TWN'], rangeKm: 160, speedMach: 0.85, warheadKg: 190, cepM: 3, pk: ashmPk(0.45), interceptDifficulty: 0.3, unitCostUsdM: 1, weightKg: 685 },
   { id: 'zarb', name: 'Zarb (C-602 derivative)', kind: 'antiship_cruise', producers: ['PAK', 'CHN'], rangeKm: 280, speedMach: 0.9, warheadKg: 300, cepM: 5, pk: ashmPk(0.5), interceptDifficulty: 0.3, unitCostUsdM: 1, weightKg: 1140 },
-  { id: 'kalibr_club', name: '3M14E Club-S (export Kalibr)', kind: 'cruise', producers: ['RUS'], rangeKm: 300, speedMach: 0.8, warheadKg: 450, cepM: 5, pk: cruisePk, interceptDifficulty: 0.3, unitCostUsdM: 4, weightKg: 1770 },
-  { id: 'babur3_slcm', name: 'Babur-3 SLCM', kind: 'cruise', producers: ['PAK'], rangeKm: 450, speedMach: 0.8, warheadKg: 450, yieldKt: 12, cepM: 30, pk: nuclearPk(12, 30), interceptDifficulty: 0.35, unitCostUsdM: 2, weightKg: 1500 },
   // Popeye Turbo SLCM: range (~1,500 km) and a nuclear role are reported but never confirmed (FAS 2022).
-  { id: 'popeye_turbo_slcm', name: 'Popeye Turbo SLCM', kind: 'cruise', producers: ['ISR'], rangeKm: 1500, speedMach: 0.8, warheadKg: 200, yieldKt: 20, cepM: 20, pk: nuclearPk(20, 20), interceptDifficulty: 0.3, unitCostUsdM: 3, weightKg: 1500 },
   { id: 'nuclear_gravity_bomb', name: 'Israeli nuclear gravity bomb', kind: 'unguided_bomb', producers: ['ISR'], rangeKm: 5, speedMach: 0.9, warheadKg: 500, yieldKt: 20, cepM: 100, pk: nuclearPk(20, 100), interceptDifficulty: 0.6, unitCostUsdM: 5, weightKg: 500 },
 ] as const);
 
