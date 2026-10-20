@@ -165,7 +165,26 @@ async function main() {
     cellOwner.set(id, poly.iso3);
     owned.add(poly.iso3);
   }
-  console.log('land cells', cellOwner.size, 'nations with territory', owned.size);
+  // Islands too small to win a cell's majority vote still host bases that matter
+  // (Guam, Okinawa, Oahu, Rhodes, the Canaries), so every island part above
+  // ISLAND_MIN_KM2 claims its centroid cell when that cell is still open water.
+  const ISLAND_MIN_KM2 = 200;
+  const EARTH_KM2 = 4 * Math.PI * 6371 ** 2;
+  let islands = 0;
+  for (const poly of polys) {
+    const parts = poly.f.geometry.type === 'MultiPolygon' ? poly.f.geometry.coordinates : [poly.f.geometry.coordinates];
+    for (const coordinates of parts) {
+      const part: Feature<Polygon> = { type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates } };
+      if ((geoArea(part) / (4 * Math.PI)) * EARTH_KM2 < ISLAND_MIN_KM2) continue;
+      const [lon, lat] = geoCentroid(part);
+      if (lat < -56) continue;
+      const id = Math.floor((90 - lat) / RES) * COLS + Math.floor((lon + 180) / RES);
+      if (cellOwner.has(id)) continue;
+      cellOwner.set(id, poly.iso3);
+      islands++;
+    }
+  }
+  console.log('land cells', cellOwner.size, 'nations with territory', owned.size, 'island cells added', islands);
 
   const cellIds = [...cellOwner.keys()].sort((a, b) => a - b);
   const indexOf = new Map(cellIds.map((id, i) => [id, i]));

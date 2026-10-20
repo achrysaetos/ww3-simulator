@@ -2,12 +2,15 @@ import { describe, expect, it } from 'vitest';
 import { platformCount } from '../src/core/forces';
 import type { Formation, NodeId, Order, PlatformId, SimEvent } from '../src/core/types';
 import { applyLandOrder, combatPower, landCombat, landMovement, terrainDefense } from '../src/systems/land';
+import { loadMap } from '../src/data/load';
+
+const MAP = loadMap();
 import { id, testWorld } from '../src/testkit';
 
 const RUS = id.nation('RUS'), UKR = id.nation('UKR'), KAZ = id.nation('KAZ');
 // Real map cells: Donbas plain (UKR) with a Russian plain cell next door; Kharkiv-area hills (UKR) beside a Russian urban cell.
-const PLAIN_UKR = 6557 as NodeId, PLAIN_RUS = 6766 as NodeId;
-const HILLS_UKR = 6128 as NodeId, URBAN_RUS = 6129 as NodeId;
+const PLAIN_UKR = MAP.nodeAt(48.5, 37.5), PLAIN_RUS = MAP.nodeAt(47.5, 38.5);
+const HILLS_UKR = MAP.nodeAt(50.5, 35.5), URBAN_RUS = MAP.nodeAt(50.5, 36.5);
 
 const brigade = (k = 1): Record<PlatformId, number> => ({
   [id.platform('t_mbt')]: Math.round(90 * k),
@@ -94,7 +97,7 @@ describe('land combat', () => {
     const attLoss = (arty: boolean) =>
       [1, 2, 3].reduce((sum, seed) => sum + assault({
         ratio: 3, defNode: PLAIN_UKR, attNode: PLAIN_RUS, entrench: 1, days: 3, seed,
-        before: (s) => void (arty && s.add({ nation: UKR, name: 'arty', kind: 'artillery', echelon: 'brigade', node: 6556 as NodeId, equipment: { [id.platform('t_spg')]: 72 } })),
+        before: (s) => void (arty && s.add({ nation: UKR, name: 'arty', kind: 'artillery', echelon: 'brigade', node: MAP.nodeAt(48.5, 36.5), equipment: { [id.platform('t_spg')]: 72 } })),
       }).attLoss, 0);
     expect(attLoss(true)).toBeGreaterThan(attLoss(false) * 1.25);
   });
@@ -148,7 +151,7 @@ describe('land movement', () => {
 
   it('will not enter a neutral country, but allies grant passage', () => {
     const s = setup();
-    const from = 5935 as NodeId, kaz = 6153 as NodeId;
+    const from = MAP.nodeAt(51.5, 60.5), kaz = MAP.nodeAt(50.5, 60.5);
     const f = s.add({ nation: RUS, name: 'x', kind: 'maneuver', echelon: 'brigade', node: from, equipment: brigade(1) });
     s.order(f, { posture: 'move', target: kaz });
     s.days(3);
@@ -209,7 +212,7 @@ describe('land movement', () => {
 describe('encirclement', () => {
   it('cuts off a pocket from supply and it surrenders over time; a connected unit does not', () => {
     const s = setup();
-    const pocket = 5043 as NodeId;
+    const pocket = MAP.nodeAt(55.5, 45.5);
     s.world.control[pocket] = UKR;
     const trapped = s.add({ nation: UKR, name: 'pocket', kind: 'maneuver', echelon: 'brigade', node: pocket, equipment: brigade(1) });
     const home = s.add({ nation: UKR, name: 'home', kind: 'maneuver', echelon: 'brigade', node: PLAIN_UKR, equipment: brigade(1) });

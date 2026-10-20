@@ -79,25 +79,7 @@ function totals(nation: string): Record<Category, number> {
  * or, for the eastern Aegean islands, in a Turkish cell.
  */
 const UNRESOLVED_ISLAND_BASES = new Set([
-  'Andersen AFB, Guam',
-  'Kadena AB, Okinawa',
-  'Camp Hansen, Okinawa',
-  'Camp Schwab, Okinawa',
-  'Camp Courtney, Okinawa',
-  'MCAS Futenma, Okinawa',
-  'Schofield Barracks, HI',
-  'Wheeler AAF, HI',
-  'JB Pearl Harbor-Hickam, HI',
-  'MCB Kaneohe Bay, HI',
-  'Fort Shafter, HI',
   'Diego Garcia, BIOT',
-  'Gando AB, Gran Canaria',
-  'Las Palmas de Gran Canaria',
-  'Rhodes',
-  'Mytilene, Lesbos',
-  'Samos',
-  'Kos',
-  'Lemnos',
 ]);
 const LAND_SNAP_KM = 150;
 

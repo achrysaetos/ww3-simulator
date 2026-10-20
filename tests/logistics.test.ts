@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { Formation, NodeId } from '../src/core/types';
 import { id, testWorld } from '../src/testkit';
+import { loadMap } from '../src/data/load';
+
+const MAP = loadMap();
 import { logistics, supplyFactor } from '../src/systems/logistics';
 
 const PLENTY = { fuel: 1e7, ammo: 1e7, food: 1e7 };
@@ -66,7 +69,7 @@ describe('logistics', () => {
   it('cuts an expeditionary force when the enemy takes the sea lanes', () => {
     const t = setup();
     const usa = id.nation('USA');
-    const outpost = 2375 as NodeId; // Icelandic port cell held by a US garrison, no airfield
+    const outpost = MAP.nodeAt(66.5, -15.5); // Icelandic port cell held by a US garrison, no airfield
     expect(t.map.ports[outpost]).toBeGreaterThan(0);
     expect(t.map.airports[outpost]).toBe(0);
     t.world.control[outpost] = usa;
