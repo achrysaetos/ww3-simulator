@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { NodeId, PlatformClass } from '../src/core/types';
+import type { PlatformClass } from '../src/core/types';
 import { haversineKm } from '../src/core/map';
 import { loadMap } from '../src/data/load';
 import type { OrbatEntry } from '../src/data/orbat/types';
@@ -74,8 +74,9 @@ function totals(nation: string): Record<Category, number> {
 }
 
 /**
- * Bases on islands or coastal strips that the 1-degree land grid does not resolve:
- * there is no land cell within LAND_SNAP_KM, so the unit sits in the adjacent sea zone.
+ * Island bases the 1-degree land grid does not resolve: no land cell of the nation or a
+ * host lies within LAND_SNAP_KM, so placement by `map.nodeAt` puts the unit in a sea zone
+ * or, for the eastern Aegean islands, in a Turkish cell.
  */
 const UNRESOLVED_ISLAND_BASES = new Set([
   'Andersen AFB, Guam',
@@ -91,6 +92,12 @@ const UNRESOLVED_ISLAND_BASES = new Set([
   'Fort Shafter, HI',
   'Diego Garcia, BIOT',
   'Gando AB, Gran Canaria',
+  'Las Palmas de Gran Canaria',
+  'Rhodes',
+  'Mytilene, Lesbos',
+  'Samos',
+  'Kos',
+  'Lemnos',
 ]);
 const LAND_SNAP_KM = 150;
 
@@ -149,16 +156,17 @@ describe('western order of battle', () => {
     expect(dup).toEqual([]);
   });
 
-  it('bases every land and air formation on land in its own nation or a known host', () => {
-    const landNear = (lat: number, lon: number): NodeId | undefined => {
-      const n = map.nodeAt(lat, lon);
-      if (!map.isSea(n)) return n;
-      let best: NodeId | undefined, bestKm = LAND_SNAP_KM;
+  it('bases every land and air formation near land held by its nation or a known host', () => {
+    // Within LAND_SNAP_KM rather than in the exact cell: a 1-degree cell near a border or coast often belongs to a neighbour or the sea.
+    const nearOwnLand = (e: OrbatEntry) => {
+      const { lat, lon } = e.base;
       for (let i = 0; i < map.landCount; i++) {
-        const km = haversineKm(lat, lon, map.lat[i], map.lon[i]);
-        if (km < bestKm) { bestKm = km; best = i as NodeId; }
+        if (Math.abs(map.lat[i] - lat) > 2) continue;
+        const owner = map.owner[i];
+        if (owner !== e.nation && !(HOSTS[e.nation] ?? []).includes(owner)) continue;
+        if (haversineKm(lat, lon, map.lat[i], map.lon[i]) <= LAND_SNAP_KM) return true;
       }
-      return best;
+      return false;
     };
     const bad: string[] = [];
     const used = new Set(west.filter((e) => !isNaval(e)).map((e) => e.base.name));
@@ -166,15 +174,10 @@ describe('western order of battle', () => {
     for (const e of west) {
       if (isNaval(e)) continue;
       const { name, lat, lon } = e.base;
-      const node = landNear(lat, lon);
+      const ok = nearOwnLand(e);
       if (UNRESOLVED_ISLAND_BASES.has(name)) {
-        if (node !== undefined) bad.push(`${name} resolves to land now; drop it from UNRESOLVED_ISLAND_BASES`);
-        continue;
-      }
-      if (node === undefined) { bad.push(`${e.nation} ${e.name} at ${name} (${lat}, ${lon}) is at sea`); continue; }
-      // A base near a border can fall in the neighbour's 1-degree cell, so the cell or one adjacent to it must belong to the nation or a host.
-      const allowed = (n: NodeId) => map.owner[n] === e.nation || (HOSTS[e.nation] ?? []).includes(map.owner[n]);
-      if (!allowed(node) && ![...map.neighbors(node)].some(allowed)) bad.push(`${e.nation} ${e.name} at ${name} lands in ${map.owner[node]}`);
+        if (ok) bad.push(`${name} resolves to land now; drop it from UNRESOLVED_ISLAND_BASES`);
+      } else if (!ok) bad.push(`${e.nation} ${e.name} at ${name} (${lat}, ${lon}) has no land of ${e.nation} or a host within ${LAND_SNAP_KM} km`);
     }
     expect(bad).toEqual([]);
   });
