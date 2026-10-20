@@ -72,9 +72,7 @@ const settled = (r: UkraineRun) => r.months.slice(1);
 describe.each([1, 2, 3])('ukraine-2026 seed %i, 90 days', (seed) => {
   // Russia launched ~2,700 Geran-2 a month by mid-2025 from Alabuga output (GUR); every round built is fired within weeks.
   // Judgment: after the opening month launches keep pace with production instead of stopping when the first loads are gone.
-  // Fails: air/rearm.ts draws rail-staged Geran from stockpile['shahed_136'] (the launcher's platform id) while
-  // production lands in stockpile['shahed136'] (the munition id), so launchers are never reloaded.
-  it.fails('Russia keeps launching Geran-2 at its production rate, 2,000-6,000 a month (GUR, UA MoD 2025)', () => {
+  it('Russia keeps launching Geran-2 at its production rate, 2,000-6,000 a month (GUR, UA MoD 2025)', () => {
     for (const m of settled(ukraine(seed))) {
       expect(m.shahed).toBeGreaterThanOrEqual(0.8 * m.shahedBuilt);
       expect(m.shahed).toBeGreaterThanOrEqual(2_000);
