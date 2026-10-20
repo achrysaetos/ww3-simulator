@@ -5,6 +5,7 @@ import { isOverseas } from '../../data/territories';
 import { HOSTILE_OPINION } from '../diplomacy/escalation';
 import { rung } from '../diplomacy/wars';
 import { dailyRounds, effectPk } from '../air';
+import { ANTISHIP_KINDS } from '../naval';
 import { isGround, issue } from './forces';
 import type { Plan } from './types';
 
@@ -13,6 +14,8 @@ export interface StrikeTarget {
   cls: TargetClass;
   value: number;
   formation?: FormationId;
+  /** A naval group away from its home port: only a weapon with a terminal seeker finds it (air strikeShips). */
+  afloat?: boolean;
   assigned: number;
 }
 
@@ -31,11 +34,27 @@ const VALUE_BY_KIND: Partial<Record<FormationKind, { value: number; cls: TargetC
   surface_group: { value: 3.5, cls: 'ship' },
   logistics: { value: 3, cls: 'soft' },
 };
+/**
+ * A naval group is worth what it carries: a US carrier strike group with its air wing runs about
+ * USD 20bn, a Taiwanese frigate flotilla about 3bn, a patrol-boat squadron a few hundred million.
+ * CSIS's 2023 Taiwan wargames had PLARF and PLAN salvos go after US carriers and Aegis escorts,
+ * sinking 2 carriers and 7-20 major surface combatants per iteration. The value grows with the
+ * square root of the group's cost against a SHIP_REF_USD_M squadron, held within SHIP_WORTH
+ * (judgment), so a carrier group outranks an air defence site but not every other target together.
+ */
+const SHIP_REF_USD_M = 3000;
+const SHIP_WORTH = { min: 0.5, max: 3 };
 const FRONT_FORCES = { value: 2, cls: 'armor' as TargetClass };
 const RAIL_HUB = { value: 1.5, cls: 'structure' as TargetClass, minRailKm: 50 };
 const CAPITAL = { value: 2.5, cls: 'structure' as TargetClass };
 /** Leadership willing to risk deep strikes on a nuclear power's homeland before the ladder sanctions them. */
 const DEEP_STRIKE_RISK = 0.7;
+
+function shipWorth(p: Plan, f: Formation): number {
+  let usd = 0;
+  for (const [id, n] of Object.entries(f.equipment)) usd += n * p.ctx.catalog.platform(id as PlatformId).unitCostUsdM;
+  return Math.min(SHIP_WORTH.max, Math.max(SHIP_WORTH.min, Math.sqrt(usd / SHIP_REF_USD_M)));
+}
 
 /**
  * Whether striking cells of `owner`'s metropolitan homeland outside the battle area is
@@ -115,7 +134,9 @@ export function strikeTargets(p: Plan, battleArea: Set<number>): TargetGrid {
   for (const e of p.enemies)
     for (const f of p.index.byNation.get(e) ?? []) {
       const v = VALUE_BY_KIND[f.kind] ?? (isGround(f) && battleArea.has(f.node) ? FRONT_FORCES : undefined);
-      if (v) out.push({ node: f.node, cls: v.cls, value: v.value, formation: f.id, assigned: 0 });
+      if (!v) continue;
+      if (f.kind !== 'surface_group') out.push({ node: f.node, cls: v.cls, value: v.value, formation: f.id, assigned: 0 });
+      else out.push({ node: f.node, cls: v.cls, value: v.value * shipWorth(p, f), formation: f.id, afloat: f.node !== f.home || !!f.order.path?.length, assigned: 0 });
     }
   for (const n of battleArea)
     if (map.railKm[n] >= RAIL_HUB.minRailKm) out.push({ node: n as NodeId, cls: RAIL_HUB.cls, value: RAIL_HUB.value * Math.min(2, map.railKm[n] / 200), assigned: 0 });
@@ -230,10 +251,15 @@ export class FireBudget {
   }
 }
 
-/** Weapons in `stock` that can kill a `cls` target, cheapest per expected kill first. */
-export function strikeOptions(stock: readonly Munition[], cls: TargetClass): Munition[] {
-  const perKill = (m: Munition) => m.unitCostUsdM / effectPk(m, cls);
-  return stock.filter((m) => effectPk(m, cls) > 0).sort((a, b) => perKill(a) - perKill(b));
+/** Kill probability of `m` against `t`; a weapon without a terminal seeker has none against a group at sea. */
+export function pkAgainst(m: Munition, t: StrikeTarget): number {
+  return t.afloat && !ANTISHIP_KINDS.has(m.kind) ? 0 : effectPk(m, t.cls);
+}
+
+/** Weapons in `stock` that can kill `t`, cheapest per expected kill first. */
+export function strikeOptions(stock: readonly Munition[], t: StrikeTarget): Munition[] {
+  const perKill = (m: Munition) => m.unitCostUsdM / pkAgainst(m, t);
+  return stock.filter((m) => pkAgainst(m, t) > 0).sort((a, b) => perKill(a) - perKill(b));
 }
 
 const INTERCEPTOR_KINDS: ReadonlySet<Munition['kind']> = new Set(['sam', 'abm', 'shorad_missile']);
@@ -380,11 +406,11 @@ export class SamCover {
   }
 }
 
-/** The munition with the best kill probability against `cls` that reaches `km`. */
-export function bestMunition(munitions: readonly Munition[], cls: TargetClass, km: number): MunitionId | undefined {
+/** The munition with the best kill probability against `t` that reaches `km`. */
+export function bestMunition(munitions: readonly Munition[], t: StrikeTarget, km: number): MunitionId | undefined {
   let best: MunitionId | undefined, bestPk = 0;
   for (const m of munitions) {
-    const pk = m.rangeKm >= km ? effectPk(m, cls) : 0;
+    const pk = m.rangeKm >= km ? pkAgainst(m, t) : 0;
     if (pk > bestPk) { bestPk = pk; best = m.id; }
   }
   return best;

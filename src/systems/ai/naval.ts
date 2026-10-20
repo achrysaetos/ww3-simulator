@@ -205,21 +205,24 @@ function batteredFleets(p: Plan, groups: Formation[]): Set<NodeId> {
 }
 
 /**
- * Where carriers hold station when the focus lies off an enemy coast: a sea zone up to two
- * zones (~300-600 km) from the focus, as far from enemy-held shore as possible, outside the
+ * Where carriers hold station when the focus lies off an enemy coast: sea zones up to two
+ * zones (~300-600 km) from the focus, farthest from enemy-held shore first, outside the
  * densest land-based missile and fighter coverage. CSIS 2023 kept US carriers east of Taiwan
  * and still lost two in the base case; the carriers fought by aircraft, not in the strait.
+ * Capital groups pair off, one pair to a zone, as in the USN's dual-carrier operations in the
+ * Philippine and South China Seas in 2020-24, rather than stacking every carrier in one zone
+ * whose escorts would then pool every interceptor against each salvo (judgment).
  */
-function standoff(p: Plan, focus: NodeId): NodeId {
+function standoffZones(p: Plan, focus: NodeId): NodeId[] {
   const { map } = p.ctx;
   const hostileShore = coast(map).filter((n) => p.enemies.has(p.world.control[n]));
-  if (!hostileShore.length) return focus;
+  if (!hostileShore.length) return [focus];
   const clearance = (z: NodeId) => {
     let d = Infinity;
     for (const n of hostileShore) if (Math.abs(map.lat[n] - map.lat[z]) * 111 < d) d = Math.min(d, map.distanceKm(n, z));
     return d;
   };
-  let best = focus, bestD = clearance(focus);
+  const zones: { z: NodeId; d: number }[] = [{ z: focus, d: clearance(focus) }];
   let ring: NodeId[] = [focus];
   const seen = new Set<number>(ring);
   for (let depth = 0; depth < 2; depth++) {
@@ -229,12 +232,11 @@ function standoff(p: Plan, focus: NodeId): NodeId {
         if (!map.isSea(m) || seen.has(m)) continue;
         seen.add(m);
         next.push(m);
-        const d = clearance(m);
-        if (d > bestD) { bestD = d; best = m; }
+        zones.push({ z: m, d: clearance(m) });
       }
     ring = next;
   }
-  return best;
+  return zones.sort((a, b) => b.d - a.d || a.z - b.z).map((x) => x.z);
 }
 
 /**
@@ -309,7 +311,8 @@ export function planNaval(p: Plan): void {
   const liftCapable = groups.filter((g) => g.kind === 'surface_group' && compose(g, p.ctx.catalog).troopLift > 0);
   const assault = planAssault(p, liftCapable);
   const { node: focus, enemyFleet } = maritimeFocus(p, assault);
-  const station = assault ? focus : standoff(p, focus);
+  const stations = assault ? [focus] : standoffZones(p, focus);
+  let capitals = 0;
   const inPort = enemyFleet ? new Set<NodeId>() : batteredFleets(p, groups);
   const enemyChokes = chokepoints(map).filter((c) => [...c.users].some((u) => p.enemies.has(u as NationId)));
   const claimed = new Map<NodeId, number>();
@@ -347,7 +350,7 @@ export function planNaval(p: Plan): void {
         else if (!blockade(g)) issue(p, g, { posture: 'patrol', target: focus });
         break;
       case 'capital':
-        issue(p, g, { posture: 'patrol', target: station });
+        issue(p, g, { posture: 'patrol', target: stations[(capitals++ >> 1) % stations.length] });
         break;
       // Without a landing to make, amphibious groups stay out of the missile zone in home waters.
       case 'lift':
