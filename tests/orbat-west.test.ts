@@ -79,7 +79,6 @@ function totals(nation: string): Record<Category, number> {
  */
 const UNRESOLVED_ISLAND_BASES = new Set([
   'Andersen AFB, Guam',
-  'Joint Region Marianas, Guam',
   'Kadena AB, Okinawa',
   'Camp Hansen, Okinawa',
   'Camp Schwab, Okinawa',
@@ -91,15 +90,7 @@ const UNRESOLVED_ISLAND_BASES = new Set([
   'MCB Kaneohe Bay, HI',
   'Fort Shafter, HI',
   'Diego Garcia, BIOT',
-  'Lajes Field, Azores',
-  'RAF Akrotiri, Cyprus',
   'Gando AB, Gran Canaria',
-  'Djibouti, Djibouti',
-  'Camp Lemonnier, Djibouti',
-  'Réunion',
-  'Nouméa, New Caledonia',
-  'Papeete, Tahiti',
-  'NSA Bahrain',
 ]);
 const LAND_SNAP_KM = 150;
 
@@ -170,6 +161,8 @@ describe('western order of battle', () => {
       return best;
     };
     const bad: string[] = [];
+    const used = new Set(west.filter((e) => !isNaval(e)).map((e) => e.base.name));
+    for (const name of UNRESOLVED_ISLAND_BASES) if (!used.has(name)) bad.push(`${name} is unused; drop it from UNRESOLVED_ISLAND_BASES`);
     for (const e of west) {
       if (isNaval(e)) continue;
       const { name, lat, lon } = e.base;

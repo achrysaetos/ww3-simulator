@@ -26,6 +26,7 @@ export const WEST_PLATFORMS = {
   leopard2a7: 'mbt',
   leopard2a8: 'mbt',
   leopard2pl: 'mbt',
+  leopard2e: 'mbt',
   k2_black_panther: 'mbt',
   pt91: 'mbt',
   t64bv: 'mbt',
@@ -95,6 +96,9 @@ export const WEST_PLATFORMS = {
   m80a: 'ifv',
   maxxpro: 'apc',
   mt_lb: 'apc',
+  cvrt: 'recon',
+  patria_6x6: 'apc',
+  bmp_cz: 'ifv',
 
   // artillery
   m109a7: 'sp_artillery',
@@ -161,6 +165,7 @@ export const WEST_PLATFORMS = {
   lrhw_launcher: 'tel_irbm',
   nmesis: 'coastal_asm',
   nsm_coastal: 'coastal_asm',
+  rbs15_coastal: 'coastal_asm',
   neptune_launcher: 'cruise_launcher',
   bora_launcher: 'tel_srbm',
   tochka_u: 'tel_srbm',
@@ -203,6 +208,7 @@ export const WEST_PLATFORMS = {
   l159: 'attack_aircraft',
   f4e: 'multirole',
   cf18: 'multirole',
+  ef18m: 'multirole',
 
   // support aircraft and drones
   ea18g: 'ew_aircraft',
@@ -220,6 +226,9 @@ export const WEST_PLATFORMS = {
   c130j: 'transport_aircraft',
   a400m: 'transport_aircraft',
   p8a: 'maritime_patrol',
+  atlantique2: 'maritime_patrol',
+  cp140: 'maritime_patrol',
+  kc767: 'tanker',
   rc135: 'ew_aircraft',
   ec130h: 'ew_aircraft',
   rq4: 'isr_drone',
@@ -236,6 +245,7 @@ export const WEST_PLATFORMS = {
   ah64d: 'attack_helo',
   ah1z: 'attack_helo',
   tiger: 'attack_helo',
+  a129: 'attack_helo',
   t129: 'attack_helo',
   mi24: 'attack_helo',
   uh60m: 'transport_helo',
@@ -318,6 +328,7 @@ export const WEST_PLATFORMS = {
   t_ao: 'replenishment',
   t_ake: 'replenishment',
   tide_tanker: 'replenishment',
+  egv_berlin: 'replenishment',
 
   // submarines
   ssn_virginia: 'ssn',
