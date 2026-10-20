@@ -30,9 +30,9 @@ export const EAST_PLATFORM_CLASS: Record<string, ScaleClass> = Object.fromEntrie
     bmp1 bmp2 bmp3 bmd2 bmd4m btr82a btr_mdm mtlb m113 vtt323 zbd04a zbl08 zbd05 ztd05 ztl11 csk181 zsd89 type15
     2s19_msta 2s3 2s7m 2s9 2a65 d30 m109 bm21_grad bm27 bm30 tos1a tos2 polonez_launcher koksan mrl_240mm kn09_tel kn25_tel
     plz05 plz07 pcl181 phl11 phl16
-    iskander_m_tel oreshnik_tel hwasong_5_tel kn23_tel kn24_tel nodong_tel hwasong_12_tel
+    iskander_m_tel iskander_mk_tel oreshnik_tel hwasong_5_tel kn23_tel kn24_tel nodong_tel hwasong_12_tel
     df26_tel df21_tel df21d_tel df17_tel df16_tel df15_tel df11_tel cj10_tel
-    fateh_110_tel shahab_3_tel kheibar_shekan_tel sejjil_tel khorramshahr_tel hoveyzeh_tel noor_asm_launcher
+    fateh_110_tel zolfaghar_tel khalij_fars_tel shahab_3_tel emad_tel kheibar_shekan_tel fattah_tel sejjil_tel khorramshahr_tel hoveyzeh_tel noor_asm_launcher
     bastion_p_launcher bal_launcher
     s400_launcher s300pm_launcher s300v4_launcher s300pmu2_launcher a135_silo pantsir_s1 tor_m2 tor_m1 buk_m3 buk_m2 strela10
     hq9_launcher hq16_launcher hq22_launcher hq17 pgz09 s200_launcher s75_launcher s125_launcher pongae5_launcher
