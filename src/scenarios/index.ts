@@ -19,6 +19,8 @@ export interface Scenario {
   startDate: string;
   /** The nation a player most likely wants to command. */
   suggestedNation: string;
+  /** Mobilization levels nations already stand at when a war under way opens, rather than ramp up to. */
+  mobilized?: Record<string, number>;
   /** Opening moves, queued for the first tick so the owning systems resolve them. */
   opening: (Command | { type: 'mobilize'; nations: string[]; level: number })[];
 }
@@ -41,7 +43,9 @@ export const SCENARIOS: Scenario[] = [
     summary: 'The war of attrition from the late-2025 front line, with no ceasefire. The calibration case for ground combat.',
     startDate: '2026-01-01T00:00:00Z',
     suggestedNation: 'UKR',
-    opening: [mobilize(['RUS'], 0.35), mobilize(['UKR'], 0.8), war('RUS', 'UKR', 'special military operation')],
+    // Both sides have been on a war footing since 2022; see MOBILIZATION in src/systems/ai/strategy.ts.
+    mobilized: { RUS: 0.33, UKR: 0.7 },
+    opening: [war('RUS', 'UKR', 'special military operation')],
   },
   {
     id: 'taiwan-2027',
@@ -122,6 +126,10 @@ export function createSession(scenarioId: string, seed = 1): Session {
   const placement = placeOrbat(world, map, catalog, allOrbat(map), ALIASES);
   stockNations(world, catalog);
   engine.init(world);
+  for (const [n, level] of Object.entries(scenario.mobilized ?? {})) {
+    world.nations[n as NationId].mobilization = level;
+    world.pending.push({ type: 'set_mobilization', nation: n as NationId, level });
+  }
   for (const move of scenario.opening) {
     if (move.type === 'mobilize') for (const n of move.nations) world.pending.push({ type: 'set_mobilization', nation: n as NationId, level: move.level });
     else world.pending.push(move);
