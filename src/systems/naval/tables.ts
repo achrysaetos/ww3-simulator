@@ -85,7 +85,13 @@ export const NOT_INTERCEPTABLE: ReadonlySet<MunitionKind> = new Set(['torpedo', 
 export const MIN_INTERCEPTABLE_MACH = 0.3;
 
 export const INTERCEPTOR_KINDS: ReadonlySet<MunitionKind> = new Set(['sam', 'abm', 'shorad_missile']);
-export const ANTISHIP_KINDS: ReadonlySet<MunitionKind> = new Set(['antiship_cruise', 'antiship_ballistic', 'cruise', 'hgv', 'torpedo', 'drone_oneway', 'loitering', 'guided_bomb', 'glide_bomb']);
+/**
+ * Kinds a fleet fires at ships at sea: only weapons with a terminal seeker that can find a
+ * moving hull. A GPS/INS land-attack missile or bomb aims at coordinates the ship has left by
+ * the time it arrives; the anti-ship Tomahawk needed a new seeker (Maritime Strike Tomahawk,
+ * Block Va, first fielded 2023-24 in small numbers, CRS IF11353).
+ */
+export const ANTISHIP_KINDS: ReadonlySet<MunitionKind> = new Set(['antiship_cruise', 'antiship_ballistic', 'torpedo']);
 
 /** Combat air patrol shots per CAP fighter per salvo and their kill chance against a subsonic sea-skimmer (estimate). */
 export const CAP_SHOTS_PER_FIGHTER = 2;
