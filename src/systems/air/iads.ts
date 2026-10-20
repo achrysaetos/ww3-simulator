@@ -10,7 +10,7 @@ import { visibility } from './combat';
 import { interceptSalvo } from './intercept';
 import { takeLosses, type LossTally } from './losses';
 import { nodeDistance, type AirGroup, type AirPicture, type Defender } from './picture';
-import { AAM_VS_DRONE_FACTOR, COUNTER_AIR_POSTURES, coverageShare, INTERCEPTOR_ENGAGES, THREAT_OF_KIND, TUNING, type ThreatCategory } from './tables';
+import { AAM_VS_DRONE_FACTOR, beltKillProbability, COUNTER_AIR_POSTURES, COUNTER_DRONE, coverageShare, engages, THREAT_OF_KIND, TUNING, type ThreatCategory } from './tables';
 
 interface Shot { m: Munition; pk: number }
 
@@ -22,15 +22,14 @@ function pkAgainst(m: Munition, cat: ThreatCategory): number {
 
 /**
  * The interceptor a defender commits: the cheapest round with an effective pk of at
- * least 0.3, else the best it has. A battery with only PAC-3s spends them on drones,
- * which is how magazines run dry against Shahed raids.
+ * least 0.3, else the best it has, among rounds costing at most `maxCostUsdM`.
  */
-export function pickInterceptor(f: Formation, cat: ThreatCategory, difficulty: number, distKm: number, ctx: SimContext): Shot | undefined {
+function pickInterceptor(f: Formation, cat: ThreatCategory, difficulty: number, distKm: number, maxCostUsdM: number, ctx: SimContext): Shot | undefined {
   let cheap: Shot | undefined, best: Shot | undefined;
   for (const [mid, n] of Object.entries(f.magazine)) {
     if (n < 1) continue;
     const m = ctx.catalog.munitions.get(mid as MunitionId);
-    if (!m || !INTERCEPTOR_ENGAGES[m.kind]?.includes(cat) || m.rangeKm * coverageShare(m.kind, cat) < distKm) continue;
+    if (!m || m.unitCostUsdM > maxCostUsdM || !engages(m, cat) || m.rangeKm * coverageShare(m.kind, cat) < distKm) continue;
     const pk = pkAgainst(m, cat);
     const eff = pk * (1 - difficulty);
     if (eff <= 0) continue;
@@ -60,10 +59,10 @@ function engage(ctx: SimContext, d: Defender, shot: Shot, cat: ThreatCategory, t
 }
 
 /** Each covering defender with the interceptor it would commit, cheapest layer first so PAC-3s are kept for what SHORAD cannot stop. */
-function layers(ctx: SimContext, defenders: Defender[], node: NodeId, cat: ThreatCategory, difficulty: number): { d: Defender; shot: Shot }[] {
+function layers(ctx: SimContext, defenders: Defender[], node: NodeId, cat: ThreatCategory, difficulty: number, maxCostUsdM = Infinity): { d: Defender; shot: Shot }[] {
   const out: { d: Defender; shot: Shot }[] = [];
   for (const d of defenders) {
-    const shot = d.channels > 0 ? pickInterceptor(d.f, cat, difficulty, nodeDistance(ctx, d.f.node, node), ctx) : undefined;
+    const shot = d.channels > 0 ? pickInterceptor(d.f, cat, difficulty, nodeDistance(ctx, d.f.node, node), maxCostUsdM, ctx) : undefined;
     if (shot) out.push({ d, shot });
   }
   return out.sort((a, b) => a.shot.m.unitCostUsdM - b.shot.m.unitCostUsdM || b.d.rangeKm - a.d.rangeKm);
@@ -81,7 +80,29 @@ function interceptorFighters(world: World, ctx: SimContext, pic: AirPicture, nod
   );
 }
 
-export interface RaidStream { munition: Munition; count: number }
+/** One attacker's weapons of one kind arriving together; `overflightKm` is how much defended ground they crossed. */
+export interface RaidStream { munition: Munition; count: number; overflightKm: number }
+
+/**
+ * Km of the route from `from` to `to` that lies over land held by a nation at war
+ * with `attacker`, sampled every COUNTER_DRONE.sampleKm (straight line, which is
+ * close enough at theater scale; real drones dog-leg around known defenses).
+ */
+export function overflightKm(world: World, ctx: SimContext, pic: AirPicture, from: NodeId, to: NodeId, attacker: NationId): number {
+  const { map } = ctx;
+  const dist = nodeDistance(ctx, from, to);
+  const steps = Math.max(1, Math.round(dist / COUNTER_DRONE.sampleKm));
+  const lat0 = map.lat[from], lon0 = map.lon[from];
+  const dLon = ((((map.lon[to] - lon0) % 360) + 540) % 360) - 180;
+  let km = 0;
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps;
+    const n = i === steps ? to : map.nodeAt(lat0 + (map.lat[to] - lat0) * t, lon0 + dLon * t);
+    const owner = map.isSea(n) ? undefined : world.control[n];
+    if (owner && pic.atWar(owner, attacker)) km += dist / steps;
+  }
+  return km;
+}
 
 /**
  * Layered defense of `node` against one attacker's weapons arriving this tick.
@@ -99,6 +120,8 @@ export function defendRaid(world: World, ctx: SimContext, pic: AirPicture, node:
     const cat = threatCategory(m);
     if (!cat) continue;
     const threat = { speedMach: m.speedMach, interceptDifficulty: m.interceptDifficulty };
+    if (streams[i].overflightKm > 0)
+      leaked[i] -= ctx.rng.binomial(leaked[i], beltKillProbability(m.kind, streams[i].overflightKm, m.interceptDifficulty));
     if (cat === 'air_breathing')
       for (const g of fighters) {
         if (!leaked[i]) break;
@@ -109,7 +132,8 @@ export function defendRaid(world: World, ctx: SimContext, pic: AirPicture, node:
         g.f.magazine[aam.id] -= r.interceptorsUsed;
         leaked[i] = r.leaked;
       }
-    for (const { d, shot } of layers(ctx, sams, node, cat, m.interceptDifficulty)) {
+    const maxCost = Math.max(TUNING.interceptorCostFloorUsdM, TUNING.interceptorCostRatio * m.unitCostUsdM);
+    for (const { d, shot } of layers(ctx, sams, node, cat, m.interceptDifficulty, maxCost)) {
       if (!leaked[i]) break;
       if (d.channels > 0 && d.f.magazine[shot.m.id] >= 1) leaked[i] = engage(ctx, d, shot, cat, { ...threat, count: leaked[i] });
     }
@@ -124,16 +148,27 @@ export function threatCategory(m: Munition): ThreatCategory | null {
 export interface ExposedFlight { g: AirGroup; n: number }
 
 /**
- * SAMs covering `node` engage aircraft of `nation` flying there. Only a share of
- * sorties ever gets inside a SAM's envelope with a firing solution; stealth shrinks
- * that share by visibility squared (detection area). Returns losses per flight.
+ * Share of the full SAM exposure a sortie takes when it releases `depthKm` inside the
+ * outermost hostile envelope: time under fire grows with depth. An Su-25 lofting
+ * rockets a few km past the edge of a Patriot's reach is far safer than a B-52 over
+ * Hanoi (estimate).
  */
-export function samVsAircraft(world: World, ctx: SimContext, pic: AirPicture, node: NodeId, nation: NationId, flights: ExposedFlight[], mission: 'strike' | 'counter_air', ewSupport: boolean, tally: LossTally): number[] {
+export function envelopeExposure(depthKm: number): number {
+  return Math.max(0, Math.min(1, depthKm / TUNING.fullExposureDepthKm));
+}
+
+/**
+ * SAMs covering `node` engage aircraft of `nation` flying there. Only a share of
+ * sorties ever gets inside a SAM's envelope with a firing solution, scaled by how deep
+ * they go (`exposure`); stealth shrinks that share by visibility squared (detection
+ * area). Returns losses per flight.
+ */
+export function samVsAircraft(world: World, ctx: SimContext, pic: AirPicture, node: NodeId, nation: NationId, flights: ExposedFlight[], mission: 'strike' | 'counter_air', ewSupport: boolean, tally: LossTally, exposure = 1): number[] {
   const sams = hostileDefenders(world, ctx, pic, node, nation);
   if (!sams.length) return flights.map(() => 0);
   const evasion = ewSupport ? TUNING.aircraftEvasionWithEw : TUNING.aircraftEvasion;
   return flights.map(({ g, n }) => {
-    let exposed = ctx.rng.binomial(n, TUNING.samExposure[mission] * visibility(g.platform.protection.stealth) ** 2);
+    let exposed = ctx.rng.binomial(n, TUNING.samExposure[mission] * exposure * visibility(g.platform.protection.stealth) ** 2);
     const before = exposed;
     for (const { d, shot } of layers(ctx, sams, node, 'aircraft', evasion)) {
       if (!exposed) break;

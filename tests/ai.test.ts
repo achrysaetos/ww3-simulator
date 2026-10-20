@@ -170,6 +170,8 @@ describe('strikes on a neutral host', () => {
     t.add({ nation: N('USA'), name: 'US air wing', kind: 'air_wing', echelon: 'wing', node: base, equipment: { [id.platform('t_fighter')]: 24 } });
     t.add({ nation: N('CHN'), name: 'PLARF brigade', kind: 'missile', echelon: 'brigade', node: launch, equipment: { [id.platform('t_tel')]: 12 } });
     relationMut(t.world, N('CHN'), N('JPN')).opinion = japanOpinionOfChina;
+    // Deep stocks, so the fire budget never rations the salvo and only the host's politics decides.
+    t.world.nations[N('CHN')].stockpile[id.munition('t_srbm')] = 10_000;
     t.war('CHN', 'TWN');
     t.war('CHN', 'USA');
     return commandsOver(t, 8).filter((c) => c.type === 'order' && c.nation === 'CHN' && c.order.posture === 'strike' && c.order.target === base);

@@ -145,13 +145,17 @@ function limitByFuel(f: Formation, fg: AirGroup[], ctx: SimContext) {
 
 /**
  * Tanker sorties within a tanker's own radius of a receiver's base are shared across
- * the nation's receiving sorties on offensive missions (one national tanker pool per
- * region). The ratio extends receivers' combat radius.
+ * the nation's receiving sorties on offensive missions beyond unrefuelled radius (one
+ * national tanker pool per region; packages that can make it on internal fuel do not
+ * queue for the boom). The ratio extends receivers' combat radius.
  */
 function applyTankerSupport(groups: AirGroup[], map: GameMap) {
   const tankers = groups.filter((g) => g.profile.role === 'tanker' && g.sorties > 0);
   if (!tankers.length) return;
-  const receivers = groups.filter((g) => RECEIVER_ROLES.has(g.profile.role) && OFFENSIVE_POSTURES.has(g.f.order.posture) && g.sorties > 0);
+  const receivers = groups.filter((g) => {
+    const t = g.f.order.target;
+    return RECEIVER_ROLES.has(g.profile.role) && OFFENSIVE_POSTURES.has(g.f.order.posture) && g.sorties > 0 && t !== undefined && map.distanceKm(g.f.node, t) > g.radiusKm;
+  });
   const demand = new Map<NationId, number>();
   for (const g of receivers) demand.set(g.f.nation, (demand.get(g.f.nation) ?? 0) + g.sorties);
   for (const g of receivers) {

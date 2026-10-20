@@ -1,6 +1,8 @@
 import type { Formation, NodeId, PlatformClass, PlatformId, TargetClass } from '../../core/types';
+import { effectPk, visibility } from '../air';
+import { TUNING } from '../air/tables';
 import { dominant, issue } from './forces';
-import { arsenal, pickTarget, reachKm, withinKm, type StrikeTarget, type TargetGrid } from './strikes';
+import { arsenal, FireBudget, pickTarget, SamCover, reachKm, strikeOptions, withinKm, type StrikeTarget, type TargetGrid } from './strikes';
 import type { Plan } from './types';
 
 type AirRole = 'fighter' | 'multirole' | 'strike' | 'support';
@@ -47,7 +49,12 @@ export function planAir(p: Plan, targets: TargetGrid): void {
     return !!c && p.enemies.has(c.nation);
   };
   const cover = new Map<NodeId, number>(keys.map((k) => [k, 0]));
+  const budget = new FireBudget(p);
+  const sams = new SamCover(p);
   const fighters = wings.filter((w) => roleOf(p, w) === 'fighter').length;
+  // Strike packages are planned with the tanker support the nation can lay on; the
+  // air system then works out each day's actual radius from tanker sorties in range.
+  const tanked = wings.some((w) => Object.entries(w.equipment).some(([id, n]) => n > 0 && p.ctx.catalog.platform(id as PlatformId).class === 'tanker')) ? 1 + TUNING.maxTankerExtension : 1;
 
   const airSuperiority = (w: Formation, radius: number): boolean => {
     let best: NodeId | undefined, bestScore = -Infinity;
@@ -63,15 +70,21 @@ export function planAir(p: Plan, targets: TargetGrid): void {
   };
   const strike = (w: Formation, radius: number): boolean => {
     const stock = arsenal(p, w);
-    const hits = new Map<string, boolean>();
+    const vis = visibility(Math.min(...Object.keys(w.equipment).map((id) => p.ctx.catalog.platform(id as PlatformId)).filter((pl) => AIR_ROLE[pl.class] && AIR_ROLE[pl.class] !== 'support').map((pl) => pl.protection.stealth)));
+    const standoff = new Map<string, number>();
     const canHit = (t: StrikeTarget) => {
-      let h = hits.get(t.cls);
-      if (h === undefined) hits.set(t.cls, (h = stock.some((m) => (m.pk[t.cls] ?? 0) > 0) || hasFirepower(p, w, t.cls)));
-      return h;
+      let km = standoff.get(t.cls);
+      if (km === undefined) {
+        km = stock.reduce((best, m) => (effectPk(m, t.cls) > 0 ? Math.max(best, m.rangeKm) : best), hasFirepower(p, w, t.cls) ? 0 : -1);
+        standoff.set(t.cls, km);
+      }
+      return km >= 0 && withinKm(map, w.node, t.node, radius + km) && sams.clear(w.node, t.node, km, vis);
     };
-    const t = pickTarget(targets.near(w.node, radius), (t) => withinKm(map, w.node, t.node, radius) && canHit(t));
+    const longest = stock.reduce((best, m) => Math.max(best, m.rangeKm), 0);
+    const t = pickTarget(targets.near(w.node, radius + longest), canHit);
     if (!t) return false;
-    issue(p, w, { posture: 'strike', target: t.node, targetClass: t.cls, targetFormation: t.formation });
+    const order = { posture: 'strike' as const, target: t.node, targetClass: t.cls, targetFormation: t.formation };
+    budget.propose(w, strikeOptions(stock, t.cls).filter((m) => withinKm(map, w.node, t.node, radius + m.rangeKm)), t, order);
     return true;
   };
 
@@ -84,11 +97,11 @@ export function planAir(p: Plan, targets: TargetGrid): void {
       case 'multirole': {
         const contested = keys.some((k) => enemySky(k) && km(w.node, k) <= radius);
         if ((contested || fighters < keys.length) && airSuperiority(w, radius)) break;
-        strike(w, radius);
+        strike(w, radius * tanked);
         break;
       }
       case 'strike':
-        strike(w, radius);
+        strike(w, radius * tanked);
         break;
       case 'support': {
         const k = keys.find((k) => km(w.node, k) <= radius);
@@ -97,6 +110,7 @@ export function planAir(p: Plan, targets: TargetGrid): void {
       }
     }
   }
+  budget.settle();
 }
 
 /** Organic weapons (guns, rockets) able to hit `cls`, for aircraft without a suitable missile or bomb. */

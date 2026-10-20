@@ -28,10 +28,10 @@ function raidRate(setup: (t: AirWorld, seed: number) => void, ticks = 1, munitio
 }
 
 describe('calibration', () => {
-  it('a national Shahed raid on three unevenly defended cities: ~80-90 % shot down (Ukrainian Air Force reports 2023-24)', () => {
+  it('a national Shahed raid on a deep, a frontline and an undefended city: ~80-90 % shot down by the counter-drone belt and SAMs (Ukrainian Air Force reports 2023-24)', () => {
     const r = raidRate((t) => {
       t.war('RUS', 'UKR');
-      const cities = [[50.45, 30.5, 2, 1], [49.8, 24, 2, 0], [46.5, 30.7, 1, 0]] as const;
+      const cities = [[50.45, 30.5, 2, 1], [49.99, 36.23, 1, 0], [46.5, 30.7, 0, 0]] as const;
       for (const [lat, lon, shorad, patriot] of cities) {
         const city = t.node(lat, lon);
         for (let i = 0; i < shorad; i++) battery(t, 'UKR', city, { x_shorad: 1 });

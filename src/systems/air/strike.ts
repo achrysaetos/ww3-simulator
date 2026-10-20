@@ -4,13 +4,15 @@
  * the defended envelope; penetrating aircraft face enemy fighters and SAMs first.
  * All weapons arriving at a node in a tick form one raid, so mass salvos saturate.
  */
+import type { Catalog } from '../../core/catalog';
 import type { SimContext } from '../../core/engine';
 import type { Formation, Munition, MunitionId, NationId, NodeId, Platform, PlatformId, TargetClass, World } from '../../core/types';
-import { defendRaid, hostileDefenders, samVsAircraft, type RaidStream } from './iads';
+import { defendRaid, envelopeExposure, hostileDefenders, overflightKm, samVsAircraft, type RaidStream } from './iads';
 import { takeLosses, type LossTally } from './losses';
 import { nodeDistance, type AirGroup, type AirPicture } from './picture';
+import { visibility } from './combat';
 import { emitBattle, hasSupport } from './superiority';
-import { LAUNCHER, NON_STRIKE_KINDS, STRIKE_ROLES, TARGET_OF_CLASS, TUNING } from './tables';
+import { AIRFRAME, DRONE_SITE_LAUNCHES_PER_DAY, isRoundOnRail, LAUNCHER, MOBILE_TARGETS, NON_STRIKE_KINDS, STRIKE_ROLES, TARGET_OF_CLASS, TUNING } from './tables';
 
 export interface AirSlice {
   /** Runway capacity per airbase node after cratering, 0..1; absent = intact. */
@@ -26,6 +28,8 @@ interface Package {
   strike?: { munition: Munition; targetClass: TargetClass; weapons: number };
   /** Aircraft that must fly into the defended area (penetrating strikers and SEAD); empty for missiles and standoff. */
   penetrators: AirGroup[];
+  /** How far inside the outermost hostile envelope the penetrators release, km. */
+  depthKm: number;
 }
 
 /** The pk that matters for a target class. Airbase attacks kill parked aircraft as soft targets. */
@@ -39,6 +43,24 @@ export function isStrikeMunition(m: Munition): boolean {
 
 const loadOf = (p: Platform, m: MunitionId) => p.loadout.find((l) => l.munition === m)?.count ?? 0;
 
+/**
+ * Rounds of `m` a formation can put in the air per day at surge tempo: sorties x
+ * load for aircraft, one round per launch for ground launchers. What a planner
+ * budgets against; the tick's actual rate also depends on fuel, runway and fatigue.
+ */
+export function dailyRounds(f: Formation, m: MunitionId, catalog: Catalog): number {
+  let rounds = 0;
+  for (const [pid, n] of Object.entries(f.equipment) as [PlatformId, number][]) {
+    const p = catalog.platform(pid);
+    const load = loadOf(p, m);
+    if (n <= 0 || load <= 0) continue;
+    if (f.kind === 'air_wing') rounds += n * (AIRFRAME[p.class]?.surgePerDay ?? 0) * load;
+    else if (isRoundOnRail(p)) rounds += DRONE_SITE_LAUNCHES_PER_DAY;
+    else rounds += n * (LAUNCHER[p.class]?.launchesPerDay ?? 0);
+  }
+  return rounds * f.readiness;
+}
+
 /** Air groups or ground launchers of a striking formation, with how far each can put a weapon. */
 function carriersOf(f: Formation, pic: AirPicture, ctx: SimContext, world: World): Carrier[] {
   if (f.kind === 'air_wing')
@@ -49,7 +71,8 @@ function carriersOf(f: Formation, pic: AirPicture, ctx: SimContext, world: World
     const platform = ctx.catalog.platform(pid);
     const rate = LAUNCHER[platform.class];
     if (!rate || n <= 0) continue;
-    const expected = n * rate.launchesPerDay * f.readiness * (world.dtHours / 24);
+    const perDay = isRoundOnRail(platform) ? DRONE_SITE_LAUNCHES_PER_DAY : n * rate.launchesPerDay;
+    const expected = perDay * f.readiness * (world.dtHours / 24);
     const launches = Math.floor(expected) + (ctx.rng.chance(expected % 1) ? 1 : 0);
     if (launches > 0) out.push({ platform, n: launches, reachKm: 0 });
   }
@@ -57,30 +80,51 @@ function carriersOf(f: Formation, pic: AirPicture, ctx: SimContext, world: World
 }
 
 /**
- * Pick the weapon: the order's munition if given, else the one with the best pk
- * against the target class among those carried, in the magazine, and in reach,
- * preferring weapons that outrange the defended envelope (standoff), then cheaper.
+ * Pick the weapon: the order's munition if given, else the cheapest per expected
+ * kill among those carried, in the magazine, and in reach. A weapon that does not
+ * outrange the defended envelope is charged the share of the launching aircraft
+ * the sortie risks (priced with TUNING.airframeLossAversion), so standoff missiles
+ * win only where penetrating is dear:
+ * Russia's KAB glide bombs (~USD 40k) did the front-line work in 2024-25 while
+ * Kh-59/69s (~USD 1M) went to defended rear targets.
  */
 function chooseMunition(f: Formation, carriers: Carrier[], tc: TargetClass, dist: number, ringKm: number, ctx: SimContext): Munition | undefined {
-  let best: Munition | undefined, bestScore = 0;
+  let best: Munition | undefined, bestCost = Infinity;
   for (const [mid, n] of Object.entries(f.magazine) as [MunitionId, number][]) {
     if (n < 1 || (f.order.munition && f.order.munition !== mid)) continue;
     const m = ctx.catalog.munitions.get(mid);
-    if (!m || !isStrikeMunition(m)) continue;
-    if (!carriers.some((c) => loadOf(c.platform, mid) > 0 && c.reachKm + m.rangeKm >= dist)) continue;
-    const score = effectPk(m, tc) * (m.rangeKm >= ringKm ? 1 : 0.6);
-    if (score > bestScore || (score === bestScore && best && m.unitCostUsdM < best.unitCostUsdM)) {
-      best = m;
-      bestScore = score;
+    const pk = m && isStrikeMunition(m) ? effectPk(m, tc) : 0;
+    if (!m || pk <= 0) continue;
+    for (const c of carriers) {
+      const load = loadOf(c.platform, mid);
+      if (load <= 0 || c.reachKm + m.rangeKm < dist) continue;
+      const exposure = TUNING.samExposure.strike * envelopeExposure(ringKm - m.rangeKm) * visibility(c.platform.protection.stealth) ** 2;
+      const risk = c.group ? (exposure * c.platform.unitCostUsdM * TUNING.airframeLossAversion) / load : 0;
+      const cost = (m.unitCostUsdM + risk) / pk;
+      if (cost < bestCost) {
+        best = m;
+        bestCost = cost;
+      }
     }
   }
   return best;
 }
 
-/** Furthest a hostile defense reaches out from the target: SAM envelopes, or enemy fighters holding the air. */
-function threatRingKm(world: World, ctx: SimContext, pic: AirPicture, target: NodeId, nation: NationId): number {
+/**
+ * How far short of the target a weapon must be released to stay out of every
+ * hostile envelope, along the line from the shooter's base: a SAM behind the
+ * target reaches out its range less its distance from the target, one in front
+ * its range plus that distance. A KAB lobbed from 60 km at a front-line cell
+ * stays clear of a Patriot battery 120 km behind the line. Enemy fighters holding
+ * the target's airspace push the release point further out.
+ */
+function threatRingKm(world: World, ctx: SimContext, pic: AirPicture, from: NodeId, target: NodeId, nation: NationId): number {
   let ring = 0;
-  for (const d of hostileDefenders(world, ctx, pic, target, nation)) ring = Math.max(ring, d.rangeKm);
+  const approach = nodeDistance(ctx, from, target);
+  for (const d of hostileDefenders(world, ctx, pic, target, nation)) {
+    const off = nodeDistance(ctx, d.f.node, target);
+    ring = Math.max(ring, d.rangeKm + (nodeDistance(ctx, from, d.f.node) < approach ? off : -off));
+  }
   const air = world.theater.airControl[target];
   if (air && pic.atWar(air.nation, nation)) ring = Math.max(ring, TUNING.standoffVsFightersKm);
   return ring;
@@ -96,7 +140,7 @@ function planPackage(world: World, ctx: SimContext, pic: AirPicture, f: Formatio
   if (!carriers.length) return undefined;
   const tc = f.order.targetClass ?? 'structure';
   const dist = nodeDistance(ctx, f.node, target);
-  const ring = threatRingKm(world, ctx, pic, target, f.nation);
+  const ring = threatRingKm(world, ctx, pic, f.node, target, f.nation);
   const m = chooseMunition(f, carriers, tc, dist, ring, ctx);
   let weapons = 0;
   const penetrators: AirGroup[] = [];
@@ -113,7 +157,8 @@ function planPackage(world: World, ctx: SimContext, pic: AirPicture, f: Formatio
   }
   weapons = m ? Math.min(weapons, Math.floor(f.magazine[m.id] ?? 0)) : 0;
   const strike = m && weapons > 0 ? { munition: m, targetClass: tc, weapons } : undefined;
-  return strike || penetrators.length ? { f, strike, penetrators } : undefined;
+  const depthKm = ring - (m && m.rangeKm < ring ? m.rangeKm : 0);
+  return strike || penetrators.length ? { f, strike, penetrators, depthKm } : undefined;
 }
 
 export function resolveStrikes(world: World, ctx: SimContext, pic: AirPicture, slice: AirSlice): void {
@@ -151,17 +196,18 @@ function resolveRaid(world: World, ctx: SimContext, pic: AirPicture, slice: AirS
       g.sorties = 0;
       return { g, n };
     });
-    const lost = samVsAircraft(world, ctx, pic, target, attacker, flights, 'strike', ew, tally);
+    const lost = samVsAircraft(world, ctx, pic, target, attacker, flights, 'strike', ew, tally, envelopeExposure(p.depthKm));
     const delivered = flights.reduce((s, x, i) => s + x.n - lost[i], 0);
     if (p.strike) p.strike.weapons = sent ? Math.floor((p.strike.weapons * delivered) / sent) : 0;
   }
 
   const live = pkgs.flatMap((p) => (p.strike && p.strike.weapons > 0 ? [{ f: p.f, ...p.strike }] : []));
   for (const p of live) p.f.magazine[p.munition.id] -= p.weapons;
-  const streams: RaidStream[] = live.map((p) => ({ munition: p.munition, count: p.weapons }));
+  const streams: RaidStream[] = live.map((p) => ({ munition: p.munition, count: p.weapons, overflightKm: overflightKm(world, ctx, pic, p.f.node, target, attacker) }));
   const leaked = defendRaid(world, ctx, pic, target, attacker, streams);
   live.forEach((p, i) => {
-    const damage = applyEffect(world, ctx, pic, slice, target, attacker, p.munition, p.targetClass, leaked[i], tally);
+    const flightMin = nodeDistance(ctx, p.f.node, target) / (Math.max(0.05, p.munition.speedMach) * MACH_KM_PER_MIN);
+    const damage = applyEffect(world, ctx, pic, slice, target, attacker, p.munition, p.targetClass, leaked[i], tally, flightMin);
     ctx.emit({ type: 'strike', tick: world.tick, by: attacker, munition: p.munition.id, fired: p.weapons, intercepted: p.weapons - leaked[i], target, damage });
   });
   emitBattle(world, ctx, target, attacker, world.control[target] || attacker, tally);
@@ -196,8 +242,24 @@ function suppressDefenses(world: World, ctx: SimContext, pic: AirPicture, target
   }
 }
 
+const MACH_KM_PER_MIN = 20.4;
+
+/**
+ * Chance a weapon aimed at a mobile unit (SAM battery, launcher, troops) in a
+ * 1-degree cell finds it: only a share of aimpoints is current, and the unit may
+ * move while the weapon flies (shoot-and-scoot SAM and MLRS crews relocate within
+ * the hour). A Shahed flying three hours rarely finds a battery; an Iskander
+ * arriving in five minutes often does. Loitering munitions search with their own
+ * seeker and are exempt. Fixed targets (structures, parked aircraft) are always
+ * where they were.
+ */
+function stillThere(m: Munition, tc: TargetClass, flightMin: number): number {
+  if (!MOBILE_TARGETS.has(tc) || m.kind === 'loitering') return 1;
+  return TUNING.mobileTargetLocated * Math.exp(-flightMin / TUNING.mobileTargetDwellMin);
+}
+
 /** Apply the weapons that got through. Returns a short damage report for the strike event. */
-function applyEffect(world: World, ctx: SimContext, pic: AirPicture, slice: AirSlice, target: NodeId, attacker: NationId, m: Munition, tc: TargetClass, hits: number, tally: LossTally): string {
+function applyEffect(world: World, ctx: SimContext, pic: AirPicture, slice: AirSlice, target: NodeId, attacker: NationId, m: Munition, tc: TargetClass, hits: number, tally: LossTally, flightMin: number): string {
   if (hits <= 0) return 'no hits';
   if (tc === 'structure' || tc === 'hardened') {
     const owner = world.control[target];
@@ -215,7 +277,7 @@ function applyEffect(world: World, ctx: SimContext, pic: AirPicture, slice: AirS
         for (const pid of Object.keys(f.equipment) as PlatformId[]) if (f.equipment[pid] > 0 && match(f, pid)) out.push({ f, pid });
     return out;
   };
-  let p = effectPk(m, tc);
+  let p = effectPk(m, tc) * stillThere(m, tc, flightMin);
   const parts: string[] = [];
   if (tc === 'aircraft') {
     p = (1 - TUNING.shelteredShare) * p + TUNING.shelteredShare * (m.pk.hardened ?? 0);
@@ -226,9 +288,10 @@ function applyEffect(world: World, ctx: SimContext, pic: AirPicture, slice: AirS
     }
   }
   const pool = victims((f, pid) => TARGET_OF_CLASS[ctx.catalog.platform(pid).class] === tc && (tc !== 'aircraft' || f.kind === 'air_wing'));
+  let left = pool.reduce((s, v) => s + v.f.equipment[v.pid], 0);
+  if (tc === 'aircraft') p *= Math.min(1, left / TUNING.packedRampAircraft);
   const kills = ctx.rng.binomial(hits, p);
   const picked = new Map<{ f: Formation; pid: PlatformId }, number>();
-  let left = pool.reduce((s, v) => s + v.f.equipment[v.pid], 0);
   for (let k = 0; k < kills && left > 0; k++, left--) {
     let r = ctx.rng.next() * left, i = 0;
     const remaining = (v: (typeof pool)[number]) => v.f.equipment[v.pid] - (picked.get(v) ?? 0);
