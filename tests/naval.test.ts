@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { Catalog } from '../src/core/catalog';
-import { Engine, relationMut } from '../src/core/engine';
+import { Engine, relationMut, type System } from '../src/core/engine';
 import { addFormation, type FormationSpec } from '../src/core/forces';
 import { Rng } from '../src/core/rng';
 import type { Formation, Munition, MunitionId, NationId, NodeId, Platform, PlatformId } from '../src/core/types';
 import { createWorld } from '../src/core/world';
 import { loadMap } from '../src/data/load';
+import { airWar } from '../src/systems/air';
 import { applyNavalOrder, CHOKEPOINTS, navalWar, resolveSalvo, strikeNavalGroup } from '../src/systems/naval';
 import { geography, nearestSea, seaNeighbour } from '../src/systems/naval/geography';
 import { testMunitions, testPlatforms } from '../src/testkit';
@@ -36,15 +37,16 @@ const navalPlatforms: Platform[] = [
   ship('n_mcm', 'mine_warfare', { crew: 50 }),
   ship('n_usv', 'usv', { crew: 0, unitCostUsdM: 0.25, mobility: { speedKph: 40, rangeKm: 800, fuelTonsPerHour: 0 }, firepower: { ship: 0.05 } }),
   ship('n_minelayer', 'corvette', { loadout: [mun('n_mine', 60)] }),
+  P({ id: 'n_coastal', name: 'Coastal ASBM launcher', class: 'coastal_asm', domain: 'land', unitCostUsdM: 5, crew: 4, mobility: { speedKph: 60, rangeKm: 600, fuelTonsPerHour: 0.05 }, protection: { armor: 0.1, stealth: 0.35 }, sensors: { detectionKm: 0 }, firepower: {}, loadout: [mun('n_asbm', 4)] }),
   ship('n_carrier', 'carrier', { crew: 3000, mobility: { speedKph: 55, rangeKm: 1e6, fuelTonsPerHour: 0 }, engagementChannels: 4, capacity: { aircraft: 60 }, loadout: [mun('t_sam', 16)] }),
   P({ id: 'n_helo', name: 'ASW helicopter', class: 'asw_helo', domain: 'air', unitCostUsdM: 40, crew: 4, mobility: { speedKph: 250, rangeKm: 300, fuelTonsPerHour: 0.5 }, protection: { armor: 0.1, stealth: 0.1 }, sensors: { detectionKm: 50 }, firepower: {}, loadout: [mun('n_lwt', 2)] }),
 ];
 
 /** A world on the real map with the testkit catalog plus naval additions and the naval system. */
-function navalWorld(seed = 42) {
+function navalWorld(seed = 42, systems: System[] = [navalWar]) {
   const map = loadMap();
   const catalog = new Catalog([...testPlatforms, ...navalPlatforms], [...testMunitions, ...navalMunitions]);
-  const engine = new Engine(map, catalog, [navalWar]);
+  const engine = new Engine(map, catalog, systems);
   const world = createWorld(map, { seed });
   engine.init(world);
   const nodeAt = (lat: number, lon: number) => map.nodeAt(lat, lon);
@@ -254,6 +256,26 @@ describe('submarine warfare', () => {
     expect(bare.attacks).toBeLessThanOrEqual(9);
     expect(bare.torpedoes).toBe(bare.attacks * 3);
     expect(attacksOn(true).attacks).toBeLessThan(bare.attacks * 0.6);
+  });
+});
+
+describe('anti-ship strikes from shore', () => {
+  it("a coastal battery's salvo meets the target group's area defence and its hits reach the naval ledger", () => {
+    const t = navalWorld(7, [airWar, navalWar]);
+    t.war('UKR', 'RUS');
+    const port = t.portOf('UKR', 46.5, 30.7);
+    const at = seaNeighbour(t.map, port)!;
+    const fleet = t.add({ nation: RUS, name: 'Frigates', kind: 'surface_group', node: at, equipment: t.eq({ n_frigate: 3 }) });
+    fleet.order = { posture: 'reserve', issuedTick: 0 };
+    const battery = t.add({ nation: UKR, name: 'ASBM battery', kind: 'missile', echelon: 'battalion', node: port, equipment: t.eq({ n_coastal: 12 }) });
+    battery.order = { posture: 'strike', target: at, targetClass: 'ship', targetFormation: fleet.id, issuedTick: 0 };
+    for (let i = 0; i < 8; i++) t.engine.step(t.world);
+    const fired = 48 - battery.magazine[mid('n_asbm')];
+    expect(fired).toBeGreaterThan(0);
+    expect(led(t, 'UKR')!.missilesFired).toBe(fired);
+    expect(led(t, 'RUS')!.interceptorsFired).toBeGreaterThan(0);
+    expect(fleet.magazine[mid('t_sam')]).toBeLessThan(96);
+    expect(led(t, 'RUS')!.hullsSunk + led(t, 'RUS')!.hullsDamaged).toBeGreaterThan(0);
   });
 });
 

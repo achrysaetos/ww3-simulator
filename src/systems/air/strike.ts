@@ -6,7 +6,8 @@
  */
 import type { Catalog } from '../../core/catalog';
 import type { SimContext } from '../../core/engine';
-import type { Formation, Munition, MunitionId, NationId, NodeId, Platform, PlatformId, TargetClass, World } from '../../core/types';
+import type { Formation, FormationId, Munition, MunitionId, NationId, NodeId, Platform, PlatformId, TargetClass, World } from '../../core/types';
+import { ANTISHIP_KINDS, strikeNavalGroup } from '../naval';
 import { defendRaid, envelopeExposure, hostileDefenders, overflightKm, samVsAircraft, type RaidStream } from './iads';
 import { takeLosses, type LossTally } from './losses';
 import { nodeDistance, type AirGroup, type AirPicture } from './picture';
@@ -201,8 +202,10 @@ function resolveRaid(world: World, ctx: SimContext, pic: AirPicture, slice: AirS
     if (p.strike) p.strike.weapons = sent ? Math.floor((p.strike.weapons * delivered) / sent) : 0;
   }
 
-  const live = pkgs.flatMap((p) => (p.strike && p.strike.weapons > 0 ? [{ f: p.f, ...p.strike }] : []));
+  const all = pkgs.flatMap((p) => (p.strike && p.strike.weapons > 0 ? [{ f: p.f, ...p.strike }] : []));
+  const live = all.filter((p) => p.targetClass !== 'ship');
   for (const p of live) p.f.magazine[p.munition.id] -= p.weapons;
+  strikeShips(world, ctx, pic, target, attacker, all.filter((p) => p.targetClass === 'ship'));
   const streams: RaidStream[] = live.map((p) => ({ munition: p.munition, count: p.weapons, overflightKm: overflightKm(world, ctx, pic, p.f.node, target, attacker) }));
   const leaked = defendRaid(world, ctx, pic, target, attacker, streams);
   live.forEach((p, i) => {
@@ -211,6 +214,44 @@ function resolveRaid(world: World, ctx: SimContext, pic: AirPicture, slice: AirS
     ctx.emit({ type: 'strike', tick: world.tick, by: attacker, munition: p.munition.id, fired: p.weapons, intercepted: p.weapons - leaked[i], target, damage });
   });
   emitBattle(world, ctx, target, attacker, world.control[target] || attacker, tally);
+}
+
+/**
+ * Weapons aimed at ships go through the naval salvo model (Hughes): the target task force's
+ * pooled area defence, point defence and staying power, the same as ship-launched salvos.
+ * Packages aimed at the same group with the same weapon arrive as one salvo. A weapon without
+ * a terminal seeker can only hit a group lying in its home port; at sea it has moved on by
+ * the time the weapon arrives (see naval ANTISHIP_KINDS). With nothing to hit, the shooter
+ * holds its rounds.
+ */
+function strikeShips(world: World, ctx: SimContext, pic: AirPicture, node: NodeId, attacker: NationId, pkgs: { f: Formation; munition: Munition; weapons: number }[]): void {
+  const salvos = new Map<string, { target: Formation; munition: Munition; count: number }>();
+  for (const p of pkgs) {
+    const target = shipTarget(world, ctx, pic, node, attacker, p.f.order.targetFormation);
+    if (!target) continue;
+    if (!ANTISHIP_KINDS.has(p.munition.kind) && (target.node !== target.home || target.order.path?.length)) continue;
+    p.f.magazine[p.munition.id] -= p.weapons;
+    const key = `${target.id}|${p.munition.id}`;
+    const s = salvos.get(key);
+    if (s) s.count += p.weapons;
+    else salvos.set(key, { target, munition: p.munition, count: p.weapons });
+  }
+  for (const s of salvos.values()) strikeNavalGroup(world, ctx, attacker, s.munition.id, s.count, s.target.id);
+}
+
+/** The aimed surface group if it is still at the node, else the most valuable hostile surface group there. */
+function shipTarget(world: World, ctx: SimContext, pic: AirPicture, node: NodeId, attacker: NationId, aimed: FormationId | undefined): Formation | undefined {
+  const ok = (f: Formation | undefined): f is Formation => !!f && f.status === 'active' && f.kind === 'surface_group' && f.node === node && pic.atWar(f.nation, attacker);
+  const a = aimed ? world.formations[aimed] : undefined;
+  if (ok(a)) return a;
+  let best: Formation | undefined, bestValue = 0;
+  for (const f of pic.atNode.get(node) ?? []) {
+    if (!ok(f)) continue;
+    let v = 0;
+    for (const [pid, n] of Object.entries(f.equipment) as [PlatformId, number][]) v += n * ctx.catalog.platform(pid).unitCostUsdM;
+    if (v > bestValue) { bestValue = v; best = f; }
+  }
+  return best;
 }
 
 /**
