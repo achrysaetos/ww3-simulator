@@ -6,6 +6,8 @@ import { defenseShare } from '../systems/economy';
 /** War-economy outcomes for one nation over a run. */
 export interface EconomyMetrics {
   gdpIndex: number;
+  /** Level last ordered by set_mobilization; mobilization itself lags toward it. */
+  mobilizationTarget: number | null;
   defenseSharePct: number;
   deficitPctGdp: number;
   treasuryUsdB: number;
@@ -112,6 +114,7 @@ export function economyProbe(world: World, catalog: Catalog) {
       const round = (x: number, k = 1000) => Math.round(x * k) / k;
       return {
         gdpIndex: round(e.gdpIndex),
+        mobilizationTarget: e.mobilizationTarget === null ? null : round(e.mobilizationTarget),
         defenseSharePct: round(defenseShare(n) * 100, 10),
         deficitPctGdp: round(e.deficitPctGdp * 100, 10),
         treasuryUsdB: round(n.treasuryUsdB, 10),

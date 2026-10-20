@@ -48,11 +48,24 @@ const BASE_RESERVE_SHARE = 0.01;
  */
 const MAX_UNDER_ARMS_SHARE = 0.12;
 /**
- * Monthly call-up at mobilization 1, share of population. The US Army grew by ~4M in
- * 1942 (~330k a month on 134M people). Russia's 2022 partial mobilization (300k in about
- * two months) corresponds to mobilization ~0.4.
+ * Two ways a state fills its ranks; each month it gets whichever yields more.
+ *
+ * Recruitment bought with money: monthly recruits per head of population per unit of
+ * defence share above the peacetime norm. Fitted between Russia's ~30k contract soldiers
+ * a month in 2024 at ~8% of GDP (MoD: ~450k contracts signed in 2024; ISW) and Ukraine's
+ * ~25-35k mobilized a month at ~34% (Ukrainian MoD statements, 2024).
  */
-const INTAKE_POP_SHARE = 0.0025;
+const INTAKE_PER_DEFENSE_SHARE = 0.003;
+/**
+ * Conscription: monthly call-up at mobilization 1, share of population, falling off as
+ * mobilization^2.5 so that only a general mobilization drafts at scale. Anchors: the US
+ * Army grew ~4M in 1942 (~330k a month on 134M people, 0.0025); US forces grew ~90k a
+ * month in 1950-52 at partial mobilization (0.5 gives ~70k); Russia at 0.35 drafts
+ * ~25k a month, below what its contract bonuses buy. The call-up follows the ordered
+ * level at once, as Ukraine's did in February 2022; factories take months to follow.
+ */
+const CONSCRIPTION_POP_SHARE = 0.0025;
+const CONSCRIPTION_EXPONENT = 2.5;
 /** Mean months from call-up to a usable reservist: Russia 2022 weeks, Ukraine 1-2 months, NATO basic plus branch 3-6 months. */
 const TRAINING_MONTHS = 2.5;
 /** Full mobilization quadruples peacetime military fuel draw (est.). */
@@ -287,7 +300,10 @@ function stepNation(world: World, ctx: SimContext, s: Scan, n: Nation, e: Nation
   const workingAge = (n.stats.workingAgePct ?? 65) / 65;
   const ceiling = Math.max(base, MAX_UNDER_ARMS_SHARE * n.population * workingAge);
   const cap = base + n.mobilization * (ceiling - base);
-  const intake = Math.max(0, Math.min(n.mobilization * n.population * INTAKE_POP_SHARE * dtMonths, cap - underArms));
+  const callUp = n.mobilization > 0
+    ? n.population * Math.max(INTAKE_PER_DEFENSE_SHARE * Math.max(0, share - NORMAL_PEACE_SHARE), CONSCRIPTION_POP_SHARE * (e.mobilizationTarget ?? n.mobilization) ** CONSCRIPTION_EXPONENT)
+    : 0;
+  const intake = Math.max(0, Math.min(callUp * dtMonths, cap - underArms));
   e.inTraining += intake;
   e.recruited += intake;
   const graduates = e.inTraining * lag(dtMonths, TRAINING_MONTHS);
