@@ -283,7 +283,7 @@ describe('strike USVs', () => {
 describe('sea control and blockade', () => {
   const malacca = CHOKEPOINTS.find((c) => c.name === 'Strait of Malacca')!;
 
-  it('a blockade of Malacca interdicts Chinese trade, disrupts Japanese and Korean, and leaves Brazil alone', () => {
+  it('a blockade of Malacca interdicts Chinese trade, disrupts Japanese and Korean only once the PLAN fights there, and leaves Brazil alone', () => {
     const t = navalWorld();
     const at = geography(t.map).chokepoints.find((c) => c.def === malacca)!.nodes[1];
     const us = t.add({ nation: USA, name: 'Blockade force', kind: 'surface_group', node: at, equipment: t.eq({ t_destroyer: 3 }), magazine: {} });
@@ -295,16 +295,22 @@ describe('sea control and blockade', () => {
     t.engine.step(t.world);
     const tb = t.world.theater.tradeBlocked as Record<string, number>;
     expect(tb.CHN).toBeGreaterThan(0.3);
-    expect(tb.JPN).toBeGreaterThan(0.15);
-    expect(tb.KOR).toBeGreaterThan(0.15);
-    expect(tb.CHN).toBeGreaterThan(tb.KOR * 0.9);
-    expect(tb.BRA).toBeLessThan(0.01);
-    expect(tb.USA).toBe(0);
+    expect(tb.JPN).toBe(0);
+    expect(tb.KOR).toBe(0);
+
+    t.add({ nation: CHN, name: 'Escort force', kind: 'surface_group', node: at, equipment: t.eq({ t_destroyer: 1 }), magazine: {} });
+    t.engine.step(t.world);
+    const contested = t.world.theater.tradeBlocked as Record<string, number>;
+    expect(contested.JPN).toBeGreaterThan(0.15);
+    expect(contested.KOR).toBeGreaterThan(0.15);
+    expect(contested.CHN).toBeGreaterThan(contested.KOR * 0.9);
+    expect(contested.BRA).toBeLessThan(0.01);
+    expect(contested.USA).toBe(0);
     expect(t.world.theater.seaControl[at]).toEqual({ nation: USA, level: expect.any(Number) });
     expect(t.world.theater.seaControl[at].level).toBeGreaterThan(0.5);
   });
 
-  it('a submarine on patrol in the Strait of Hormuz cuts Gulf exporters, a surface patrol (not blockade) does not', () => {
+  it('a submarine on patrol in the Strait of Hormuz cuts Iranian trade, a surface patrol (not blockade) does not, and neutrals sail on', () => {
     const t = navalWorld();
     const at = geography(t.map).chokepoints.find((c) => c.def.name === 'Strait of Hormuz')!.nodes[0];
     t.war('USA', 'IRN');
@@ -316,7 +322,7 @@ describe('sea control and blockade', () => {
     t.order(ssn, { posture: 'patrol', target: at });
     t.engine.step(t.world);
     expect((t.world.theater.tradeBlocked as Record<string, number>).IRN).toBeGreaterThan(0.2);
-    expect((t.world.theater.tradeBlocked as Record<string, number>).QAT).toBeGreaterThan(0.1);
+    expect((t.world.theater.tradeBlocked as Record<string, number>).QAT).toBe(0);
   });
 });
 

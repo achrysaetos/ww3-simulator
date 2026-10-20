@@ -13,8 +13,10 @@ const SUB_INTERDICTION = 0.6;
 /** Interdiction strength of hostile mines per mine (100 mines ~ 2.0). */
 const MINE_INTERDICTION = 0.02;
 /**
- * Neutral shipping avoids active war zones. Red Sea 2024: attacks aimed at Israel-linked ships
- * cut Suez/Bab-el-Mandeb transits by about two thirds for everyone (UNCTAD, Feb-Jul 2024).
+ * Neutral shipping avoids active war zones: sea zones that are mined or where navies at war
+ * meet. Red Sea 2024: attacks aimed at Israel-linked ships cut Suez/Bab-el-Mandeb transits by
+ * about two thirds for everyone (UNCTAD, Feb-Jul 2024). A belligerent's patrol far from any
+ * fighting does not turn away neutral ships it has no quarrel with.
  */
 const NEUTRAL_DISRUPTION = 0.5;
 
@@ -77,8 +79,13 @@ export function computeTradeBlocked(env: TickEnv): void {
       for (const h of c.hulls) if (h.platform.class !== 'ssbn') s += SUB_INTERDICTION * h.count;
     if (s > 0) add(blockers, f.node, f.nation, s);
   }
+  const warZone = new Set<number>();
   for (const [node, laid] of Object.entries(world.slices.naval.mines))
-    for (const [layer, n] of Object.entries(laid)) add(blockers, Number(node), layer as NationId, n * MINE_INTERDICTION);
+    for (const [layer, n] of Object.entries(laid)) {
+      add(blockers, Number(node), layer as NationId, n * MINE_INTERDICTION);
+      warZone.add(Number(node));
+    }
+  for (const [node, here] of env.byNode) if (fighting(world, here)) warZone.add(node);
 
   const intensity = (node: number, victim: NationId): number => {
     const b = blockers.get(node);
@@ -86,7 +93,8 @@ export function computeTradeBlocked(env: TickEnv): void {
     let s = 0;
     for (const [nation, v] of b) {
       if (nation === victim) continue;
-      s += atWar(world, nation, victim) ? v : v * NEUTRAL_DISRUPTION;
+      if (atWar(world, nation, victim)) s += v;
+      else if (warZone.has(node)) s += v * NEUTRAL_DISRUPTION;
     }
     return s > 0 ? 1 - Math.exp(-s / (1 + (escorts.get(node)?.get(victim) ?? 0))) : 0;
   };
@@ -120,4 +128,11 @@ export function computeTradeBlocked(env: TickEnv): void {
     out[id] = 1 - open;
   }
   world.theater.tradeBlocked = out;
+}
+
+/** Whether naval forces of two nations at war share this sea zone. */
+function fighting(world: World, here: readonly { nation: NationId }[]): boolean {
+  for (let i = 0; i < here.length; i++)
+    for (let j = i + 1; j < here.length; j++) if (here[i].nation !== here[j].nation && atWar(world, here[i].nation, here[j].nation)) return true;
+  return false;
 }
