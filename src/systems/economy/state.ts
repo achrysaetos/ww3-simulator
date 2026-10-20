@@ -38,6 +38,12 @@ export interface NationEconomy {
   short: Resource[];
   /** Units delivered since the last monthly production report. */
   produced: Record<ItemId, number>;
+  /** Units delivered since the run began; never reset, for measurement. */
+  delivered: Record<ItemId, number>;
+  /** People called up since the run began. */
+  recruited: number;
+  /** Bulk fuel delivered to national depots since the run began, tons. */
+  fuelDelivered: number;
 }
 
 export interface EconomyState {
@@ -93,5 +99,8 @@ export function newNationEconomy(nation: Nation): NationEconomy {
     inTraining: 0,
     short: [],
     produced: {},
+    delivered: {},
+    recruited: 0,
+    fuelDelivered: 0,
   };
 }

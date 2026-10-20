@@ -217,6 +217,7 @@ function runLine(n: Nation, e: NationEconomy, line: LineState, spendMultiple: nu
   if (whole <= 0) return;
   line.built += whole;
   e.produced[line.item] = (e.produced[line.item] ?? 0) + whole;
+  e.delivered[line.item] = (e.delivered[line.item] ?? 0) + whole;
   const sink = spec?.sink ?? { kind: 'stockpile' };
   if (sink.kind === 'bulk_ammo') n.bulk.ammo += whole * sink.tonsPerUnit;
   else n.stockpile[line.item] = (n.stockpile[line.item] ?? 0) + whole;
@@ -259,7 +260,9 @@ function stepNation(world: World, ctx: SimContext, s: Scan, n: Nation, e: Nation
   for (const line of Object.values(e.lines)) runLine(n, e, line, spendMultiple, dtMonths);
 
   const fuelPerMonth = (((n.stats.milexUsd ?? 0) / 1e6) * MIL_FUEL_TONS_PER_USD_M / 12) * (1 + (FUEL_MOBILIZATION_MULTIPLE - 1) * n.mobilization);
+  const fuelBefore = n.bulk.fuel;
   n.bulk.fuel = Math.min(Math.max(n.bulk.fuel, fuelPerMonth * 6), n.bulk.fuel + fuelPerMonth * dtMonths * Math.min(1, 2 * e.supply.energy));
+  e.fuelDelivered += n.bulk.fuel - fuelBefore;
 
   const personnel = s.personnel.get(n.id) ?? 0;
   const underArms = n.reserves + e.inTraining + personnel;
@@ -273,6 +276,7 @@ function stepNation(world: World, ctx: SimContext, s: Scan, n: Nation, e: Nation
   const cap = base + n.mobilization * (ceiling - base);
   const intake = Math.max(0, Math.min(n.mobilization * n.population * INTAKE_POP_SHARE * dtMonths, cap - underArms));
   e.inTraining += intake;
+  e.recruited += intake;
   const graduates = e.inTraining * lag(dtMonths, TRAINING_MONTHS);
   e.inTraining -= graduates;
   n.reserves += graduates;

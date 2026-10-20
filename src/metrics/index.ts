@@ -1,6 +1,7 @@
 import type { Catalog } from '../core/catalog';
 import type { Engine } from '../core/engine';
 import type { GameMap } from '../core/map';
+import { economyProbe, type EconomyMetrics } from './economy';
 import type { Domain, NationId, PlatformClass, PlatformId, SimEvent, World } from '../core/types';
 
 /** What happened in a run, aggregated per nation. The common currency for calibration. */
@@ -27,6 +28,7 @@ export interface NationMetrics {
   warSupport: number;
   mobilization: number;
   civilianDeaths: number;
+  economy?: EconomyMetrics;
 }
 
 function totals(world: World, catalog: Catalog): Map<NationId, Map<PlatformId, number>> {
@@ -61,8 +63,10 @@ export function measureRun(engine: Engine, world: World, map: GameMap, days: num
   };
   const nukes: RunMetrics['nuclearDetonations'] = [];
   const caps: RunMetrics['capitulations'] = [];
+  const eco = economyProbe(world, catalog);
   const t0 = performance.now();
   for (let i = 0; i < ticks; i++) {
+    eco.tick();
     const day = (world.tick * world.dtHours) / 24;
     for (const e of engine.step(world) as SimEvent[]) {
       if (e.type === 'battle') for (const [n, c] of Object.entries(e.casualties)) get(n).casualties += c;
@@ -97,6 +101,7 @@ export function measureRun(engine: Engine, world: World, map: GameMap, days: num
     mm.warSupport = n.warSupport;
     mm.mobilization = n.mobilization;
     mm.civilianDeaths = Math.max(0, (startPop.get(n.id) ?? 0) - n.population);
+    mm.economy = eco.finish(n.id);
   }
   const wars = Object.entries(world.relations).filter(([, r]) => r.atWar).map(([k, r]) => { const [a, b] = k.split('|'); return { a, b, since: r.warSince ?? 0 }; });
   return { days, nations: Object.fromEntries(per), wars, nuclearDetonations: nukes, capitulations: caps, msPerTick };
