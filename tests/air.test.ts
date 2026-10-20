@@ -2,20 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { Rng } from '../src/core/rng';
 import type { Formation, NodeId } from '../src/core/types';
 import { applyAirOrder, combatRadiusKm, interceptSalvo, resolveAirBattle } from '../src/systems/air';
-import { airWorld, mid, nation, pid } from './air.fixture';
+import { airWorld, battery, launchers, mid, nation, pid, wing } from './air.fixture';
 
 const USA = nation('USA'), RUS = nation('RUS'), UKR = nation('UKR');
 const TAIPEI = [25, 121.5] as const, FUZHOU = [26, 119.3] as const, KYIV = [50.45, 30.5] as const;
 
-function wing(t: ReturnType<typeof airWorld>, n: string, at: NodeId, equipment: Record<string, number>, order: Partial<Formation['order']> = {}) {
-  return t.add({ nation: nation(n), name: `${n} wing`, kind: 'air_wing', echelon: 'wing', node: at, equipment: Object.fromEntries(Object.entries(equipment).map(([k, v]) => [pid(k), v])), order: { posture: 'defend', issuedTick: 0, ...order } });
-}
-function battery(t: ReturnType<typeof airWorld>, n: string, at: NodeId, equipment: Record<string, number>) {
-  return t.add({ nation: nation(n), name: `${n} AD`, kind: 'air_defense', echelon: 'battalion', node: at, equipment: Object.fromEntries(Object.entries(equipment).map(([k, v]) => [pid(k), v])) });
-}
-function launchers(t: ReturnType<typeof airWorld>, n: string, at: NodeId, equipment: Record<string, number>, order: Partial<Formation['order']> = {}) {
-  return t.add({ nation: nation(n), name: `${n} missiles`, kind: 'missile', echelon: 'brigade', node: at, equipment: Object.fromEntries(Object.entries(equipment).map(([k, v]) => [pid(k), v])), order: { posture: 'defend', issuedTick: 0, ...order } });
-}
 const count = (f: Formation) => Object.values(f.equipment).reduce((a, b) => a + b, 0);
 
 describe('air superiority', () => {
@@ -95,30 +86,35 @@ describe('air superiority', () => {
 });
 
 describe('integrated air defense', () => {
-  it('interceptSalvo leaks once incoming exceeds fire-control channels', () => {
+  it('interceptSalvo leaks once a time-on-target salvo exceeds fire-control channels', () => {
     const rng = new Rng(1);
     const ballistic = { speedMach: 7, interceptDifficulty: 0.3 };
     const defense = { channels: 9, interceptors: 200, pk: 0.9, rangeKm: 25 };
-    const saturated = interceptSalvo({ ...ballistic, count: 30 }, defense, rng);
+    const saturated = interceptSalvo({ ...ballistic, count: 30, arrivalWindowS: 0 }, defense, rng);
     expect(saturated.leaked).toBeGreaterThanOrEqual(21);
     expect(saturated.interceptorsUsed).toBe(18);
-    const light = interceptSalvo({ ...ballistic, count: 6 }, defense, rng);
+    const light = interceptSalvo({ ...ballistic, count: 6, arrivalWindowS: 0 }, defense, rng);
     expect(light.leaked).toBeLessThanOrEqual(1);
-    // Slow drones give each channel many engagement cycles: the same battery is not saturated by 30 of them.
-    const drones = interceptSalvo({ count: 30, speedMach: 0.15, interceptDifficulty: 0.1 }, { ...defense, rangeKm: 50 }, rng);
+    // The same 30 arriving over ten minutes let each channel engage again and again.
+    const staggered = interceptSalvo({ ...ballistic, count: 30, arrivalWindowS: 600 }, defense, rng);
+    expect(staggered.leaked).toBeLessThanOrEqual(3);
+    // Slow drones in a time-on-target salvo still give each channel many engagement cycles.
+    const drones = interceptSalvo({ count: 30, speedMach: 0.15, interceptDifficulty: 0.1, arrivalWindowS: 0 }, { ...defense, rangeKm: 50 }, rng);
     expect(drones.leaked).toBeLessThanOrEqual(2);
   });
 
-  it('a saturated SAM site leaks ballistic missiles into the target', () => {
+  it('a SAM site facing more missiles than its magazine can answer leaks the rest into the target', () => {
     const t = airWorld();
     t.war('RUS', 'UKR');
     const kyiv = t.node(...KYIV);
-    battery(t, 'UKR', kyiv, { x_patriot: 1 });
+    const ad = battery(t, 'UKR', kyiv, { x_patriot: 1 });
     launchers(t, 'RUS', t.node(53.9, 27.6), { x_mrbm_tel: 200 }, { posture: 'strike', target: kyiv, targetClass: 'structure' });
     const s = t.strikes(t.tick()).find((e) => e.munition === mid('x_mrbm'))!;
     expect(s.fired).toBeGreaterThan(25);
     expect(s.intercepted).toBeGreaterThan(0);
-    expect(s.intercepted).toBeLessThanOrEqual(9);
+    // 32 PAC-3s fired in 2-round salvos engage at most 16 ballistic missiles.
+    expect(s.intercepted).toBeLessThanOrEqual(16);
+    expect(ad.magazine[mid('x_pac3')]).toBe(0);
     expect(t.world.theater.infrastructure[kyiv]).toBeLessThan(1);
   });
 

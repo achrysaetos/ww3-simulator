@@ -10,13 +10,13 @@ import { visibility } from './combat';
 import { interceptSalvo } from './intercept';
 import { takeLosses, type LossTally } from './losses';
 import { nodeDistance, type AirGroup, type AirPicture, type Defender } from './picture';
-import { COUNTER_AIR_POSTURES, COVERAGE_SHARE, INTERCEPTOR_ENGAGES, THREAT_OF_KIND, TUNING, type ThreatCategory } from './tables';
+import { AAM_VS_DRONE_FACTOR, COUNTER_AIR_POSTURES, coverageShare, INTERCEPTOR_ENGAGES, THREAT_OF_KIND, TUNING, type ThreatCategory } from './tables';
 
 interface Shot { m: Munition; pk: number }
 
 function pkAgainst(m: Munition, cat: ThreatCategory): number {
   if (cat === 'aircraft') return m.pk.aircraft ?? 0;
-  if (cat === 'air_breathing') return m.pk.missile ?? (m.pk.aircraft ?? 0) * 0.8;
+  if (cat === 'air_breathing') return m.pk.missile ?? Math.min(0.9, (m.pk.aircraft ?? 0) * (m.kind === 'aam' ? AAM_VS_DRONE_FACTOR : 0.8));
   return m.pk.missile ?? 0;
 }
 
@@ -30,7 +30,7 @@ export function pickInterceptor(f: Formation, cat: ThreatCategory, difficulty: n
   for (const [mid, n] of Object.entries(f.magazine)) {
     if (n < 1) continue;
     const m = ctx.catalog.munitions.get(mid as MunitionId);
-    if (!m || !INTERCEPTOR_ENGAGES[m.kind]?.includes(cat) || m.rangeKm * COVERAGE_SHARE[cat] < distKm) continue;
+    if (!m || !INTERCEPTOR_ENGAGES[m.kind]?.includes(cat) || m.rangeKm * coverageShare(m.kind, cat) < distKm) continue;
     const pk = pkAgainst(m, cat);
     const eff = pk * (1 - difficulty);
     if (eff <= 0) continue;
@@ -40,7 +40,7 @@ export function pickInterceptor(f: Formation, cat: ThreatCategory, difficulty: n
   return cheap ?? best;
 }
 
-/** Defenders hostile to `nation` whose envelope reaches `node`, outer layer (longest range) first. */
+/** Defenders hostile to `nation` whose envelope reaches `node`, longest range first. */
 export function hostileDefenders(world: World, ctx: SimContext, pic: AirPicture, node: NodeId, nation: NationId): Defender[] {
   const key = `${node}|${nation}`;
   let inRange = pic.defendersInRange.get(key);
@@ -51,15 +51,22 @@ export function hostileDefenders(world: World, ctx: SimContext, pic: AirPicture,
   return inRange.filter((d) => d.f.status === 'active' && d.channels > 0);
 }
 
-/** One defender engages `count` threats; spends its channels and interceptors. Returns survivors. */
-function engage(ctx: SimContext, d: Defender, node: NodeId, cat: ThreatCategory, threat: { count: number; speedMach: number; interceptDifficulty: number }): number {
-  const dist = nodeDistance(ctx, d.f.node, node);
-  const shot = pickInterceptor(d.f, cat, threat.interceptDifficulty, dist, ctx);
-  if (!shot) return threat.count;
-  const r = interceptSalvo(threat, { channels: d.channels, interceptors: d.f.magazine[shot.m.id], pk: shot.pk, rangeKm: shot.m.rangeKm * COVERAGE_SHARE[cat] }, ctx.rng);
+/** One defender fires `shot` at `count` threats; spends its channels and interceptors. Returns survivors. */
+function engage(ctx: SimContext, d: Defender, shot: Shot, cat: ThreatCategory, threat: { count: number; speedMach: number; interceptDifficulty: number }): number {
+  const r = interceptSalvo(threat, { channels: d.channels, interceptors: d.f.magazine[shot.m.id], pk: shot.pk, rangeKm: shot.m.rangeKm * coverageShare(shot.m.kind, cat) }, ctx.rng);
   d.channels -= r.channelsUsed;
   d.f.magazine[shot.m.id] -= r.interceptorsUsed;
   return r.leaked;
+}
+
+/** Each covering defender with the interceptor it would commit, cheapest layer first so PAC-3s are kept for what SHORAD cannot stop. */
+function layers(ctx: SimContext, defenders: Defender[], node: NodeId, cat: ThreatCategory, difficulty: number): { d: Defender; shot: Shot }[] {
+  const out: { d: Defender; shot: Shot }[] = [];
+  for (const d of defenders) {
+    const shot = d.channels > 0 ? pickInterceptor(d.f, cat, difficulty, nodeDistance(ctx, d.f.node, node), ctx) : undefined;
+    if (shot) out.push({ d, shot });
+  }
+  return out.sort((a, b) => a.shot.m.unitCostUsdM - b.shot.m.unitCostUsdM || b.d.rangeKm - a.d.rangeKm);
 }
 
 /** Fighters of nations at war with `attacker` that can reach `node` and still have intercept sorties. */
@@ -102,9 +109,9 @@ export function defendRaid(world: World, ctx: SimContext, pic: AirPicture, node:
         g.f.magazine[aam.id] -= r.interceptorsUsed;
         leaked[i] = r.leaked;
       }
-    for (const d of sams) {
+    for (const { d, shot } of layers(ctx, sams, node, cat, m.interceptDifficulty)) {
       if (!leaked[i]) break;
-      if (d.channels > 0) leaked[i] = engage(ctx, d, node, cat, { ...threat, count: leaked[i] });
+      if (d.channels > 0 && d.f.magazine[shot.m.id] >= 1) leaked[i] = engage(ctx, d, shot, cat, { ...threat, count: leaked[i] });
     }
   }
   return leaked;
@@ -128,9 +135,9 @@ export function samVsAircraft(world: World, ctx: SimContext, pic: AirPicture, no
   return flights.map(({ g, n }) => {
     let exposed = ctx.rng.binomial(n, TUNING.samExposure[mission] * visibility(g.platform.protection.stealth) ** 2);
     const before = exposed;
-    for (const d of sams) {
+    for (const { d, shot } of layers(ctx, sams, node, 'aircraft', evasion)) {
       if (!exposed) break;
-      if (d.channels > 0) exposed = engage(ctx, d, node, 'aircraft', { count: exposed, speedMach: g.platform.mobility.speedKph / 1235, interceptDifficulty: evasion });
+      if (d.channels > 0 && d.f.magazine[shot.m.id] >= 1) exposed = engage(ctx, d, shot, 'aircraft', { count: exposed, speedMach: g.platform.mobility.speedKph / 1235, interceptDifficulty: evasion });
     }
     const killed = before - exposed;
     return takeLosses(world, ctx, g.f, g.pid, killed, TUNING.damagedShare, tally);

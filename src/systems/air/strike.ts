@@ -17,6 +17,7 @@ export interface AirSlice {
   runway: Record<number, number>;
 }
 
+/** Sorties (aircraft) or launches (ground launchers) available this tick, and how far the carrier itself goes. */
 interface Carrier { platform: Platform; n: number; reachKm: number; group?: AirGroup }
 
 interface Package {
@@ -99,7 +100,8 @@ function planPackage(world: World, ctx: SimContext, pic: AirPicture, f: Formatio
   let weapons = 0;
   const penetrators: AirGroup[] = [];
   for (const c of carriers) {
-    const per = loadOf(c.platform, m.id);
+    // A sortie delivers the full load; a ground launch is one round (the loadout is the launcher's reload capacity).
+    const per = c.group ? loadOf(c.platform, m.id) : Math.min(1, loadOf(c.platform, m.id));
     if (!per || c.reachKm + m.rangeKm < dist) continue;
     weapons += c.n * per;
     if (c.group) {

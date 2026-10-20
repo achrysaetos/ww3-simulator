@@ -96,7 +96,19 @@ export const INTERCEPTOR_ENGAGES: Partial<Record<MunitionKind, readonly ThreatCa
  * vs a 30 m sea-skimmer); Patriot's TBM footprint is ~20-40 km against a 160 km
  * aircraft range (CRS RL31111, MDA fact sheets).
  */
-export const COVERAGE_SHARE: Record<ThreatCategory, number> = { aircraft: 1, air_breathing: 0.5, ballistic: 0.25 };
+const COVERAGE_SHARE: Record<ThreatCategory, number> = { aircraft: 1, air_breathing: 0.5, ballistic: 0.25 };
+
+/** Dedicated ABMs (Arrow, THAAD, SM-3) are built around the ballistic footprint. */
+export function coverageShare(interceptor: MunitionKind, cat: ThreatCategory): number {
+  return interceptor === 'abm' ? 1 : COVERAGE_SHARE[cat];
+}
+
+/**
+ * AAM pk against a non-maneuvering air-breathing target relative to its pk against a
+ * fighter. Combat AAM pk vs fighters ~0.46 (Higby 2005); US/UK/Israeli jets downed
+ * most of ~170 Shaheds on 13-14 Apr 2024 with AIM-9X/AMRAAM, implying ~0.7-0.9.
+ */
+export const AAM_VS_DRONE_FACTOR = 1.6;
 
 /** Munition kinds that are not strike weapons (air-to-air, interceptors, naval-only). */
 export const NON_STRIKE_KINDS: ReadonlySet<MunitionKind> = new Set(['aam', 'sam', 'abm', 'shorad_missile', 'small_arms', 'torpedo', 'mine', 'arm']);
@@ -124,8 +136,14 @@ export const TARGET_OF_CLASS: Record<PlatformClass, TargetClass> = {
 export const TUNING = {
   /** Fire-control cycle (launch, guide, assess) per channel, seconds. Patriot/S-300 engagement timelines ~60-90 s. */
   engagementCycleS: 75,
-  /** Cap on engagements a channel gets against one raid; raids arrive in waves of tens of minutes. */
-  maxCycles: 10,
+  /** Cap on engagements per channel per raid (launcher reload, ~30-60 min for Patriot/S-300 crews). */
+  maxCycles: 12,
+  /**
+   * Default spread of a raid's arrivals at the target. Iran's Oct 2024 salvo of ~180
+   * MRBMs and Russia's combined strikes arrived in waves over tens of minutes; 10 min
+   * is an estimate between a coordinated time-on-target and a staggered wave.
+   */
+  raidWindowS: 600,
   /** Each tanker sortie refuels ~2 receivers once (KC-135 ~90 t offload vs ~6-8 t per fighter top-up, minus tanker reserve). */
   tankerReceiversPerTanker: 2,
   /** Two refuels per sortie (outbound and recovery) at most roughly doubles combat radius. */
@@ -146,7 +164,7 @@ export const TUNING = {
    * to a dense IADS (Linebacker II B-52s 2 %, Yom Kippur IAF ~1 %, ODS day 1 ~0.5 %)
    * and stealth ~0.05 % (F-117: 1 loss in ~2,100 sorties ODS + Allied Force).
    */
-  samExposure: { strike: 0.08, counter_air: 0.04 } as Record<string, number>,
+  samExposure: { strike: 0.05, counter_air: 0.03 } as Record<string, number>,
   /** Interceptor difficulty an aircraft presents (ECM, chaff, terrain masking, maneuver). */
   aircraftEvasion: 0.55,
   aircraftEvasionWithEw: 0.7,

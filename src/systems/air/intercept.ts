@@ -8,6 +8,8 @@ export interface SalvoThreat {
   speedMach: number;
   /** 0 = trivially intercepted, 1 = unstoppable (Munition.interceptDifficulty). */
   interceptDifficulty: number;
+  /** Seconds over which the raid arrives; 0 = perfect time-on-target. Defaults to TUNING.raidWindowS. */
+  arrivalWindowS?: number;
 }
 
 export interface SalvoDefense {
@@ -32,32 +34,40 @@ export interface SalvoResult {
 
 const MACH_MS = 340;
 
+/** Seconds a threat spends crossing the defended envelope. */
+function crossingS(rangeKm: number, speedMach: number): number {
+  return (rangeKm * 1000) / (Math.max(0.05, speedMach) * MACH_MS);
+}
+
 /**
- * How many sequential engagements one channel gets against a threat crossing the
- * defended envelope. A Shahed at Mach 0.15 spends ~50 min inside a 150 km ring (many
- * cycles); a ballistic reentry vehicle at Mach 6 gives one ~70 s window.
+ * Sequential engagements one channel gets against a raid: it can keep engaging for
+ * as long as threats keep arriving plus one crossing time. A ballistic RV at Mach 6
+ * crosses a 25 km footprint in ~12 s, so against a time-on-target salvo each channel
+ * fires once; a Shahed at Mach 0.15 spends ~50 min inside a 150 km ring.
  */
-export function engagementCycles(rangeKm: number, speedMach: number): number {
-  const windowS = (rangeKm * 1000) / (Math.max(0.05, speedMach) * MACH_MS);
-  return Math.max(1, Math.min(TUNING.maxCycles, windowS / TUNING.engagementCycleS));
+export function engagementCycles(rangeKm: number, speedMach: number, arrivalWindowS: number = TUNING.raidWindowS): number {
+  const s = arrivalWindowS + crossingS(rangeKm, speedMach);
+  return Math.max(1, Math.min(TUNING.maxCycles, s / TUNING.engagementCycleS));
 }
 
 /**
  * Salvo math for one defender against one stream of identical incoming weapons.
- * Each threat costs 1/cycles of a channel per engagement, so fast threats saturate
- * channels and slow ones exhaust magazines. Per-shot pk = pk x (1 - interceptDifficulty).
- * Shoot-look-shoot needs a second cycle, so against ballistic threats it falls back to
- * one shot; 'salvo2' fires two rounds at once and burns interceptors twice as fast.
+ * Each engagement costs 1/cycles of a channel, so a time-on-target salvo of fast
+ * threats saturates channels while a spread-out raid mostly drains magazines.
+ * Per-shot pk = pk x (1 - interceptDifficulty). Shoot-look-shoot needs time for a
+ * second look inside one threat's crossing, so against ballistic threats 'auto' fires
+ * a 2-round salvo instead, which burns interceptors twice as fast.
  * Reused by the naval and strategic systems; pure apart from the rng draws.
  */
 export function interceptSalvo(threat: SalvoThreat, defense: SalvoDefense, rng: Rng): SalvoResult {
   const none: SalvoResult = { intercepted: 0, leaked: threat.count, interceptorsUsed: 0, channelsUsed: 0 };
   const p = Math.max(0, Math.min(1, defense.pk * (1 - threat.interceptDifficulty)));
   if (threat.count <= 0 || p <= 0 || defense.interceptors < 1 || defense.channels <= 0 || defense.rangeKm <= 0) return none;
-  const cycles = engagementCycles(defense.rangeKm, threat.speedMach);
+  const cycles = engagementCycles(defense.rangeKm, threat.speedMach, threat.arrivalWindowS);
   const slot = 1 / cycles;
   const slots = Math.floor(defense.channels / slot + 1e-9);
-  const doctrine = defense.doctrine === 'auto' || !defense.doctrine ? (cycles >= 2 ? 'shoot_look_shoot' : 'salvo2') : defense.doctrine;
+  const canLookAgain = crossingS(defense.rangeKm, threat.speedMach) >= 2 * TUNING.engagementCycleS;
+  const doctrine = defense.doctrine === 'auto' || !defense.doctrine ? (canLookAgain ? 'shoot_look_shoot' : 'salvo2') : defense.doctrine;
 
   if (doctrine === 'salvo2') {
     const pairs = Math.min(threat.count, slots, Math.floor(defense.interceptors / 2));
@@ -68,7 +78,6 @@ export function interceptSalvo(threat: SalvoThreat, defense: SalvoDefense, rng: 
 
   const first = Math.min(threat.count, slots, Math.floor(defense.interceptors));
   const k1 = rng.binomial(first, p);
-  const canLookAgain = cycles >= 2;
   const second = canLookAgain ? Math.min(first - k1, slots - first, Math.floor(defense.interceptors) - first) : 0;
   const k2 = rng.binomial(Math.max(0, second), p);
   const shots = first + Math.max(0, second);
