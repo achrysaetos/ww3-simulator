@@ -1,6 +1,7 @@
 import { relation } from '../../core/engine';
 import type { GameMap } from '../../core/map';
 import type { Formation, FormationId, FormationKind, Munition, MunitionId, NationId, NodeId, PlatformId, TargetClass } from '../../core/types';
+import { HOSTILE_OPINION } from '../diplomacy/escalation';
 import { rung } from '../diplomacy/wars';
 import { isGround } from './forces';
 import type { Plan } from './types';
@@ -39,9 +40,26 @@ const DEEP_STRIKE_RISK = 0.7;
  * Ukraine hit Russian territory near Kharkiv but not deeper).
  */
 function deepStrikeAllowed(p: Plan, owner: NationId): boolean {
-  if (!p.enemies.has(owner) || p.world.nations[owner].nuclear.warheads <= 0) return true;
+  if (!p.enemies.has(owner)) return relation(p.world, p.nation, owner).opinion <= HOSTILE_OPINION;
+  if (p.world.nations[owner].nuclear.warheads <= 0) return true;
   if (p.profile.riskTolerance >= DEEP_STRIKE_RISK) return true;
   return rung(relation(p.world, p.nation, owner).escalation) >= rung('strategic_conventional');
+}
+
+/**
+ * Enemy forces on a neutral's soil are struck only when the host is already
+ * hostile and inside the theatre, which brings the host into the war (see
+ * diplomacy processEvents). CSIS "The First Battle of the Next War" (2023) has
+ * China strike US bases on Okinawa, ~650 km from Taipei, in most iterations;
+ * mainland Japan and Korea, 1,300-1,500 km out, stay unstruck in its base case.
+ * A friendly or ambivalent host is never struck: China would not hit Al Udeid
+ * over Taiwan, nor Russia its own ally Belarus.
+ */
+const THEATRE_KM = 1000;
+
+function nearEnemyCapital(p: Plan, node: NodeId): boolean {
+  for (const e of p.enemies) if (withinKm(p.ctx.map, node, p.world.nations[e].capital, THEATRE_KM)) return true;
+  return false;
 }
 
 export function battleAreaOf(p: Plan): Set<number> {
@@ -104,7 +122,7 @@ export function strikeTargets(p: Plan, battleArea: Set<number>): TargetGrid {
     const owner = map.owner[t.node];
     let ok = deep.get(owner);
     if (ok === undefined) deep.set(owner, (ok = deepStrikeAllowed(p, owner)));
-    return ok;
+    return ok && (p.enemies.has(owner) || nearEnemyCapital(p, t.node));
   };
   return new TargetGrid(out.filter(allowed).sort((a, b) => b.value - a.value || a.node - b.node), map);
 }

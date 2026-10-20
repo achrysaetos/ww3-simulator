@@ -1,6 +1,7 @@
 import { atWar, relation, relationKey, relationMut, type SimContext } from '../../core/engine';
 import { ESCALATION, type EscalationLevel, type NationId, type World } from '../../core/types';
-import { DEFAULT_PROFILE, type AllianceTreaty, type DiplomacyState, type PendingJoin, type StrategicProfile, type War } from './types';
+import { neighbours } from './assess';
+import { DEFAULT_PROFILE, type AllianceTreaty, type Assessment, type DiplomacyState, type PendingJoin, type StrategicProfile, type War } from './types';
 
 export const rung = (l: EscalationLevel) => ESCALATION.indexOf(l);
 
@@ -60,10 +61,18 @@ function joinSide(world: World, ctx: SimContext, s: DiplomacyState, war: War, n:
 
 /**
  * Defensive treaties of `victim` that oblige other members to fight `aggressor`.
- * Intra-alliance wars (Greece-Turkey in NATO) trigger nothing.
+ * Intra-alliance wars (Greece-Turkey in NATO) trigger nothing. The side that
+ * started the war is not defended because others came to its victim's aid:
+ * CSTO Art. 4 and the 2024 Russia-DPRK treaty cover "armed attack", and Russia
+ * invoked neither for Ukraine's backers in 2022-25. Only a serious invasion of
+ * its own homeland calls them (see invasions).
  */
-function cascade(world: World, s: DiplomacyState, alliances: readonly AllianceTreaty[], war: War, victim: NationId, aggressor: NationId): void {
+function cascade(world: World, s: DiplomacyState, alliances: readonly AllianceTreaty[], war: War, victim: NationId, aggressor: NationId, invaded = false): void {
   const side = sideOf(war, victim) as 0 | 1;
+  if (side === sideOf(war, war.aggressor) && !invaded) return;
+  const key = `${war.id}|${victim}`;
+  if (s.invoked.includes(key)) return;
+  s.invoked.push(key);
   for (const t of alliances) {
     const vm = t.members[victim];
     if (!vm || vm.role === 'guarantor' || t.members[aggressor]) continue;
@@ -129,6 +138,28 @@ export function declareWar(world: World, ctx: SimContext, s: DiplomacyState, all
 }
 
 /**
+ * Share of homeland population an enemy must hold before the aggressor's side
+ * calls on its treaties. Estimate: the Kursk incursion (Aug 2024, ~0.5% of
+ * Russia's population) drew DPRK troops under Russian command but no DPRK
+ * declaration of war and no CSTO invocation; a front deep in the homeland would.
+ */
+const SERIOUS_INVASION = 0.02;
+
+/** The aggressor's coalition calls its treaties once an enemy holds a serious part of a member's homeland. */
+export function invasions(world: World, s: DiplomacyState, alliances: readonly AllianceTreaty[], invadedBy: ReadonlyMap<NationId, NationId>): void {
+  for (const war of s.wars) {
+    const side = sideOf(war, war.aggressor);
+    if (side === -1) continue;
+    for (const n of war.sides[side]) {
+      const invader = invadedBy.get(n);
+      const a = s.assessment[n];
+      if (!invader || sideOf(war, invader) !== 1 - side || !a) continue;
+      if (a.popLost >= SERIOUS_INVASION || a.capitalThreatened) cascade(world, s, alliances, war, n, invader, true);
+    }
+  }
+}
+
+/**
  * Ambiguous commitments are decided by the guarantor at the time: leadership
  * interventionism and risk appetite, plus how it regards both parties. The
  * weights are an estimate; with the US profile (high interventionism, moderate
@@ -140,50 +171,107 @@ function ambiguousResolve(world: World, profile: StrategicProfile, j: PendingJoi
   return Math.min(1, Math.max(0, 0.5 * profile.interventionism + 0.3 * profile.riskTolerance + lean / 400));
 }
 
+/**
+ * Log-odds added to a member's reliability per stake it holds in the attacked
+ * member's fate. Estimate (x7 odds each), after Schelling's tripwire logic
+ * ("Arms and Influence", 1966) and war diffusion through borders (Siverson and
+ * Starr 1991): a nuclear guarantor whose credibility everywhere rides on it, a
+ * frontline state that borders the attacker, and a member whose own troops are
+ * on the victim's soil (NATO's eFP battlegroups) each come close to certain.
+ */
+const STAKE_LOGIT = 2;
+
+function stakes(ctx: SimContext, treaty: AllianceTreaty, j: PendingJoin, hosted: ReadonlySet<string>): number {
+  return (treaty.guarantors?.includes(j.nation) ? 1 : 0)
+    + (neighbours(ctx.map, j.nation).has(j.aggressor) ? 1 : 0)
+    + (hosted.has(`${j.nation}|${j.victim}`) ? 1 : 0);
+}
+
+/** `nation|host` for every nation with active forces on another's homeland. */
+function forcesAbroad(world: World, ctx: SimContext): Set<string> {
+  const out = new Set<string>();
+  for (const f of Object.values(world.formations)) {
+    if (f.status !== 'active' || f.node >= ctx.map.landCount) continue;
+    const host = ctx.map.owner[f.node];
+    if (host !== f.nation) out.add(`${f.nation}|${host}`);
+  }
+  return out;
+}
+
+/** `p` with `logit` added to its log-odds. */
+export const shiftOdds = (p: number, logit: number) => 1 / (1 + Math.exp(-(Math.log(p / (1 - p)) + logit)));
+
+/**
+ * A member that declines looks again once, a week on, after the first battles
+ * and allied pressure; a second refusal stands. Estimate of the cadence of
+ * alliance councils in a crisis (NATO's North Atlantic Council meets weekly).
+ */
+const RECONSIDER_DAYS = 7;
+
 /** Resolve treaty obligations that have come due. */
 export function resolveJoins(world: World, ctx: SimContext, s: DiplomacyState, alliances: readonly AllianceTreaty[], profiles: Readonly<Record<string, StrategicProfile>>): void {
   const due = s.joins.filter((j) => j.dueTick <= world.tick);
   if (!due.length) return;
   s.joins = s.joins.filter((j) => j.dueTick > world.tick);
+  const hosted = forcesAbroad(world, ctx);
   for (const j of due) {
     const war = s.wars.find((w) => w.id === j.war);
     if (!war || sideOf(war, j.victim) !== j.side || sideOf(war, j.nation) !== -1) continue;
     if (world.nations[j.victim].status === 'capitulated' || world.nations[j.nation].status === 'capitulated') continue;
     const treaty = alliances.find((t) => t.id === j.treaty)!;
-    const p = j.kind === 'ambiguous' ? ambiguousResolve(world, profiles[j.nation] ?? DEFAULT_PROFILE, j) : treaty.members[j.nation].reliability;
+    const p = j.kind === 'ambiguous'
+      ? ambiguousResolve(world, profiles[j.nation] ?? DEFAULT_PROFILE, j)
+      : shiftOdds(treaty.members[j.nation].reliability, STAKE_LOGIT * stakes(ctx, treaty, j, hosted));
     if (ctx.rng.chance(p)) {
       joinSide(world, ctx, s, war, j.nation, j.side, `${j.treaty}: defence of ${j.victim}`, 'joined');
     } else {
       const r = relationMut(world, j.nation, j.victim);
       r.opinion = Math.max(-100, r.opinion - 30);
       ctx.emit({ type: 'message', tick: world.tick, nation: j.nation, text: `${j.nation} declines to honour ${j.treaty} for ${j.victim}` });
+      if (!j.reconsidered) s.joins.push({ ...j, reconsidered: true, dueTick: world.tick + Math.ceil((RECONSIDER_DAYS * 24) / world.dtHours) });
     }
   }
 }
 
 /**
  * Neutrals with a strong lean toward one side may enter later, more readily as
- * the war escalates. Evaluated once a day per profiled nation.
+ * the war escalates. Evaluated once a day per profiled nation. Wars spread to
+ * neighbours and allies (Siverson and Starr, "The Diffusion of War", 1991), so
+ * an opportunist must border the side it would fight; treaty partners come in
+ * through `cascade` instead. Opportunists join a war already being won, as
+ * Italy did against France in June 1940 and the USSR against Japan in August
+ * 1945 (Schweller, "Bandwagoning for Profit", 1994), so a foe must be
+ * collapsing. Nobody opts into a war against a nuclear-armed state: NATO armed
+ * Ukraine for years without fighting Russia, and no state has entered a war
+ * against a nuclear power on another's behalf without a treaty since 1945.
  */
 export function neutralEntry(world: World, ctx: SimContext, s: DiplomacyState, alliances: readonly AllianceTreaty[], profiles: Readonly<Record<string, StrategicProfile>>): void {
   for (const war of [...s.wars]) {
     let peak = 0;
     for (const a of war.sides[0]) for (const b of war.sides[1]) peak = Math.max(peak, rung(relation(world, a, b).escalation));
     const escalationPull = 1 + Math.max(0, peak - rung('conventional'));
+    const deterred = war.sides.map((side) => side.some((m) => world.nations[m].nuclear.warheads > 0));
     for (const [n, profile] of Object.entries(profiles) as [NationId, StrategicProfile][]) {
       const nation = world.nations[n];
       if (!nation || nation.status !== 'peace' || sideOf(war, n) !== -1) continue;
       if (s.joins.some((j) => j.nation === n && j.war === war.id)) continue;
       const lean = meanOpinion(world, n, war.sides[0]) - meanOpinion(world, n, war.sides[1]);
       if (Math.abs(lean) < 100) continue;
+      const side: 0 | 1 = lean > 0 ? 0 : 1;
+      const foes = war.sides[1 - side];
+      if (deterred[1 - side] || !foes.some((f) => collapsing(s.assessment[f]))) continue;
+      const near = neighbours(ctx.map, n);
+      if (!foes.some((f) => near.has(f))) continue;
       const p = 0.01 * profile.interventionism * (Math.abs(lean) / 100) * escalationPull;
       if (!ctx.rng.chance(p)) continue;
-      const side: 0 | 1 = lean > 0 ? 0 : 1;
       joinSide(world, ctx, s, war, n, side, 'enters the war', 'aggressor');
-      for (const victim of war.sides[1 - side]) cascade(world, s, alliances, war, victim, n);
+      for (const victim of foes) cascade(world, s, alliances, war, victim, n);
     }
   }
 }
+
+/** A third of the homeland overrun or the capital fallen. Estimate; France had lost about that when Italy struck. */
+const collapsing = (a: Assessment | undefined) => !!a && (a.capitalLost || a.popLost >= 1 / 3);
 
 function meanOpinion(world: World, n: NationId, side: NationId[]): number {
   let sum = 0;

@@ -4,7 +4,7 @@ import { assess, enemyMap } from './assess';
 import { processEvents } from './escalation';
 import { checkCapitulation, negotiatedPeace, offerPeace, updateSupport } from './support';
 import type { DiplomacyInput } from './types';
-import { adoptWars, declareWar, neutralEntry, resolveJoins } from './wars';
+import { adoptWars, declareWar, invasions, neutralEntry, resolveJoins } from './wars';
 
 export * from './types';
 export { enemyMap } from './assess';
@@ -22,7 +22,7 @@ export function createDiplomacy(input: DiplomacyInput = {}): System {
     id: 'diplomacy',
     commands: ['declare_war', 'offer_peace'],
     init(world) {
-      world.slices.diplomacy = { wars: [], joins: [], records: {}, assessment: {}, pressure: {}, offers: {}, ssbnFormations: [] };
+      world.slices.diplomacy = { wars: [], joins: [], records: {}, assessment: {}, pressure: {}, offers: {}, ssbnFormations: [], invoked: [] };
     },
     apply(world, cmd, ctx) {
       const s = world.slices.diplomacy;
@@ -36,12 +36,13 @@ export function createDiplomacy(input: DiplomacyInput = {}): System {
       const prevThreatened = new Set(Object.entries(s.assessment).filter(([, a]) => a.capitalThreatened).map(([n]) => n as NationId));
       const situation = assess(world, ctx.map, enemies);
       s.assessment = situation.nations;
-      processEvents(world, ctx, s, enemies, situation.lostTo, prevThreatened);
+      for (const [by, on] of processEvents(world, ctx, s, enemies, situation.lostTo, prevThreatened)) declareWar(world, ctx, s, alliances, by, on, `strike on ${on} territory`);
       s.ssbnFormations = [];
       for (const f of Object.values(world.formations)) {
         if (f.status === 'destroyed' || (f.kind !== 'submarine' && f.kind !== 'strategic')) continue;
         if (Object.keys(f.equipment).some((p) => ctx.catalog.platforms.get(p as PlatformId)?.class === 'ssbn')) s.ssbnFormations.push(f.id as FormationId);
       }
+      invasions(world, s, alliances, situation.invadedBy);
       resolveJoins(world, ctx, s, alliances, profiles);
       if (world.tick % Math.max(1, Math.round(24 / world.dtHours)) === 0) neutralEntry(world, ctx, s, alliances, profiles);
       updateSupport(world, s, profiles);

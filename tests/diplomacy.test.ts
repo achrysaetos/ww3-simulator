@@ -150,3 +150,133 @@ describe('capitulation', () => {
     expect(atWar(t.world, N('RUS'), N('UKR'))).toBe(true);
   });
 });
+
+describe('who joins a war', () => {
+  const CSTO: AllianceTreaty = { id: 'CSTO', kind: 'collective_defense', members: { [N('RUS')]: member(1), [N('KAZ')]: member(1) } };
+  const UKR_FRIENDS: AllianceTreaty = { id: 'UKR-POL', kind: 'collective_defense', members: { [N('UKR')]: member(1), [N('POL')]: member(1) } };
+  /** Hand `share` of `nation`'s homeland population to `by`, least populous cells first and far from the capital. */
+  const invade = (t: ReturnType<typeof testWorld>, nation: NationId, by: NationId, share: number) => {
+    const cap = t.world.nations[nation].capital;
+    let taken = 0;
+    const far = t.map.nodesOf(nation).filter((n) => t.map.distanceKm(n, cap) > 1000).sort((a, b) => t.map.popShare[a] - t.map.popShare[b]);
+    for (const n of far) {
+      if (taken >= share) break;
+      if (t.world.control[n] !== nation) continue;
+      t.world.control[n] = by;
+      taken += t.map.popShare[n];
+    }
+  };
+
+  it("the aggressor's allies stay out when the victim's friends join it, and come in only once the aggressor is seriously invaded", () => {
+    const t = testWorld([createDiplomacy({ alliances: [CSTO, UKR_FRIENDS] })]);
+    t.world.pending.push({ type: 'declare_war', nation: N('RUS'), target: N('UKR') });
+    t.engine.run(t.world, days(5));
+    expect(atWar(t.world, N('POL'), N('RUS'))).toBe(true);
+    expect(atWar(t.world, N('KAZ'), N('UKR'))).toBe(false);
+
+    invade(t, N('RUS'), N('UKR'), 0.005);
+    t.engine.run(t.world, days(5));
+    expect(atWar(t.world, N('KAZ'), N('UKR'))).toBe(false);
+
+    invade(t, N('RUS'), N('UKR'), 0.05);
+    t.engine.run(t.world, days(5));
+    expect(atWar(t.world, N('KAZ'), N('UKR'))).toBe(true);
+    expect(atWar(t.world, N('KAZ'), N('POL'))).toBe(true);
+  });
+
+  it('a guarantor or a frontline member honours a shaky commitment far more often than a distant member', () => {
+    const shaky: AllianceTreaty = {
+      id: 'PACT', kind: 'collective_defense', guarantors: [N('USA')],
+      members: { [N('EST')]: member(1), [N('USA')]: member(1, 0.5), [N('FIN')]: member(1, 0.5), [N('PRT')]: member(1, 0.5) },
+    };
+    const count = { USA: 0, FIN: 0, PRT: 0 };
+    for (let seed = 1; seed <= 30; seed++) {
+      const t = testWorld([createDiplomacy({ alliances: [shaky] })], seed);
+      t.world.pending.push({ type: 'declare_war', nation: N('RUS'), target: N('EST') });
+      t.engine.run(t.world, days(2));
+      for (const m of ['USA', 'FIN', 'PRT'] as const) if (atWar(t.world, N(m), N('RUS'))) count[m]++;
+    }
+    expect(count.USA).toBeGreaterThanOrEqual(23);
+    expect(count.FIN).toBeGreaterThanOrEqual(23);
+    expect(count.PRT).toBeLessThanOrEqual(22);
+  });
+
+  it('a member that declines looks again a week later, once', () => {
+    const reluctant: AllianceTreaty = { id: 'PACT', kind: 'collective_defense', members: { [N('EST')]: member(1), [N('PRT')]: member(1, 0) } };
+    const t = testWorld([createDiplomacy({ alliances: [reluctant] })]);
+    t.world.pending.push({ type: 'declare_war', nation: N('RUS'), target: N('EST') });
+    t.engine.run(t.world, days(30));
+    const declines = t.world.history.filter((e) => e.type === 'message' && e.text.startsWith('PRT declines'));
+    expect(declines.map((e) => Math.round(e.tick / days(1)))).toEqual([1, 8]);
+  });
+
+  describe('opportunistic entry', () => {
+    const hawk: StrategicProfile = { casualtyTolerance: 0.5, interventionism: 1, riskTolerance: 0.5, aggression: 0.5 };
+    /** Seeds out of 10 in which Belarus, leaning hard toward Russia, joins its war on Ukraine within 120 days. */
+    const entries = (setup: (t: ReturnType<typeof testWorld>) => void) => {
+      let n = 0;
+      for (let seed = 1; seed <= 10; seed++) {
+        const t = testWorld([createDiplomacy({ profiles: { BLR: hawk } })], seed);
+        relationMut(t.world, N('BLR'), N('RUS')).opinion = 100;
+        relationMut(t.world, N('BLR'), N('UKR')).opinion = -100;
+        setup(t);
+        t.world.pending.push({ type: 'declare_war', nation: N('RUS'), target: N('UKR') });
+        t.engine.run(t.world, days(120));
+        if (atWar(t.world, N('BLR'), N('UKR'))) n++;
+      }
+      return n;
+    };
+    const collapse = (t: ReturnType<typeof testWorld>) => { t.world.control[t.world.nations[N('UKR')].capital] = N('RUS'); };
+
+    it('a neighbour piles onto a collapsing victim', () => {
+      expect(entries(collapse)).toBeGreaterThanOrEqual(7);
+    });
+
+    it('but not onto a victim that is holding', () => {
+      expect(entries(() => {})).toBe(0);
+    });
+
+    it('nor against a nuclear-armed victim, however badly it is doing', () => {
+      expect(entries((t) => { collapse(t); t.world.nations[N('UKR')].nuclear.warheads = 50; })).toBe(0);
+    });
+
+    it('nor from beyond the neighbourhood', () => {
+      let n = 0;
+      for (let seed = 1; seed <= 10; seed++) {
+        const t = testWorld([createDiplomacy({ profiles: { ESP: hawk } })], seed);
+        relationMut(t.world, N('ESP'), N('RUS')).opinion = 100;
+        relationMut(t.world, N('ESP'), N('UKR')).opinion = -100;
+        collapse(t);
+        t.world.pending.push({ type: 'declare_war', nation: N('RUS'), target: N('UKR') });
+        t.engine.run(t.world, days(120));
+        if (atWar(t.world, N('ESP'), N('UKR'))) n++;
+      }
+      expect(n).toBe(0);
+    });
+  });
+
+  describe('strikes on a bystander', () => {
+    const strikeOn = (host: string, opinion: number) => {
+      let node = 0 as NodeId;
+      const t = testWorld([
+        emitter((tick) => (tick === 2 ? [{ type: 'strike', tick, by: N('CHN'), munition: id.munition('t_cruise'), fired: 4, intercepted: 1, target: node, damage: 'hit' }] : [])),
+        createDiplomacy(),
+      ]);
+      node = t.world.nations[N(host)].capital;
+      relationMut(t.world, N(host), N('CHN')).opinion = opinion;
+      t.war('CHN', 'TWN');
+      t.engine.run(t.world, 4);
+      return t;
+    };
+
+    it('bring a hostile host into the war against the striker', () => {
+      const t = strikeOn('JPN', -55);
+      expect(atWar(t.world, N('JPN'), N('CHN'))).toBe(true);
+      expect(atWar(t.world, N('JPN'), N('TWN'))).toBe(false);
+    });
+
+    it('but a friendly host absorbs the strike', () => {
+      expect(atWar(strikeOn('QAT', 0).world, N('QAT'), N('CHN'))).toBe(false);
+    });
+  });
+});
