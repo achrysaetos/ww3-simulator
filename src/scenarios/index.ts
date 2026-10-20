@@ -8,6 +8,7 @@ import { loadMap } from '../data/load';
 import { profiles } from '../data/nations';
 import { ALIASES } from '../data/orbat/aliases';
 import { allOrbat } from '../data/orbat';
+import { OCCUPATIONS, pointInRing } from '../data/occupation';
 import { SYSTEMS } from '../systems';
 import { placeOrbat, stockNations, type PlacementReport } from './build';
 
@@ -33,6 +34,14 @@ export const SCENARIOS: Scenario[] = [
     startDate: '2027-01-01T00:00:00Z',
     suggestedNation: 'USA',
     opening: [],
+  },
+  {
+    id: 'ukraine-2026',
+    name: 'Russo-Ukrainian War continues',
+    summary: 'The war of attrition from the late-2025 front line, with no ceasefire. The calibration case for ground combat.',
+    startDate: '2026-01-01T00:00:00Z',
+    suggestedNation: 'UKR',
+    opening: [mobilize(['RUS'], 0.35), mobilize(['UKR'], 0.8), war('RUS', 'UKR', 'special military operation')],
   },
   {
     id: 'taiwan-2027',
@@ -107,6 +116,9 @@ export function createSession(scenarioId: string, seed = 1): Session {
   const catalog = loadCatalog();
   const engine = new Engine(map, catalog, SYSTEMS);
   const world = createWorld(map, { seed, startDate: scenario.startDate, profiles });
+  for (let n = 0; n < map.landCount; n++)
+    for (const o of OCCUPATIONS)
+      if (map.owner[n] === o.owner && pointInRing(map.lon[n], map.lat[n], o.ring)) world.control[n] = o.holder as NationId;
   const placement = placeOrbat(world, map, catalog, allOrbat(map), ALIASES);
   stockNations(world, catalog);
   engine.init(world);
