@@ -41,6 +41,6 @@ export const EAST_PLATFORM_CLASS: Record<string, ScaleClass> = Object.fromEntrie
     a50u il78 il76 an124 il38n tu142m kj500 kj2000 kj600 y20 y8q c130 yak130
     ka52 mi28 mi24p mi8amtsh z10 z19 z20 z8 z9 z18 mi171 ah1j
     grisha ropucha ivan_gren buyan_m karakurt molniya bykov
-    type056a type022 type071 type075 type901 ccg_cutter ccg_patrol
+    type056a type022 type071 type075 type072a type072_iii type073a type074 roro_ferry type901 ccg_cutter ccg_patrol
     missile_boat fast_attack_craft bayandor shahid_soleimani`),
 ]);
