@@ -19,6 +19,8 @@ export interface LandState {
   fortified: Record<number, number>;
   /** Controller of each land cell when the world was set up; offensives culminate with distance from it. */
   origin: NationId[];
+  /** Gun artillery rounds each nation has fired since the run began, for measurement. */
+  shellsFired: Record<NationId, number>;
 }
 
 export interface Contest {
@@ -33,7 +35,7 @@ declare module '../../core/types' {
 }
 
 export function landSlice(world: World): LandState {
-  return (world.slices.land ??= { baseline: {}, isolatedDays: {}, contest: {}, fortified: {}, origin: [] });
+  return (world.slices.land ??= { baseline: {}, isolatedDays: {}, contest: {}, fortified: {}, origin: [], shellsFired: {} });
 }
 
 /** North-south and east-west extent of a 1-degree cell, as one depth of advance: ~111 km by 111*cos(lat) km. */

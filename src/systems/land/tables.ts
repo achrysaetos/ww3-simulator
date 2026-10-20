@@ -74,6 +74,19 @@ export const AIR_INTERDICTION = 0.6;
 export const AMMO_RATION_BELOW = 0.3;
 /** Days of intense combat a basic load lasts (US Army planning: 3-5 days, FM 4-0). */
 export const AMMO_DAYS_INTENSE = 3;
+/** Gun artillery, which fires rounds at SHELLS_PER_TUBE_DAY rather than spending a basic load. */
+export const TUBE_ARTILLERY: ReadonlySet<PlatformClass> = new Set(['sp_artillery', 'towed_artillery']);
+/** A complete 152/155 mm round with charge and packaging, tons (matches the industry model's shell weight). */
+export const SHELL_TONS = 0.06;
+/**
+ * Rounds per gun per day of full-intensity combat; holding a line fires a quarter of
+ * that (POSITIONAL_INTENSITY). Calibration: Russia fired ~10-20k rounds a day in
+ * 2024-25 from roughly 4,000-5,000 guns in theatre, 2-5 a gun a day averaged over
+ * quiet and active sectors (RUSI, ISW, Estonian intelligence), so about 3 a day on a
+ * held line. A gun's basic load here is only 15-30 rounds (core/forces.ts sizes it
+ * from firepower), so higher rates empty it before logistics can refill it.
+ */
+export const SHELLS_PER_TUBE_DAY = 12;
 /** Fraction of full-operation fuel burn spent per hour of combat (manoeuvre, idling). */
 export const COMBAT_FUEL_DUTY = 0.25;
 

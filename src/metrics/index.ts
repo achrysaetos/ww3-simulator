@@ -42,6 +42,8 @@ export interface NationMetrics {
   /** Crewed aircraft destroyed or damaged in air wings whose base was hit by a strike that tick (losses on the ground). */
   aircraftLostOnGround: number;
   formationsDestroyed: number;
+  /** Gun artillery rounds fired per day of the run, from the land system's tally. */
+  shellsPerDay: number;
   warSupport: number;
   mobilization: number;
   civilianDeaths: number;
@@ -165,12 +167,13 @@ export function measureRun(engine: Engine, world: World, map: GameMap, days: num
   const per = new Map<string, NationMetrics>();
   const get = (n: string) => {
     let m = per.get(n);
-    if (!m) per.set(n, (m = { territoryDelta: 0, lossesByClass: {}, lossesByDomain: {}, battleLossesByClass: {}, casualties: 0, missilesFired: 0, missilesIntercepted: 0, strikes: {}, strikesOn: {}, frontAirControl: 0, interceptors: { start: 0, end: 0 }, aircraftLostOnGround: 0, formationsDestroyed: 0, warSupport: 0, mobilization: 0, civilianDeaths: 0 }));
+    if (!m) per.set(n, (m = { territoryDelta: 0, lossesByClass: {}, lossesByDomain: {}, battleLossesByClass: {}, casualties: 0, missilesFired: 0, missilesIntercepted: 0, strikes: {}, strikesOn: {}, frontAirControl: 0, interceptors: { start: 0, end: 0 }, aircraftLostOnGround: 0, formationsDestroyed: 0, shellsPerDay: 0, warSupport: 0, mobilization: 0, civilianDeaths: 0 }));
     return m;
   };
   const nukes: RunMetrics['nuclearDetonations'] = [];
   const caps: RunMetrics['capitulations'] = [];
   const eco = economyProbe(world, catalog);
+  const shells0 = { ...world.slices.land?.shellsFired };
   const startInterceptors = interceptorStock(world, catalog);
   const frontCells = new Map<NationId, number>(), frontHeld = new Map<NationId, number>();
   const t0 = performance.now();
@@ -225,6 +228,7 @@ export function measureRun(engine: Engine, world: World, map: GameMap, days: num
       m.lossesByDomain[p.domain] = (m.lossesByDomain[p.domain] ?? 0) + lost;
     }
   }
+  for (const [n, k] of Object.entries(world.slices.land?.shellsFired ?? {})) get(n).shellsPerDay = (k - (shells0[n as NationId] ?? 0)) / days;
   for (let n = 0; n < map.landCount; n++) {
     if (startControl[n] === world.control[n]) continue;
     if (startControl[n]) get(startControl[n]).territoryDelta--;
