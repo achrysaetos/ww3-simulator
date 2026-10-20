@@ -15,7 +15,8 @@ export const MANUAL_STATS: Record<string, { name?: string; [k: string]: number |
   IRN: { milexUsd: 1.03e10 },
   XKX: { name: 'Kosovo' },
   PSE: { name: 'Palestine' },
-  RUS: { milexUsd: 1.09e11, milexPctGdp: 5.9 },
+  // SIPRI Fact Sheet, April 2025: USD 149B and 7.1% of GDP in 2024 (5.9% was the 2023 figure).
+  RUS: { milexUsd: 1.49e11, milexPctGdp: 7.1 },
   UKR: { milexUsd: 6.5e10, milexPctGdp: 34, armedForces: 900_000 },
   ISR: { milexUsd: 4.6e10, milexPctGdp: 8.8 },
 };
