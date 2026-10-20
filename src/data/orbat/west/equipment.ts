@@ -318,6 +318,9 @@ export const WEST_PLATFORMS = {
   t_ake: 'replenishment',
   tide_tanker: 'replenishment',
   egv_berlin: 'replenishment',
+  magura_v5: 'usv',
+  magura_v7: 'usv',
+  sea_baby: 'usv',
 
   // submarines
   ssn_virginia: 'ssn',

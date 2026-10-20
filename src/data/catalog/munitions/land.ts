@@ -91,7 +91,9 @@ export const landMunitions = defineMunitions([
   // ---- loitering munitions and one-way attack drones
   // Shahed-136/Geran-2: ~2,000+ km, 40-50 kg warhead; cost estimates $20-50k (Iran) to ~$80k (Alabuga).
   // Ukraine reports downing ~80-90% of Shahed-class drones in 2023-24.
-  { id: 'shahed136', name: 'Shahed-136 / Geran-2', kind: 'drone_oneway', producers: ['IRN', 'RUS'], rangeKm: 2000, speedMach: 0.15, warheadKg: 50, cepM: 10, pk: { structure: 0.5, soft: 0.6, infantry: 0.2, armor: 0.1, ship: 0.05 }, interceptDifficulty: 0.15, unitCostUsdM: 0.05, weightKg: 200 },
+  // No ship kill chance: GPS/INS guidance flies to fixed coordinates and cannot follow a hull under way
+  // (its anti-ship record is moored merchant ships in Odesa and Danube ports, 2023-24).
+  { id: 'shahed136', name: 'Shahed-136 / Geran-2', kind: 'drone_oneway', producers: ['IRN', 'RUS'], rangeKm: 2000, speedMach: 0.15, warheadKg: 50, cepM: 10, pk: { structure: 0.5, soft: 0.6, infantry: 0.2, armor: 0.1 }, interceptDifficulty: 0.15, unitCostUsdM: 0.05, weightKg: 200 },
   { id: 'shahed238', name: 'Shahed-238 / Geran-3 (jet)', kind: 'drone_oneway', producers: ['IRN', 'RUS'], rangeKm: 1500, speedMach: 0.45, warheadKg: 50, cepM: 10, pk: { structure: 0.5, soft: 0.6, infantry: 0.2, armor: 0.1 }, interceptDifficulty: 0.3, unitCostUsdM: 0.2, weightKg: 380 },
   { id: 'lyutyi', name: 'FP-1 / Lyutyi long-range strike drone', kind: 'drone_oneway', producers: ['UKR'], rangeKm: 1500, speedMach: 0.15, warheadKg: 75, cepM: 10, pk: { structure: 0.5, soft: 0.6, infantry: 0.2, armor: 0.1 }, interceptDifficulty: 0.15, unitCostUsdM: 0.2, weightKg: 300 },
   { id: 'lancet3', name: 'ZALA Lancet-3', kind: 'loitering', producers: ['RUS'], rangeKm: 70, speedMach: 0.25, warheadKg: 3, cepM: 2, pk: { armor: 0.3, soft: 0.6, infantry: 0.2, structure: 0.1 }, interceptDifficulty: 0.25, unitCostUsdM: 0.035, weightKg: 12 },
