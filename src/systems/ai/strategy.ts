@@ -68,16 +68,18 @@ export function warAims(p: Plan): Objective[] {
  * Mobilization ordered for the threat a nation faces, read through the economy's
  * defence curve (2% + 48% x level^2 of GDP, src/systems/economy):
  * - existential: an enemy holds 2% of the homeland's people or threatens the capital.
- *   0.7 gives ~26% of GDP and drafts ~0.1% of the population a month; Ukraine spent 34%
- *   in 2024 (SIPRI 2025) and drafted ~25-35k a month (Ukrainian MoD). The draft caps it:
- *   at 0.8 the economy's call-up reaches ~55k a month.
+ *   0.8 gives ~33% of GDP; Ukraine spent 34% in 2024 (SIPRI 2025). Its draft pool, not the
+ *   level, holds its call-up to the ~25-35k a month the Ukrainian MoD reports.
  * - frontline: an enemy across a land border, or homeland struck at the strategic rung.
  *   0.33 gives ~7.2% of GDP; Russia spent 7.1% in 2024 (SIPRI 2025) while recruiting
  *   ~30k contract soldiers a month, with no general call-up since September 2022.
  * - distant: a war fought abroad. 0.25 gives 5% of GDP, near the US in 1991 and 2003-10
  *   (4.6-4.7%, OMB Historical Tables 3.1).
+ * A nation at war never orders less than it already stands at or has ordered: call-ups,
+ * contracts and war laws stay in force while the war lasts, as Russia's and Ukraine's
+ * have since 2022. A scenario's opening order or war footing is the floor.
  */
-const MOBILIZATION = { existential: 0.7, frontline: 0.33, distant: 0.25 } as const;
+const MOBILIZATION = { existential: 0.8, frontline: 0.33, distant: 0.25 } as const;
 const INVADED_POP_SHARE = 0.02;
 
 export function mobilizationTarget(a: Assessment | undefined, bordersEnemy: boolean, peakRung: number): number {
@@ -193,8 +195,9 @@ export function planStrategy(p: Plan): void {
   let peak = 0;
   for (const e of p.enemies) peak = Math.max(peak, rung(relation(p.world, p.nation, e).escalation));
   const near = neighbours(p.ctx.map, p.nation);
+  const standing = Math.max(nation.mobilization, p.world.slices.economy?.nations[p.nation]?.mobilizationTarget ?? 0);
   const mob = mobilizationTarget(d?.assessment[p.nation], [...p.enemies].some((e) => near.has(e)), peak);
-  if (Math.abs(mob - nation.mobilization) > 0.05) p.out.push({ type: 'set_mobilization', nation: p.nation, level: mob });
+  if (mob > standing + 0.05) p.out.push({ type: 'set_mobilization', nation: p.nation, level: mob });
 
   nuclearDecision(p, d);
 
