@@ -9,6 +9,11 @@ const SEEDS = [1, 2, 3];
 const SURFACE: PlatformClass[] = ['cruiser', 'destroyer', 'frigate', 'corvette'];
 /** CSIS's base case has the US fighting from D-day; a US entry after this many days is a different game and gets no loss band. */
 const US_EARLY_DAYS = 10;
+/**
+ * theater.seaControl level counted as working control: half of full control, which two unopposed
+ * destroyers reach in their own zone (blockade.ts CONTROL_SCALE). Judgement.
+ */
+const WORKING_CONTROL = 0.5;
 
 interface TaiwanRun {
   m: RunMetrics;
@@ -98,17 +103,21 @@ describe('Taiwan 2027 naval war and invasion (CSIS "The First Battle of the Next
 
 describe('Black Sea 2026 (Russian Black Sea Fleet after 2022-24: ~a third lost to missiles and USVs, withdrawn east of Crimea)', () => {
   // Since mid-2023 Russian warships no longer operate west of Crimea and Ukrainian grain sails from Odesa
-  // (UK MoD and ISW updates 2023-24). Judgement: Russia is the controlling navy off Odesa on at most a third of days.
-  it.each(SEEDS)('the Russian fleet does not hold the sea off Odesa (seed %i)', (seed) => {
+  // (UK MoD and ISW updates 2023-24). Judgement: Russia holds working control off Odesa on at most a third of days.
+  // Control is a matter of degree (Corbett, "Some Principles of Maritime Strategy", 1911: the normal state of
+  // the sea is uncommanded). Till ("Seapower", 4th ed. 2018) calls the useful degree "working control": using a
+  // sea area at acceptable risk and denying it to the enemy. A remnant group a zone away that leaves a trace of
+  // presence off Odesa is not that, so a day counts only at control level WORKING_CONTROL or above.
+  it.each(SEEDS)('the Russian fleet does not hold working control of the sea off Odesa (seed %i)', (seed) => {
     const s = createSession('ukraine-2026', seed);
     const odesaSea = nearestSea(s.map, 46.5, 30.7) as NodeId;
     let russianDays = 0;
     for (let d = 0; d < DAYS; d++) {
       measureRun(s.engine, s.world, s.map, 1);
       const c = s.world.theater.seaControl[odesaSea];
-      if (c?.nation === 'RUS') russianDays++;
+      if (c?.nation === 'RUS' && c.level >= WORKING_CONTROL) russianDays++;
     }
-    console.log(`ukraine seed ${seed}: days of Russian sea control off Odesa ${russianDays}/${DAYS}`);
+    console.log(`ukraine seed ${seed}: days of Russian working control off Odesa ${russianDays}/${DAYS}`);
     expect(russianDays).toBeLessThanOrEqual(DAYS / 3);
   }, 300_000);
 });
