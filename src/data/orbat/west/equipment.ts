@@ -24,7 +24,6 @@ export const WEST_PLATFORMS = {
   leopard2a5: 'mbt',
   leopard2a6: 'mbt',
   leopard2a7: 'mbt',
-  leopard2a8: 'mbt',
   leopard2pl: 'mbt',
   leopard2e: 'mbt',
   k2_black_panther: 'mbt',
@@ -72,7 +71,6 @@ export const WEST_PLATFORMS = {
   marder: 'ifv',
   fennek: 'recon',
   rosomak: 'apc',
-  borsuk: 'ifv',
   bmp1: 'ifv',
   bmp2: 'ifv',
   btr4: 'apc',
@@ -88,9 +86,7 @@ export const WEST_PLATFORMS = {
   pandur2: 'apc',
   piranha5: 'apc',
   kf41_lynx: 'ifv',
-  acsv_g5: 'apc',
   vilkas: 'ifv',
-  ascod: 'ifv',
   kirpi: 'apc',
   acv15: 'ifv',
   m80a: 'ifv',
@@ -98,7 +94,6 @@ export const WEST_PLATFORMS = {
   mt_lb: 'apc',
   cvrt: 'recon',
   patria_6x6: 'apc',
-  bmp_cz: 'ifv',
 
   // artillery
   m109a7: 'sp_artillery',
@@ -114,7 +109,6 @@ export const WEST_PLATFORMS = {
   l118: 'towed_artillery',
   caesar: 'sp_artillery',
   lru: 'mlrs',
-  trf1: 'towed_artillery',
   pzh2000: 'sp_artillery',
   mars2: 'mlrs',
   krab: 'sp_artillery',
@@ -124,7 +118,6 @@ export const WEST_PLATFORMS = {
   dana: 'sp_artillery',
   zuzana2: 'sp_artillery',
   fh70: 'towed_artillery',
-  atmos: 'sp_artillery',
   t155_firtina: 'sp_artillery',
   trg300_kasirga: 'mlrs',
   m110a2: 'sp_artillery',
@@ -137,7 +130,6 @@ export const WEST_PLATFORMS = {
   '2s7': 'sp_artillery',
   '2a65': 'towed_artillery',
   bohdana: 'sp_artillery',
-  m198: 'towed_artillery',
 
   // air defense and missile defense
   patriot_pac3: 'sam_long',
@@ -201,7 +193,6 @@ export const WEST_PLATFORMS = {
   gripen_e: 'multirole',
   fa50: 'multirole',
   mig29: 'fighter',
-  su22: 'attack_aircraft',
   su27: 'fighter',
   su24m: 'attack_aircraft',
   su25: 'attack_aircraft',
@@ -235,7 +226,6 @@ export const WEST_PLATFORMS = {
   mq4c: 'isr_drone',
   mq9a: 'strike_drone',
   mq9b: 'strike_drone',
-  mq1c: 'strike_drone',
   tb2: 'strike_drone',
   akinci: 'strike_drone',
   ac130j: 'attack_aircraft',
@@ -319,7 +309,6 @@ export const WEST_PLATFORMS = {
   lhd_wasp: 'amphibious',
   lpd_san_antonio: 'amphibious',
   lsd_whidbey_island: 'amphibious',
-  lpd_albion: 'amphibious',
   lhd_mistral: 'amphibious',
   lhd_juan_carlos: 'amphibious',
   lha_trieste: 'amphibious',
@@ -364,11 +353,9 @@ export type WestPlatform = keyof typeof WEST_PLATFORMS;
 /** Munition ids used in `extraMagazine` (reloads beyond the platforms' standard loadouts). */
 export const WEST_MUNITIONS = [
   'trident2_d5',
-  'm51_slbm',
   'asmp_a',
   'b61_12',
   'agm86b_alcm',
-  'lgm30g_minuteman3',
   'pac3_mse',
   'pac2_gem_t',
   'thaad_interceptor',
@@ -381,7 +368,6 @@ export const WEST_MUNITIONS = [
   'nsm',
   'storm_shadow',
   'neptune',
-  'gbi',
 ] as const;
 
 export type WestMunition = (typeof WEST_MUNITIONS)[number];

@@ -135,7 +135,7 @@ describe('western order of battle', () => {
     expect(off).toEqual([]);
   });
 
-  it('uses only registered platform and munition ids, in positive whole counts', () => {
+  it('uses only registered platform and munition ids in positive whole counts, and registers no unused id', () => {
     const bad: string[] = [];
     for (const e of west) {
       for (const [id, n] of Object.entries(e.equipment)) if (!classOf(id) || !Number.isInteger(n) || n <= 0) bad.push(`${e.nation} ${e.name}: ${id}=${n}`);
@@ -143,6 +143,8 @@ describe('western order of battle', () => {
       if (!Object.keys(e.equipment).length) bad.push(`${e.nation} ${e.name}: no equipment`);
       if (!e.source) bad.push(`${e.nation} ${e.name}: no source`);
     }
+    const used = new Set(west.flatMap((e) => [...Object.keys(e.equipment), ...Object.keys(e.extraMagazine ?? {})]));
+    for (const id of [...Object.keys(WEST_PLATFORMS), ...WEST_MUNITIONS]) if (!used.has(id)) bad.push(`registered but unused: ${id}`);
     expect(bad).toEqual([]);
   });
 
