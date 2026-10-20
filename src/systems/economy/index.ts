@@ -71,14 +71,18 @@ const MAX_UNDER_ARMS_SHARE = 0.12;
  */
 const INTAKE_PER_DEFENSE_SHARE = 0.003;
 /**
- * Conscription: monthly call-up at mobilization 1, share of population, falling off as
- * mobilization^2.5 so that only a general mobilization drafts at scale. Anchors: the US
- * Army grew ~4M in 1942 (~330k a month on 134M people, 0.0025); US forces grew ~90k a
- * month in 1950-52 at partial mobilization (0.5 gives ~70k); Russia at 0.35 drafts
- * ~25k a month, below what its contract bonuses buy. The call-up follows the ordered
- * level at once, as Ukraine's did in February 2022; factories take months to follow.
+ * Conscription: share of the remaining draft pool (src/data/nations/conscription.ts) called
+ * up a month at mobilization 1, falling off as mobilization^2.5 so that only a general
+ * mobilization drafts at scale. With the default law the pool is ~13% of the population,
+ * so this keeps the anchors of a population-wide rate of 0.25% a month: the US Army grew
+ * ~4M in 1942 (~330k a month on 134M people); US forces grew ~90k a month in 1950-52 at
+ * partial mobilization (0.5 gives ~70k); Russia at 0.35 drafts ~25k a month, below what
+ * its contract bonuses buy. A narrow law or a pool drawn down by years of war yields less
+ * at the same level: Ukraine's draft at 0.8 yields ~30k a month, not the ~55k its population
+ * alone would give, so the ~37k its 34% of GDP buys sets its intake. The call-up follows the ordered level at once, as Ukraine's did in February 2022;
+ * factories take months to follow.
  */
-const CONSCRIPTION_POP_SHARE = 0.0025;
+const DRAFT_SHARE_PER_MONTH = 0.019;
 const CONSCRIPTION_EXPONENT = 2.5;
 /** Mean months from call-up to a usable reservist: Russia 2022 weeks, Ukraine 1-2 months, NATO basic plus branch 3-6 months. */
 const TRAINING_MONTHS = 2.5;
@@ -106,7 +110,7 @@ function peaceShare(n: Nation): number {
  * what the baseline stats already show it spending. Mobilization buys spending
  * quadratically: partial mobilization (0.5) matches the US Korean War peak of ~14% of
  * GDP (OMB Historical Tables 3.1, 1953), full mobilization (1) the WWII peaks. Nations
- * whose baseline is already wartime (Russia 5.9%, Ukraine 34%) need a high level before
+ * whose baseline is already wartime (Russia 7.1%, Ukraine 34%; SIPRI 2025) need a high level before
  * spending rises further, so a scenario's "partial mobilization" for Russia keeps it near
  * the 6-9% it spends in 2024-25 (SIPRI 2025) instead of tripling it.
  */
@@ -351,9 +355,11 @@ function stepNation(world: World, ctx: SimContext, s: Scan, n: Nation, e: Nation
   const ceiling = Math.max(base, MAX_UNDER_ARMS_SHARE * n.population * workingAge);
   const cap = base + n.mobilization * (ceiling - base);
   const callUp = n.mobilization > 0
-    ? n.population * Math.max(INTAKE_PER_DEFENSE_SHARE * Math.max(0, share - NORMAL_PEACE_SHARE), CONSCRIPTION_POP_SHARE * (e.mobilizationTarget ?? n.mobilization) ** CONSCRIPTION_EXPONENT)
+    ? Math.max(n.population * INTAKE_PER_DEFENSE_SHARE * Math.max(0, share - NORMAL_PEACE_SHARE), e.draftPool * DRAFT_SHARE_PER_MONTH * (e.mobilizationTarget ?? n.mobilization) ** CONSCRIPTION_EXPONENT)
     : 0;
-  const intake = Math.max(0, Math.min(callUp * dtMonths, cap - underArms));
+  // Volunteers and conscripts alike come out of the pool of men the state can take.
+  const intake = Math.max(0, Math.min(callUp * dtMonths, cap - underArms, e.draftPool));
+  e.draftPool -= intake;
   e.inTraining += intake;
   e.recruited += intake;
   const graduates = e.inTraining * lag(dtMonths, TRAINING_MONTHS);
