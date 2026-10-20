@@ -8,46 +8,43 @@ import { FormationList, FormationPanel } from './FormationPanel';
 import { MapView } from './MapView';
 import { NationPanel } from './NationPanel';
 import { NuclearDialog } from './NuclearDialog';
+import { StartScreen } from './StartScreen';
 import type { Overlays } from './renderer';
 
 const SPEEDS = [0, 1, 5, 20] as const;
 type Speed = (typeof SPEEDS)[number];
-const FEATURED = ['USA', 'RUS', 'CHN', 'POL', 'GBR', 'FRA', 'DEU', 'TWN', 'UKR', 'IND', 'JPN', 'IRN'];
 const OVERLAY_LABELS: Record<keyof Overlays, string> = { air: 'Air control', sea: 'Sea control', infra: 'Infrastructure damage', fallout: 'Fallout', cities: 'Cities', seaZones: 'Sea zones' };
 
 export function App({ client }: { client: SimClient }) {
-  const version = useSyncExternalStore(client.subscribe, client.getVersion);
-  const palette = useMemo(() => new Palette((id) => client.state.nations.get(id as NationId)?.blocs ?? []), [client]);
+  useSyncExternalStore(client.subscribe, client.getVersion);
+  const palette = useMemo(() => new Palette((id) => client.nationCards.get(id as NationId)?.blocs ?? []), [client]);
+  if (!client.meta || !client.playing) return <StartScreen client={client} palette={palette} />;
+  return <Command client={client} palette={palette} initialNation={client.playing} />;
+}
+
+function Command({ client, palette, initialNation }: { client: SimClient; palette: Palette; initialNation: NationId }) {
+  const version = client.version;
   const places = useMemo(() => new PlaceNamer(client.map), [client]);
   const focusHandle = useRef<((n: NodeId) => void) | null>(null);
 
-  const [playAs, setPlayAs] = useState<NationId | null>(null);
+  const [playAs, setPlayAs] = useState<NationId>(initialNation);
   const [selected, setSelected] = useState<FormationId | null>(null);
   const [pending, setPending] = useState<{ posture: Posture; targetClass?: TargetClass } | null>(null);
   const [nuclearPick, setNuclearPick] = useState(false);
   const [nuclearTarget, setNuclearTarget] = useState<NodeId | null>(null);
-  const [speed, setSpeed] = useState<Speed>(0);
+  const speed = client.ticksPerSec as Speed;
+  const setSpeed = (s: Speed) => client.setSpeed(s);
   const [overlays, setOverlays] = useState<Overlays>({ air: true, sea: true, infra: true, fallout: true, cities: true, seaZones: true });
   const [toast, setToast] = useState<string | null>(null);
 
-  useEffect(() => client.focus(playAs ?? undefined, selected ?? undefined), [client, playAs, selected]);
-
-  useEffect(() => {
-    if (!speed) return;
-    let owed = 0;
-    const id = setInterval(() => {
-      owed = Math.min(owed + 1, 40);
-      if (client.step(owed)) owed = 0;
-    }, 1000 / speed);
-    return () => clearInterval(id);
-  }, [client, speed]);
+  useEffect(() => client.focus(playAs, selected ?? undefined), [client, playAs, selected]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement).tagName === 'INPUT') return;
       if (e.key === 'Escape') { setPending(null); setNuclearPick(false); }
-      if (e.key === ' ') { e.preventDefault(); setSpeed((s) => (s ? 0 : 1)); }
-      if (e.key === '.') client.step(1);
+      if (e.key === ' ') { e.preventDefault(); client.setSpeed(client.ticksPerSec ? 0 : 1); }
+      if (e.key === '.') client.step();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -77,7 +74,7 @@ export function App({ client }: { client: SimClient }) {
       setNuclearTarget(node);
       return;
     }
-    if (!pending || !selected || !playAs) return;
+    if (!pending || !selected) return;
     client.command({ type: 'order', nation: playAs, formation: selected, order: { posture: pending.posture, target: node, targetClass: pending.targetClass } });
     setToast(`${pending.posture.replace(/_/g, ' ')} order sent → ${places.name(node)}. Takes effect next tick.`);
     setPending(null);
@@ -95,7 +92,13 @@ export function App({ client }: { client: SimClient }) {
         <div className="brand"><span className="brand-mark">◆</span> WW3 <span className="brand-sub">Strategic Command</span></div>
         <div className="clock" data-testid="clock">
           <div className="clock-date mono">{date ? date.toUTCString().slice(5, 22) + 'Z' : 'Initializing…'}</div>
-          <div className="clock-sub mono">D+{Math.floor(hours / 24)} · tick {client.state.tick}{client.stepMs ? ` · ${client.stepMs.toFixed(1)} ms/tick` : ''}</div>
+          <div className="clock-sub mono">D+{Math.floor(hours / 24)} · tick {client.state.tick} · {client.meta?.scenario.name}</div>
+        </div>
+        <div className="perf mono" data-testid="perf" title="Engine time for the last tick, and ticks actually completed per second against the requested speed">
+          <div>{client.stats.stepMs ? `${client.stats.stepMs.toFixed(0)} ms/tick` : '—'}</div>
+          <div className={speed && client.stats.achievedTps && client.stats.achievedTps < speed * 0.9 ? 'lagging' : ''}>
+            {speed ? `${client.stats.achievedTps.toFixed(1)} / ${speed} t/s` : 'paused'}
+          </div>
         </div>
         <div className="time-ctl" role="group" aria-label="Time controls">
           {SPEEDS.map((s) => (
@@ -103,19 +106,18 @@ export function App({ client }: { client: SimClient }) {
               {s ? `${s}×` : '❚❚'}
             </button>
           ))}
-          <button onClick={() => client.step(1)} disabled={speed !== 0} title="Advance one tick (.)" data-testid="step">Step ▸</button>
+          <button onClick={() => client.step()} disabled={speed !== 0} title="Advance one tick (.)" data-testid="step">Step ▸</button>
         </div>
         <div className="play-as">
           <span>Playing</span>
-          <select value={playAs ?? ''} onChange={(e) => choose(e.target.value as NationId)} data-testid="play-as">
-            <option value="" disabled>Choose nation…</option>
+          <select value={playAs} onChange={(e) => choose(e.target.value as NationId)} data-testid="play-as">
             {nations.map((n) => <option key={n.id} value={n.id}>{n.name}</option>)}
           </select>
         </div>
       </header>
 
       <aside className="left">
-        {playAs ? <NationPanel client={client} palette={palette} playAs={playAs} onCommand={(c) => { client.command(c); setToast(`${c.type.replace(/_/g, ' ')} sent. Takes effect next tick.`); }} onNuclear={() => { setPending(null); setNuclearPick(true); }} /> : <p className="muted pad">Choose a nation to command.</p>}
+        <NationPanel client={client} palette={palette} playAs={playAs} onCommand={(c) => { client.command(c); setToast(`${c.type.replace(/_/g, ' ')} sent. Takes effect next tick.`); }} onNuclear={() => { setPending(null); setNuclearPick(true); }} />
       </aside>
 
       <main className="center">
@@ -148,7 +150,7 @@ export function App({ client }: { client: SimClient }) {
       </main>
 
       <aside className="right">
-        {playAs && selected && selectedView ? (
+        {selected && selectedView ? (
           <FormationPanel
             client={client}
             palette={palette}
@@ -160,41 +162,16 @@ export function App({ client }: { client: SimClient }) {
             onClose={() => selectFormation(null)}
             onFocus={(n) => focusHandle.current?.(n)}
           />
-        ) : playAs ? (
+        ) : (
           <FormationList client={client} palette={palette} places={places} playAs={playAs} onSelect={(id, node) => { selectFormation(id); focusHandle.current?.(node); }} />
-        ) : null}
+        )}
       </aside>
 
       <footer className="bottom">
         <EventLog client={client} places={places} playAs={playAs} version={version} onFocus={(n) => focusHandle.current?.(n)} />
       </footer>
 
-      {!playAs && client.meta && (
-        <div className="modal-back">
-          <div className="modal picker" data-testid="nation-picker">
-            <h2>Assume national command</h2>
-            <p className="muted">Every country on the map is playable. The rest are run by the AI.</p>
-            <div className="featured">
-              {FEATURED.filter((id) => client.state.nations.has(id as NationId)).map((id) => {
-                const n = client.state.nations.get(id as NationId)!;
-                return (
-                  <button key={id} onClick={() => choose(n.id)} data-testid={`pick-${id}`}>
-                    <span className="swatch" style={{ background: palette.of(id).css }} />
-                    <span>{n.name}</span>
-                    <span className="muted small">{n.blocs[0] ?? 'non-aligned'}{n.status === 'war' ? ' · at war' : ''}</span>
-                  </button>
-                );
-              })}
-            </div>
-            <select defaultValue="" onChange={(e) => choose(e.target.value as NationId)}>
-              <option value="" disabled>Or any of {nations.length} nations…</option>
-              {nations.map((n) => <option key={n.id} value={n.id}>{n.name}</option>)}
-            </select>
-          </div>
-        </div>
-      )}
-
-      {playAs && nuclearTarget !== null && (
+      {nuclearTarget !== null && (
         <NuclearDialog
           client={client}
           places={places}

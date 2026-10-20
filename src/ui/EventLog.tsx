@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import type { NationId, NodeId } from '../core/types';
+import type { FormationId, NationId, NodeId } from '../core/types';
 import type { SimClient } from './client';
 import { CATEGORY_OF, EVENT_CATEGORIES, describeEvent, eventNations, eventNode, type EventCategory, type PlaceNamer } from './events';
 
@@ -17,6 +17,8 @@ export function EventLog({ client, places, playAs, version, onFocus }: Props) {
   const [off, setOff] = useState<Set<EventCategory>>(() => new Set(['economy']));
   const [mine, setMine] = useState(false);
   const nameOf = (id: NationId) => client.state.nations.get(id)?.name ?? id;
+  const formations = useMemo(() => new Map(client.state.formations.map((f) => [f.entry.id, f.entry.name])), [client.state.rosterVersion]);
+  const formationName = (id: FormationId) => formations.get(id) ?? id;
   const counts = useMemo(() => {
     const c: Partial<Record<EventCategory, number>> = {};
     for (const { event } of client.log) c[CATEGORY_OF[event.type]] = (c[CATEGORY_OF[event.type]] ?? 0) + 1;
@@ -35,7 +37,7 @@ export function EventLog({ client, places, playAs, version, onFocus }: Props) {
       <li key={seq} className={`ev ev-${cat}`} onClick={() => node !== null && onFocus(node)} style={{ cursor: node !== null ? 'pointer' : 'default' }}>
         <span className="ev-time mono">D+{Math.floor(hours / 24)} {String(hours % 24).padStart(2, '0')}:00</span>
         <span className={`ev-tag ${cat}`}>{cat}</span>
-        <span className="ev-text">{describeEvent(event, nameOf, places, client.meta)}</span>
+        <span className="ev-text">{describeEvent(event, nameOf, places, client.meta, formationName)}</span>
       </li>,
     );
   }

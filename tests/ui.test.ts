@@ -2,17 +2,18 @@ import { describe, expect, it } from 'vitest';
 import type { FormationId, NationId, NodeId, SimEvent } from '../src/core/types';
 import { id, testWorld } from '../src/testkit';
 import { nationColor, Palette } from '../src/ui/colors';
-import { applySnapshot, emptyClientState, NO_NATION, SnapshotEncoder } from '../src/ui/snapshot';
+import { applySnapshot, emptyClientState, nationCards, NO_NATION, SnapshotEncoder } from '../src/ui/snapshot';
 import { baseProjection, pickNode, toLonLat, toScreen } from '../src/ui/view';
 
 describe('snapshot codec', () => {
   const setup = () => {
     const t = testWorld();
-    const enc = new SnapshotEncoder(t.map.nationIds);
+    const enc = new SnapshotEncoder(t.map.nationIds, t.catalog, t.map.size);
     const client = emptyClientState(t.map.size);
+    const cards = new Map(nationCards(t.map, {}).map((c) => [c.id, c]));
     const sync = () => {
       const snap = enc.encode(t.world, t.map);
-      applySnapshot(client, snap);
+      applySnapshot(client, snap, t.map.nationIds, cards);
       return snap;
     };
     const decodedControl = () => Array.from(client.control, (i) => (i === NO_NATION ? '' : t.map.nationIds[i]));
@@ -58,7 +59,7 @@ describe('snapshot codec', () => {
     expect(s.sync().roster).toBeUndefined();
     const view = s.client.formations[0];
     expect(view.entry.id).toBe(a.id);
-    expect(view.strength).toBeCloseTo(0.25);
+    expect(view.strength).toBeCloseTo(0.25, 2);
     expect(view.posture).toBe('attack');
     expect(view.target).toBe(s.nodeAt(53.9, 27.6));
 
@@ -94,9 +95,62 @@ describe('snapshot codec', () => {
     const f = s.add({ nation: id.nation('USA'), name: 'Wing', kind: 'air_wing', echelon: 'wing', node: s.nodeAt(49.4, 7.6), equipment: { [id.platform('t_fighter')]: 24 } });
     expect(s.enc.encode(s.world, s.map).focusFormation).toBeUndefined();
     const snap = s.enc.encode(s.world, s.map, { nation: id.nation('USA'), formation: f.id as FormationId });
-    expect(snap.focusFormation?.magazine).toEqual(f.magazine);
+    expect(snap.focusFormation?.formation.magazine).toEqual(f.magazine);
     expect(snap.focusNation?.nodesHeld).toBe(s.map.nodesOf(id.nation('USA')).length);
     expect(snap.focusNation?.formations).toBe(1);
+  });
+});
+
+describe('dashboard detail', () => {
+  const nation = (n: string) => id.nation(n);
+
+  it('totals munitions by family across depots and loaded magazines, with nuclear rounds kept apart', () => {
+    const t = testWorld();
+    const enc = new SnapshotEncoder(t.map.nationIds, t.catalog, t.map.size);
+    const ddg = t.add({ nation: nation('USA'), name: 'DESRON', kind: 'surface_group', echelon: 'task_group', node: t.nodeAt(36.9, -76.3), equipment: { [id.platform('t_destroyer')]: 2 } });
+    const silos = t.add({ nation: nation('USA'), name: 'Missile wing', kind: 'strategic', echelon: 'wing', node: t.nodeAt(41.1, -104.8), equipment: { [id.platform('t_icbm')]: 50 } });
+    t.add({ nation: nation('RUS'), name: 'Not ours', kind: 'surface_group', echelon: 'task_group', node: t.nodeAt(69, 33), equipment: { [id.platform('t_destroyer')]: 4 } });
+    t.world.nations[nation('USA')].stockpile = { [id.munition('t_sam')]: 300, [id.platform('t_mbt')]: 40 };
+    const d = enc.encode(t.world, t.map, { nation: nation('USA') }).focusNation!;
+    const group = (g: string) => d.munitions.find((m) => m.group === g);
+    const mag = ddg.magazine as Record<string, number>;
+    expect(group('interceptor')).toMatchObject({ warehoused: 300, loaded: mag.t_sam });
+    expect(group('cruise')).toMatchObject({ warehoused: 0, loaded: mag.t_cruise + mag.t_asm });
+    expect(group('nuclear')).toMatchObject({ loaded: (silos.magazine as Record<string, number>).t_nuke });
+    expect(group('ballistic')).toBeUndefined();
+    expect(d.nuclear.launchers).toBe(50);
+    expect(d.formations).toBe(2);
+  });
+
+  it('records how each nation entered a war: its own casus belli, an attack on it, or the treaty that pulled it in', () => {
+    const t = testWorld();
+    const enc = new SnapshotEncoder(t.map.nationIds, t.catalog, t.map.size);
+    const [RUS, POL, DEU, FRA] = ['RUS', 'POL', 'DEU', 'FRA'].map(nation);
+    t.world.slices.diplomacy = {
+      wars: [{ id: 'w1', aggressor: RUS, sides: [[RUS], [POL, DEU]], startTick: 0 }],
+      joins: [{ nation: FRA, war: 'w1', side: 1, dueTick: 12, treaty: 'NATO', kind: 'collective_defense', victim: POL, aggressor: RUS }],
+      records: {}, assessment: {}, pressure: {}, offers: {}, ssbnFormations: [], invoked: [],
+    };
+    enc.collect([
+      { type: 'war_declared', tick: 0, by: RUS, on: POL, reason: 'NATO aggression' },
+      { type: 'war_declared', tick: 8, by: DEU, on: RUS, reason: 'NATO: defence of POL' },
+      { type: 'war_declared', tick: 9, by: DEU, on: RUS, reason: 'later duplicate' },
+    ]);
+    const [war] = enc.encode(t.world, t.map, { nation: POL }).focusNation!.wars;
+    expect(war.sides[0]).toEqual([{ nation: RUS, reason: 'NATO aggression', tick: 0 }]);
+    expect(war.sides[1]).toEqual([{ nation: POL, reason: 'attacked by RUS', tick: 0 }, { nation: DEU, reason: 'NATO: defence of POL', tick: 8 }]);
+    expect(war.pending).toEqual([{ nation: FRA, treaty: 'NATO', side: 1, dueTick: 12 }]);
+    expect(enc.encode(t.world, t.map, { nation: FRA }).focusNation!.wars).toEqual([]);
+  });
+
+  it('reports a focused formation as engaged and cut off from the land slice', () => {
+    const t = testWorld();
+    const enc = new SnapshotEncoder(t.map.nationIds, t.catalog, t.map.size);
+    const f = t.add({ nation: nation('UKR'), name: 'Bde', kind: 'maneuver', echelon: 'brigade', node: t.nodeAt(48.5, 37.9), equipment: { [id.platform('t_mbt')]: 30 } });
+    const quiet = enc.encode(t.world, t.map, { formation: f.id }).focusFormation!;
+    expect(quiet).toMatchObject({ engaged: false, isolatedDays: 0, supplyFlow: null, trackedBy: [] });
+    t.world.slices.land = { baseline: { [f.id]: 30 }, isolatedDays: { [f.id]: 3.5 } };
+    expect(enc.encode(t.world, t.map, { formation: f.id }).focusFormation).toMatchObject({ engaged: true, isolatedDays: 3.5 });
   });
 });
 

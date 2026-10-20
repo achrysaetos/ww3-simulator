@@ -9,7 +9,11 @@ describe('test conventions', () => {
     const offenders = fs
       .readdirSync(TESTS)
       .filter((f) => f.endsWith('.test.ts') && !f.endsWith('.perf.test.ts'))
-      .filter((f) => /performance\.now\(|Date\.now\(|process\.hrtime/.test(fs.readFileSync(path.join(TESTS, f), 'utf8')));
+      .filter((f) => {
+        const src = fs.readFileSync(path.join(TESTS, f), 'utf8');
+        // Under vi.useFakeTimers the clock is simulated, so reading it is deterministic.
+        return /performance\.now\(|Date\.now\(|process\.hrtime/.test(src) && !src.includes('vi.useFakeTimers');
+      });
     expect(offenders, 'move timing assertions into <area>.perf.test.ts (npm run perf)').toEqual([]);
   });
 });

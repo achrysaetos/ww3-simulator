@@ -14,7 +14,7 @@ const BLOC_HUES: readonly [bloc: string, hue: number][] = [
   ['AUKUS', 196],
   ['EU', 228],
   ['SCO', 22],
-  ['QUAD', 180],
+  ['Quad', 180],
   ['ANZUS', 200],
   ['AXIS_OF_RESISTANCE', 300],
   ['GCC', 140],
