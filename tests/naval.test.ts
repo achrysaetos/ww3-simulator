@@ -184,27 +184,39 @@ describe('submarine warfare', () => {
     s.order = { posture: 'reserve', issuedTick: 0 };
     return s;
   };
-  const detectionRate = (screen: Record<string, number>) => {
+  const detectionRate = (screen: Record<string, number>, firing = false) => {
     const t = navalWorld(11);
     const at = t.nodeAt(20, 125);
     t.war('USA', 'CHN');
     const ssn = quietSsn(t, at);
     t.add({ nation: CHN, name: 'Screen', kind: 'surface_group', node: at, equipment: t.eq(screen), magazine: {} });
     let seen = 0;
-    const ticks = 80;
+    const ticks = 200;
     for (let i = 0; i < ticks; i++) {
+      if (firing) t.world.slices.naval.lastFired[ssn.id] = t.world.tick - 1;
       t.engine.step(t.world);
       if (t.world.slices.naval.tracks[ssn.id]?.includes(CHN)) seen++;
     }
     return seen / ticks;
   };
 
-  it('a quiet SSN is rarely detected by a ship without an ASW screen, far more often by frigates and helicopters', () => {
+  it('area search over a whole sea zone rarely finds a quiet SSN, even with an ASW screen', () => {
+    expect(detectionRate({ t_destroyer: 1 })).toBeLessThan(0.03);
+    expect(detectionRate({ t_destroyer: 1, n_frigate: 2, n_helo: 4 })).toBeLessThan(0.1);
+  });
+
+  it('a massed ASW force finds a quiet SSN far more often than a lone ship', () => {
     const bare = detectionRate({ t_destroyer: 1 });
-    const screened = detectionRate({ t_destroyer: 1, n_frigate: 2, n_helo: 4 });
-    expect(bare).toBeLessThan(0.1);
-    expect(screened).toBeGreaterThan(0.15);
-    expect(screened).toBeGreaterThan(bare * 3);
+    const massed = detectionRate({ n_frigate: 30, n_helo: 60 });
+    expect(massed).toBeGreaterThan(0.1);
+    expect(massed).toBeGreaterThan(bare * 3);
+  });
+
+  it('a submarine that has just fired is found by the screen it attacked far more often than one lying quiet', () => {
+    const quiet = detectionRate({ t_destroyer: 1, n_frigate: 2, n_helo: 4 });
+    const datum = detectionRate({ t_destroyer: 1, n_frigate: 2, n_helo: 4 }, true);
+    expect(datum).toBeGreaterThan(0.1);
+    expect(datum).toBeGreaterThan(quiet * 3);
   });
 
   it('an SSN ambush sinks an unescorted amphibious ship and the submarine survives', () => {
