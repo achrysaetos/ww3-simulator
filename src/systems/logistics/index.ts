@@ -109,7 +109,7 @@ function sustain(world: World, ctx: SimContext, s: LogisticsState, forces: Forma
   const want = new Float64Array(n * 3); // fuel, ammo, food per formation
   const nodeTons = new Map<number, number>(), nodeFactor = new Map<number, number>();
   // Hoisted: dev loaders (vitest, tsx) compile imported bindings to getters, which dominates this loop.
-  const classes = SUPPLY_CLASSES, refill = MAX_REFILL_FRACTION_PER_DAY * dtDays, idleHours = IDLE_FUEL_HOURS_PER_DAY, food = FOOD_TONS_PER_PERSON_DAY * dtDays;
+  const refill = MAX_REFILL_FRACTION_PER_DAY * dtDays, idleHours = IDLE_FUEL_HOURS_PER_DAY, food = FOOD_TONS_PER_PERSON_DAY * dtDays;
   const { networks, networkOf } = s;
 
   for (let i = 0; i < n; i++) {
@@ -118,13 +118,12 @@ function sustain(world: World, ctx: SimContext, s: LogisticsState, forces: Forma
     const net = networks[networkOf[f.nation]];
     const phi = (factor[i] = net ? net.search.milliAt(s.seen, f.node) / 1000 : 0);
     if (phi <= 0) continue;
-    let tons = 0;
-    for (let c = 0; c < 3; c++) {
-      const cls = classes[c], cap = f.supplyCapacity[cls];
-      const w = Math.min(Math.max(0, cap - f.supply[cls]), cap * refill * phi);
-      want[i * 3 + c] = w;
-      tons += w;
-    }
+    // Spelled out per class: keyed access by class name dominated this loop.
+    const cap = f.supplyCapacity, have = f.supply, j = i * 3;
+    const tons =
+      (want[j] = Math.min(Math.max(0, cap.fuel - have.fuel), cap.fuel * refill * phi)) +
+      (want[j + 1] = Math.min(Math.max(0, cap.ammo - have.ammo), cap.ammo * refill * phi)) +
+      (want[j + 2] = Math.min(Math.max(0, cap.food - have.food), cap.food * refill * phi));
     nodeTons.set(f.node, (nodeTons.get(f.node) ?? 0) + tons);
     nodeFactor.set(f.node, Math.max(nodeFactor.get(f.node) ?? 0, phi));
   }
@@ -148,11 +147,12 @@ function sustain(world: World, ctx: SimContext, s: LogisticsState, forces: Forma
     if (phi <= 0) continue;
     const f = forces[i];
     const sh = share.get(f.nation);
-    if (sh)
-      for (let c = 0; c < 3; c++) {
-        const cls = classes[c];
-        f.supply[cls] = Math.min(f.supplyCapacity[cls], f.supply[cls] + want[i * 3 + c] * sh[c]);
-      }
+    if (sh) {
+      const cap = f.supplyCapacity, have = f.supply, j = i * 3;
+      have.fuel = Math.min(cap.fuel, have.fuel + want[j] * sh[0]);
+      have.ammo = Math.min(cap.ammo, have.ammo + want[j + 1] * sh[1]);
+      have.food = Math.min(cap.food, have.food + want[j + 2] * sh[2]);
+    }
     repair(f, ctx, phi * REPAIR_FRACTION_PER_DAY * dtDays);
     replace(world, ctx, f, s.establishment[f.id], phi * REPLACE_FRACTION_PER_DAY * dtDays * (f.order.posture === 'reserve' ? RESERVE_REPLACE_MULTIPLIER : 1));
   }

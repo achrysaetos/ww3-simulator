@@ -365,11 +365,21 @@ export class NetworkSearch {
    */
   adopt(inputs: SearchInputs, base: NetworkSearch, changed: Iterable<number>, recaptured: Iterable<number>): void {
     if (!base.seeded) return;
-    const cell = this.controllers.cell;
-    const sideIn = (s: Uint8Array, c: number) => (c < s.length ? s[c] : 0);
+    const { cell } = this.controllers, { adjStart, adj, landCount } = this.map;
+    // Per controller: 1 if passability differs, 2 if only foe status does, which moves just the frontline next to it.
+    const moved = new Uint8Array(Math.max(base.side.length, this.side.length));
+    for (let c = 0; c < moved.length; c++) {
+      const was = base.side[c] ?? 0, now = this.side[c] ?? 0;
+      if (was !== now) moved[c] = was === FRIENDLY || now === FRIENDLY ? 1 : 2;
+    }
     const resided = [...recaptured];
-    for (let n = 0; n < this.map.landCount; n++) if (sideIn(base.side, cell[n]) !== sideIn(this.side, cell[n])) resided.push(n);
-    const nodes = [...changed, ...resided];
+    const nodes = [...changed];
+    for (let n = 0; n < landCount; n++) {
+      const m = moved[cell[n]];
+      if (m === 1) resided.push(n);
+      else if (m === 2) for (let k = adjStart[n]; k < adjStart[n + 1]; k++) if (this.side[cell[adj[k]]] === FRIENDLY) nodes.push(adj[k]);
+    }
+    nodes.push(...resided);
     for (const n of base.blocked) if (!this.blocked.has(n)) nodes.push(n);
     for (const n of this.blocked) if (!base.blocked.has(n)) nodes.push(n);
     for (const held of [inputs.sea, inputs.air])

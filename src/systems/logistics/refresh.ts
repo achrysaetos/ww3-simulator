@@ -162,10 +162,12 @@ export function refreshNetworks(world: World, map: GameMap, networks: Record<str
     (enemies.get(b) ?? enemies.set(b, []).get(b)!).push(a);
   }
   const demand = new Set<NationId>(enemies.keys());
-  const landForces = new Map<NationId, number[]>();
+  // Land forces on ground another nation holds: the only ones that can block a network's supply.
+  const intruders: Formation[] = [];
+  const landKinds = LAND_KINDS, landCount = map.landCount;
   for (const f of forces) {
     demand.add(f.nation);
-    if (LAND_KINDS.has(f.kind) && f.node < map.landCount) file(landForces, f.nation, f.node);
+    if (landKinds.has(f.kind) && f.node < landCount && world.control[f.node] !== f.nation) intruders.push(f);
   }
 
   const networkOf: Record<NationId, string> = {};
@@ -194,7 +196,7 @@ export function refreshNetworks(world: World, map: GameMap, networks: Record<str
     for (const m of members) for (const e of enemies.get(m) ?? []) if (!memberSet.has(e)) foeSet.add(e);
     const foes = [...foeSet].sort();
     const occupied: number[] = [];
-    for (const e of foes) for (const n of landForces.get(e) ?? []) if (memberSet.has(world.control[n])) occupied.push(n);
+    for (const f of intruders) if (foeSet.has(f.nation) && memberSet.has(world.control[f.node])) occupied.push(f.node);
     occupied.sort((a, b) => a - b);
     const net = networks[key];
     if (!net) {
