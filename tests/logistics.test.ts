@@ -66,6 +66,23 @@ describe('logistics', () => {
     expect(t.world.nations[id.nation('UKR')].bulk.food).toBe(bulkBefore);
   });
 
+  it('supplies both sides in a contested cell through their own adjacent ground, but not a spearhead two cells deep', () => {
+    const t = setup();
+    const [ukr, rus] = [id.nation('UKR'), id.nation('RUS')];
+    const contested = t.nodeAt(49.5, 36.5), belgorod = t.nodeAt(50.5, 36.5), deep = t.nodeAt(49.5, 34.5);
+    expect([t.world.control[contested], t.world.control[belgorod], t.world.control[deep]]).toEqual([ukr, rus, ukr]);
+    t.war('UKR', 'RUS');
+    const defender = t.brigade('UKR', contested), attacker = t.brigade('RUS', contested), spearhead = t.brigade('RUS', deep);
+    for (const f of [defender, attacker, spearhead]) t.drain(f, 0.3);
+    t.engine.run(t.world, 2 * DAY);
+    expect(supplyFactor(t.world, contested, rus)).toBeGreaterThan(0.2);
+    expect(supplyFactor(t.world, contested, ukr)).toBeGreaterThan(0.2);
+    expect(t.fill(attacker, 'ammo')).toBeGreaterThan(0.4);
+    expect(t.fill(defender, 'ammo')).toBeGreaterThan(0.4);
+    expect(supplyFactor(t.world, deep, rus)).toBe(0);
+    expect(t.fill(spearhead, 'ammo')).toBeCloseTo(0.3, 5);
+  });
+
   it('cuts an expeditionary force when the enemy takes the sea lanes', () => {
     const t = setup();
     const usa = id.nation('USA');

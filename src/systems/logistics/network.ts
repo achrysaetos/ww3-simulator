@@ -408,6 +408,21 @@ export class NetworkSearch {
     return s >= SETTLED ? s - SETTLED : Math.round(this.airlift(inputs, node) * 1000);
   }
 
+  /**
+   * Factor in thousandths for forces at `node`. A cell is about 100 km across, so
+   * forces in a land cell the network cannot enter (enemy-held, or friendly with
+   * enemy troops in it) fight at its near edge and draw through the best adjacent
+   * cell it reaches.
+   */
+  milliForForcesAt(inputs: SearchInputs, node: number): number {
+    const own = this.milliAt(inputs, node);
+    const { landCount, adjStart, adj } = this.map;
+    if (own > 0 || node >= landCount) return own;
+    let best = 0;
+    for (let k = adjStart[node]; k < adjStart[node + 1]; k++) if (adj[k] < landCount) best = Math.max(best, this.milliAt(inputs, adj[k]));
+    return best;
+  }
+
   /** Searches on until every node in `nodes` has its factor. */
   cover(inputs: SearchInputs, nodes: Iterable<number>): void {
     if (this.seeded && !this.heapSize) return;

@@ -41,7 +41,7 @@ export function supplyFactor(world: World, node: NodeId, nation: NationId): numb
   const s = world.slices.logistics;
   const key = s?.networkOf[nation];
   const net = key ? s.networks[key] : undefined;
-  return net ? net.search.milliAt(s.seen, node) / 1000 : 0;
+  return net ? net.search.milliForForcesAt(s.seen, node) / 1000 : 0;
 }
 
 const initialState = (world: World, map: GameMap): LogisticsState => ({
@@ -116,7 +116,7 @@ function sustain(world: World, ctx: SimContext, s: LogisticsState, forces: Forma
     const f = forces[i];
     consumeBaseline(f, ctx, idleHours[f.kind] * dtDays, food);
     const net = networks[networkOf[f.nation]];
-    const phi = (factor[i] = net ? net.search.milliAt(s.seen, f.node) / 1000 : 0);
+    const phi = (factor[i] = net ? net.search.milliForForcesAt(s.seen, f.node) / 1000 : 0);
     if (phi <= 0) continue;
     // Spelled out per class: keyed access by class name dominated this loop.
     const cap = f.supplyCapacity, have = f.supply, j = i * 3;
