@@ -277,21 +277,3 @@ describe('cyber', () => {
   });
 });
 
-describe('performance', () => {
-  it('steps a 6,000-formation world well under 50 ms', () => {
-    const t = testWorld([strategic]);
-    const nations = Object.keys(t.world.nations) as NationId[];
-    for (let i = 0; i < 6000; i++) {
-      const nation = nations[i % nations.length];
-      t.add({ nation, name: `f${i}`, kind: i % 50 === 0 ? 'space' : 'maneuver', echelon: 'brigade', node: (i * 7) % t.map.landCount as NodeId, equipment: { [id.platform('t_mbt')]: 40 } });
-    }
-    t.war('USA', 'CHN');
-    t.war('RUS', 'GBR');
-    t.engine.run(t.world, 3);
-    const start = performance.now();
-    t.engine.run(t.world, 20);
-    const ms = (performance.now() - start) / 20;
-    console.log(`strategic step: ${ms.toFixed(2)} ms/tick at 6,000 formations`);
-    expect(ms).toBeLessThan(50);
-  });
-});

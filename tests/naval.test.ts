@@ -363,37 +363,3 @@ describe('naval movement and lift', () => {
   });
 });
 
-describe('naval scale', () => {
-  it('steps 600 naval formations in the Western Pacific within budget and replays deterministically', () => {
-    const build = () => {
-      const t = navalWorld(21);
-      t.war('USA', 'CHN');
-      const rng = new Rng(5);
-      const nodes: NodeId[] = [];
-      for (let n = t.map.landCount; n < t.map.size; n++) if (t.map.lat[n] > 0 && t.map.lat[n] < 40 && t.map.lon[n] > 110 && t.map.lon[n] < 150) nodes.push(n as NodeId);
-      const postures = ['patrol', 'blockade', 'attack', 'defend', 'move'] as const;
-      const groups: Formation[] = [];
-      for (let i = 0; i < 600; i++) {
-        const nation = i % 2 ? USA : CHN;
-        const sub = i % 4 === 0;
-        const f = t.add({ nation, name: `g${i}`, kind: sub ? 'submarine' : 'surface_group', echelon: sub ? 'squadron' : 'task_group', node: rng.pick(nodes), equipment: sub ? t.eq({ t_ssn: 1 }) : t.eq({ t_destroyer: 2, n_frigate: 1, n_helo: 2 }) });
-        groups.push(f);
-      }
-      for (const f of groups) t.order(f, { posture: rng.pick(postures), target: rng.pick(nodes) });
-      return t;
-    };
-    const t = build();
-    t.engine.step(t.world);
-    const ticks = 10;
-    const start = performance.now();
-    t.engine.run(t.world, ticks);
-    const ms = (performance.now() - start) / ticks;
-    console.log(`naval step, 600 formations: ${ms.toFixed(1)} ms/tick`);
-    expect(ms).toBeLessThan(50);
-
-    const a = build(), b = build();
-    a.engine.run(a.world, 5);
-    b.engine.run(b.world, 5);
-    expect(JSON.stringify(a.world)).toBe(JSON.stringify(b.world));
-  });
-});

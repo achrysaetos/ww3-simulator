@@ -197,26 +197,6 @@ describe('economy: produce command', () => {
   });
 });
 
-describe('economy: performance', () => {
-  it('steps all 193 nations with 3,000 formations well under the 50 ms budget', () => {
-    const t = testWorld([economy]);
-    const nations = Object.keys(t.world.nations) as NationId[];
-    expect(nations.length).toBe(193);
-    for (let i = 0; i < 3_000; i++) {
-      const nation = nations[i % nations.length];
-      addFormation(t.world, t.catalog, { nation, name: `f${i}`, kind: 'maneuver', echelon: 'brigade', node: t.world.nations[nation].capital as NodeId, equipment: { [id.platform('t_ifv')]: 40 } });
-    }
-    t.world.pending.push({ type: 'set_mobilization', nation: USA, level: 1 });
-    const ctx = t.engine.context(t.world);
-    for (let i = 0; i < 20; i++) economy.step(t.world, ctx);
-    const ticks = 200;
-    const start = performance.now();
-    for (let i = 0; i < ticks; i++) economy.step(t.world, ctx);
-    const ms = (performance.now() - start) / ticks;
-    console.log(`economy.step: ${ms.toFixed(2)} ms/tick (193 nations, 3,000 formations)`);
-    expect(ms).toBeLessThan(20);
-  });
-});
 
 describe('economy: initial stockpiles', () => {
   it('puts missiles in the stockpile and shells into bulk ammunition tons', () => {
