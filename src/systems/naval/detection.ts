@@ -4,10 +4,22 @@ import type { TickEnv } from './env';
 
 interface Effort { surface: number; asw: number }
 
-/** Search-effort scale against submarines; tuned so a lone destroyer holds an SSN under 5% of 6-hour ticks while a frigate/helo/MPA screen finds it about a third of the time (Cold War ASW exercise lore; estimate). */
-const ASW_K = 0.5;
-/** A submarine that fired last tick is a flaming datum: torpedo and missile launches are loud. */
-const DATUM_EFFORT = 2.5;
+/**
+ * Area search against submarines (Koopman random search, P = 1 - exp(-sweep / area)). One ASW
+ * escort with hull sonar, towed array and a helicopter (asw ~1) sweeps a ~10 km lane at ~28 km/h,
+ * ~1,700 km2 in a 6-hour tick, about 1.7% of a 3-degree sea zone (~100,000 km2) against a
+ * noisy target; quieting shrinks the lane by (1 - stealth). Hence ~0.03 per unit of effort:
+ * a lone destroyer almost never finds a quiet SSN in open water, and even a massed fleet finds
+ * one only now and then (estimate; NWP 3-21 search theory; CNA ASW effectiveness studies).
+ */
+const ASW_K = 0.03;
+/**
+ * A submarine that fired last tick is a flaming datum: torpedo and missile launches are loud and
+ * the escorts are close by. Localized search around the datum, not area search, so it is not
+ * scaled by ASW_K: a boat at stealth 0.85 that just fired is found about one tick in six, a noisy
+ * one at 0.6 about two in five (Falklands 1982, WWII convoy escort experience; estimate).
+ */
+const DATUM_EFFORT = 1.25;
 /** A submarine at transit speed is louder. */
 const TRANSIT_STEALTH_PENALTY = 0.1;
 /** SSBN bastions (Sea of Okhotsk, Barents, Bohai): friendly sea control screens the boomers. */
@@ -58,7 +70,7 @@ export function detect(env: TickEnv): Map<FormationId, Set<NationId>> {
       const stealth = Math.max(0, c.stealth - (t.order.path?.length ? TRANSIT_STEALTH_PENALTY : 0));
       for (const [nation, e] of here) {
         if (!atWar(world, nation, t.nation)) continue;
-        if (rng.chance(1 - Math.exp(-(e.asw * bastion + datum) * (1 - stealth) * ASW_K))) seen.add(nation);
+        if (rng.chance(1 - Math.exp(-(e.asw * bastion * ASW_K + datum) * (1 - stealth)))) seen.add(nation);
       }
     } else {
       for (const [nation, e] of surfaceEffortAround(t.node)) {

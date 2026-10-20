@@ -34,6 +34,7 @@ const navalPlatforms: Platform[] = [
   ship('n_cruiser', 'cruiser', { crew: 500, engagementChannels: 10, loadout: [mun('t_sam', 64)] }),
   ship('n_lhd', 'amphibious', { crew: 1000, capacity: { troops: 6000, vehicles: 200 }, loadout: [] }),
   ship('n_mcm', 'mine_warfare', { crew: 50 }),
+  ship('n_usv', 'usv', { crew: 0, unitCostUsdM: 0.25, mobility: { speedKph: 40, rangeKm: 800, fuelTonsPerHour: 0 }, firepower: { ship: 0.05 } }),
   ship('n_minelayer', 'corvette', { loadout: [mun('n_mine', 60)] }),
   ship('n_carrier', 'carrier', { crew: 3000, mobility: { speedKph: 55, rangeKm: 1e6, fuelTonsPerHour: 0 }, engagementChannels: 4, capacity: { aircraft: 60 }, loadout: [mun('t_sam', 16)] }),
   P({ id: 'n_helo', name: 'ASW helicopter', class: 'asw_helo', domain: 'air', unitCostUsdM: 40, crew: 4, mobility: { speedKph: 250, rangeKm: 300, fuelTonsPerHour: 0.5 }, protection: { armor: 0.1, stealth: 0.1 }, sensors: { detectionKm: 50 }, firepower: {}, loadout: [mun('n_lwt', 2)] }),
@@ -184,27 +185,39 @@ describe('submarine warfare', () => {
     s.order = { posture: 'reserve', issuedTick: 0 };
     return s;
   };
-  const detectionRate = (screen: Record<string, number>) => {
+  const detectionRate = (screen: Record<string, number>, firing = false) => {
     const t = navalWorld(11);
     const at = t.nodeAt(20, 125);
     t.war('USA', 'CHN');
     const ssn = quietSsn(t, at);
     t.add({ nation: CHN, name: 'Screen', kind: 'surface_group', node: at, equipment: t.eq(screen), magazine: {} });
     let seen = 0;
-    const ticks = 80;
+    const ticks = 200;
     for (let i = 0; i < ticks; i++) {
+      if (firing) t.world.slices.naval.lastFired[ssn.id] = t.world.tick - 1;
       t.engine.step(t.world);
       if (t.world.slices.naval.tracks[ssn.id]?.includes(CHN)) seen++;
     }
     return seen / ticks;
   };
 
-  it('a quiet SSN is rarely detected by a ship without an ASW screen, far more often by frigates and helicopters', () => {
+  it('area search over a whole sea zone rarely finds a quiet SSN, even with an ASW screen', () => {
+    expect(detectionRate({ t_destroyer: 1 })).toBeLessThan(0.03);
+    expect(detectionRate({ t_destroyer: 1, n_frigate: 2, n_helo: 4 })).toBeLessThan(0.1);
+  });
+
+  it('a massed ASW force finds a quiet SSN far more often than a lone ship', () => {
     const bare = detectionRate({ t_destroyer: 1 });
-    const screened = detectionRate({ t_destroyer: 1, n_frigate: 2, n_helo: 4 });
-    expect(bare).toBeLessThan(0.1);
-    expect(screened).toBeGreaterThan(0.15);
-    expect(screened).toBeGreaterThan(bare * 3);
+    const massed = detectionRate({ n_frigate: 30, n_helo: 60 });
+    expect(massed).toBeGreaterThan(0.1);
+    expect(massed).toBeGreaterThan(bare * 3);
+  });
+
+  it('a submarine that has just fired is found by the screen it attacked far more often than one lying quiet', () => {
+    const quiet = detectionRate({ t_destroyer: 1, n_frigate: 2, n_helo: 4 });
+    const datum = detectionRate({ t_destroyer: 1, n_frigate: 2, n_helo: 4 }, true);
+    expect(datum).toBeGreaterThan(0.1);
+    expect(datum).toBeGreaterThan(quiet * 3);
   });
 
   it('an SSN ambush sinks an unescorted amphibious ship and the submarine survives', () => {
@@ -217,6 +230,53 @@ describe('submarine warfare', () => {
     expect(runUntil(t, () => lhd.status === 'destroyed', 6)).toBeGreaterThan(0);
     expect(ssn.status).toBe('active');
     expect(led(t, 'USA')!.torpedoesFired).toBeGreaterThan(0);
+  });
+
+  const attacksOn = (screened: boolean) => {
+    const t = navalWorld(7);
+    const at = t.nodeAt(20, 125);
+    t.war('USA', 'CHN');
+    const ssn = t.add({ nation: USA, name: 'SSN', kind: 'submarine', echelon: 'squadron', node: at, equipment: t.eq({ t_ssn: 1 }) });
+    ssn.order = { posture: 'patrol', issuedTick: 0 };
+    const force = t.add({ nation: CHN, name: 'Amphibious force', kind: 'surface_group', node: at, equipment: t.eq({ n_lhd: 40 }) });
+    if (screened) {
+      const screen = t.add({ nation: CHN, name: 'ASW screen', kind: 'surface_group', node: at, equipment: t.eq({ n_frigate: 6, n_helo: 12 }), magazine: {} });
+      screen.order = { posture: 'escort', targetFormation: force.id, issuedTick: 0 };
+    }
+    let attacks = 0;
+    for (let i = 0; i < 32; i++) for (const e of t.engine.step(t.world)) if (e.type === 'strike' && e.by === USA) attacks++;
+    return { attacks, torpedoes: led(t, 'USA')?.torpedoesFired ?? 0 };
+  };
+
+  it('one boat attacks with a spread of three about once a day, and an ASW screen turns most approaches away', () => {
+    const bare = attacksOn(false);
+    expect(bare.attacks).toBeGreaterThanOrEqual(6);
+    expect(bare.attacks).toBeLessThanOrEqual(9);
+    expect(bare.torpedoes).toBe(bare.attacks * 3);
+    expect(attacksOn(true).attacks).toBeLessThan(bare.attacks * 0.6);
+  });
+});
+
+describe('strike USVs', () => {
+  it('a wave of strike USVs expends itself on a tracked warship group, gets past its SAMs, and sinks ships', () => {
+    let sunk = 0, samsSpent = 0, launched = 0;
+    for (const seed of [1, 2, 3, 4, 5, 6]) {
+      const t = navalWorld(seed);
+      const at = t.nodeAt(44.5, 31.5);
+      t.war('UKR', 'RUS');
+      const usvs = t.add({ nation: UKR, name: 'USV squadron', kind: 'surface_group', node: at, equipment: t.eq({ n_usv: 8 }), magazine: {} });
+      usvs.order = { posture: 'patrol', issuedTick: 0 };
+      const fleet = t.add({ nation: RUS, name: 'Corvette group', kind: 'surface_group', node: at, equipment: t.eq({ n_minelayer: 4 }), magazine: { t_sam: 40 } as never });
+      fleet.order = { posture: 'reserve', issuedTick: 0 };
+      t.world.slices.naval.oceanSurveillance[UKR] = 5;
+      for (let i = 0; i < 4 && (usvs.equipment['n_usv' as PlatformId] ?? 0) > 0; i++) t.engine.step(t.world);
+      launched += 8 - (usvs.equipment['n_usv' as PlatformId] ?? 0);
+      sunk += 4 - (fleet.equipment['n_minelayer' as PlatformId] ?? 0) - (fleet.damaged['n_minelayer' as PlatformId] ?? 0);
+      samsSpent += 40 - (fleet.magazine['t_sam' as MunitionId] ?? 0);
+    }
+    expect(launched).toBe(48);
+    expect(sunk).toBeGreaterThan(4);
+    expect(samsSpent).toBe(0);
   });
 });
 
@@ -323,7 +383,7 @@ describe('naval movement and lift', () => {
   });
 
   describe('amphibious assault on Taiwan', () => {
-    const assault = (defended: boolean) => {
+    const assault = (defended: boolean, lodgement = false) => {
       const t = navalWorld(9);
       t.war('CHN', 'TWN');
       const port = t.portOf('CHN', 24.5, 118.1);
@@ -333,6 +393,7 @@ describe('naval movement and lift', () => {
       const lift = t.add({ nation: CHN, name: 'Amphib group', kind: 'surface_group', node: port, equipment: t.eq({ n_lhd: 2, t_destroyer: 2 }) });
       const brigade = t.add({ nation: CHN, name: 'Amphibious combined-arms brigade', kind: 'maneuver', echelon: 'brigade', node: port, equipment: t.eq({ t_inf: 300, t_mbt: 40 }) });
       if (defended) t.add({ nation: TWN, name: 'Coastal defense brigade', kind: 'maneuver', echelon: 'brigade', node: beach, equipment: t.eq({ t_inf: 600, t_mbt: 100 }), entrenchment: 0.5 });
+      if (lodgement) t.add({ nation: CHN, name: 'First wave', kind: 'maneuver', echelon: 'brigade', node: beach, equipment: t.eq({ t_inf: 600, t_mbt: 100 }) });
       t.order(brigade, { posture: 'embark', targetFormation: lift.id });
       t.order(lift, { posture: 'attack', target: beach });
       const before = brigade.personnel;
@@ -350,15 +411,35 @@ describe('naval movement and lift', () => {
       expect(open).toBeLessThan(0.06);
       expect(opposed).toBeGreaterThan(0.3);
     });
+
+    it('a follow-on wave landing behind its own troops on the beach loses far less than the assault wave', () => {
+      const assaultWave = assault(true);
+      const followOn = assault(true, true);
+      expect(followOn).toBeLessThan(assaultWave * 0.7);
+      expect(followOn).toBeGreaterThan(0);
+    });
   });
 
-  it('refuses to embark more troops than the lift carries', () => {
+  it('embarks only the landing team the lift can carry, leaves the rest ashore, and refuses once the lift is full', () => {
     const t = navalWorld();
     const port = t.portOf('CHN', 24.5, 118.1);
     const lift = t.add({ nation: CHN, name: 'Lift', kind: 'surface_group', node: port, equipment: t.eq({ n_lhd: 1 }) });
     const big = t.add({ nation: CHN, name: 'Group army', kind: 'maneuver', echelon: 'corps', node: port, equipment: t.eq({ t_inf: 2000 }) });
+    const troops = big.personnel, inf = big.equipment['t_inf' as never];
+    const capacity = t.catalog.platform('n_lhd' as never).capacity!.troops!;
     t.order(big, { posture: 'embark', targetFormation: lift.id });
+    const team = Object.values(t.world.formations).find((f) => f.embarkedOn === lift.id)!;
     expect(big.status).toBe('active');
+    expect(big.node).toBe(port);
+    expect(team.status).toBe('embarked');
+    expect(team.personnel).toBeLessThanOrEqual(capacity);
+    expect(team.personnel).toBeGreaterThan(capacity * 0.9);
+    expect(team.personnel + big.personnel).toBe(troops);
+    expect(team.equipment['t_inf' as never] + big.equipment['t_inf' as never]).toBe(inf);
+
+    const second = t.add({ nation: CHN, name: 'Second brigade', kind: 'maneuver', echelon: 'brigade', node: port, equipment: t.eq({ t_inf: 100 }) });
+    t.order(second, { posture: 'embark', targetFormation: lift.id });
+    expect(second.status).toBe('active');
     expect(t.world.events.some((e) => e.type === 'message' && e.text.includes('lacks lift capacity'))).toBe(true);
   });
 });

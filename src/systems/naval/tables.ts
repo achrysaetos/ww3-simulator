@@ -1,4 +1,4 @@
-import type { MunitionKind, NationId, PlatformClass } from '../../core/types';
+import type { Munition, MunitionId, MunitionKind, NationId, PlatformClass } from '../../core/types';
 
 /**
  * Per-hull-class naval facts. `hitsToKill` is in Exocet-equivalent hits (a 165 kg
@@ -32,6 +32,7 @@ export const NAVAL_HULL_CLASSES = [
 ] as const satisfies readonly PlatformClass[];
 export type NavalHullClass = (typeof NAVAL_HULL_CLASSES)[number];
 
+// Patrol craft (missile boats, coast guard cutters) carry no hull sonar or towed array: no ASW search.
 // Endurance: USN carriers and SSNs ~90 days of stores; destroyers ~45; SSK patrols
 // 50-70 days with AIP (estimates from CRS RL32665 and manufacturer data).
 export const HULLS: Record<NavalHullClass, HullProfile> = {
@@ -41,7 +42,7 @@ export const HULLS: Record<NavalHullClass, HullProfile> = {
   destroyer: { hitsToKill: 2, asw: 0.6, surfaceSearch: 1, pointDefense: 0.4, seaControl: 1, enduranceDays: 45, signature: 1.5 },
   frigate: { hitsToKill: 1.5, asw: 1, surfaceSearch: 0.7, pointDefense: 0.35, seaControl: 0.7, enduranceDays: 40, signature: 1.2 },
   corvette: { hitsToKill: 1, asw: 0.4, surfaceSearch: 0.4, pointDefense: 0.25, seaControl: 0.3, enduranceDays: 15, signature: 0.8 },
-  patrol: { hitsToKill: 1, asw: 0.1, surfaceSearch: 0.3, pointDefense: 0.15, seaControl: 0.15, enduranceDays: 10, signature: 0.6 },
+  patrol: { hitsToKill: 1, asw: 0, surfaceSearch: 0.3, pointDefense: 0.15, seaControl: 0.15, enduranceDays: 10, signature: 0.6 },
   mine_warfare: { hitsToKill: 1, asw: 0.1, surfaceSearch: 0.2, pointDefense: 0.1, seaControl: 0.1, enduranceDays: 15, signature: 0.6 },
   replenishment: { hitsToKill: 2, asw: 0, surfaceSearch: 0.2, pointDefense: 0.2, seaControl: 0.1, enduranceDays: 60, signature: 3 },
   cargo_ship: { hitsToKill: 2, asw: 0, surfaceSearch: 0.1, pointDefense: 0, seaControl: 0, enduranceDays: 30, signature: 3 },
@@ -85,7 +86,13 @@ export const NOT_INTERCEPTABLE: ReadonlySet<MunitionKind> = new Set(['torpedo', 
 export const MIN_INTERCEPTABLE_MACH = 0.3;
 
 export const INTERCEPTOR_KINDS: ReadonlySet<MunitionKind> = new Set(['sam', 'abm', 'shorad_missile']);
-export const ANTISHIP_KINDS: ReadonlySet<MunitionKind> = new Set(['antiship_cruise', 'antiship_ballistic', 'cruise', 'hgv', 'torpedo', 'drone_oneway', 'loitering', 'guided_bomb', 'glide_bomb']);
+/**
+ * Kinds a fleet fires at ships at sea: only weapons with a terminal seeker that can find a
+ * moving hull. A GPS/INS land-attack missile or bomb aims at coordinates the ship has left by
+ * the time it arrives; the anti-ship Tomahawk needed a new seeker (Maritime Strike Tomahawk,
+ * Block Va, first fielded 2023-24 in small numbers, CRS IF11353).
+ */
+export const ANTISHIP_KINDS: ReadonlySet<MunitionKind> = new Set(['antiship_cruise', 'antiship_ballistic', 'torpedo']);
 
 /** Combat air patrol shots per CAP fighter per salvo and their kill chance against a subsonic sea-skimmer (estimate). */
 export const CAP_SHOTS_PER_FIGHTER = 2;
@@ -96,8 +103,22 @@ export const CAP_AIRBORNE_SHARE = 0.25;
 export const SORTIES_PER_HOUR = 0.05;
 /** VLS ripple: missiles a launching hull can put in the air per tick. */
 export const LAUNCHES_PER_HULL = 8;
-/** Torpedoes per attacking submarine per tick (4-6 tubes, one reload). */
-export const TORPEDOES_PER_SUB = 6;
+/** Torpedoes one boat fires in an attack on a surface group: a spread of three (Conqueror at the Belgrano, 1982: three Mk 8s, two hits). */
+export const TORPEDO_SPREAD = 3;
+
+/**
+ * A strike USV (Magura V5, Sea Baby) is itself the weapon: a boat at ~40 km/h with a 300-850 kg
+ * charge. Too slow for missile interceptors or CAP; guns, helicopters and the target's point
+ * defense are what stop it. Hit chance per boat launched is an estimate from 2023-24 Black Sea
+ * attacks (Ivanovets and Sergei Kotov each sunk by waves of 5-10 boats, several hitting; many
+ * waves repelled). The pseudo-munition carries those numbers through the salvo model.
+ */
+export const USV_STRIKE: Munition = {
+  id: 'usv_strike' as MunitionId, name: 'Strike USV (one-way)', kind: 'drone_oneway', producers: [], rangeKm: 800, speedMach: 0.035,
+  warheadKg: 300, cepM: 2, pk: { ship: 0.35 }, interceptDifficulty: 0.3, unitCostUsdM: 0.25, weightKg: 1000,
+};
+/** Strike USVs a group launches at one target per tick: one wave (2024 attacks used 5-10 boats). */
+export const USV_WAVE = 8;
 
 /** Crew lost when a hull sinks: Belgrano 1982 ~30%, Sheffield 7%, Moskva disputed; mean estimate. */
 export const CREW_LOSS_SUNK = 0.3;

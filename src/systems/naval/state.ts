@@ -13,6 +13,9 @@ export interface NavalLedger {
   minesSwept: number;
   troopsLanded: number;
   troopsLostLanding: number;
+  /** Opposed landings attempted (one per lift group putting troops ashore on a hostile coast). */
+  assaultLandings: number;
+  firstAssaultTick?: number;
 }
 
 export interface NavalState {
@@ -42,7 +45,7 @@ export function isNavalFormation(f: Formation): boolean {
 export function ledger(world: World, nation: NationId): NavalLedger {
   return (world.slices.naval.ledger[nation] ??= {
     missilesFired: 0, interceptorsFired: 0, leakers: 0, torpedoesFired: 0, hullsSunk: 0, hullsDamaged: 0,
-    minesLaid: 0, minesSwept: 0, troopsLanded: 0, troopsLostLanding: 0,
+    minesLaid: 0, minesSwept: 0, troopsLanded: 0, troopsLostLanding: 0, assaultLandings: 0,
   });
 }
 
