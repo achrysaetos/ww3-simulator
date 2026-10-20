@@ -1,6 +1,6 @@
 import type { Formation, NodeId, PlatformClass, PlatformId, TargetClass } from '../../core/types';
 import { dominant, issue } from './forces';
-import { arsenal, cheapestPerKill, FireBudget, pickTarget, reachKm, withinKm, type StrikeTarget, type TargetGrid } from './strikes';
+import { arsenal, FireBudget, pickTarget, SamCover, reachKm, strikeOptions, withinKm, type StrikeTarget, type TargetGrid } from './strikes';
 import type { Plan } from './types';
 
 type AirRole = 'fighter' | 'multirole' | 'strike' | 'support';
@@ -48,6 +48,7 @@ export function planAir(p: Plan, targets: TargetGrid): void {
   };
   const cover = new Map<NodeId, number>(keys.map((k) => [k, 0]));
   const budget = new FireBudget(p);
+  const sams = new SamCover(p);
   const fighters = wings.filter((w) => roleOf(p, w) === 'fighter').length;
 
   const airSuperiority = (w: Formation, radius: number): boolean => {
@@ -64,18 +65,20 @@ export function planAir(p: Plan, targets: TargetGrid): void {
   };
   const strike = (w: Formation, radius: number): boolean => {
     const stock = arsenal(p, w);
-    const hits = new Map<string, boolean>();
+    const standoff = new Map<string, number>();
     const canHit = (t: StrikeTarget) => {
-      let h = hits.get(t.cls);
-      if (h === undefined) hits.set(t.cls, (h = stock.some((m) => (m.pk[t.cls] ?? 0) > 0) || hasFirepower(p, w, t.cls)));
-      return h;
+      let km = standoff.get(t.cls);
+      if (km === undefined) {
+        km = stock.reduce((best, m) => ((m.pk[t.cls] ?? 0) > 0 ? Math.max(best, m.rangeKm) : best), hasFirepower(p, w, t.cls) ? 0 : -1);
+        standoff.set(t.cls, km);
+      }
+      return km >= 0 && withinKm(map, w.node, t.node, radius + km) && sams.clear(t.node, km);
     };
-    const t = pickTarget(targets.near(w.node, radius), (t) => withinKm(map, w.node, t.node, radius) && canHit(t));
+    const longest = stock.reduce((best, m) => Math.max(best, m.rangeKm), 0);
+    const t = pickTarget(targets.near(w.node, radius + longest), canHit);
     if (!t) return false;
     const order = { posture: 'strike' as const, target: t.node, targetClass: t.cls, targetFormation: t.formation };
-    const m = cheapestPerKill(stock, t.cls);
-    if (m) budget.propose(w, m, t, order);
-    else issue(p, w, order);
+    budget.propose(w, strikeOptions(stock, t.cls).filter((m) => withinKm(map, w.node, t.node, radius + m.rangeKm)), t, order);
     return true;
   };
 

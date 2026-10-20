@@ -148,16 +148,27 @@ export function threatCategory(m: Munition): ThreatCategory | null {
 export interface ExposedFlight { g: AirGroup; n: number }
 
 /**
- * SAMs covering `node` engage aircraft of `nation` flying there. Only a share of
- * sorties ever gets inside a SAM's envelope with a firing solution; stealth shrinks
- * that share by visibility squared (detection area). Returns losses per flight.
+ * Share of the full SAM exposure a sortie takes when it releases `depthKm` inside the
+ * outermost hostile envelope: time under fire grows with depth. An Su-25 lofting
+ * rockets a few km past the edge of a Patriot's reach is far safer than a B-52 over
+ * Hanoi (estimate).
  */
-export function samVsAircraft(world: World, ctx: SimContext, pic: AirPicture, node: NodeId, nation: NationId, flights: ExposedFlight[], mission: 'strike' | 'counter_air', ewSupport: boolean, tally: LossTally): number[] {
+export function envelopeExposure(depthKm: number): number {
+  return Math.max(0, Math.min(1, depthKm / TUNING.fullExposureDepthKm));
+}
+
+/**
+ * SAMs covering `node` engage aircraft of `nation` flying there. Only a share of
+ * sorties ever gets inside a SAM's envelope with a firing solution, scaled by how deep
+ * they go (`exposure`); stealth shrinks that share by visibility squared (detection
+ * area). Returns losses per flight.
+ */
+export function samVsAircraft(world: World, ctx: SimContext, pic: AirPicture, node: NodeId, nation: NationId, flights: ExposedFlight[], mission: 'strike' | 'counter_air', ewSupport: boolean, tally: LossTally, exposure = 1): number[] {
   const sams = hostileDefenders(world, ctx, pic, node, nation);
   if (!sams.length) return flights.map(() => 0);
   const evasion = ewSupport ? TUNING.aircraftEvasionWithEw : TUNING.aircraftEvasion;
   return flights.map(({ g, n }) => {
-    let exposed = ctx.rng.binomial(n, TUNING.samExposure[mission] * visibility(g.platform.protection.stealth) ** 2);
+    let exposed = ctx.rng.binomial(n, TUNING.samExposure[mission] * exposure * visibility(g.platform.protection.stealth) ** 2);
     const before = exposed;
     for (const { d, shot } of layers(ctx, sams, node, 'aircraft', evasion)) {
       if (!exposed) break;

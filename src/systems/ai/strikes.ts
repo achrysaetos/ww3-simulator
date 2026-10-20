@@ -143,54 +143,85 @@ const STOCK_HORIZON_DAYS = 365;
 
 /**
  * A nation's daily firing budget per rationed munition: production plus stock
- * over the horizon. Planners propose strikes; `settle` lets each proposal fire
- * with probability budget / (what the proposing formations could fire), and
- * the rest hold on 'defend'.
+ * over the horizon. Planners propose strikes with the weapons that could do them,
+ * cheapest per kill first; `settle` lets each proposal fire its first weapon whose
+ * draw comes up, at probability budget / (what all proposals carrying it could
+ * fire), and the rest hold on 'defend'.
  */
 export class FireBudget {
-  private readonly proposals = new Map<MunitionId, { f: Formation; order: Omit<Order, 'issuedTick'>; t: StrikeTarget }[]>();
+  private readonly proposals: { f: Formation; options: Munition[]; t: StrikeTarget; order: Omit<Order, 'issuedTick'> }[] = [];
 
   constructor(private readonly p: Plan) {}
 
-  /** Strike now if the weapon for it is cheap, else queue it for `settle`. */
-  propose(f: Formation, m: Munition, t: StrikeTarget, order: Omit<Order, 'issuedTick'>): void {
-    if (m.unitCostUsdM < RATIONED_COST_USD_M) return issue(this.p, f, order);
-    const list = this.proposals.get(m.id);
-    if (list) list.push({ f, order, t });
-    else this.proposals.set(m.id, [{ f, order, t }]);
+  /** Strike now if the cheapest weapon for it is not rationed, else queue it for `settle`. */
+  propose(f: Formation, options: Munition[], t: StrikeTarget, order: Omit<Order, 'issuedTick'>): void {
+    if (!options.length || options[0].unitCostUsdM < RATIONED_COST_USD_M) return issue(this.p, f, order);
+    this.proposals.push({ f, options, t, order });
   }
 
   settle(): void {
     const { world, nation, ctx } = this.p;
-    for (const [m, list] of this.proposals) {
+    const capacity = new Map<MunitionId, number>();
+    for (const x of this.proposals) for (const m of x.options) capacity.set(m.id, (capacity.get(m.id) ?? 0) + dailyRounds(x.f, m.id, ctx.catalog));
+    const share = new Map<MunitionId, number>();
+    for (const [m, cap] of capacity) {
       let stock = world.nations[nation].stockpile[m] ?? 0;
       for (const f of this.p.index.byNation.get(nation) ?? []) if (f.kind === 'air_wing' || f.kind === 'missile') stock += f.magazine[m] ?? 0;
       const produced = (world.slices.economy?.nations[nation]?.lines[m]?.capacityPerMonth ?? 0) / 30;
-      const capacity = list.reduce((s, x) => s + dailyRounds(x.f, m, ctx.catalog), 0);
-      const share = capacity > 0 ? Math.min(1, (produced + stock / STOCK_HORIZON_DAYS) / capacity) : 0;
-      for (const x of list) {
-        if (ctx.rng.chance(share)) issue(this.p, x.f, x.order);
-        else {
-          x.t.assigned--;
-          issue(this.p, x.f, { posture: 'defend' });
-        }
+      share.set(m, cap > 0 ? Math.min(1, (produced + stock / STOCK_HORIZON_DAYS) / cap) : 0);
+    }
+    for (const x of this.proposals) {
+      const m = x.options.find((m) => ctx.rng.chance(share.get(m.id) ?? 0));
+      if (m) issue(this.p, x.f, { ...x.order, munition: m.id });
+      else {
+        x.t.assigned--;
+        issue(this.p, x.f, { posture: 'defend' });
       }
     }
-    this.proposals.clear();
+    this.proposals.length = 0;
   }
 }
 
-/** The weapon a formation would spend on a `cls` target: the cheapest per expected kill. */
-export function cheapestPerKill(stock: readonly Munition[], cls: TargetClass): Munition | undefined {
-  let best: Munition | undefined, bestCost = Infinity;
-  for (const m of stock) {
-    const pk = m.pk[cls] ?? 0;
-    if (pk > 0 && m.unitCostUsdM / pk < bestCost) {
-      best = m;
-      bestCost = m.unitCostUsdM / pk;
-    }
+/** Weapons in `stock` that can kill a `cls` target, cheapest per expected kill first. */
+export function strikeOptions(stock: readonly Munition[], cls: TargetClass): Munition[] {
+  const perKill = (m: Munition) => m.unitCostUsdM / (m.pk[cls] ?? 0);
+  return stock.filter((m) => (m.pk[cls] ?? 0) > 0).sort((a, b) => perKill(a) - perKill(b));
+}
+
+const INTERCEPTOR_KINDS: ReadonlySet<Munition['kind']> = new Set(['sam', 'abm', 'shorad_missile']);
+/**
+ * How far a strike sortie will fly into a known SAM envelope before releasing.
+ * Russian and Ukrainian strike aviation in 2023-25 released glide bombs and rockets
+ * at or just inside the edge of known coverage, not over it (judgment).
+ */
+const TOLERATED_DEPTH_KM = 15;
+
+/** Enemy SAM envelopes, for keeping strike aircraft out of coverage they cannot outrange. */
+export class SamCover {
+  private readonly sams: { node: NodeId; km: number }[] = [];
+
+  constructor(private readonly p: Plan) {
+    for (const e of p.enemies)
+      for (const f of p.index.byNation.get(e) ?? []) {
+        if (f.kind !== 'air_defense' && f.kind !== 'surface_group') continue;
+        let km = 0;
+        for (const [id, n] of Object.entries(f.magazine)) {
+          const m = n >= 1 ? p.ctx.catalog.munitions.get(id as MunitionId) : undefined;
+          if (m && INTERCEPTOR_KINDS.has(m.kind)) km = Math.max(km, m.rangeKm);
+        }
+        if (km > 0) this.sams.push({ node: f.node, km });
+      }
   }
-  return best;
+
+  /** Whether a weapon reaching `standoffKm` can hit `node` without flying deeper than tolerated into an envelope (SAMs taken to sit behind the target). */
+  clear(node: NodeId, standoffKm: number): boolean {
+    const { map } = this.p.ctx;
+    for (const s of this.sams) {
+      const need = s.km - standoffKm - TOLERATED_DEPTH_KM;
+      if (need > 0 && withinKm(map, s.node, node, need)) return false;
+    }
+    return true;
+  }
 }
 
 /** The munition with the best kill probability against `cls` that reaches `km`. */

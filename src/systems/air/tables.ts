@@ -106,8 +106,8 @@ export const BULK_AMMO_KINDS: ReadonlySet<MunitionKind> = new Set(['unguided_bom
  */
 export const COUNTER_DRONE = {
   kinds: new Set<MunitionKind>(['drone_oneway', 'loitering']),
-  maxKill: 0.8,
-  beltKm: 150,
+  maxKill: 0.85,
+  beltKm: 100,
   sampleKm: 50,
 };
 
@@ -179,6 +179,9 @@ export const AAM_VS_DRONE_FACTOR = 1.6;
 /** Munition kinds that are not strike weapons (air-to-air, interceptors, naval-only). */
 export const NON_STRIKE_KINDS: ReadonlySet<MunitionKind> = new Set(['aam', 'sam', 'abm', 'shorad_missile', 'small_arms', 'torpedo', 'mine', 'arm']);
 
+/** Target classes that move: a strike must find them, not just reach their cell. */
+export const MOBILE_TARGETS: ReadonlySet<TargetClass> = new Set(['soft', 'armor', 'infantry']);
+
 /** The target class a platform presents to a strike. */
 export const TARGET_OF_CLASS: Record<PlatformClass, TargetClass> = {
   infantry: 'infantry', mbt: 'armor', ifv: 'armor', apc: 'armor', recon: 'armor', sp_artillery: 'armor',
@@ -231,6 +234,26 @@ export const TUNING = {
    * and stealth ~0.05 % (F-117: 1 loss in ~2,100 sorties ODS + Allied Force).
    */
   samExposure: { strike: 0.05, counter_air: 0.03 } as Record<string, number>,
+  /**
+   * Release depth inside the outermost hostile SAM envelope at which a strike sortie
+   * takes the full samExposure (Linebacker II and ODS packages flew 100+ km inside
+   * layered SAM belts); shallower releases scale down linearly (estimate).
+   */
+  fullExposureDepthKm: 100,
+  /**
+   * Multiple of its unit cost at which a commander prices a lost airframe: crew,
+   * months to replace (Russia builds ~20-30 Su-34 a year), lost sortie generation.
+   * Both air forces over Ukraine in 2023-25 accepted very little SAM exposure,
+   * trading cheap bombs for standoff missiles near known batteries (judgment).
+   */
+  airframeLossAversion: 10,
+  /**
+   * Share of strikes on a mobile unit aimed at a current position, and the minutes it
+   * typically stays put once located. Judgment calls fitted to Ukraine 2023-25, where
+   * Russia's thousands of strikes destroyed a few SAM launchers a month (Oryx).
+   */
+  mobileTargetLocated: 0.5,
+  mobileTargetDwellMin: 60,
   /** Interceptor difficulty an aircraft presents (ECM, chaff, terrain masking, maneuver). */
   aircraftEvasion: 0.55,
   aircraftEvasionWithEw: 0.7,
@@ -256,8 +279,12 @@ export const TUNING = {
   /** Suppression of a SAM's channels per ARM fired at it, and the cap (ODS: Iraqi radars largely silenced, few destroyed). */
   armSuppressionPerShot: 0.15,
   maxArmSuppression: 0.8,
-  /** ARM kill probability is degraded by emission control and shutdown tactics. */
-  armPkFactor: 0.3,
+  /**
+   * ARM kill probability is degraded by emission control and shutdown tactics. ODS:
+   * ~2,000 HARMs silenced Iraqi radars but destroyed perhaps 100-200, ~5-10 % a shot;
+   * 0.1 x a 0.65 catalog pk gives ~6.5 % (estimate).
+   */
+  armPkFactor: 0.1,
   /** Fatigue gained per day of surge flying and recovered per day standing down; full fatigue halves sortie rate. */
   surgeFatiguePerDay: 0.15,
   restRecoveryPerDay: 0.3,

@@ -27,6 +27,8 @@ export interface NationMetrics {
   missilesIntercepted: number;
   /** Every strike weapon this nation fired, by how open-source tallies count it; intercepted = shot down by the enemy. */
   strikes: Partial<Record<StrikeWeaponClass, { fired: number; intercepted: number }>>;
+  /** The same, split by the nation holding the target cell (sea targets are left out). */
+  strikesOn: Record<string, Partial<Record<StrikeWeaponClass, { fired: number; intercepted: number }>>>;
   /**
    * Mean share of this nation's front-line cells (land cells touching an enemy-held
    * cell) over which it held air control at level >= 0.5, sampled every tick.
@@ -126,7 +128,7 @@ export function measureRun(engine: Engine, world: World, map: GameMap, days: num
   const per = new Map<string, NationMetrics>();
   const get = (n: string) => {
     let m = per.get(n);
-    if (!m) per.set(n, (m = { territoryDelta: 0, lossesByClass: {}, lossesByDomain: {}, casualties: 0, missilesFired: 0, missilesIntercepted: 0, strikes: {}, frontAirControl: 0, interceptors: { start: 0, end: 0 }, formationsDestroyed: 0, warSupport: 0, mobilization: 0, civilianDeaths: 0 }));
+    if (!m) per.set(n, (m = { territoryDelta: 0, lossesByClass: {}, lossesByDomain: {}, casualties: 0, missilesFired: 0, missilesIntercepted: 0, strikes: {}, strikesOn: {}, frontAirControl: 0, interceptors: { start: 0, end: 0 }, formationsDestroyed: 0, warSupport: 0, mobilization: 0, civilianDeaths: 0 }));
     return m;
   };
   const nukes: RunMetrics['nuclearDetonations'] = [];
@@ -141,9 +143,11 @@ export function measureRun(engine: Engine, world: World, map: GameMap, days: num
       else if (e.type === 'strike') {
         const m = catalog.munitions.get(e.munition);
         const cls = m ? strikeWeaponClass(m) : 'air_ordnance';
-        const by = get(e.by), t = (by.strikes[cls] ??= { fired: 0, intercepted: 0 });
-        t.fired += e.fired;
-        t.intercepted += e.intercepted;
+        const by = get(e.by), victim = map.isSea(e.target) ? undefined : world.control[e.target];
+        for (const t of [(by.strikes[cls] ??= { fired: 0, intercepted: 0 }), ...(victim ? [((by.strikesOn[victim] ??= {})[cls] ??= { fired: 0, intercepted: 0 })] : [])]) {
+          t.fired += e.fired;
+          t.intercepted += e.intercepted;
+        }
         if (cls === 'cruise_missile' || cls === 'ballistic_missile') {
           by.missilesFired += e.fired;
           by.missilesIntercepted += e.intercepted;

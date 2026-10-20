@@ -18,7 +18,7 @@ export function planMissiles(p: Plan, targets: TargetGrid): void {
     const t = pickTarget(targets.near(f.node, reach), (t) => withinKm(map, f.node, t.node, reach) && bestMunition(stock, t.cls, map.distanceKm(f.node, t.node)) !== undefined);
     if (!t) continue;
     const munition = bestMunition(stock, t.cls, map.distanceKm(f.node, t.node))!;
-    budget.propose(f, p.ctx.catalog.munition(munition), t, { posture: 'strike', target: t.node, targetClass: t.cls, targetFormation: t.formation, munition });
+    budget.propose(f, [p.ctx.catalog.munition(munition)], t, { posture: 'strike', target: t.node, targetClass: t.cls, targetFormation: t.formation, munition });
   }
   budget.settle();
 }
