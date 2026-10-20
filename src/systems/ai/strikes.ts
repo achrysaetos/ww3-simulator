@@ -1,8 +1,9 @@
 import { relation } from '../../core/engine';
 import type { GameMap } from '../../core/map';
-import type { Formation, FormationId, FormationKind, Munition, MunitionId, NationId, NodeId, PlatformId, TargetClass } from '../../core/types';
+import type { Formation, FormationId, FormationKind, Munition, MunitionId, NationId, NodeId, Order, PlatformId, TargetClass } from '../../core/types';
 import { rung } from '../diplomacy/wars';
-import { isGround } from './forces';
+import { dailyRounds } from '../air';
+import { isGround, issue } from './forces';
 import type { Plan } from './types';
 
 export interface StrikeTarget {
@@ -109,14 +110,87 @@ export function strikeTargets(p: Plan, battleArea: Set<number>): TargetGrid {
   return new TargetGrid(out.filter(allowed).sort((a, b) => b.value - a.value || a.node - b.node), map);
 }
 
-/** Conventional munitions a formation has in its magazine. */
+/**
+ * Conventional munitions in a formation's magazine that one of its platforms can
+ * launch (an ORBAT's extra rounds for a launcher the formation lacks are dead stock).
+ */
 export function arsenal(p: Plan, f: Formation): Munition[] {
   const out: Munition[] = [];
   for (const [id, n] of Object.entries(f.magazine)) {
     const m = n > 0 ? p.ctx.catalog.munitions.get(id as MunitionId) : undefined;
-    if (m && !m.yieldKt) out.push(m);
+    if (m && !m.yieldKt && launchable(p, f, m.id)) out.push(m);
   }
   return out;
+}
+
+function launchable(p: Plan, f: Formation, m: MunitionId): boolean {
+  for (const [id, n] of Object.entries(f.equipment)) if (n > 0 && p.ctx.catalog.platform(id as PlatformId).loadout.some((l) => l.munition === m)) return true;
+  return false;
+}
+
+/**
+ * Precision weapons above this unit cost are rationed; drones, glide kits, bombs
+ * and rockets are fired as fast as launchers and sorties allow.
+ */
+const RATIONED_COST_USD_M = 0.3;
+/**
+ * Days a nation spreads its precision-munition stocks over, on top of new
+ * production. Russia's 2023-25 launches tracked production plus a slow draw on
+ * reserves (Ukrainian GUR stock estimates vs monthly launch tallies imply
+ * roughly a year of reserve held back). A judgment, not a doctrine figure.
+ */
+const STOCK_HORIZON_DAYS = 365;
+
+/**
+ * A nation's daily firing budget per rationed munition: production plus stock
+ * over the horizon. Planners propose strikes; `settle` lets each proposal fire
+ * with probability budget / (what the proposing formations could fire), and
+ * the rest hold on 'defend'.
+ */
+export class FireBudget {
+  private readonly proposals = new Map<MunitionId, { f: Formation; order: Omit<Order, 'issuedTick'>; t: StrikeTarget }[]>();
+
+  constructor(private readonly p: Plan) {}
+
+  /** Strike now if the weapon for it is cheap, else queue it for `settle`. */
+  propose(f: Formation, m: Munition, t: StrikeTarget, order: Omit<Order, 'issuedTick'>): void {
+    if (m.unitCostUsdM < RATIONED_COST_USD_M) return issue(this.p, f, order);
+    const list = this.proposals.get(m.id);
+    if (list) list.push({ f, order, t });
+    else this.proposals.set(m.id, [{ f, order, t }]);
+  }
+
+  settle(): void {
+    const { world, nation, ctx } = this.p;
+    for (const [m, list] of this.proposals) {
+      let stock = world.nations[nation].stockpile[m] ?? 0;
+      for (const f of this.p.index.byNation.get(nation) ?? []) if (f.kind === 'air_wing' || f.kind === 'missile') stock += f.magazine[m] ?? 0;
+      const produced = (world.slices.economy?.nations[nation]?.lines[m]?.capacityPerMonth ?? 0) / 30;
+      const capacity = list.reduce((s, x) => s + dailyRounds(x.f, m, ctx.catalog), 0);
+      const share = capacity > 0 ? Math.min(1, (produced + stock / STOCK_HORIZON_DAYS) / capacity) : 0;
+      for (const x of list) {
+        if (ctx.rng.chance(share)) issue(this.p, x.f, x.order);
+        else {
+          x.t.assigned--;
+          issue(this.p, x.f, { posture: 'defend' });
+        }
+      }
+    }
+    this.proposals.clear();
+  }
+}
+
+/** The weapon a formation would spend on a `cls` target: the cheapest per expected kill. */
+export function cheapestPerKill(stock: readonly Munition[], cls: TargetClass): Munition | undefined {
+  let best: Munition | undefined, bestCost = Infinity;
+  for (const m of stock) {
+    const pk = m.pk[cls] ?? 0;
+    if (pk > 0 && m.unitCostUsdM / pk < bestCost) {
+      best = m;
+      bestCost = m.unitCostUsdM / pk;
+    }
+  }
+  return best;
 }
 
 /** The munition with the best kill probability against `cls` that reaches `km`. */

@@ -4,13 +4,15 @@
  * the defended envelope; penetrating aircraft face enemy fighters and SAMs first.
  * All weapons arriving at a node in a tick form one raid, so mass salvos saturate.
  */
+import type { Catalog } from '../../core/catalog';
 import type { SimContext } from '../../core/engine';
 import type { Formation, Munition, MunitionId, NationId, NodeId, Platform, PlatformId, TargetClass, World } from '../../core/types';
-import { defendRaid, hostileDefenders, samVsAircraft, type RaidStream } from './iads';
+import { defendRaid, hostileDefenders, overflightKm, samVsAircraft, type RaidStream } from './iads';
 import { takeLosses, type LossTally } from './losses';
 import { nodeDistance, type AirGroup, type AirPicture } from './picture';
+import { visibility } from './combat';
 import { emitBattle, hasSupport } from './superiority';
-import { LAUNCHER, NON_STRIKE_KINDS, STRIKE_ROLES, TARGET_OF_CLASS, TUNING } from './tables';
+import { AIRFRAME, DRONE_SITE_LAUNCHES_PER_DAY, isRoundOnRail, LAUNCHER, NON_STRIKE_KINDS, STRIKE_ROLES, TARGET_OF_CLASS, TUNING } from './tables';
 
 export interface AirSlice {
   /** Runway capacity per airbase node after cratering, 0..1; absent = intact. */
@@ -39,6 +41,24 @@ export function isStrikeMunition(m: Munition): boolean {
 
 const loadOf = (p: Platform, m: MunitionId) => p.loadout.find((l) => l.munition === m)?.count ?? 0;
 
+/**
+ * Rounds of `m` a formation can put in the air per day at surge tempo: sorties x
+ * load for aircraft, one round per launch for ground launchers. What a planner
+ * budgets against; the tick's actual rate also depends on fuel, runway and fatigue.
+ */
+export function dailyRounds(f: Formation, m: MunitionId, catalog: Catalog): number {
+  let rounds = 0;
+  for (const [pid, n] of Object.entries(f.equipment) as [PlatformId, number][]) {
+    const p = catalog.platform(pid);
+    const load = loadOf(p, m);
+    if (n <= 0 || load <= 0) continue;
+    if (f.kind === 'air_wing') rounds += n * (AIRFRAME[p.class]?.surgePerDay ?? 0) * load;
+    else if (isRoundOnRail(p)) rounds += DRONE_SITE_LAUNCHES_PER_DAY;
+    else rounds += n * (LAUNCHER[p.class]?.launchesPerDay ?? 0);
+  }
+  return rounds * f.readiness;
+}
+
 /** Air groups or ground launchers of a striking formation, with how far each can put a weapon. */
 function carriersOf(f: Formation, pic: AirPicture, ctx: SimContext, world: World): Carrier[] {
   if (f.kind === 'air_wing')
@@ -49,7 +69,8 @@ function carriersOf(f: Formation, pic: AirPicture, ctx: SimContext, world: World
     const platform = ctx.catalog.platform(pid);
     const rate = LAUNCHER[platform.class];
     if (!rate || n <= 0) continue;
-    const expected = n * rate.launchesPerDay * f.readiness * (world.dtHours / 24);
+    const perDay = isRoundOnRail(platform) ? DRONE_SITE_LAUNCHES_PER_DAY : n * rate.launchesPerDay;
+    const expected = perDay * f.readiness * (world.dtHours / 24);
     const launches = Math.floor(expected) + (ctx.rng.chance(expected % 1) ? 1 : 0);
     if (launches > 0) out.push({ platform, n: launches, reachKm: 0 });
   }
@@ -57,21 +78,29 @@ function carriersOf(f: Formation, pic: AirPicture, ctx: SimContext, world: World
 }
 
 /**
- * Pick the weapon: the order's munition if given, else the one with the best pk
- * against the target class among those carried, in the magazine, and in reach,
- * preferring weapons that outrange the defended envelope (standoff), then cheaper.
+ * Pick the weapon: the order's munition if given, else the cheapest per expected
+ * kill among those carried, in the magazine, and in reach. A weapon that does not
+ * outrange the defended envelope is charged the share of the launching aircraft
+ * the sortie risks, so standoff missiles win only where penetrating is dear:
+ * Russia's KAB glide bombs (~USD 40k) did the front-line work in 2024-25 while
+ * Kh-59/69s (~USD 1M) went to defended rear targets.
  */
 function chooseMunition(f: Formation, carriers: Carrier[], tc: TargetClass, dist: number, ringKm: number, ctx: SimContext): Munition | undefined {
-  let best: Munition | undefined, bestScore = 0;
+  let best: Munition | undefined, bestCost = Infinity;
   for (const [mid, n] of Object.entries(f.magazine) as [MunitionId, number][]) {
     if (n < 1 || (f.order.munition && f.order.munition !== mid)) continue;
     const m = ctx.catalog.munitions.get(mid);
-    if (!m || !isStrikeMunition(m)) continue;
-    if (!carriers.some((c) => loadOf(c.platform, mid) > 0 && c.reachKm + m.rangeKm >= dist)) continue;
-    const score = effectPk(m, tc) * (m.rangeKm >= ringKm ? 1 : 0.6);
-    if (score > bestScore || (score === bestScore && best && m.unitCostUsdM < best.unitCostUsdM)) {
-      best = m;
-      bestScore = score;
+    const pk = m && isStrikeMunition(m) ? effectPk(m, tc) : 0;
+    if (!m || pk <= 0) continue;
+    for (const c of carriers) {
+      const load = loadOf(c.platform, mid);
+      if (load <= 0 || c.reachKm + m.rangeKm < dist) continue;
+      const risk = c.group && m.rangeKm < ringKm ? (TUNING.samExposure.strike * visibility(c.platform.protection.stealth) ** 2 * c.platform.unitCostUsdM) / load : 0;
+      const cost = (m.unitCostUsdM + risk) / pk;
+      if (cost < bestCost) {
+        best = m;
+        bestCost = cost;
+      }
     }
   }
   return best;
@@ -158,7 +187,7 @@ function resolveRaid(world: World, ctx: SimContext, pic: AirPicture, slice: AirS
 
   const live = pkgs.flatMap((p) => (p.strike && p.strike.weapons > 0 ? [{ f: p.f, ...p.strike }] : []));
   for (const p of live) p.f.magazine[p.munition.id] -= p.weapons;
-  const streams: RaidStream[] = live.map((p) => ({ munition: p.munition, count: p.weapons }));
+  const streams: RaidStream[] = live.map((p) => ({ munition: p.munition, count: p.weapons, overflightKm: overflightKm(world, ctx, pic, p.f.node, target, attacker) }));
   const leaked = defendRaid(world, ctx, pic, target, attacker, streams);
   live.forEach((p, i) => {
     const damage = applyEffect(world, ctx, pic, slice, target, attacker, p.munition, p.targetClass, leaked[i], tally);

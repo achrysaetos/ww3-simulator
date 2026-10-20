@@ -7,13 +7,14 @@ import type { SimContext, System } from '../../core/engine';
 import type { Command, Formation, FormationKind, MunitionId, PlatformId, Posture, World } from '../../core/types';
 import { combatRadiusKm } from './combat';
 import { buildPicture } from './picture';
+import { rearm } from './rearm';
 import { isStrikeMunition, resolveStrikes, type AirSlice } from './strike';
 import { resolveAirSuperiority } from './superiority';
 import { AIRFRAME, LAUNCHER, OFFENSIVE_POSTURES, STRIKE_ROLES, TUNING } from './tables';
 
 export { combatRadiusKm, resolveAirBattle, visibility } from './combat';
 export { engagementCycles, interceptSalvo, type SalvoDefense, type SalvoResult, type SalvoThreat, type ShotDoctrine } from './intercept';
-export type { AirSlice } from './strike';
+export { dailyRounds, type AirSlice } from './strike';
 
 declare module '../../core/types' {
   interface Slices {
@@ -43,6 +44,7 @@ export const airWar: System = {
     resolveAirSuperiority(world, ctx, pic);
     resolveStrikes(world, ctx, pic, slice);
     recover(world, slice);
+    rearm(world, ctx);
   },
 };
 

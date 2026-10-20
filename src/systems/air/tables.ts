@@ -3,7 +3,7 @@
  * platform classes or munition kinds lives here, keyed by class or kind, so the
  * system code reads one row instead of branching.
  */
-import type { MunitionKind, PlatformClass, Posture, TargetClass } from '../../core/types';
+import type { Munition, MunitionKind, Platform, PlatformClass, Posture, TargetClass } from '../../core/types';
 
 export type AirRole = 'counter_air' | 'strike' | 'bomber' | 'awacs' | 'tanker' | 'ew' | 'isr' | 'helo' | 'transport';
 
@@ -65,6 +65,56 @@ export const LAUNCHER: Partial<Record<PlatformClass, { launchesPerDay: number }>
   loitering_munition_launcher: { launchesPerDay: 5 },
 };
 
+/**
+ * A one-way-drone row whose ORBAT count is drones staged on rails, not launch
+ * trucks (shahed_136: "one drone on its rail", load 1). Its launch rate is set by
+ * the site's crews, not by how many drones are staged.
+ */
+export function isRoundOnRail(p: Platform): boolean {
+  return p.class === 'loitering_munition_launcher' && p.loadout.length === 1 && p.loadout[0].count === 1;
+}
+
+/**
+ * Drones one launch site (an ORBAT launch group) puts up per day at full readiness.
+ * Ukrainian Air Force monthly tallies for 2025: ~2,500 (Jan) rising to ~6,300 (Jul)
+ * Shahed/Geran plus Gerbera decoys from 6-8 sites, i.e. ~25-35 per site per day on
+ * average with single-night surges of 100+ per site (810 drones on 7 Sep 2025).
+ * 45 x the groups' 0.65 readiness gives ~30 per site per day (estimate).
+ */
+export const DRONE_SITE_LAUNCHES_PER_DAY = 45;
+
+/**
+ * Rearming from national stocks. A formation's depot restores up to this share of its
+ * full load per day (Iskander transloaders, Patriot reload trucks, airbase munitions
+ * convoys turning around in 1-2 days; estimate). Guided rounds come out of the
+ * national stockpile item by item; the kinds below are mass-produced iron and come
+ * out of bulk ammunition tonnage by weight (Russia's FAB-500/1500 plus UMPK kits,
+ * ~100+ glide bombs a day in 2024-25 per Ukrainian Air Force reports).
+ */
+export const REARM_SHARE_PER_DAY = 0.5;
+export const BULK_AMMO_KINDS: ReadonlySet<MunitionKind> = new Set(['unguided_bomb', 'glide_bomb', 'rocket']);
+
+/**
+ * The ground counter-drone belt: mobile fire groups (machine guns, Gepards,
+ * MANPADS), EW jamming and spoofing, and interceptor drones spread across a
+ * defending nation's territory. A slow one-way drone flying `km` over defended
+ * ground is downed with probability maxKill x (1 - exp(-(1 - difficulty) km / beltKm)).
+ * Some always get through (routing around known groups, saturation on mass-raid
+ * nights, weather), so the belt alone never exceeds maxKill. Fitted to Ukrainian Air
+ * Force 2024-25 reports of ~80-90 % of Shaheds downed or "locationally lost" to EW,
+ * of which SAMs and fighters took a minority (estimate; UAF and ISW daily summaries).
+ */
+export const COUNTER_DRONE = {
+  kinds: new Set<MunitionKind>(['drone_oneway', 'loitering']),
+  maxKill: 0.8,
+  beltKm: 150,
+  sampleKm: 50,
+};
+
+export function beltKillProbability(overflightKm: number, difficulty: number): number {
+  return COUNTER_DRONE.maxKill * (1 - Math.exp((-(1 - difficulty) * overflightKm) / COUNTER_DRONE.beltKm));
+}
+
 /** How a threat behaves for air defense. */
 export type ThreatCategory = 'aircraft' | 'air_breathing' | 'ballistic';
 
@@ -79,16 +129,32 @@ export const THREAT_OF_KIND: Record<MunitionKind, ThreatCategory | null> = {
 };
 
 /**
- * Which threats each interceptor kind engages. Long-range SAMs (Patriot PAC-3,
- * S-400) do terminal TBM defense; dedicated ABMs (Arrow, THAAD, SM-3) only engage
- * ballistic targets; SHORAD missiles cannot catch ballistic reentry vehicles.
+ * Which threats each interceptor kind engages. Long-range SAMs (Patriot PAC-2,
+ * S-400) do terminal TBM defense; SHORAD missiles cannot catch ballistic reentry
+ * vehicles. The catalog's 'abm' kind mixes dedicated exo/upper-tier ABMs (Arrow,
+ * THAAD, SM-3: ballistic only) with dual-role hit-to-kill rounds (PAC-3 MSE,
+ * Aster 30, Stunner) that also kill aircraft and cruise missiles; an 'abm' with an
+ * aircraft pk is the dual-role kind.
  */
-export const INTERCEPTOR_ENGAGES: Partial<Record<MunitionKind, readonly ThreatCategory[]>> = {
+const INTERCEPTOR_ENGAGES: Partial<Record<MunitionKind, readonly ThreatCategory[]>> = {
   sam: ['aircraft', 'air_breathing', 'ballistic'],
   abm: ['ballistic'],
   shorad_missile: ['aircraft', 'air_breathing'],
   aam: ['aircraft', 'air_breathing'],
 };
+
+/**
+ * Medium-range SAMs (NASAMS, IRIS-T SLM, Buk-M1, Kub) have no terminal TBM
+ * capability; the ones that do (Patriot PAC-2, S-300/400, HQ-9, Buk-M3, SM-6) all
+ * reach 70 km or more against aircraft.
+ */
+const TBM_CAPABLE_SAM_KM = 70;
+
+export function engages(m: Munition, cat: ThreatCategory): boolean {
+  if (m.kind === 'abm' && m.pk.aircraft !== undefined) return true;
+  if (m.kind === 'sam' && cat === 'ballistic') return m.rangeKm >= TBM_CAPABLE_SAM_KM;
+  return INTERCEPTOR_ENGAGES[m.kind]?.includes(cat) ?? false;
+}
 
 /**
  * Share of an interceptor's published range at which it can engage each threat.
@@ -98,9 +164,9 @@ export const INTERCEPTOR_ENGAGES: Partial<Record<MunitionKind, readonly ThreatCa
  */
 const COVERAGE_SHARE: Record<ThreatCategory, number> = { aircraft: 1, air_breathing: 0.5, ballistic: 0.25 };
 
-/** Dedicated ABMs (Arrow, THAAD, SM-3) are built around the ballistic footprint. */
+/** ABM rounds are built around the ballistic footprint; against air-breathing threats they see what any radar sees. */
 export function coverageShare(interceptor: MunitionKind, cat: ThreatCategory): number {
-  return interceptor === 'abm' ? 1 : COVERAGE_SHARE[cat];
+  return interceptor === 'abm' && cat === 'ballistic' ? 1 : COVERAGE_SHARE[cat];
 }
 
 /**
@@ -195,6 +261,14 @@ export const TUNING = {
   /** Fatigue gained per day of surge flying and recovered per day standing down; full fatigue halves sortie rate. */
   surgeFatiguePerDay: 0.15,
   restRecoveryPerDay: 0.3,
+  /**
+   * Cost exchange: a battery spends a round on a weapon only if the round costs at most
+   * this multiple of it, or under the floor. Ukraine kept Patriot and NASAMS rounds for
+   * missiles and fed IRIS-T, Stingers and guns to Shaheds; nobody fires PAC-3s at
+   * USD 40k glide bombs (2023-25 reporting; ratio and floor are estimates).
+   */
+  interceptorCostRatio: 10,
+  interceptorCostFloorUsdM: 0.5,
   /** Share of a defending fighter force's sorties available as an intercept layer vs cruise missiles and drones. */
   fighterInterceptShare: 0.5,
   /** Hours on station or in ingress beyond transit per sortie. */

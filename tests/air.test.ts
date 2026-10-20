@@ -118,24 +118,24 @@ describe('integrated air defense', () => {
     expect(t.world.theater.infrastructure[kyiv]).toBeLessThan(1);
   });
 
-  it('runs interceptor stocks down until drones fly through unopposed', () => {
+  it('runs interceptor stocks down until only the counter-drone belt stops drones', () => {
     const t = airWorld();
     t.war('RUS', 'UKR');
     const kyiv = t.node(...KYIV);
-    const ad = battery(t, 'UKR', kyiv, { x_patriot: 1 });
+    const ad = battery(t, 'UKR', kyiv, { x_shorad: 1 });
     launchers(t, 'RUS', t.node(53.9, 27.6), { x_drone_rack: 20 }, { posture: 'strike', target: kyiv, targetClass: 'structure' });
     const stock: number[] = [];
-    const intercepted: number[] = [];
-    for (let i = 0; i < 6; i++) {
+    const rate: number[] = [];
+    for (let i = 0; i < 8; i++) {
       const s = t.strikes(t.tick());
-      stock.push(ad.magazine[mid('x_pac3')]);
-      intercepted.push(s.reduce((a, e) => a + e.intercepted, 0));
+      stock.push(ad.magazine[mid('x_shorad_msl')]);
+      rate.push(s.reduce((a, e) => a + e.intercepted, 0) / s.reduce((a, e) => a + e.fired, 0));
     }
-    expect(stock[0]).toBeLessThan(32);
+    expect(stock[0]).toBeLessThan(24);
     expect(stock.at(-1)).toBe(0);
     for (let i = 1; i < stock.length; i++) expect(stock[i]).toBeLessThanOrEqual(stock[i - 1]);
-    expect(intercepted[0]).toBeGreaterThan(0);
-    expect(intercepted.at(-1)).toBe(0);
+    expect(rate[0]).toBeGreaterThan(rate.at(-1)! + 0.1);
+    expect(rate.at(-1)).toBeLessThan(0.85);
   });
 
   it('suppression with anti-radiation missiles lets more of a cruise raid through', () => {

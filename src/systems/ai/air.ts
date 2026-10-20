@@ -1,6 +1,6 @@
 import type { Formation, NodeId, PlatformClass, PlatformId, TargetClass } from '../../core/types';
 import { dominant, issue } from './forces';
-import { arsenal, pickTarget, reachKm, withinKm, type StrikeTarget, type TargetGrid } from './strikes';
+import { arsenal, cheapestPerKill, FireBudget, pickTarget, reachKm, withinKm, type StrikeTarget, type TargetGrid } from './strikes';
 import type { Plan } from './types';
 
 type AirRole = 'fighter' | 'multirole' | 'strike' | 'support';
@@ -47,6 +47,7 @@ export function planAir(p: Plan, targets: TargetGrid): void {
     return !!c && p.enemies.has(c.nation);
   };
   const cover = new Map<NodeId, number>(keys.map((k) => [k, 0]));
+  const budget = new FireBudget(p);
   const fighters = wings.filter((w) => roleOf(p, w) === 'fighter').length;
 
   const airSuperiority = (w: Formation, radius: number): boolean => {
@@ -71,7 +72,10 @@ export function planAir(p: Plan, targets: TargetGrid): void {
     };
     const t = pickTarget(targets.near(w.node, radius), (t) => withinKm(map, w.node, t.node, radius) && canHit(t));
     if (!t) return false;
-    issue(p, w, { posture: 'strike', target: t.node, targetClass: t.cls, targetFormation: t.formation });
+    const order = { posture: 'strike' as const, target: t.node, targetClass: t.cls, targetFormation: t.formation };
+    const m = cheapestPerKill(stock, t.cls);
+    if (m) budget.propose(w, m, t, order);
+    else issue(p, w, order);
     return true;
   };
 
@@ -97,6 +101,7 @@ export function planAir(p: Plan, targets: TargetGrid): void {
       }
     }
   }
+  budget.settle();
 }
 
 /** Organic weapons (guns, rockets) able to hit `cls`, for aircraft without a suitable missile or bomb. */
