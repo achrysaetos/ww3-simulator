@@ -9,9 +9,10 @@ import type { GameMap } from '../core/map';
 import type { FormationId, NodeId, SimEvent } from '../core/types';
 import { rgba, type Palette } from './colors';
 import { eventNode } from './events';
-import { NO_NATION, type ClientState } from './snapshot';
-import { drawCounter } from './symbols';
-import { baseProjection, IDENTITY, type ViewTransform } from './view';
+import { NO_NATION, type ClientState, type FormationView } from './snapshot';
+import { clusterStacks, gridSize, indexByNode, type Stack } from './stacks';
+import { CounterSprites, type CounterBox } from './symbols';
+import { baseProjection, IDENTITY, MAX_ZOOM, type ViewTransform } from './view';
 
 export interface Overlays {
   air: boolean;
@@ -40,13 +41,20 @@ interface Flash {
 
 const FLASH_MS: Record<Flash['kind'], number> = { battle: 900, strike: 1100, capture: 700, nuclear: 4000 };
 const ECHELON_W: Record<string, number> = { battalion: 13, squadron: 13, flotilla: 15, brigade: 16, wing: 17, division: 19, task_group: 19, corps: 21, army: 23, fleet: 23 };
+/** Target on-screen size of a stacking cell. */
+const CELL_PX = 34;
+/** On-screen width of one map node at which its stack fans out into individual counters. */
+const FAN_PX = 48;
+const FAN_SLOT_PX = 26;
+/** How far the cached base layer extends past each edge of the view, CSS px. */
+const PAN_MARGIN = 220;
 
-export interface HitBox {
-  id: FormationId;
-  x: number;
-  y: number;
-  w: number;
-  h: number;
+export interface HitBox extends CounterBox {
+  /** Strongest first. */
+  ids: FormationId[];
+  node: NodeId;
+  /** Zoom that opens this stack up; null when it cannot open further. */
+  zoomTo: number | null;
 }
 
 export class MapRenderer {
@@ -70,11 +78,23 @@ export class MapRenderer {
   private coast: Path2D | null = null;
   private topo: { borders: GeoPermissibleObjects; land: GeoPermissibleObjects } | null = null;
   private territory = new Map<number, Path2D>();
+  /** Control as of the last territory build, to rebuild only the nations whose cells changed hands. */
+  private builtControl: Uint16Array | null = null;
   private front = new Path2D();
   private builtFor = { control: -1, wars: '', size: '' };
   private flashes: Flash[] = [];
   private airPatterns = new Map<number, CanvasPattern>();
   private sortedCities: GameMap['cities'] | null = null;
+  private readonly sprites = new CounterSprites();
+  private base: OffscreenCanvas | null = null;
+  private baseAt: ViewTransform = IDENTITY;
+  private baseFor: { air: Float32Array | null; control: number; overlays: Overlays | null; topo: Path2D | null } = { air: null, control: -1, overlays: null, topo: null };
+  /** Projected width of one degree of longitude at zoom 1. */
+  private degPx = 1;
+  private byNode = new Map<NodeId, FormationView[]>();
+  private indexedFrom: readonly FormationView[] | null = null;
+  private stacks: Stack[] = [];
+  private stacksGrid = -1;
 
   constructor(private readonly canvas: HTMLCanvasElement, readonly map: GameMap, private readonly palette: Palette) {
     this.ctx = canvas.getContext('2d')!;
@@ -110,7 +130,11 @@ export class MapRenderer {
     this.canvas.width = Math.round(width * dpr);
     this.canvas.height = Math.round(height * dpr);
     this.proj = baseProjection(width, height);
+    this.sprites.setDpr(dpr);
     const { map, proj } = this;
+    this.degPx = proj([1, 0])![0] - proj([0, 0])![0];
+    this.base = null;
+    this.stacksGrid = -1;
     this.corners = new Float32Array(map.size * 8);
     this.center = new Float32Array(map.size * 2);
     for (let n = 0; n < map.size; n++) {
@@ -143,6 +167,8 @@ export class MapRenderer {
     for (let n = map.landCount; n < map.size; n++) this.quad(this.seaGrid, n);
     this.buildTopology();
     this.builtFor.size = `${width}x${height}`;
+    this.territory.clear();
+    this.builtControl = null;
     this.builtFor.control = -1;
   }
 
@@ -191,15 +217,22 @@ export class MapRenderer {
       atWar.add(`${b}|${a}`);
     }
     if (this.builtFor.control !== state.controlVersion) {
-      this.territory.clear();
-      const ctl = state.control;
+      const ctl = state.control, prev = this.builtControl;
+      const dirty = new Set<number>();
+      for (let n = 0; n < this.map.landCount; n++) {
+        if (!prev) dirty.add(ctl[n]);
+        else if (prev[n] !== ctl[n]) dirty.add(ctl[n]).add(prev[n]);
+      }
+      dirty.delete(NO_NATION);
+      for (const owner of dirty) this.territory.delete(owner);
       for (let n = 0; n < this.map.landCount; n++) {
         const owner = ctl[n];
-        if (owner === NO_NATION) continue;
+        if (!dirty.has(owner)) continue;
         let p = this.territory.get(owner);
         if (!p) this.territory.set(owner, (p = new Path2D()));
         this.quad(p, n);
       }
+      this.builtControl = ctl.slice(0, this.map.landCount);
     }
     this.front = new Path2D();
     const e = this.orthoEdges, ep = this.edgeProj, ctl = state.control;
@@ -215,7 +248,7 @@ export class MapRenderer {
     this.builtFor.wars = state.warsKey;
   }
 
-  private airPattern(nation: number, nationId: string): CanvasPattern | null {
+  private airPattern(ctx: CanvasRenderingContext2D, nation: number, nationId: string): CanvasPattern | null {
     const cached = this.airPatterns.get(nation);
     if (cached) return cached;
     const [r, g, b] = this.palette.of(nationId).rgb;
@@ -228,21 +261,62 @@ export class MapRenderer {
     c.moveTo(-2, 2); c.lineTo(2, -2);
     c.moveTo(6, 10); c.lineTo(10, 6);
     c.stroke();
-    const p = this.ctx.createPattern(tile, 'repeat');
+    const p = ctx.createPattern(tile, 'repeat');
     if (p) this.airPatterns.set(nation, p);
     return p;
   }
 
   render(input: RenderInput, now: number) {
     const { ctx, t, dpr } = this;
-    const { state, nationIds, overlays } = input;
+    const { state, nationIds } = input;
     if (this.builtFor.control !== state.controlVersion || this.builtFor.wars !== state.warsKey) this.rebuildTerritory(state, nationIds);
-    const nationAt = (i: number) => nationIds[i] ?? '';
-
+    const dx = t.x - this.baseAt.x, dy = t.y - this.baseAt.y;
+    if (!this.base || this.baseAt.k !== t.k || Math.abs(dx) > PAN_MARGIN || Math.abs(dy) > PAN_MARGIN || this.baseFor.air !== state.air || this.baseFor.control !== state.controlVersion || this.baseFor.overlays !== input.overlays || this.baseFor.topo !== this.coast) {
+      this.renderBase(input);
+      this.baseAt = { ...t };
+      this.baseFor = { air: state.air, control: state.controlVersion, overlays: input.overlays, topo: this.coast };
+    }
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = '#05080d';
     ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
-    ctx.setTransform(dpr * t.k, 0, 0, dpr * t.k, dpr * t.x, dpr * t.y);
+    ctx.drawImage(this.base!, Math.round((t.x - this.baseAt.x - PAN_MARGIN) * dpr), Math.round((t.y - this.baseAt.y - PAN_MARGIN) * dpr));
+
+    if (input.hoverNode !== null && input.targeting) {
+      ctx.setTransform(dpr * t.k, 0, 0, dpr * t.k, dpr * t.x, dpr * t.y);
+      const p = new Path2D();
+      this.quad(p, input.hoverNode);
+      ctx.fillStyle = input.targeting === 'nuclear' ? 'rgba(255,230,80,0.45)' : 'rgba(255,255,255,0.25)';
+      ctx.fill(p);
+      ctx.strokeStyle = input.targeting === 'nuclear' ? '#ffe14d' : '#ffffff';
+      ctx.lineWidth = 1.5 / t.k;
+      ctx.stroke(p);
+    }
+
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    this.drawOrders(input);
+    this.drawFormations(input);
+    this.drawFlashes(now);
+  }
+
+  /**
+   * Everything that changes only with a snapshot, the zoom or the overlay
+   * toggles goes into an offscreen bitmap PAN_MARGIN larger than the view on
+   * each side. Panning within the margin, and animating flashes, then cost
+   * one blit instead of rasterizing coastlines and 193 territories again.
+   */
+  private renderBase(input: RenderInput) {
+    const { t, dpr } = this;
+    const w = Math.ceil((this.width + 2 * PAN_MARGIN) * dpr), h = Math.ceil((this.height + 2 * PAN_MARGIN) * dpr);
+    if (!this.base || this.base.width !== w || this.base.height !== h) {
+      this.base = new OffscreenCanvas(w, h);
+      this.airPatterns.clear();
+    }
+    const ctx = this.base.getContext('2d')! as unknown as CanvasRenderingContext2D;
+    const { state, nationIds, overlays } = input;
+    const nationAt = (i: number) => nationIds[i] ?? '';
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    ctx.setTransform(dpr * t.k, 0, 0, dpr * t.k, dpr * (t.x + PAN_MARGIN), dpr * (t.y + PAN_MARGIN));
     const px = 1 / t.k;
 
     ctx.fillStyle = '#0c1724';
@@ -256,16 +330,16 @@ export class MapRenderer {
     }
 
     for (const [nation, path] of this.territory) {
-      const [h, s, l] = this.palette.of(nationAt(nation)).hsl;
-      ctx.fillStyle = `hsl(${h} ${s * 0.85}% ${l * 0.62}%)`;
+      const [hu, sa, li] = this.palette.of(nationAt(nation)).hsl;
+      ctx.fillStyle = `hsl(${hu} ${sa * 0.85}% ${li * 0.62}%)`;
       ctx.fill(path);
     }
 
-    if (overlays.sea) this.drawSparseControl(state.sea, nationAt, 0.4);
+    if (overlays.sea) this.drawSparseControl(ctx, state.sea, nationAt, 0.4);
     if (overlays.air) {
       const a = state.air;
       for (let i = 0; i < a.length; i += 3) {
-        const pat = this.airPattern(a[i + 1], nationAt(a[i + 1]));
+        const pat = this.airPattern(ctx, a[i + 1], nationAt(a[i + 1]));
         if (!pat) continue;
         const p = new Path2D();
         this.quad(p, a[i]);
@@ -276,26 +350,9 @@ export class MapRenderer {
         ctx.fill(p);
         ctx.globalAlpha = 1;
       }
-      ctx.globalAlpha = 1;
     }
-    if (overlays.infra) {
-      const v = state.infra;
-      for (let i = 0; i < v.length; i += 2) {
-        const p = new Path2D();
-        this.quad(p, v[i]);
-        ctx.fillStyle = `rgba(255,110,40,${Math.min(0.85, (1 - v[i + 1]) * 1.1)})`;
-        ctx.fill(p);
-      }
-    }
-    if (overlays.fallout) {
-      const v = state.fallout;
-      for (let i = 0; i < v.length; i += 2) {
-        const p = new Path2D();
-        this.quad(p, v[i]);
-        ctx.fillStyle = `rgba(190,255,60,${Math.min(0.75, v[i + 1] * 0.8)})`;
-        ctx.fill(p);
-      }
-    }
+    if (overlays.infra) this.fillPairs(ctx, state.infra, (v) => `rgba(255,110,40,${Math.min(0.85, (1 - v) * 1.1)})`);
+    if (overlays.fallout) this.fillPairs(ctx, state.fallout, (v) => `rgba(190,255,60,${Math.min(0.75, v * 0.8)})`);
 
     if (this.coast) {
       ctx.strokeStyle = 'rgba(150,185,220,0.45)';
@@ -316,25 +373,21 @@ export class MapRenderer {
     ctx.lineWidth = 2.4 * px;
     ctx.stroke(this.front);
 
-    if (input.hoverNode !== null && input.targeting) {
-      const p = new Path2D();
-      this.quad(p, input.hoverNode);
-      ctx.fillStyle = input.targeting === 'nuclear' ? 'rgba(255,230,80,0.45)' : 'rgba(255,255,255,0.25)';
-      ctx.fill(p);
-      ctx.strokeStyle = input.targeting === 'nuclear' ? '#ffe14d' : '#ffffff';
-      ctx.lineWidth = 1.5 * px;
-      ctx.stroke(p);
-    }
-
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    if (overlays.cities) this.drawCities();
-    this.drawOrders(input);
-    this.drawFormations(input);
-    this.drawFlashes(now);
+    ctx.setTransform(dpr, 0, 0, dpr, dpr * PAN_MARGIN, dpr * PAN_MARGIN);
+    if (overlays.cities) this.drawCities(ctx);
   }
 
-  private drawSparseControl(v: Float32Array, nationAt: (i: number) => string, alpha: number) {
-    const ctx = this.ctx;
+  /** Fill each node of a flat (node, value) list. */
+  private fillPairs(ctx: CanvasRenderingContext2D, v: Float32Array, style: (value: number) => string) {
+    for (let i = 0; i < v.length; i += 2) {
+      const p = new Path2D();
+      this.quad(p, v[i]);
+      ctx.fillStyle = style(v[i + 1]);
+      ctx.fill(p);
+    }
+  }
+
+  private drawSparseControl(ctx: CanvasRenderingContext2D, v: Float32Array, nationAt: (i: number) => string, alpha: number) {
     for (let i = 0; i < v.length; i += 3) {
       const p = new Path2D();
       this.quad(p, v[i]);
@@ -344,8 +397,8 @@ export class MapRenderer {
   }
 
   /** Capitals first, then by population; a label is skipped if it would overlap one already placed. */
-  private drawCities() {
-    const { ctx, t } = this;
+  private drawCities(ctx: CanvasRenderingContext2D) {
+    const { t } = this;
     const minPop = t.k < 2 ? 5e6 : t.k < 4 ? 1.5e6 : t.k < 8 ? 4e5 : 0;
     ctx.font = '500 11px "Inter", system-ui, sans-serif';
     ctx.textBaseline = 'middle';
@@ -356,7 +409,7 @@ export class MapRenderer {
       const p = this.proj([c.lon, c.lat]);
       if (!p) continue;
       const x = p[0] * t.k + t.x, y = p[1] * t.k + t.y;
-      if (x < -20 || y < -20 || x > this.width + 20 || y > this.height + 20) continue;
+      if (x < -PAN_MARGIN || y < -PAN_MARGIN || x > this.width + PAN_MARGIN || y > this.height + PAN_MARGIN) continue;
       ctx.fillStyle = c.capital ? '#f4f7fb' : '#b8c4d4';
       ctx.strokeStyle = '#05080d';
       ctx.lineWidth = 1;
@@ -405,45 +458,111 @@ export class MapRenderer {
     ctx.restore();
   }
 
+  /** Formations at a node, strongest first, as of the latest snapshot rendered. */
+  formationsAt(node: NodeId): readonly FormationView[] {
+    return this.byNode.get(node) ?? [];
+  }
+
   private drawFormations(input: RenderInput) {
     const { ctx, t } = this;
-    const zoomScale = Math.min(1.5, Math.max(0.6, 0.7 + 0.2 * Math.log2(t.k)));
-    const byNode = new Map<number, typeof input.state.formations>();
-    for (const f of input.state.formations) {
-      if (f.status === 'destroyed' || f.status === 'embarked') continue;
-      let l = byNode.get(f.node);
-      if (!l) byNode.set(f.node, (l = []));
-      l.push(f);
+    if (input.state.formations !== this.indexedFrom) {
+      this.indexedFrom = input.state.formations;
+      this.byNode = indexByNode(input.state.formations);
+      this.stacksGrid = -1;
     }
+    const grid = gridSize(CELL_PX, t.k);
+    if (grid !== this.stacksGrid) {
+      this.stacks = clusterStacks(this.byNode, (n) => [this.center[n * 2], this.center[n * 2 + 1]], grid);
+      this.stacksGrid = grid;
+    }
+    const nodePx = this.degPx * t.k;
+    const fan = nodePx >= FAN_PX;
+    const zoomScale = Math.min(1.4, Math.max(0.75, 0.75 + 0.18 * Math.log2(t.k)));
+    const atNode = new Map<NodeId, number>();
+    const order = [...this.stacks].sort((a, b) => Number(a.nation === input.playAs) - Number(b.nation === input.playAs));
     this.hits = [];
-    for (const [node, list] of byNode) {
-      const [x, y] = this.screenOf(node as NodeId);
-      if (x < -40 || y < -40 || x > this.width + 40 || y > this.height + 40) continue;
-      list.sort((a, b) => (a.entry.id === input.selected ? 1 : 0) - (b.entry.id === input.selected ? 1 : 0));
-      const shown = list.slice(-4);
-      shown.forEach((f, i) => {
-        const w = (ECHELON_W[f.entry.echelon] ?? 16) * zoomScale * (0.8 + 0.2 * f.strength);
-        const off = (i - (shown.length - 1)) * 5;
-        const col = this.palette.of(f.entry.nation);
-        const box = drawCounter(ctx, x + off, y + off, w, f.entry.kind, f.entry.echelon, f.strength, {
-          fill: col.css, ink: '#0a0e14', selected: f.entry.id === input.selected, routed: f.status === 'routed', own: f.entry.nation === input.playAs,
+    let selectedBox: CounterBox | null = null;
+    for (const stack of order) {
+      const [cx, cy] = this.screenOf(stack.node);
+      if (cx < -60 || cy < -60 || cx > this.width + 60 || cy > this.height + 60) continue;
+      const nth = atNode.get(stack.node) ?? 0;
+      atNode.set(stack.node, nth + 1);
+      const own = stack.nation === input.playAs;
+      const fill = this.palette.of(stack.nation).css;
+      if (fan && stack.nodes === 1 && stack.members.length > 1) {
+        const cols = Math.max(2, Math.min(4, Math.floor(nodePx / FAN_SLOT_PX)));
+        const cap = cols * cols;
+        const shown = stack.members.length > cap ? stack.members.slice(0, cap - 1) : stack.members;
+        const slots = shown.length + (stack.members.length > shown.length ? 1 : 0);
+        const rows = Math.ceil(slots / cols), step = Math.min(FAN_SLOT_PX * zoomScale, nodePx / cols);
+        const at = (i: number): [number, number] => [cx + ((i % cols) - (Math.min(cols, slots) - 1) / 2) * step + nth * 8, cy + (Math.floor(i / cols) - (rows - 1) / 2) * step + nth * 8];
+        shown.forEach((f, i) => {
+          const [x, y] = at(i);
+          const box = this.sprites.draw(ctx, x, y, (ECHELON_W[f.entry.echelon] ?? 16) * zoomScale * 0.85, f.entry.kind, f.entry.echelon, f.strength, fill, own, f.status === 'routed');
+          this.hits.push({ ...box, ids: [f.entry.id], node: stack.node, zoomTo: null });
+          if (f.entry.id === input.selected) selectedBox = box;
         });
-        this.hits.push({ id: f.entry.id, ...box });
-      });
-      if (list.length > shown.length) {
-        ctx.font = '600 10px "JetBrains Mono", ui-monospace, monospace';
-        ctx.fillStyle = '#e8eef6';
-        ctx.textAlign = 'left';
-        ctx.fillText(`+${list.length - shown.length}`, x + 14 * zoomScale, y + 10);
+        if (shown.length < stack.members.length) {
+          const rest = stack.members.slice(shown.length);
+          const [x, y] = at(shown.length);
+          const box = this.drawStack(rest, x, y, zoomScale * 0.85, fill, own);
+          this.hits.push({ ...box, ids: rest.map((f) => f.entry.id), node: stack.node, zoomTo: t.k < MAX_ZOOM ? Math.min(MAX_ZOOM, t.k * 1.6) : null });
+          if (rest.some((f) => f.entry.id === input.selected)) selectedBox = box;
+        }
+        continue;
       }
+      const box = this.drawStack(stack.members, cx + nth * 7, cy + nth * 7, zoomScale, fill, own);
+      const zoomTo = stack.members.length === 1 ? null : stack.nodes > 1 ? Math.min(MAX_ZOOM, t.k * 2.5) : Math.min(MAX_ZOOM, Math.max(t.k * 1.5, (FAN_PX * 1.05) / this.degPx));
+      this.hits.push({ ...box, ids: stack.members.map((f) => f.entry.id), node: stack.node, zoomTo: zoomTo !== null && zoomTo > t.k ? zoomTo : null });
+      if (input.selected && stack.members.some((f) => f.entry.id === input.selected)) selectedBox = box;
     }
+    if (selectedBox) {
+      const b: CounterBox = selectedBox;
+      ctx.save();
+      ctx.shadowColor = '#ffe066';
+      ctx.shadowBlur = 10;
+      ctx.strokeStyle = '#ffe066';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(b.x - 3, b.y - 2, b.w + 6, b.h + 4);
+      ctx.restore();
+    }
+  }
+
+  /** The strongest member's symbol over a shadow counter, with a count badge and the stack's mean strength. */
+  private drawStack(members: readonly FormationView[], x: number, y: number, zoomScale: number, fill: string, own: boolean): CounterBox {
+    const { ctx } = this;
+    const lead = members[0];
+    const w = (ECHELON_W[lead.entry.echelon] ?? 16) * zoomScale;
+    if (members.length === 1) return this.sprites.draw(ctx, x, y, w, lead.entry.kind, lead.entry.echelon, lead.strength, fill, own, lead.status === 'routed');
+    let strength = 0;
+    for (const f of members) strength += f.strength;
+    ctx.globalAlpha = 0.6;
+    this.sprites.draw(ctx, x + 3, y - 3, w, lead.entry.kind, lead.entry.echelon, 0, fill, own, false);
+    ctx.globalAlpha = 1;
+    const box = this.sprites.draw(ctx, x, y, w, lead.entry.kind, lead.entry.echelon, strength / members.length, fill, own, false);
+    const label = members.length > 999 ? '999+' : String(members.length);
+    const bw = 5 + label.length * 6, bx = x + w / 2 - 2, by = y - w * 0.33 - 9;
+    ctx.fillStyle = own ? '#e8f1ff' : '#0a0e14';
+    ctx.strokeStyle = own ? '#0a0e14' : 'rgba(232,241,255,0.75)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.roundRect(bx, by, bw, 12, 3);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = own ? '#0a0e14' : '#e8eef6';
+    ctx.font = '600 9.5px "JetBrains Mono", ui-monospace, monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, bx + bw / 2, by + 6.5);
+    return { x: box.x, y: Math.min(box.y, by), w: box.w + bw - 2, h: box.h + (box.y - Math.min(box.y, by)) };
   }
 
   private drawFlashes(now: number) {
     const { ctx } = this;
     this.flashes = this.flashes.filter((f) => now - f.t0 < FLASH_MS[f.kind]);
     for (const f of this.flashes) {
-      const u = (now - f.t0) / FLASH_MS[f.kind];
+      // rAF timestamps can precede the performance.now() stamped on the event.
+      const u = Math.max(0, now - f.t0) / FLASH_MS[f.kind];
       const [x, y] = this.screenOf(f.node);
       ctx.save();
       switch (f.kind) {

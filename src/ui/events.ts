@@ -1,5 +1,5 @@
 import type { GameMap } from '../core/map';
-import type { NationId, NodeId, SimEvent } from '../core/types';
+import type { FormationId, NationId, NodeId, SimEvent } from '../core/types';
 import type { SessionMeta } from './snapshot';
 
 export const EVENT_CATEGORIES = ['combat', 'strikes', 'nuclear', 'diplomacy', 'territory', 'economy', 'messages'] as const;
@@ -67,7 +67,7 @@ export class PlaceNamer {
   }
 }
 
-export function describeEvent(e: SimEvent, nameOf: (n: NationId) => string, place: PlaceNamer, meta: SessionMeta | null): string {
+export function describeEvent(e: SimEvent, nameOf: (n: NationId) => string, place: PlaceNamer, meta: SessionMeta | null, formationName: (id: FormationId) => string): string {
   const sum = (r: Record<string, number>) => Object.values(r).reduce((a, b) => a + b, 0);
   switch (e.type) {
     case 'war_declared': return `${nameOf(e.by)} declares war on ${nameOf(e.on)}: ${e.reason}`;
@@ -79,7 +79,7 @@ export function describeEvent(e: SimEvent, nameOf: (n: NationId) => string, plac
     }
     case 'strike': return `${nameOf(e.by)} fires ${e.fired} × ${meta?.munitions[e.munition]?.name ?? e.munition} at ${place.name(e.target)}, ${e.intercepted} intercepted: ${e.damage}`;
     case 'node_captured': return `${nameOf(e.to)} takes ${place.name(e.node)} from ${nameOf(e.from)}`;
-    case 'formation_destroyed': return `${nameOf(e.nation)} formation ${e.formation} destroyed`;
+    case 'formation_destroyed': return `${nameOf(e.nation)}: ${formationName(e.formation)} destroyed`;
     case 'nuclear_detonation': return `NUCLEAR DETONATION at ${place.name(e.node)}: ${nameOf(e.by)}, ${e.yieldKt.toLocaleString()} kt, est. ${e.casualties.toLocaleString()} casualties`;
     case 'escalation': return `${nameOf(e.a)} and ${nameOf(e.b)} escalate to ${e.level.replace(/_/g, ' ')}`;
     case 'production': return `${nameOf(e.nation)} produces ${e.count} × ${meta?.platforms[e.item]?.name ?? meta?.munitions[e.item]?.name ?? e.item}`;

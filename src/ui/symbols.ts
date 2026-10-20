@@ -57,37 +57,21 @@ function framePath(c: Ctx, frame: Frame, w: number, h: number) {
   }
 }
 
-export interface CounterStyle {
-  fill: string;
-  ink: string;
-  selected: boolean;
-  routed: boolean;
-  own: boolean;
-}
-
-/** Draws a counter centered on (x, y) with width w; returns the hit box. */
-export function drawCounter(c: Ctx, x: number, y: number, w: number, kind: FormationKind, echelon: Echelon, strength: number, s: CounterStyle) {
+/** Frame, glyph and echelon mark centered on the origin; strength and selection are drawn per frame on top. */
+function paintCounter(c: Ctx, w: number, kind: FormationKind, echelon: Echelon, fill: string, own: boolean) {
   const h = w * 0.66;
-  c.save();
-  c.translate(x, y);
-  if (s.selected) {
-    c.shadowColor = '#ffe066';
-    c.shadowBlur = 12;
-  }
   framePath(c, FRAME_OF[kind], w, h);
-  c.fillStyle = s.fill;
-  c.globalAlpha = s.routed ? 0.55 : 1;
+  c.fillStyle = fill;
   c.fill();
-  c.shadowBlur = 0;
-  c.lineWidth = s.selected ? 2.2 : s.own ? 1.6 : 1.1;
-  c.strokeStyle = s.selected ? '#ffe066' : s.own ? '#e8f1ff' : 'rgba(10,14,20,0.9)';
+  c.lineWidth = own ? 1.6 : 1.1;
+  c.strokeStyle = own ? '#e8f1ff' : 'rgba(10,14,20,0.9)';
   c.stroke();
   c.beginPath();
   GLYPH[kind](c, w * 0.9, h * 0.9);
-  c.strokeStyle = s.ink;
+  c.strokeStyle = INK;
   c.lineWidth = 1.2;
   c.stroke();
-  if (kind === 'artillery' || kind === 'strategic') { c.fillStyle = s.ink; c.fill(); }
+  if (kind === 'artillery' || kind === 'strategic') { c.fillStyle = INK; c.fill(); }
   if (w >= 16) {
     c.fillStyle = 'rgba(230,236,245,0.9)';
     c.font = `600 ${Math.max(7, w * 0.26)}px "JetBrains Mono", ui-monospace, monospace`;
@@ -95,11 +79,70 @@ export function drawCounter(c: Ctx, x: number, y: number, w: number, kind: Forma
     c.textBaseline = 'bottom';
     c.fillText(ECHELON_MARK[echelon], 0, -h / 2 - 1);
   }
-  const bw = w, by = h / 2 + 3;
-  c.fillStyle = 'rgba(0,0,0,0.6)';
-  c.fillRect(-bw / 2, by, bw, 3);
-  c.fillStyle = strength > 0.66 ? '#5ad17a' : strength > 0.33 ? '#f2c14e' : '#ef5b5b';
-  c.fillRect(-bw / 2, by, bw * Math.max(0, Math.min(1, strength)), 3);
-  c.restore();
-  return { x: x - w / 2, y: y - h / 2 - 8, w, h: h + 14 };
+}
+
+const INK = '#0a0e14';
+const SPRITE_LIMIT = 3_000;
+
+interface Sprite {
+  img: OffscreenCanvas;
+  /** CSS-pixel size and the counter center's offset inside it. */
+  w: number;
+  h: number;
+  ox: number;
+  oy: number;
+}
+
+export interface CounterBox {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/**
+ * Counters are rasterized once per (kind, echelon, nation color, ownership,
+ * width) and blitted, so a frame with hundreds of counters costs hundreds of
+ * drawImage calls instead of hundreds of path fills, strokes and text runs.
+ */
+export class CounterSprites {
+  private readonly cache = new Map<string, Sprite>();
+  private dpr = 1;
+
+  setDpr(dpr: number) {
+    if (dpr !== this.dpr) this.cache.clear();
+    this.dpr = dpr;
+  }
+
+  private sprite(w: number, kind: FormationKind, echelon: Echelon, fill: string, own: boolean): Sprite {
+    const key = `${w}|${kind}|${echelon}|${fill}|${own ? 1 : 0}`;
+    let s = this.cache.get(key);
+    if (s) return s;
+    if (this.cache.size > SPRITE_LIMIT) this.cache.clear();
+    const h = w * 0.66;
+    const top = w * 0.26 + 4;
+    const cw = Math.ceil(w + 6), ch = Math.ceil(h + top + 4);
+    const img = new OffscreenCanvas(Math.ceil(cw * this.dpr), Math.ceil(ch * this.dpr));
+    const c = img.getContext('2d')! as unknown as Ctx;
+    c.scale(this.dpr, this.dpr);
+    c.translate(cw / 2, top + h / 2);
+    paintCounter(c, w, kind, echelon, fill, own);
+    s = { img, w: cw, h: ch, ox: cw / 2, oy: top + h / 2 };
+    this.cache.set(key, s);
+    return s;
+  }
+
+  /** Draws a counter centered on (x, y) with width w and a strength bar beneath; returns its hit box. */
+  draw(c: Ctx, x: number, y: number, w: number, kind: FormationKind, echelon: Echelon, strength: number, fill: string, own: boolean, routed: boolean): CounterBox {
+    const s = this.sprite(Math.round(w), kind, echelon, fill, own);
+    if (routed) c.globalAlpha = 0.55;
+    c.drawImage(s.img, x - s.ox, y - s.oy, s.w, s.h);
+    if (routed) c.globalAlpha = 1;
+    const h = w * 0.66, by = y + h / 2 + 3;
+    c.fillStyle = 'rgba(0,0,0,0.6)';
+    c.fillRect(x - w / 2, by, w, 3);
+    c.fillStyle = strength > 0.66 ? '#5ad17a' : strength > 0.33 ? '#f2c14e' : '#ef5b5b';
+    c.fillRect(x - w / 2, by, w * Math.max(0, Math.min(1, strength)), 3);
+    return { x: x - w / 2, y: y - h / 2 - 8, w, h: h + 14 };
+  }
 }

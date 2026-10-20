@@ -1,44 +1,80 @@
 /**
  * Worker <-> UI wire format. The worker owns the World; the UI holds a decoded
- * mirror (`ClientState`) built only from snapshots. Bulk per-node and
- * per-formation data travels as typed arrays so a tick costs a few kilobytes,
- * and the control map is sent only when some node changed hands.
+ * mirror (`ClientState`) built only from snapshots. Facts that never change
+ * during a session (names, blocs, the catalog) travel once in `SessionMeta`.
+ * Per-tick data is typed arrays: nodes fit in 16 bits, strength in 8, and the
+ * control map is sent only when some node changed hands. With the full world
+ * (~2,500 formations, 193 nations) a tick costs about 25 KB plus events.
  */
+import { enemiesOf } from '../core/engine';
 import { platformCount } from '../core/forces';
 import type { GameMap } from '../core/map';
-import type {
-  Command, Echelon, Formation, FormationId, FormationKind, ItemId, Nation, NationId, NodeId, Posture, SimEvent, World,
-} from '../core/types';
 import type { Catalog } from '../core/catalog';
-import { enemiesOf } from '../core/engine';
+import { BMD_SYSTEMS } from '../systems/strategic/tables';
+import type {
+  Command, Echelon, Formation, FormationId, FormationKind, ItemId, MunitionKind, Nation, NationId, NodeId, Posture, SimEvent, World,
+} from '../core/types';
 
 export const NO_NATION = 0xffff;
+export const NO_NODE = 0xffff;
 export const POSTURES: readonly Posture[] = ['reserve', 'defend', 'attack', 'move', 'strike', 'air_superiority', 'patrol', 'blockade', 'escort', 'embark'];
 export const STATUSES: readonly Formation['status'][] = ['active', 'routed', 'destroyed', 'embarked'];
+const NATION_STATUSES: readonly Nation['status'][] = ['peace', 'war', 'capitulated', 'collapsed'];
+/** Per-nation numbers sent every tick, packed in this order. */
+const NATION_FIELDS = ['status', 'human', 'mobilization', 'warSupport', 'reserves', 'population', 'treasuryUsdB', 'warheads', 'deployed'] as const;
 /** Above this many changed nodes a full control array is cheaper than pairs. */
 const DIFF_LIMIT = 2_000;
 const EVENT_LIMIT = 400;
 
 // ---------------------------------------------------------------- messages
 
+export interface ScenarioCard {
+  id: string;
+  name: string;
+  summary: string;
+  startDate: string;
+  suggestedNation: NationId;
+  /** Nations in the opening wars, aggressors first. */
+  belligerents: NationId[];
+}
+
+export interface NationCard {
+  id: NationId;
+  name: string;
+  blocs: string[];
+  doctrine: Nation['nuclear']['doctrine'];
+  gdpUsdB: number;
+}
+
 export type ToWorker =
-  | { type: 'init'; scenario: string }
-  | { type: 'step'; n: number }
+  | { type: 'start'; scenario: string; nation: NationId; seed: number }
+  /** Target ticks per second; 0 pauses. The worker never runs ahead of the UI's acks. */
+  | { type: 'speed'; ticksPerSec: number }
+  | { type: 'step' }
+  | { type: 'ack' }
   | { type: 'command'; command: Command }
   | { type: 'play_as'; nation: NationId }
   | { type: 'focus'; nation?: NationId; formation?: FormationId };
 
+export interface RunStats {
+  /** Wall time of the latest engine step. */
+  stepMs: number;
+  /** Ticks actually completed per second over the last few seconds. */
+  achievedTps: number;
+}
+
 export type FromWorker =
+  | { type: 'hello'; scenarios: ScenarioCard[]; nations: NationCard[] }
   | { type: 'ready'; meta: SessionMeta; snapshot: Snapshot }
-  | { type: 'snapshot'; snapshot: Snapshot; /** Set when this snapshot answers a step request. */ stepMs?: number }
+  | { type: 'snapshot'; snapshot: Snapshot; stats: RunStats }
   | { type: 'error'; message: string };
 
 export interface SessionMeta {
-  scenario: string;
+  scenario: ScenarioCard;
   /** Index order used by every nation index in snapshots. */
   nationIds: NationId[];
   platforms: Record<string, { name: string; class: string; domain: string }>;
-  munitions: Record<string, { name: string; kind: string; yieldKt?: number; rangeKm: number }>;
+  munitions: Record<string, { name: string; kind: MunitionKind; yieldKt?: number; rangeKm: number }>;
   dtHours: number;
 }
 
@@ -48,6 +84,8 @@ export interface RosterEntry {
   nation: NationId;
   kind: FormationKind;
   echelon: Echelon;
+  /** Operational platforms when first seen; strength is measured against it. */
+  platforms: number;
 }
 
 export interface NationSummary {
@@ -67,9 +105,66 @@ export interface NationSummary {
   doctrine: Nation['nuclear']['doctrine'];
 }
 
+/** One munition family a dashboard tracks, totalled across warehouses and loaded magazines. */
+export interface MunitionStock {
+  group: MunitionGroup;
+  warehoused: number;
+  loaded: number;
+  /** Current production capacity of the nation's lines in this group, per month. */
+  perMonth: number;
+}
+
+export const MUNITION_GROUPS = ['interceptor', 'aam', 'cruise', 'ballistic', 'rocket', 'atgm', 'drone', 'bomb', 'torpedo', 'nuclear'] as const;
+export type MunitionGroup = (typeof MUNITION_GROUPS)[number];
+
+export const GROUP_OF_KIND: Record<MunitionKind, MunitionGroup | null> = {
+  sam: 'interceptor', abm: 'interceptor', shorad_missile: 'interceptor',
+  aam: 'aam',
+  cruise: 'cruise', antiship_cruise: 'cruise', arm: 'cruise',
+  srbm: 'ballistic', mrbm: 'ballistic', irbm: 'ballistic', icbm: 'ballistic', slbm: 'ballistic', hgv: 'ballistic', antiship_ballistic: 'ballistic',
+  rocket: 'rocket', guided_rocket: 'rocket',
+  atgm: 'atgm',
+  loitering: 'drone', drone_oneway: 'drone',
+  glide_bomb: 'bomb', guided_bomb: 'bomb', unguided_bomb: 'bomb',
+  torpedo: 'torpedo', mine: 'torpedo',
+  shell: null, guided_shell: null, small_arms: null,
+};
+
+/** How a nation came to be in a war, read from the war_declared events that brought it in. */
+export interface WarEntry {
+  nation: NationId;
+  /** The war_declared reason; a treaty entry reads like "NATO: defence of POL". */
+  reason: string;
+  tick: number;
+}
+
+export interface WarView {
+  id: string;
+  aggressor: NationId;
+  /** Side 0 is the aggressor's. Each member carries how it got in. */
+  sides: [WarEntry[], WarEntry[]];
+  startTick: number;
+  /** Treaty members whose decision is still pending. */
+  pending: { nation: NationId; treaty: string; side: 0 | 1; dueTick: number }[];
+}
+
+export interface EconomyView {
+  gdpIndex: number;
+  deficitPctGdp: number;
+  integrity: number;
+  tradeLoss: number;
+  inTraining: number;
+  /** Months of national stock left per strategic resource. */
+  buffers: Record<string, number>;
+  /** Share of need met this tick per resource. */
+  supply: Record<string, number>;
+  short: string[];
+  /** Production lines with the highest output, per month. */
+  lines: { item: ItemId; perMonth: number; built: number }[];
+}
+
 export interface NationDetail {
   id: NationId;
-  stockpile: Record<ItemId, number>;
   bulk: Nation['bulk'];
   enemies: NationId[];
   /** Land cells currently held, and how many of them were held at start. */
@@ -77,6 +172,30 @@ export interface NationDetail {
   nodesHome: number;
   formations: number;
   personnel: number;
+  economy: EconomyView | null;
+  munitions: MunitionStock[];
+  wars: WarView[];
+  nuclear: {
+    posture: string | null;
+    /** Launchers in strategic formations and their loaded nuclear rounds. */
+    launchers: number;
+    loadedWarheads: number;
+    /** Remaining interceptors per national missile-defence system. */
+    bmd: Record<string, number>;
+    satellites: number;
+  };
+}
+
+export interface FormationDetail {
+  formation: Formation;
+  /** Share of nominal supply reaching its cell through the national network, 0..1; null if no network. */
+  supplyFlow: number | null;
+  /** Days cut off from friendly supply. */
+  isolatedDays: number;
+  /** In a ground engagement this tick. */
+  engaged: boolean;
+  /** Hostile nations holding a track on it (naval). */
+  trackedBy: NationId[];
 }
 
 export interface Snapshot {
@@ -86,16 +205,17 @@ export interface Snapshot {
   /** Flat (node, nationIndex) pairs applied on top of the previous control array. */
   controlDiff?: Uint32Array;
   roster?: RosterEntry[];
-  fNode: Int32Array;
-  /** Operational platforms divided by the count first seen. */
-  fStrength: Float32Array;
+  fNode: Uint16Array;
+  /** Operational platforms divided by the count first seen, scaled to 0..255. */
+  fStrength: Uint8Array;
   fPosture: Uint8Array;
   fStatus: Uint8Array;
-  /** Order target node, -1 for none. */
-  fTarget: Int32Array;
+  /** Order target node, NO_NODE for none. */
+  fTarget: Uint16Array;
   events: SimEvent[];
   droppedEvents: number;
-  nations: NationSummary[];
+  /** NATION_FIELDS per nation, in meta.nationIds order. */
+  nations: Float32Array;
   wars: [NationId, NationId][];
   /** Flat (node, nationIndex, level) triples. */
   air: Float32Array;
@@ -104,7 +224,7 @@ export interface Snapshot {
   infra: Float32Array;
   fallout: Float32Array;
   focusNation?: NationDetail;
-  focusFormation?: Formation;
+  focusFormation?: FormationDetail;
 }
 
 // ---------------------------------------------------------------- encoder (worker side)
@@ -116,14 +236,22 @@ export class SnapshotEncoder {
   private readonly nationIndex: Map<NationId, number>;
   private events: SimEvent[] = [];
   private dropped = 0;
+  /** First war_declared that put each nation into each war, keyed `nation|enemy`. */
+  private readonly entries = new Map<string, WarEntry>();
 
-  constructor(readonly nationIds: NationId[]) {
+  constructor(readonly nationIds: NationId[], private readonly catalog: Catalog, mapSize: number) {
+    if (mapSize >= NO_NODE) throw new Error(`map has ${mapSize} nodes; the wire format packs nodes in 16 bits`);
     this.nationIndex = new Map(nationIds.map((n, i) => [n, i]));
   }
 
   /** Buffer events from ticks that run between two snapshots. */
   collect(events: readonly SimEvent[]): void {
     for (const e of events) {
+      if (e.type === 'war_declared') {
+        const entry = { reason: e.reason, tick: e.tick };
+        if (!this.entries.has(`${e.by}|${e.on}`)) this.entries.set(`${e.by}|${e.on}`, { nation: e.by, ...entry });
+        if (!this.entries.has(`${e.on}|${e.by}`)) this.entries.set(`${e.on}|${e.by}`, { nation: e.on, ...entry, reason: `attacked by ${e.by}` });
+      }
       if (this.events.length < EVENT_LIMIT) this.events.push(e);
       else this.dropped++;
     }
@@ -134,14 +262,14 @@ export class SnapshotEncoder {
     const snap: Snapshot = {
       tick: world.tick,
       date: dateOf(world),
-      fNode: new Int32Array(0),
-      fStrength: new Float32Array(0),
+      fNode: new Uint16Array(0),
+      fStrength: new Uint8Array(0),
       fPosture: new Uint8Array(0),
       fStatus: new Uint8Array(0),
-      fTarget: new Int32Array(0),
+      fTarget: new Uint16Array(0),
       events: this.events,
       droppedEvents: this.dropped,
-      nations: Object.values(world.nations).map(summarize),
+      nations: this.nationNumbers(world),
       wars: wars(world),
       air: this.sparseControl(world.theater.airControl),
       sea: this.sparseControl(world.theater.seaControl),
@@ -163,29 +291,49 @@ export class SnapshotEncoder {
     this.lastControl = control;
 
     const fs = Object.values(world.formations);
+    for (const f of fs) if (!this.initial.has(f.id)) this.initial.set(f.id, Math.max(1, platformCount(f)));
     if (fs.length !== this.lastIds.length || fs.some((f, i) => f.id !== this.lastIds[i])) {
-      snap.roster = fs.map((f) => ({ id: f.id, name: f.name, nation: f.nation, kind: f.kind, echelon: f.echelon }));
+      snap.roster = fs.map((f) => ({ id: f.id, name: f.name, nation: f.nation, kind: f.kind, echelon: f.echelon, platforms: this.initial.get(f.id)! }));
       this.lastIds = fs.map((f) => f.id);
     }
     const n = fs.length;
-    snap.fNode = new Int32Array(n);
-    snap.fStrength = new Float32Array(n);
+    snap.fNode = new Uint16Array(n);
+    snap.fStrength = new Uint8Array(n);
     snap.fPosture = new Uint8Array(n);
     snap.fStatus = new Uint8Array(n);
-    snap.fTarget = new Int32Array(n);
-    fs.forEach((f, i) => {
-      const count = platformCount(f);
-      if (!this.initial.has(f.id)) this.initial.set(f.id, Math.max(1, count));
+    snap.fTarget = new Uint16Array(n);
+    for (let i = 0; i < n; i++) {
+      const f = fs[i];
       snap.fNode[i] = f.node;
-      snap.fStrength[i] = count / this.initial.get(f.id)!;
+      snap.fStrength[i] = Math.round(Math.min(1, platformCount(f) / this.initial.get(f.id)!) * 255);
       snap.fPosture[i] = POSTURES.indexOf(f.order.posture);
       snap.fStatus[i] = STATUSES.indexOf(f.status);
-      snap.fTarget[i] = f.order.target ?? -1;
-    });
+      snap.fTarget[i] = f.order.target ?? NO_NODE;
+    }
 
-    if (focus.nation && world.nations[focus.nation]) snap.focusNation = detail(world, map, focus.nation);
-    if (focus.formation && world.formations[focus.formation]) snap.focusFormation = world.formations[focus.formation];
+    if (focus.nation && world.nations[focus.nation]) snap.focusNation = this.nationDetail(world, map, focus.nation);
+    if (focus.formation && world.formations[focus.formation]) snap.focusFormation = formationDetail(world, world.formations[focus.formation]);
     return snap;
+  }
+
+  private nationNumbers(world: World): Float32Array {
+    const k = NATION_FIELDS.length;
+    const out = new Float32Array(this.nationIds.length * k);
+    this.nationIds.forEach((id, i) => {
+      const n = world.nations[id];
+      if (!n) return;
+      const o = i * k;
+      out[o] = NATION_STATUSES.indexOf(n.status);
+      out[o + 1] = n.controlledBy === 'human' ? 1 : 0;
+      out[o + 2] = n.mobilization;
+      out[o + 3] = n.warSupport;
+      out[o + 4] = n.reserves;
+      out[o + 5] = n.population;
+      out[o + 6] = n.treasuryUsdB;
+      out[o + 7] = n.nuclear.warheads;
+      out[o + 8] = n.nuclear.deployed;
+    });
+    return out;
   }
 
   private controlArray(world: World): Uint16Array {
@@ -205,38 +353,123 @@ export class SnapshotEncoder {
     });
     return out;
   }
+
+  private nationDetail(world: World, map: GameMap, id: NationId): NationDetail {
+    const n = world.nations[id];
+    const { catalog } = this;
+    let held = 0, home = 0;
+    for (let i = 0; i < map.landCount; i++) {
+      if (world.control[i] === id) held++;
+      if (map.owner[i] === id) home++;
+    }
+    const groups = new Map<MunitionGroup, MunitionStock>(MUNITION_GROUPS.map((g) => [g, { group: g, warehoused: 0, loaded: 0, perMonth: 0 }]));
+    const groupOf = (item: string): MunitionGroup | null => {
+      const m = catalog.munitions.get(item as never);
+      if (!m) return null;
+      return m.yieldKt ? 'nuclear' : GROUP_OF_KIND[m.kind];
+    };
+    for (const [item, count] of Object.entries(n.stockpile)) {
+      const g = groupOf(item);
+      if (g) groups.get(g)!.warehoused += count;
+    }
+    let formations = 0, personnel = 0, launchers = 0, loadedWarheads = 0;
+    for (const f of Object.values(world.formations)) {
+      if (f.nation !== id || f.status === 'destroyed') continue;
+      formations++;
+      personnel += f.personnel;
+      if (f.kind === 'strategic') launchers += platformCount(f);
+      for (const [mid, count] of Object.entries(f.magazine)) {
+        const g = groupOf(mid);
+        if (!g) continue;
+        groups.get(g)!.loaded += count;
+        if (g === 'nuclear') loadedWarheads += count;
+      }
+    }
+    const eco = world.slices.economy?.nations[id];
+    if (eco) for (const line of Object.values(eco.lines)) {
+      const g = groupOf(line.item);
+      if (g) groups.get(g)!.perMonth += line.capacityPerMonth;
+    }
+    const strategic = world.slices.strategic;
+    const space = strategic?.space[id];
+    return {
+      id,
+      bulk: n.bulk,
+      enemies: enemiesOf(world, id),
+      nodesHeld: held,
+      nodesHome: home,
+      formations,
+      personnel,
+      economy: eco
+        ? {
+            gdpIndex: eco.gdpIndex, deficitPctGdp: eco.deficitPctGdp, integrity: eco.integrity, tradeLoss: eco.tradeLoss, inTraining: eco.inTraining,
+            buffers: eco.buffers, supply: eco.supply, short: eco.short,
+            lines: Object.values(eco.lines).map((l) => ({ item: l.item, perMonth: l.capacityPerMonth, built: l.built })).sort((a, b) => b.perMonth - a.perMonth).slice(0, 12),
+          }
+        : null,
+      munitions: [...groups.values()].filter((g) => g.warehoused || g.loaded || g.perMonth),
+      wars: this.warViews(world, id),
+      nuclear: {
+        posture: strategic?.posture[id] ?? null,
+        launchers,
+        loadedWarheads,
+        bmd: bmdOf(strategic?.interceptors ?? {}, id),
+        satellites: space ? Object.values(space).reduce((a, s) => a + s.alive, 0) : 0,
+      },
+    };
+  }
+
+  private warViews(world: World, id: NationId): WarView[] {
+    const d = world.slices.diplomacy;
+    if (!d) return [];
+    return d.wars
+      .filter((w) => w.sides[0].includes(id) || w.sides[1].includes(id))
+      .map((w) => {
+        const entry = (m: NationId, side: 0 | 1): WarEntry => {
+          for (const e of w.sides[1 - side]) {
+            const found = this.entries.get(`${m}|${e}`);
+            if (found) return found;
+          }
+          return { nation: m, reason: m === w.aggressor ? 'aggressor' : 'scenario start', tick: w.startTick };
+        };
+        return {
+          id: w.id,
+          aggressor: w.aggressor,
+          startTick: w.startTick,
+          sides: [w.sides[0].map((m) => entry(m, 0)), w.sides[1].map((m) => entry(m, 1))],
+          pending: d.joins.filter((j) => j.war === w.id).map((j) => ({ nation: j.nation, treaty: j.treaty, side: j.side, dueTick: j.dueTick })),
+        };
+      });
+  }
+}
+
+function bmdOf(interceptors: Record<string, number>, id: NationId): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const sys of BMD_SYSTEMS) if (sys.owner === id) out[sys.id] = interceptors[sys.id] ?? sys.interceptors;
+  return out;
+}
+
+function formationDetail(world: World, f: Formation): FormationDetail {
+  const logistics = world.slices.logistics;
+  const net = logistics?.networkOf[f.nation];
+  const flow = net ? logistics.networks[net]?.factor[f.node] : undefined;
+  return {
+    formation: f,
+    supplyFlow: flow ?? null,
+    isolatedDays: world.slices.land?.isolatedDays[f.id] ?? 0,
+    engaged: world.slices.land?.baseline[f.id] !== undefined,
+    trackedBy: world.slices.naval?.tracks[f.id] ?? [],
+  };
 }
 
 function dateOf(world: World): string {
   return new Date(Date.parse(world.startDate) + world.tick * world.dtHours * 3_600_000).toISOString();
 }
 
-function summarize(n: Nation): NationSummary {
-  return {
-    id: n.id, name: n.name, blocs: n.blocs, status: n.status, controlledBy: n.controlledBy,
-    mobilization: n.mobilization, warSupport: n.warSupport, reserves: n.reserves, population: n.population,
-    treasuryUsdB: n.treasuryUsdB, gdpUsdB: (n.stats.gdp ?? 0) / 1e9,
-    warheads: n.nuclear.warheads, deployed: n.nuclear.deployed, doctrine: n.nuclear.doctrine,
-  };
-}
-
 function wars(world: World): [NationId, NationId][] {
   const out: [NationId, NationId][] = [];
   for (const [k, r] of Object.entries(world.relations)) if (r.atWar) out.push(k.split('|') as [NationId, NationId]);
   return out;
-}
-
-function detail(world: World, map: GameMap, id: NationId): NationDetail {
-  const n = world.nations[id];
-  let held = 0, home = 0;
-  for (let i = 0; i < map.landCount; i++) {
-    if (world.control[i] === id) held++;
-    if (map.owner[i] === id) home++;
-  }
-  let formations = 0, personnel = 0;
-  for (const f of Object.values(world.formations))
-    if (f.nation === id && f.status !== 'destroyed') { formations++; personnel += f.personnel; }
-  return { id, stockpile: n.stockpile, bulk: n.bulk, enemies: enemiesOf(world, id), nodesHeld: held, nodesHome: home, formations, personnel };
 }
 
 function sparseBelow(values: readonly number[], limit: number): Float32Array {
@@ -251,7 +484,15 @@ function sparseRecord(rec: Record<number, number>): Float32Array {
   return Float32Array.from(pairs);
 }
 
-export function sessionMeta(scenario: string, world: World, map: GameMap, catalog: Catalog): SessionMeta {
+export function nationCards(map: GameMap, profiles: Readonly<Record<string, { blocs?: string[]; nuclear?: Nation['nuclear'] }>>): NationCard[] {
+  return map.data.nations.map((raw, i) => {
+    const id = map.nationIds[i];
+    const p = profiles[id] ?? {};
+    return { id, name: raw.name, blocs: p.blocs ?? [], doctrine: p.nuclear?.doctrine ?? 'none', gdpUsdB: ((raw.stats as { gdp?: number }).gdp ?? 0) / 1e9 };
+  });
+}
+
+export function sessionMeta(scenario: ScenarioCard, world: World, map: GameMap, catalog: Catalog): SessionMeta {
   const platforms: SessionMeta['platforms'] = {};
   for (const p of catalog.platforms.values()) platforms[p.id] = { name: p.name, class: p.class, domain: p.domain };
   const munitions: SessionMeta['munitions'] = {};
@@ -286,7 +527,7 @@ export interface ClientState {
   infra: Float32Array;
   fallout: Float32Array;
   focusNation?: NationDetail;
-  focusFormation?: Formation;
+  focusFormation?: FormationDetail;
   /** Events from the latest snapshot only. */
   latestEvents: SimEvent[];
 }
@@ -300,7 +541,7 @@ export function emptyClientState(size: number): ClientState {
   };
 }
 
-export function applySnapshot(state: ClientState, snap: Snapshot): void {
+export function applySnapshot(state: ClientState, snap: Snapshot, nationIds: readonly NationId[], cards: ReadonlyMap<NationId, NationCard>): void {
   state.tick = snap.tick;
   state.date = snap.date;
   if (snap.control) {
@@ -319,12 +560,21 @@ export function applySnapshot(state: ClientState, snap: Snapshot): void {
   state.formations = roster.map((entry, i) => ({
     entry,
     node: snap.fNode[i] as NodeId,
-    strength: snap.fStrength[i],
+    strength: snap.fStrength[i] / 255,
     posture: POSTURES[snap.fPosture[i]],
     status: STATUSES[snap.fStatus[i]],
-    target: snap.fTarget[i] < 0 ? null : (snap.fTarget[i] as NodeId),
+    target: snap.fTarget[i] === NO_NODE ? null : (snap.fTarget[i] as NodeId),
   }));
-  state.nations = new Map(snap.nations.map((n) => [n.id, n]));
+  const k = NATION_FIELDS.length, v = snap.nations;
+  state.nations = new Map(nationIds.map((id, i) => {
+    const card = cards.get(id);
+    const o = i * k;
+    return [id, {
+      id, name: card?.name ?? id, blocs: card?.blocs ?? [], doctrine: card?.doctrine ?? 'none', gdpUsdB: card?.gdpUsdB ?? 0,
+      status: NATION_STATUSES[v[o]], controlledBy: v[o + 1] ? 'human' : 'ai',
+      mobilization: v[o + 2], warSupport: v[o + 3], reserves: v[o + 4], population: v[o + 5], treasuryUsdB: v[o + 6], warheads: v[o + 7], deployed: v[o + 8],
+    }];
+  }));
   const warsKey = snap.wars.map((w) => w.join('|')).sort().join(',');
   if (warsKey !== state.warsKey) {
     state.wars = snap.wars;

@@ -144,7 +144,15 @@ export function MapView(props: MapViewProps) {
     for (let i = r.hits.length - 1; i >= 0; i--) {
       const h = r.hits[i];
       if (x >= h.x && x <= h.x + h.w && y >= h.y && y <= h.y + h.h) {
-        p.onSelectFormation(h.id);
+        if (h.zoomTo !== null) {
+          r.t = centerOn(r.proj, r.width, r.height, r.map.lon[h.node], r.map.lat[h.node], h.zoomTo);
+          userMoved.current = true;
+          dirty.current = true;
+        } else {
+          // A stack that cannot open further: repeated clicks cycle through it.
+          const at = p.selected ? h.ids.indexOf(p.selected) : -1;
+          p.onSelectFormation(h.ids[(at + 1) % h.ids.length]);
+        }
         return;
       }
     }
@@ -166,11 +174,18 @@ export function MapView(props: MapViewProps) {
     const holder = owner === NO_NATION ? null : client.state.nations.get(ids[owner]);
     const map = client.map;
     const sea = map.isSea(hover.node);
+    const here = rendererRef.current?.formationsAt(hover.node) ?? [];
     return (
       <div className="map-tooltip" style={{ left: hover.x + 14, top: hover.y + 14 }}>
         <div className="tt-title">{places.name(hover.node)}</div>
         <div>{sea ? 'Sea zone' : `${map.terrain[hover.node]} · ${holder?.name ?? 'unclaimed'}`}</div>
         {!sea && map.owner[hover.node] !== (holder?.id ?? '') && <div className="tt-warn">Occupied (pre-war: {map.owner[hover.node]})</div>}
+        {here.length > 0 && (
+          <ul className="tt-list">
+            {here.slice(0, 6).map((f) => <li key={f.entry.id}>{f.entry.nation} · {f.entry.name}</li>)}
+            {here.length > 6 && <li className="muted">+{here.length - 6} more</li>}
+          </ul>
+        )}
         {props.targeting && <div className="tt-hint">Click to set target</div>}
       </div>
     );
