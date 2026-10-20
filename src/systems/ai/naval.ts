@@ -183,6 +183,39 @@ function maritimeFocus(p: Plan, assault: Assault | undefined): NodeId {
 }
 
 /**
+ * Where carriers hold station when the focus lies off an enemy coast: a sea zone up to two
+ * zones (~300-600 km) from the focus, as far from enemy-held shore as possible, outside the
+ * densest land-based missile and fighter coverage. CSIS 2023 kept US carriers east of Taiwan
+ * and still lost two in the base case; the carriers fought by aircraft, not in the strait.
+ */
+function standoff(p: Plan, focus: NodeId): NodeId {
+  const { map } = p.ctx;
+  const hostileShore = coast(map).filter((n) => p.enemies.has(p.world.control[n]));
+  if (!hostileShore.length) return focus;
+  const clearance = (z: NodeId) => {
+    let d = Infinity;
+    for (const n of hostileShore) if (Math.abs(map.lat[n] - map.lat[z]) * 111 < d) d = Math.min(d, map.distanceKm(n, z));
+    return d;
+  };
+  let best = focus, bestD = clearance(focus);
+  let ring: NodeId[] = [focus];
+  const seen = new Set<number>(ring);
+  for (let depth = 0; depth < 2; depth++) {
+    const next: NodeId[] = [];
+    for (const z of ring)
+      for (const m of map.neighbors(z)) {
+        if (!map.isSea(m) || seen.has(m)) continue;
+        seen.add(m);
+        next.push(m);
+        const d = clearance(m);
+        if (d > bestD) { bestD = d; best = m; }
+      }
+    ring = next;
+  }
+  return best;
+}
+
+/**
  * Lift groups shuttle troops from the embarkation port to the beach: sail to the port, load
  * staged formations (oversized ones board as landing teams), sail at SAIL_LOAD, land, return.
  * Ground formations nearest the port are staged there for STAGE_WAVES loads ahead.
@@ -240,7 +273,8 @@ function runAssault(p: Plan, a: Assault, lifts: Formation[]): void {
 
 /**
  * Naval groups: SSBNs hold a bastion in home waters; a nation able to invade across the sea
- * shuttles troops in its lift groups; carriers concentrate at the maritime focus; attack
+ * shuttles troops in its lift groups; carriers concentrate on the maritime focus, standing off
+ * from a hostile shore unless covering their own landing; attack
  * submarines near the focus hunt there and the rest blockade the chokepoints enemy trade
  * and fleets must pass; escorts screen lift groups first, then carriers, one each, and
  * otherwise blockade or patrol the focus.
@@ -253,6 +287,7 @@ export function planNaval(p: Plan): void {
   const liftCapable = groups.filter((g) => g.kind === 'surface_group' && compose(g, p.ctx.catalog).troopLift > 0);
   const assault = planAssault(p, liftCapable);
   const focus = maritimeFocus(p, assault);
+  const station = assault ? focus : standoff(p, focus);
   const enemyChokes = chokepoints(map).filter((c) => [...c.users].some((u) => p.enemies.has(u as NationId)));
   const claimed = new Map<NodeId, number>();
 
@@ -285,7 +320,7 @@ export function planNaval(p: Plan): void {
         else if (!blockade(g)) issue(p, g, { posture: 'patrol', target: focus });
         break;
       case 'capital':
-        issue(p, g, { posture: 'patrol', target: focus });
+        issue(p, g, { posture: 'patrol', target: station });
         break;
       // Without a landing to make, amphibious groups stay out of the missile zone in home waters.
       case 'lift':
