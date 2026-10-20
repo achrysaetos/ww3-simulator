@@ -1,6 +1,7 @@
 import { relation } from '../../core/engine';
 import type { GameMap } from '../../core/map';
 import type { Formation, FormationId, FormationKind, Munition, MunitionId, NationId, NodeId, Order, PlatformId, TargetClass } from '../../core/types';
+import { isOverseas } from '../../data/territories';
 import { HOSTILE_OPINION } from '../diplomacy/escalation';
 import { rung } from '../diplomacy/wars';
 import { dailyRounds, effectPk } from '../air';
@@ -37,7 +38,7 @@ const CAPITAL = { value: 2.5, cls: 'structure' as TargetClass };
 const DEEP_STRIKE_RISK = 0.7;
 
 /**
- * Whether striking cells of `owner`'s homeland outside the battle area is
+ * Whether striking cells of `owner`'s metropolitan homeland outside the battle area is
  * politically allowed. A nuclear power weighs deep strikes on another nuclear
  * power's homeland against escalation and waits until the dyad has reached
  * strategic conventional war (cf. the 2024 US decision to let Ukraine use US
@@ -126,6 +127,8 @@ export function strikeTargets(p: Plan, battleArea: Set<number>): TargetGrid {
   const allowed = (t: StrikeTarget) => {
     if (map.isSea(t.node) || battleArea.has(t.node)) return true;
     const owner = map.owner[t.node];
+    // An enemy's overseas territory is theatre, not homeland: Guam's bases are struck alongside Okinawa's.
+    if (p.enemies.has(owner) && isOverseas(map, t.node)) return true;
     let ok = deep.get(owner);
     if (ok === undefined) deep.set(owner, (ok = deepStrikeAllowed(p, owner)));
     return ok && (p.enemies.has(owner) || nearEnemyCapital(p, t.node));

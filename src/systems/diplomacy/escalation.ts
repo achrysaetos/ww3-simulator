@@ -1,5 +1,6 @@
 import { atWar, relation, relationKey, relationMut, type SimContext } from '../../core/engine';
 import type { EscalationLevel, NationId, World } from '../../core/types';
+import { isOverseas } from '../../data/territories';
 import type { DiplomacyState, WarRecord } from './types';
 import { raiseEscalation, sideOf } from './wars';
 
@@ -68,6 +69,8 @@ export function processEvents(world: World, ctx: SimContext, s: DiplomacyState, 
           if (bystander && !s.wars.some((w) => sideOf(w, e.by) !== -1 && sideOf(w, e.by) === sideOf(w, victim))) attacks.push([e.by, victim]);
           break;
         }
+        // Bases in an overseas territory (Guam) are part of the theatre; striking them does not threaten the state itself.
+        if (isOverseas(map, e.target)) break;
         addPressure(s, e.by, victim, e.target === world.nations[victim].capital ? PRESSURE.capitalStrike : PRESSURE.homelandStrike);
         break;
       }
