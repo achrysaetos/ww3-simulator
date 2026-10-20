@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { addFormation } from '../src/core/forces';
 import type { NationId, NodeId, SimEvent } from '../src/core/types';
+import { initialStockpiles } from '../src/data/industry';
 import { economicStress, economy } from '../src/systems/economy';
 import { id, testWorld } from '../src/testkit';
 
@@ -160,11 +161,13 @@ describe('economy: manpower', () => {
     const deStart = de.reserves, polStart = pol.reserves;
     t.world.pending.push({ type: 'set_mobilization', nation: POL, level: 1 });
 
-    t.engine.run(t.world, 1);
-    // A week in, call-ups are still in training, not yet reserves.
-    expect(pol.reserves - polStart).toBeLessThan(0.0025 * pol.population * 0.25 * 0.25);
+    t.engine.run(t.world, 4);
+    // A month in, most call-ups are still in the training pipeline, not yet reserves.
+    const trained = pol.reserves - polStart, training = t.world.slices.economy.nations[POL].inTraining;
+    expect(training).toBeGreaterThan(0);
+    expect(trained).toBeLessThan(0.5 * (trained + training));
 
-    t.engine.run(t.world, 26);
+    t.engine.run(t.world, 23);
     const halfYear = pol.reserves - polStart;
     expect(halfYear).toBeGreaterThan(0.005 * pol.population);
 
@@ -212,5 +215,19 @@ describe('economy: performance', () => {
     const ms = (performance.now() - start) / ticks;
     console.log(`economy.step: ${ms.toFixed(2)} ms/tick (193 nations, 3,000 formations)`);
     expect(ms).toBeLessThan(20);
+  });
+});
+
+describe('economy: initial stockpiles', () => {
+  it('puts missiles in the stockpile and shells into bulk ammunition tons', () => {
+    const { world } = testWorld();
+    const us = initialStockpiles(world.nations[USA]);
+    expect(us.stockpile[id.munition('tomahawk')]).toBeGreaterThan(1_000);
+    expect(us.stockpile[id.munition('pac3_mse')]).toBeGreaterThan(1_000);
+    expect(us.stockpile[id.munition('shell_155')]).toBeUndefined();
+    // 1.5M rounds at ~60 kg each.
+    expect(us.bulk.ammo).toBeGreaterThan(90_000);
+    expect(us.bulk.fuel).toBeGreaterThan(0);
+    expect(initialStockpiles(world.nations[id.nation('ISL')]).stockpile).toEqual({});
   });
 });
