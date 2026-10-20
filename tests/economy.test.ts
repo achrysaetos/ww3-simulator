@@ -163,6 +163,24 @@ describe('economy: blockade by geography', () => {
   });
 });
 
+describe('economy: energy price', () => {
+  it('a Hormuz closure roughly doubles the world energy price, costing importers output and exporters none', () => {
+    const t = dailyWorld();
+    t.days(2);
+    expect(t.world.slices.economy.energyPrice).toBe(1);
+    for (const g of ['SAU', 'ARE', 'IRQ', 'KWT', 'QAT', 'IRN']) t.world.theater.tradeBlocked[id.nation(g)] = 0.9;
+    t.days(10);
+    const price = t.world.slices.economy.energyPrice;
+    // EIA/IEA closure scenarios: USD 150-200/bbl from ~USD 75.
+    expect(price).toBeGreaterThan(1.6);
+    expect(price).toBeLessThan(3);
+    const jp = t.world.slices.economy.nations[JPN];
+    expect(jp.supply.energy).toBe(1);
+    expect(jp.gdpIndex).toBeLessThan(0.99);
+    expect(t.world.slices.economy.nations[USA].gdpIndex).toBe(1);
+  });
+});
+
 describe('economy: military aid', () => {
   it('ships donor stocks to a nation at war, and stops when the donor fights the recipient or the war ends', () => {
     const t = dailyWorld();

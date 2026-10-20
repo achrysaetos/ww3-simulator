@@ -64,6 +64,8 @@ export interface EconomyState {
   lastReportTick: number;
   /** Arms pipelines, keyed by aidKey(flow). */
   aid: Record<string, AidState>;
+  /** World energy price relative to the start, from export capacity lost to blockade and war damage. */
+  energyPrice: number;
 }
 
 declare module '../../core/types' {

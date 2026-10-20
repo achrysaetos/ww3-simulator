@@ -39,6 +39,20 @@ const BUFFER_REFILL_PER_MONTH = 0.25;
 /** Fraction of imports that GDP cannot replace at home in the short run (est.). */
 const IMPORT_GDP_LOSS = 0.5;
 const ENERGY_GDP_ELASTICITY = 0.7;
+/**
+ * Short-run price elasticity of world energy supply and demand combined, with stock
+ * releases. Losing ~20% of world oil exports through Hormuz then lifts prices ~2.4x,
+ * inside the USD 150-200/bbl range of EIA and IEA closure scenarios from ~USD 75 (est.).
+ */
+const ENERGY_PRICE_ELASTICITY = 0.25;
+const MAX_ENERGY_PRICE = 4;
+/**
+ * Energy imports cost ~3-5% of GDP for large net importers at 2024 prices (World Bank,
+ * IEA); half of a price rise passes through to lost output in the short run (est.;
+ * IMF rule of thumb: +USD 10/bbl costs ~0.15% of world GDP).
+ */
+const ENERGY_BILL_SHARE = 0.04;
+const ENERGY_PRICE_PASSTHROUGH = 0.5;
 const FOOD_GDP_ELASTICITY = 0.3;
 /** Peacetime under-arms ceiling: standing forces plus 1% of the population as reserves (createWorld's default). */
 const BASE_RESERVE_SHARE = 0.01;
@@ -180,6 +194,7 @@ interface Scan {
 function scan(world: World, ctx: SimContext): Scan {
   const integrity = industrialIntegrity(world, ctx.map);
   for (const [id, v] of integrity) integrity.set(id, v / (world.slices.economy.nations[id]?.baseIntegrity || 1));
+  world.slices.economy.energyPrice = energyPrice(world, integrity);
   const personnel = new Map<NationId, number>();
   for (const f of Object.values(world.formations)) if (f.status !== 'destroyed') personnel.set(f.nation, (personnel.get(f.nation) ?? 0) + f.personnel);
   let worldGdp = 0;
@@ -192,6 +207,16 @@ function scan(world: World, ctx: SimContext): Scan {
 /** Share of a nation's total foreign trade a naval blockade has cut. */
 function seaCut(world: World, id: NationId): number {
   return (world.theater.tradeBlocked[id] ?? 0) * (SEABORNE_TRADE_SHARE[id] ?? DEFAULT_SEABORNE_TRADE_SHARE);
+}
+
+/** World energy price relative to normal: export capacity lost to blockade or damage, through a short-run elasticity. Sanctions only reroute oil, so they do not count. */
+function energyPrice(world: World, integrity: Map<NationId, number>): number {
+  let lost = 0;
+  for (const [supplier, share] of Object.entries(RESOURCE_SPECS.energy.market)) {
+    if (!world.nations[supplier as NationId]) continue;
+    lost += share * (1 - (1 - seaCut(world, supplier as NationId)) * (integrity.get(supplier as NationId) ?? 1));
+  }
+  return Math.min(MAX_ENERGY_PRICE, Math.pow(Math.max(1e-3, 1 - lost), -1 / ENERGY_PRICE_ELASTICITY));
 }
 
 /** How much of a supplier's exports reach `buyer`, 0..1. */
@@ -286,9 +311,11 @@ function stepNation(world: World, ctx: SimContext, s: Scan, n: Nation, e: Nation
   for (const r of RESOURCES) e.supply[r] = drawSupply(e, n.id, r, rawAccess(world, s, n, r), dtMonths);
   announceShortages(world, ctx, n.id, e);
 
+  const energyImported = 1 - clamp01(RESOURCE_SPECS.energy.selfSufficiency[n.id] ?? RESOURCE_SPECS.energy.defaultSelf(n.stats));
   e.gdpIndex =
     e.integrity *
     (1 - ENERGY_GDP_ELASTICITY * (1 - e.supply.energy)) *
+    (1 - ENERGY_BILL_SHARE * energyImported * (world.slices.economy.energyPrice - 1) * ENERGY_PRICE_PASSTHROUGH) *
     (1 - FOOD_GDP_ELASTICITY * (1 - e.supply.food)) *
     (1 - ((n.stats.importsPctGdp ?? 30) / 100) * e.tradeLoss * IMPORT_GDP_LOSS);
 
@@ -403,7 +430,7 @@ export const economy: System = {
   commands: ['set_mobilization', 'produce', 'sanction'],
 
   init(world, ctx) {
-    world.slices.economy = { nations: {}, lastReportTick: world.tick, aid: {} };
+    world.slices.economy = { nations: {}, lastReportTick: world.tick, aid: {}, energyPrice: 1 };
     const integrity = industrialIntegrity(world, ctx.map);
     for (const n of Object.values(world.nations)) {
       const e = newNationEconomy(n);
