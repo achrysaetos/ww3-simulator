@@ -47,9 +47,9 @@ export function landings(env: TickEnv): void {
     }
     if (lift.node !== seaNeighbour(ctx.map, target)) continue;
     const support = supportAt(env, lift, target);
-    let attack = 0;
+    const { defense, held } = beach(env, lift, target);
+    let attack = held;
     for (const f of aboard) attack += combatValue(env, f);
-    const defense = beachDefense(env, lift, target);
     const r = attack > 0 ? defense / attack : 10;
     const loss = Math.min(0.95, (LANDING_BASE_LOSS + LANDING_OPPOSED_LOSS * (r / (1 + r)) * (1 - support)) * ctx.rng.range(0.8, 1.2));
     const lb = ledger(world, lift.nation);
@@ -67,17 +67,23 @@ function supportAt(env: TickEnv, lift: Formation, beach: NodeId): number {
   return (sea?.nation === lift.nation ? LANDING_SEA_SUPPORT * sea.level : 0) + (air?.nation === lift.nation ? LANDING_AIR_SUPPORT * air.level : 0);
 }
 
-/** Hostile ground combat value on the beach cell, plus half of what stands in the cells next to it. */
-function beachDefense(env: TickEnv, lift: Formation, beach: NodeId): number {
+/**
+ * Hostile ground combat value on the beach cell plus half of what stands in the cells next to it,
+ * and the lander's own troops already on the beach: follow-on waves land behind them (Normandy
+ * after D-Day, Inchon's second day).
+ */
+function beach(env: TickEnv, lift: Formation, cell: NodeId): { defense: number; held: number } {
   const { world, ctx } = env;
-  const near = new Map<number, number>([[beach, 1]]);
-  for (const n of ctx.map.neighbors(beach)) if (!ctx.map.isSea(n)) near.set(n, 0.5);
-  let v = 0;
+  const near = new Map<number, number>([[cell, 1]]);
+  for (const n of ctx.map.neighbors(cell)) if (!ctx.map.isSea(n)) near.set(n, 0.5);
+  let defense = 0, held = 0;
   for (const f of Object.values(world.formations)) {
     const w = near.get(f.node);
-    if (w && f.status === 'active' && GROUND_KINDS.has(f.kind) && atWar(world, f.nation, lift.nation)) v += w * combatValue(env, f) * (1 + f.entrenchment);
+    if (!w || f.status !== 'active' || !GROUND_KINDS.has(f.kind)) continue;
+    if (atWar(world, f.nation, lift.nation)) defense += w * combatValue(env, f) * (1 + f.entrenchment);
+    else if (f.nation === lift.nation && f.node === cell) held += combatValue(env, f);
   }
-  return v;
+  return { defense, held };
 }
 
 /** Abstract ground combat value: summed firepower against ground target classes, scaled by readiness. */

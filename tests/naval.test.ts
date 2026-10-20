@@ -335,7 +335,7 @@ describe('naval movement and lift', () => {
   });
 
   describe('amphibious assault on Taiwan', () => {
-    const assault = (defended: boolean) => {
+    const assault = (defended: boolean, lodgement = false) => {
       const t = navalWorld(9);
       t.war('CHN', 'TWN');
       const port = t.portOf('CHN', 24.5, 118.1);
@@ -345,6 +345,7 @@ describe('naval movement and lift', () => {
       const lift = t.add({ nation: CHN, name: 'Amphib group', kind: 'surface_group', node: port, equipment: t.eq({ n_lhd: 2, t_destroyer: 2 }) });
       const brigade = t.add({ nation: CHN, name: 'Amphibious combined-arms brigade', kind: 'maneuver', echelon: 'brigade', node: port, equipment: t.eq({ t_inf: 300, t_mbt: 40 }) });
       if (defended) t.add({ nation: TWN, name: 'Coastal defense brigade', kind: 'maneuver', echelon: 'brigade', node: beach, equipment: t.eq({ t_inf: 600, t_mbt: 100 }), entrenchment: 0.5 });
+      if (lodgement) t.add({ nation: CHN, name: 'First wave', kind: 'maneuver', echelon: 'brigade', node: beach, equipment: t.eq({ t_inf: 600, t_mbt: 100 }) });
       t.order(brigade, { posture: 'embark', targetFormation: lift.id });
       t.order(lift, { posture: 'attack', target: beach });
       const before = brigade.personnel;
@@ -361,6 +362,13 @@ describe('naval movement and lift', () => {
       const opposed = assault(true);
       expect(open).toBeLessThan(0.06);
       expect(opposed).toBeGreaterThan(0.3);
+    });
+
+    it('a follow-on wave landing behind its own troops on the beach loses far less than the assault wave', () => {
+      const assaultWave = assault(true);
+      const followOn = assault(true, true);
+      expect(followOn).toBeLessThan(assaultWave * 0.7);
+      expect(followOn).toBeGreaterThan(0);
     });
   });
 
