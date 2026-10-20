@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { Catalog } from '../src/core/catalog';
-import { Engine, relationMut } from '../src/core/engine';
+import { Engine, relationMut, type System } from '../src/core/engine';
 import { addFormation, type FormationSpec } from '../src/core/forces';
 import { Rng } from '../src/core/rng';
 import type { Formation, Munition, MunitionId, NationId, NodeId, Platform, PlatformId } from '../src/core/types';
 import { createWorld } from '../src/core/world';
 import { loadMap } from '../src/data/load';
+import { airWar } from '../src/systems/air';
 import { applyNavalOrder, CHOKEPOINTS, navalWar, resolveSalvo, strikeNavalGroup } from '../src/systems/naval';
 import { geography, nearestSea, seaNeighbour } from '../src/systems/naval/geography';
 import { testMunitions, testPlatforms } from '../src/testkit';
@@ -36,15 +37,16 @@ const navalPlatforms: Platform[] = [
   ship('n_mcm', 'mine_warfare', { crew: 50 }),
   ship('n_usv', 'usv', { crew: 0, unitCostUsdM: 0.25, mobility: { speedKph: 40, rangeKm: 800, fuelTonsPerHour: 0 }, firepower: { ship: 0.05 } }),
   ship('n_minelayer', 'corvette', { loadout: [mun('n_mine', 60)] }),
+  P({ id: 'n_coastal', name: 'Coastal ASBM launcher', class: 'coastal_asm', domain: 'land', unitCostUsdM: 5, crew: 4, mobility: { speedKph: 60, rangeKm: 600, fuelTonsPerHour: 0.05 }, protection: { armor: 0.1, stealth: 0.35 }, sensors: { detectionKm: 0 }, firepower: {}, loadout: [mun('n_asbm', 4)] }),
   ship('n_carrier', 'carrier', { crew: 3000, mobility: { speedKph: 55, rangeKm: 1e6, fuelTonsPerHour: 0 }, engagementChannels: 4, capacity: { aircraft: 60 }, loadout: [mun('t_sam', 16)] }),
   P({ id: 'n_helo', name: 'ASW helicopter', class: 'asw_helo', domain: 'air', unitCostUsdM: 40, crew: 4, mobility: { speedKph: 250, rangeKm: 300, fuelTonsPerHour: 0.5 }, protection: { armor: 0.1, stealth: 0.1 }, sensors: { detectionKm: 50 }, firepower: {}, loadout: [mun('n_lwt', 2)] }),
 ];
 
 /** A world on the real map with the testkit catalog plus naval additions and the naval system. */
-function navalWorld(seed = 42) {
+function navalWorld(seed = 42, systems: System[] = [navalWar]) {
   const map = loadMap();
   const catalog = new Catalog([...testPlatforms, ...navalPlatforms], [...testMunitions, ...navalMunitions]);
-  const engine = new Engine(map, catalog, [navalWar]);
+  const engine = new Engine(map, catalog, systems);
   const world = createWorld(map, { seed });
   engine.init(world);
   const nodeAt = (lat: number, lon: number) => map.nodeAt(lat, lon);
@@ -257,6 +259,26 @@ describe('submarine warfare', () => {
   });
 });
 
+describe('anti-ship strikes from shore', () => {
+  it("a coastal battery's salvo meets the target group's area defence and its hits reach the naval ledger", () => {
+    const t = navalWorld(7, [airWar, navalWar]);
+    t.war('UKR', 'RUS');
+    const port = t.portOf('UKR', 46.5, 30.7);
+    const at = seaNeighbour(t.map, port)!;
+    const fleet = t.add({ nation: RUS, name: 'Frigates', kind: 'surface_group', node: at, equipment: t.eq({ n_frigate: 3 }) });
+    fleet.order = { posture: 'reserve', issuedTick: 0 };
+    const battery = t.add({ nation: UKR, name: 'ASBM battery', kind: 'missile', echelon: 'battalion', node: port, equipment: t.eq({ n_coastal: 12 }) });
+    battery.order = { posture: 'strike', target: at, targetClass: 'ship', targetFormation: fleet.id, issuedTick: 0 };
+    for (let i = 0; i < 8; i++) t.engine.step(t.world);
+    const fired = 48 - battery.magazine[mid('n_asbm')];
+    expect(fired).toBeGreaterThan(0);
+    expect(led(t, 'UKR')!.missilesFired).toBe(fired);
+    expect(led(t, 'RUS')!.interceptorsFired).toBeGreaterThan(0);
+    expect(fleet.magazine[mid('t_sam')]).toBeLessThan(96);
+    expect(led(t, 'RUS')!.hullsSunk + led(t, 'RUS')!.hullsDamaged).toBeGreaterThan(0);
+  });
+});
+
 describe('strike USVs', () => {
   it('a wave of strike USVs expends itself on a tracked warship group, gets past its SAMs, and sinks ships', () => {
     let sunk = 0, samsSpent = 0, launched = 0;
@@ -278,12 +300,30 @@ describe('strike USVs', () => {
     expect(sunk).toBeGreaterThan(4);
     expect(samsSpent).toBe(0);
   });
+
+  it('a USV group raids from its port at a group within range, then waits about two weeks before the next raid', () => {
+    const t = navalWorld();
+    t.war('UKR', 'RUS');
+    const port = t.portOf('UKR', 46.5, 30.7);
+    const usvs = t.add({ nation: UKR, name: 'USV squadron', kind: 'surface_group', node: port, equipment: t.eq({ n_usv: 40 }), magazine: {} });
+    usvs.order = { posture: 'defend', issuedTick: 0 };
+    const fleet = t.add({ nation: RUS, name: 'Patrol', kind: 'surface_group', node: t.nodeAt(43.5, 34.5), equipment: t.eq({ t_destroyer: 20 }), magazine: {} });
+    fleet.order = { posture: 'reserve', issuedTick: 0 };
+    t.world.slices.naval.oceanSurveillance[UKR] = 5;
+    const left = () => usvs.equipment['n_usv' as PlatformId] ?? 0;
+    t.engine.step(t.world);
+    expect(left()).toBe(32);
+    for (let i = 0; i < 13 * 4; i++) t.engine.step(t.world);
+    expect(left()).toBe(32);
+    for (let i = 0; i < 2 * 4; i++) t.engine.step(t.world);
+    expect(left()).toBe(24);
+  });
 });
 
 describe('sea control and blockade', () => {
   const malacca = CHOKEPOINTS.find((c) => c.name === 'Strait of Malacca')!;
 
-  it('a blockade of Malacca interdicts Chinese trade, disrupts Japanese and Korean, and leaves Brazil alone', () => {
+  it('a blockade of Malacca interdicts Chinese trade, disrupts Japanese and Korean only once the PLAN fights there, and leaves Brazil alone', () => {
     const t = navalWorld();
     const at = geography(t.map).chokepoints.find((c) => c.def === malacca)!.nodes[1];
     const us = t.add({ nation: USA, name: 'Blockade force', kind: 'surface_group', node: at, equipment: t.eq({ t_destroyer: 3 }), magazine: {} });
@@ -295,16 +335,22 @@ describe('sea control and blockade', () => {
     t.engine.step(t.world);
     const tb = t.world.theater.tradeBlocked as Record<string, number>;
     expect(tb.CHN).toBeGreaterThan(0.3);
-    expect(tb.JPN).toBeGreaterThan(0.15);
-    expect(tb.KOR).toBeGreaterThan(0.15);
-    expect(tb.CHN).toBeGreaterThan(tb.KOR * 0.9);
-    expect(tb.BRA).toBeLessThan(0.01);
-    expect(tb.USA).toBe(0);
+    expect(tb.JPN).toBe(0);
+    expect(tb.KOR).toBe(0);
+
+    t.add({ nation: CHN, name: 'Escort force', kind: 'surface_group', node: at, equipment: t.eq({ t_destroyer: 1 }), magazine: {} });
+    t.engine.step(t.world);
+    const contested = t.world.theater.tradeBlocked as Record<string, number>;
+    expect(contested.JPN).toBeGreaterThan(0.15);
+    expect(contested.KOR).toBeGreaterThan(0.15);
+    expect(contested.CHN).toBeGreaterThan(contested.KOR * 0.9);
+    expect(contested.BRA).toBeLessThan(0.01);
+    expect(contested.USA).toBe(0);
     expect(t.world.theater.seaControl[at]).toEqual({ nation: USA, level: expect.any(Number) });
     expect(t.world.theater.seaControl[at].level).toBeGreaterThan(0.5);
   });
 
-  it('a submarine on patrol in the Strait of Hormuz cuts Gulf exporters, a surface patrol (not blockade) does not', () => {
+  it('a submarine on patrol in the Strait of Hormuz cuts Iranian trade, a surface patrol (not blockade) does not, and neutrals sail on', () => {
     const t = navalWorld();
     const at = geography(t.map).chokepoints.find((c) => c.def.name === 'Strait of Hormuz')!.nodes[0];
     t.war('USA', 'IRN');
@@ -316,7 +362,7 @@ describe('sea control and blockade', () => {
     t.order(ssn, { posture: 'patrol', target: at });
     t.engine.step(t.world);
     expect((t.world.theater.tradeBlocked as Record<string, number>).IRN).toBeGreaterThan(0.2);
-    expect((t.world.theater.tradeBlocked as Record<string, number>).QAT).toBeGreaterThan(0.1);
+    expect((t.world.theater.tradeBlocked as Record<string, number>).QAT).toBe(0);
   });
 });
 

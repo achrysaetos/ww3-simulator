@@ -2,7 +2,7 @@ import type { GameMap } from '../../core/map';
 import type { Formation, FormationId, NationId, NodeId, PlatformClass, PlatformId } from '../../core/types';
 import { liftShare } from '../naval/amphibious';
 import { geography, seaNeighbour } from '../naval/geography';
-import { compose } from '../naval/state';
+import { compose, fleetLosses } from '../naval/state';
 import { dominant, isGround, issue } from './forces';
 import { enemyPowerAt, landMass } from './fronts';
 import { reachKm } from './strikes';
@@ -66,14 +66,14 @@ function coast(map: GameMap): NodeId[] {
   return c;
 }
 
-type NavalRole = 'ssbn' | 'submarine' | 'capital' | 'lift' | 'escort';
+type NavalRole = 'ssbn' | 'submarine' | 'capital' | 'lift' | 'escort' | 'raider';
 const NAVAL_ROLE: Partial<Record<PlatformClass, NavalRole>> = {
   ssbn: 'ssbn',
   ssn: 'submarine', ssk: 'submarine', ssgn: 'submarine', uuv: 'submarine',
   carrier: 'capital', amphibious: 'capital',
-  cruiser: 'escort', destroyer: 'escort', frigate: 'escort', corvette: 'escort', patrol: 'escort', mine_warfare: 'escort', usv: 'escort',
+  cruiser: 'escort', destroyer: 'escort', frigate: 'escort', corvette: 'escort', patrol: 'escort', mine_warfare: 'escort', usv: 'raider',
 };
-const PRIORITY: NavalRole[] = ['ssbn', 'capital', 'submarine', 'escort'];
+const PRIORITY: NavalRole[] = ['ssbn', 'capital', 'submarine', 'escort', 'raider'];
 
 function roleOf(p: Plan, f: Formation, liftCapable: boolean): NavalRole | undefined {
   if (liftCapable) return 'lift';
@@ -165,16 +165,18 @@ function planAssault(p: Plan, lifts: Formation[]): Assault | undefined {
  * Where this nation's fleet concentrates: the assault zone when invading; otherwise the sea
  * zone holding the enemy surface fleet that most threatens friendly soil (value of its hulls
  * over distance to the nearest friendly capital), so a defender's allies converge on an
- * invasion fleet; failing both, off the main land front or in home waters.
+ * invasion fleet; failing both, off the main land front or in home waters. `enemyFleet` says
+ * whether there is an enemy fleet at sea to fight.
  */
-function maritimeFocus(p: Plan, assault: Assault | undefined): NodeId {
+function maritimeFocus(p: Plan, assault: Assault | undefined): { node: NodeId; enemyFleet: boolean } {
   const { map } = p.ctx;
-  if (assault) return assault.zone;
+  if (assault) return { node: assault.zone, enemyFleet: true };
   const capitals = [...p.friends].map((n) => p.world.nations[n].capital);
   let best: NodeId | undefined, bestScore = 0;
   for (const e of p.enemies)
     for (const f of p.index.byNation.get(e) ?? []) {
-      if (f.kind !== 'surface_group') continue;
+      // Boats ashore in a port cell (shore-launched USVs) are struck from the air, not hunted at sea.
+      if (f.kind !== 'surface_group' || !map.isSea(f.node)) continue;
       let value = 0;
       for (const [pid, n] of Object.entries(f.equipment)) value += n * p.ctx.catalog.platform(pid as PlatformId).unitCostUsdM;
       let d = Infinity;
@@ -182,8 +184,24 @@ function maritimeFocus(p: Plan, assault: Assault | undefined): NodeId {
       const score = value / (1 + d / 500);
       if (score > bestScore) { bestScore = score; best = f.node; }
     }
-  if (best !== undefined) return nearestSea(map, best);
-  return p.sectors.length ? nearestSea(map, p.sectors[0].key) : nearestSea(map, p.world.nations[p.nation].capital);
+  if (best !== undefined) return { node: nearestSea(map, best), enemyFleet: true };
+  return { node: nearestSea(map, p.sectors.length ? p.sectors[0].key : p.world.nations[p.nation].capital), enemyFleet: false };
+}
+
+/**
+ * Recent hull losses (fleetLosses, fading over three months) at which a fleet stops sending its
+ * groups out when there is no enemy fleet to fight: losses to shore missiles and drones buy
+ * nothing, so the fleet stays in its home waters as a fleet in being. One ship lost in the last
+ * two months is enough: after Moskva sank in April 2022 the Black Sea Fleet pulled back from the
+ * northwestern Black Sea, and from 2023 it operated from Novorossiysk (UK MoD, ISW).
+ */
+const WITHDRAW_LOSSES = 0.5;
+
+/** Home ports of this nation's fleets that lost WITHDRAW_LOSSES hulls recently. */
+function batteredFleets(p: Plan, groups: Formation[]): Set<NodeId> {
+  const out = new Set<NodeId>();
+  for (const g of groups) if (fleetLosses(p.world, p.nation, g.home) >= WITHDRAW_LOSSES) out.add(g.home);
+  return out;
 }
 
 /**
@@ -290,8 +308,9 @@ export function planNaval(p: Plan): void {
   if (!groups.length) return;
   const liftCapable = groups.filter((g) => g.kind === 'surface_group' && compose(g, p.ctx.catalog).troopLift > 0);
   const assault = planAssault(p, liftCapable);
-  const focus = maritimeFocus(p, assault);
+  const { node: focus, enemyFleet } = maritimeFocus(p, assault);
   const station = assault ? focus : standoff(p, focus);
+  const inPort = enemyFleet ? new Set<NodeId>() : batteredFleets(p, groups);
   const enemyChokes = chokepoints(map).filter((c) => [...c.users].some((u) => p.enemies.has(u as NationId)));
   const claimed = new Map<NodeId, number>();
 
@@ -315,6 +334,10 @@ export function planNaval(p: Plan): void {
   if (assault) runAssault(p, assault, liftCapable);
   const unescorted = [...(assault ? liftCapable.filter((g) => g.order.posture !== 'reserve') : []), ...groups.filter((g) => roles.get(g) === 'capital')];
   for (const g of groups) {
+    if (inPort.has(g.home) && roles.get(g) !== 'raider' && roles.get(g) !== 'ssbn') {
+      issue(p, g, { posture: 'patrol', target: nearestSea(map, g.home) });
+      continue;
+    }
     switch (roles.get(g)) {
       case 'ssbn':
         issue(p, g, { posture: 'patrol', target: nearestSea(map, g.home) });
@@ -329,6 +352,10 @@ export function planNaval(p: Plan): void {
       // Without a landing to make, amphibious groups stay out of the missile zone in home waters.
       case 'lift':
         if (!assault) issue(p, g, { posture: 'patrol', target: nearestSea(map, g.home) });
+        break;
+      // Strike USVs are launched from shore at targets within their range; they do not keep the sea.
+      case 'raider':
+        issue(p, g, { posture: 'defend', target: g.home });
         break;
       case 'escort': {
         let ward: Formation | undefined, bestD = Infinity;

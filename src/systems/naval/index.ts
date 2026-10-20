@@ -15,6 +15,7 @@ export { applyNavalOrder, isNavalOrder } from './orders';
 export { resolveSalvo, hitWeight } from './salvo';
 export type { NavalState, NavalLedger } from './state';
 export { CHOKEPOINTS } from './geography';
+export { ANTISHIP_KINDS } from './tables';
 
 /**
  * Surface groups, submarines and naval lift. Each tick: follow/RTB orders, movement with
@@ -30,6 +31,7 @@ export const navalWar: System = {
       tracks: {},
       lastFired: {},
       ledger: {},
+      attrition: {},
     };
   },
   step(world, ctx) {

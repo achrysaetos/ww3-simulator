@@ -6,7 +6,8 @@
  */
 import type { Catalog } from '../../core/catalog';
 import type { SimContext } from '../../core/engine';
-import type { Formation, Munition, MunitionId, NationId, NodeId, Platform, PlatformId, TargetClass, World } from '../../core/types';
+import type { Formation, FormationId, Munition, MunitionId, NationId, NodeId, Platform, PlatformId, TargetClass, World } from '../../core/types';
+import { ANTISHIP_KINDS, strikeNavalGroup } from '../naval';
 import { defendRaid, envelopeExposure, hostileDefenders, overflightKm, samVsAircraft, type RaidStream } from './iads';
 import { takeLosses, type LossTally } from './losses';
 import { nodeDistance, type AirGroup, type AirPicture } from './picture';
@@ -201,16 +202,56 @@ function resolveRaid(world: World, ctx: SimContext, pic: AirPicture, slice: AirS
     if (p.strike) p.strike.weapons = sent ? Math.floor((p.strike.weapons * delivered) / sent) : 0;
   }
 
-  const live = pkgs.flatMap((p) => (p.strike && p.strike.weapons > 0 ? [{ f: p.f, ...p.strike }] : []));
+  const all = pkgs.flatMap((p) => (p.strike && p.strike.weapons > 0 ? [{ f: p.f, ...p.strike }] : []));
+  const live = all.filter((p) => p.targetClass !== 'ship');
   for (const p of live) p.f.magazine[p.munition.id] -= p.weapons;
+  strikeShips(world, ctx, pic, target, attacker, all.filter((p) => p.targetClass === 'ship'));
   const streams: RaidStream[] = live.map((p) => ({ munition: p.munition, count: p.weapons, overflightKm: overflightKm(world, ctx, pic, p.f.node, target, attacker) }));
   const leaked = defendRaid(world, ctx, pic, target, attacker, streams);
   live.forEach((p, i) => {
     const flightMin = nodeDistance(ctx, p.f.node, target) / (Math.max(0.05, p.munition.speedMach) * MACH_KM_PER_MIN);
-    const damage = applyEffect(world, ctx, pic, slice, target, attacker, p.munition, p.targetClass, leaked[i], tally, flightMin);
+    const damage = applyEffect(world, ctx, pic, slice, target, attacker, p.munition, p.targetClass, leaked[i], tally, flightMin, p.f.order.targetFormation);
     ctx.emit({ type: 'strike', tick: world.tick, by: attacker, munition: p.munition.id, fired: p.weapons, intercepted: p.weapons - leaked[i], target, damage });
   });
   emitBattle(world, ctx, target, attacker, world.control[target] || attacker, tally);
+}
+
+/**
+ * Weapons aimed at ships go through the naval salvo model (Hughes): the target task force's
+ * pooled area defence, point defence and staying power, the same as ship-launched salvos.
+ * Packages aimed at the same group with the same weapon arrive as one salvo. A weapon without
+ * a terminal seeker can only hit a group lying in its home port; at sea it has moved on by
+ * the time the weapon arrives (see naval ANTISHIP_KINDS). With nothing to hit, the shooter
+ * holds its rounds.
+ */
+function strikeShips(world: World, ctx: SimContext, pic: AirPicture, node: NodeId, attacker: NationId, pkgs: { f: Formation; munition: Munition; weapons: number }[]): void {
+  const salvos = new Map<string, { target: Formation; munition: Munition; count: number }>();
+  for (const p of pkgs) {
+    const target = shipTarget(world, ctx, pic, node, attacker, p.f.order.targetFormation);
+    if (!target) continue;
+    if (!ANTISHIP_KINDS.has(p.munition.kind) && (target.node !== target.home || target.order.path?.length)) continue;
+    p.f.magazine[p.munition.id] -= p.weapons;
+    const key = `${target.id}|${p.munition.id}`;
+    const s = salvos.get(key);
+    if (s) s.count += p.weapons;
+    else salvos.set(key, { target, munition: p.munition, count: p.weapons });
+  }
+  for (const s of salvos.values()) strikeNavalGroup(world, ctx, attacker, s.munition.id, s.count, s.target.id);
+}
+
+/** The aimed surface group if it is still at the node, else the most valuable hostile surface group there. */
+function shipTarget(world: World, ctx: SimContext, pic: AirPicture, node: NodeId, attacker: NationId, aimed: FormationId | undefined): Formation | undefined {
+  const ok = (f: Formation | undefined): f is Formation => !!f && f.status === 'active' && f.kind === 'surface_group' && f.node === node && pic.atWar(f.nation, attacker);
+  const a = aimed ? world.formations[aimed] : undefined;
+  if (ok(a)) return a;
+  let best: Formation | undefined, bestValue = 0;
+  for (const f of pic.atNode.get(node) ?? []) {
+    if (!ok(f)) continue;
+    let v = 0;
+    for (const [pid, n] of Object.entries(f.equipment) as [PlatformId, number][]) v += n * ctx.catalog.platform(pid).unitCostUsdM;
+    if (v > bestValue) { bestValue = v; best = f; }
+  }
+  return best;
 }
 
 /**
@@ -258,8 +299,39 @@ function stillThere(m: Munition, tc: TargetClass, flightMin: number): number {
   return TUNING.mobileTargetLocated * Math.exp(-flightMin / TUNING.mobileTargetDwellMin);
 }
 
+interface Victim { f: Formation; pid: PlatformId; /** Detectability relative to a vehicle in the open, 0..1. */ seen: number }
+
+/**
+ * Concealment below which a mobile platform is found as readily as any vehicle in the open:
+ * tanks, IFVs, SP guns and SAM radars (stealth 0.1 in the catalog's land defaults).
+ */
+const OPEN_STEALTH = 0.1;
+
+/**
+ * Hostile platforms at the node a strike of class `tc` can kill. A strike on mobile forces aimed
+ * at a formation hits only that formation: the aimpoints are its located vehicles, not the dug-in
+ * or dispersed units elsewhere in a 1-degree cell, and a formation that has left the cell is
+ * missed. Each mobile platform carries its detectability relative to a vehicle in the open; it
+ * weights which platform a kill falls on and scales the kill chance, so a camouflaged TEL
+ * (Neptune, stealth 0.35) survives more often than its radar. Parked aircraft and fixed sites
+ * are not hidden by signature.
+ */
+function victims(ctx: SimContext, pic: AirPicture, target: NodeId, attacker: NationId, tc: TargetClass, aimed: FormationId | undefined): Victim[] {
+  const mobile = MOBILE_TARGETS.has(tc);
+  const out: Victim[] = [];
+  for (const f of pic.atNode.get(target) ?? []) {
+    if (f.status !== 'active' || !pic.atWar(f.nation, attacker) || (mobile && aimed && f.id !== aimed)) continue;
+    if (tc === 'aircraft' && f.kind !== 'air_wing') continue;
+    for (const pid of Object.keys(f.equipment) as PlatformId[]) {
+      const platform = ctx.catalog.platform(pid);
+      if (f.equipment[pid] > 0 && TARGET_OF_CLASS[platform.class] === tc) out.push({ f, pid, seen: mobile ? visibility(Math.max(0, platform.protection.stealth - OPEN_STEALTH)) : 1 });
+    }
+  }
+  return out;
+}
+
 /** Apply the weapons that got through. Returns a short damage report for the strike event. */
-function applyEffect(world: World, ctx: SimContext, pic: AirPicture, slice: AirSlice, target: NodeId, attacker: NationId, m: Munition, tc: TargetClass, hits: number, tally: LossTally, flightMin: number): string {
+function applyEffect(world: World, ctx: SimContext, pic: AirPicture, slice: AirSlice, target: NodeId, attacker: NationId, m: Munition, tc: TargetClass, hits: number, tally: LossTally, flightMin: number, aimed: FormationId | undefined): string {
   if (hits <= 0) return 'no hits';
   if (tc === 'structure' || tc === 'hardened') {
     const owner = world.control[target];
@@ -270,13 +342,6 @@ function applyEffect(world: World, ctx: SimContext, pic: AirPicture, slice: AirS
     infra[target] = before * (1 - Math.min(0.5, perHit)) ** hits;
     return `infrastructure ${before.toFixed(3)} -> ${infra[target].toFixed(3)}`;
   }
-  const victims = (match: (f: Formation, pid: PlatformId) => boolean) => {
-    const out: { f: Formation; pid: PlatformId }[] = [];
-    for (const f of pic.atNode.get(target) ?? [])
-      if (f.status === 'active' && pic.atWar(f.nation, attacker))
-        for (const pid of Object.keys(f.equipment) as PlatformId[]) if (f.equipment[pid] > 0 && match(f, pid)) out.push({ f, pid });
-    return out;
-  };
   let p = effectPk(m, tc) * stillThere(m, tc, flightMin);
   const parts: string[] = [];
   if (tc === 'aircraft') {
@@ -287,16 +352,17 @@ function applyEffect(world: World, ctx: SimContext, pic: AirPicture, slice: AirS
       parts.push(`runway ${r.toFixed(2)} -> ${slice.runway[target].toFixed(2)}`);
     }
   }
-  const pool = victims((f, pid) => TARGET_OF_CLASS[ctx.catalog.platform(pid).class] === tc && (tc !== 'aircraft' || f.kind === 'air_wing'));
+  const pool = victims(ctx, pic, target, attacker, tc, aimed);
   let left = pool.reduce((s, v) => s + v.f.equipment[v.pid], 0);
   if (tc === 'aircraft') p *= Math.min(1, left / TUNING.packedRampAircraft);
+  if (MOBILE_TARGETS.has(tc) && left) p *= pool.reduce((s, v) => s + v.f.equipment[v.pid] * v.seen, 0) / left;
   const kills = ctx.rng.binomial(hits, p);
-  const picked = new Map<{ f: Formation; pid: PlatformId }, number>();
+  const picked = new Map<Victim, number>();
+  const weight = (v: Victim) => (v.f.equipment[v.pid] - (picked.get(v) ?? 0)) * v.seen;
   for (let k = 0; k < kills && left > 0; k++, left--) {
-    let r = ctx.rng.next() * left, i = 0;
-    const remaining = (v: (typeof pool)[number]) => v.f.equipment[v.pid] - (picked.get(v) ?? 0);
-    while (i < pool.length - 1 && r >= remaining(pool[i])) {
-      r -= remaining(pool[i]);
+    let r = ctx.rng.next() * pool.reduce((s, v) => s + weight(v), 0), i = 0;
+    while (i < pool.length - 1 && r >= weight(pool[i])) {
+      r -= weight(pool[i]);
       i++;
     }
     picked.set(pool[i], (picked.get(pool[i]) ?? 0) + 1);

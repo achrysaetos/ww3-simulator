@@ -199,6 +199,18 @@ describe('strikes', () => {
     expect(t.strikes(t.tick()).length).toBeGreaterThan(0);
   });
 
+  it('a strike aimed at one formation kills in that formation, not in another one sharing its cell', () => {
+    const t = airWorld();
+    t.war('RUS', 'UKR');
+    const cell = t.node(47.5, 35);
+    const aimed = launchers(t, 'UKR', cell, { x_cruise_tel: 40 });
+    const bystander = launchers(t, 'UKR', cell, { x_mrbm_tel: 40 });
+    launchers(t, 'RUS', t.node(46.5, 36.5), { t_tel: 200 }, { posture: 'strike', target: cell, targetClass: 'soft', targetFormation: aimed.id });
+    t.tick(4);
+    expect(count(aimed)).toBeLessThan(40);
+    expect(count(bystander)).toBe(40);
+  });
+
   it('missile strikes on an airbase destroy parked aircraft and crater the runway, cutting sorties', () => {
     const t = airWorld();
     t.war('USA', 'CHN');

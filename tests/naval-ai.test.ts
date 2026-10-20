@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { NationId } from '../src/core/types';
 import { createSession } from '../src/scenarios';
+import { recordFleetLoss } from '../src/systems/naval/state';
 
 const run = (scenario: string, days: number) => {
   const s = createSession(scenario, 1);
@@ -23,5 +24,20 @@ describe('naval AI amphibious assault', () => {
     const s = run('ukraine-2026', 5);
     expect(Object.values(s.world.formations).some((f) => f.status === 'embarked')).toBe(false);
     expect(s.world.slices.naval.ledger['RUS' as NationId]?.assaultLandings ?? 0).toBe(0);
+  }, 120_000);
+});
+
+describe('naval AI fleet in being', () => {
+  const blackSeaFleet = (s: ReturnType<typeof createSession>) =>
+    Object.values(s.world.formations).filter((f) => f.nation === 'RUS' && f.status === 'active' && (f.kind === 'surface_group' || f.kind === 'submarine') && f.name.startsWith('Black Sea Fleet'));
+
+  it('a fleet that keeps losing ships with no enemy fleet at sea to fight stays in its home waters', () => {
+    const fresh = createSession('ukraine-2026', 1);
+    const battered = createSession('ukraine-2026', 1);
+    const home = blackSeaFleet(battered)[0].home;
+    recordFleetLoss(battered.world, blackSeaFleet(battered)[0], 3);
+    for (const s of [fresh, battered]) for (let i = 0; i < 4; i++) s.engine.step(s.world);
+    expect(blackSeaFleet(fresh).some((f) => f.order.target !== home)).toBe(true);
+    expect(blackSeaFleet(battered).every((f) => f.order.target === home)).toBe(true);
   }, 120_000);
 });
