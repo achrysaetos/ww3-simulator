@@ -230,6 +230,30 @@ describe('submarine warfare', () => {
     expect(ssn.status).toBe('active');
     expect(led(t, 'USA')!.torpedoesFired).toBeGreaterThan(0);
   });
+
+  const attacksOn = (screened: boolean) => {
+    const t = navalWorld(7);
+    const at = t.nodeAt(20, 125);
+    t.war('USA', 'CHN');
+    const ssn = t.add({ nation: USA, name: 'SSN', kind: 'submarine', echelon: 'squadron', node: at, equipment: t.eq({ t_ssn: 1 }) });
+    ssn.order = { posture: 'patrol', issuedTick: 0 };
+    const force = t.add({ nation: CHN, name: 'Amphibious force', kind: 'surface_group', node: at, equipment: t.eq({ n_lhd: 40 }) });
+    if (screened) {
+      const screen = t.add({ nation: CHN, name: 'ASW screen', kind: 'surface_group', node: at, equipment: t.eq({ n_frigate: 6, n_helo: 12 }), magazine: {} });
+      screen.order = { posture: 'escort', targetFormation: force.id, issuedTick: 0 };
+    }
+    let attacks = 0;
+    for (let i = 0; i < 32; i++) for (const e of t.engine.step(t.world)) if (e.type === 'strike' && e.by === USA) attacks++;
+    return { attacks, torpedoes: led(t, 'USA')?.torpedoesFired ?? 0 };
+  };
+
+  it('one boat attacks with a spread of three about once a day, and an ASW screen turns most approaches away', () => {
+    const bare = attacksOn(false);
+    expect(bare.attacks).toBeGreaterThanOrEqual(6);
+    expect(bare.attacks).toBeLessThanOrEqual(9);
+    expect(bare.torpedoes).toBe(bare.attacks * 3);
+    expect(attacksOn(true).attacks).toBeLessThan(bare.attacks * 0.6);
+  });
 });
 
 describe('sea control and blockade', () => {
