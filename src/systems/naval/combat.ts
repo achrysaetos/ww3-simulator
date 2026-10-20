@@ -24,6 +24,13 @@ const ASW_SALVO = 2;
  * one per tick.
  */
 const SUB_REATTACK_TICKS = 4;
+/**
+ * Chance per unit of screen ASW effort x (1 - stealth) that a target group's own screen catches a
+ * submarine closing to firing range. Fleet exercises still see quiet boats reach carriers (Saphir
+ * vs Theodore Roosevelt 2015, Gotland vs Ronald Reagan 2005), so a carrier group's screen (destroyers
+ * and a dozen MH-60Rs, ~8 units) should foil about half the attacks by a 0.9-stealth SSN (estimate).
+ */
+const SCREEN_K = 0.9;
 /** Decoy/evasion chance for a surface ship against one torpedo (Nixie-type towed decoys; estimate). */
 const SHIP_TORPEDO_DEFENSE = 0.15;
 
@@ -52,6 +59,11 @@ export function navalCombat(env: TickEnv, tracks: Tracks): void {
     if (!target) continue;
     const torp = bestMunition(env, f, 'ship', 0, (m) => m.kind === 'torpedo');
     if (!torp) continue;
+    // A boat caught on its approach breaks off; it is a datum the screen searches next tick.
+    if (env.ctx.rng.chance(1 - Math.exp(-screen(env, target) * (1 - c.stealth) * SCREEN_K))) {
+      env.world.slices.naval.lastFired[f.id] = env.world.tick;
+      continue;
+    }
     const n = Math.min(Math.floor(f.magazine[torp.id]), TORPEDO_SPREAD);
     queue(target, f.nation, fire(env, f, target, torp, n, 'ship'));
   }
@@ -88,6 +100,14 @@ export function navalCombat(env: TickEnv, tracks: Tracks): void {
   }
 
   for (const { target, hits, by } of pending.values()) applyHits(env, target, hits, by);
+}
+
+/** ASW effort screening a group against an approaching submarine: its own sensors and those of the groups escorting it. */
+function screen(env: TickEnv, target: Formation): number {
+  let asw = env.comp(target).aswSearch;
+  for (const g of env.byNode.get(target.node) ?? [])
+    if (g !== target && g.nation === target.nation && g.order.posture === 'escort' && g.order.targetFormation === target.id) asw += env.comp(g).aswSearch;
+  return asw;
 }
 
 function isNeighbour(env: TickEnv, a: number, b: number): boolean {
