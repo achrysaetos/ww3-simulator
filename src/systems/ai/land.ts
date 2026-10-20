@@ -1,4 +1,4 @@
-import type { Formation, NodeId } from '../../core/types';
+import type { Formation, NationId, NodeId } from '../../core/types';
 import { canEnter, landSlice } from '../land';
 import { isGround, issue, strength } from './forces';
 import { enemyPowerAt, landMass, stagingSector } from './fronts';
@@ -50,9 +50,12 @@ function passableRegions(p: Plan): Int32Array {
   const { map } = p.ctx;
   const region = new Int32Array(map.landCount).fill(-1);
   const open = new Uint8Array(map.landCount);
+  const byHolder = new Map<NationId | undefined, number>();
   for (let n = 0; n < map.landCount; n++) {
     const c = p.world.control[n];
-    open[n] = canEnter(p.world, map, p.nation, n as NodeId) && !p.enemies.has(c) ? 1 : 0;
+    let o = byHolder.get(c);
+    if (o === undefined) byHolder.set(c, (o = canEnter(p.world, map, p.nation, n as NodeId) && !p.enemies.has(c) ? 1 : 0));
+    open[n] = o;
   }
   let next = 0;
   for (let s = 0; s < map.landCount; s++) {

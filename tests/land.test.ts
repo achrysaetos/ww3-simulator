@@ -235,4 +235,62 @@ describe('encirclement', () => {
     expect(s.events).toContainEqual(expect.objectContaining({ type: 'formation_destroyed', formation: trapped.id }));
     expect(home.status).toBe('active');
   });
+
+  it('neither a garrison hosted by a neutral nor a unit fighting inside an enemy cell next to its own lines is cut off', () => {
+    const s = setup();
+    const yerevan = MAP.nodeAt(40.2, 44.5);
+    const garrison = s.add({ nation: RUS, name: 'base abroad', kind: 'maneuver', echelon: 'brigade', node: yerevan, equipment: brigade(1) });
+    const forward = s.add({ nation: RUS, name: 'forward', kind: 'maneuver', echelon: 'brigade', node: PLAIN_UKR, equipment: brigade(1) });
+    s.days(15);
+    expect(s.world.slices.land.isolatedDays[garrison.id]).toBeUndefined();
+    expect(s.world.slices.land.isolatedDays[forward.id]).toBeUndefined();
+    expect(garrison.status).toBe('active');
+  });
+});
+
+describe('the front', () => {
+  it('lines in contact trade fire across a cell boundary without any attack order', () => {
+    const s = setup();
+    const ukr = s.add({ nation: UKR, name: 'ukr', kind: 'maneuver', echelon: 'brigade', node: PLAIN_UKR, equipment: brigade(1) });
+    const rus = s.add({ nation: RUS, name: 'rus', kind: 'maneuver', echelon: 'brigade', node: PLAIN_RUS, equipment: brigade(1) });
+    s.days(5);
+    const battles = s.events.filter((e): e is Extract<SimEvent, { type: 'battle' }> => e.type === 'battle');
+    expect(battles.length).toBeGreaterThan(10);
+    expect(platformCount(ukr) + platformCount(rus)).toBeLessThan(2 * platformCount({ ...ukr, equipment: brigade(1) }));
+    expect(s.world.control[PLAIN_UKR]).toBe(UKR);
+    expect(s.world.control[PLAIN_RUS]).toBe(RUS);
+    expect(s.world.slices.land.contest).toEqual({});
+  });
+
+  it('a won battle does not take a cell: attritional assaults gain ground a few km at a time', () => {
+    const r = assault({ ratio: 3, defNode: PLAIN_UKR, attNode: PLAIN_RUS, entrench: 1, days: 10 });
+    expect(r.world.control[PLAIN_UKR]).toBe(UKR);
+    const km = r.world.slices.land.contest[PLAIN_UKR]?.km ?? 0;
+    expect(km).toBeLessThan(40);
+  });
+});
+
+describe('mismatched armies', () => {
+  // 1991: a dug-in, poorly trained conscript army under total enemy air control collapsed in 100 hours (GWAPS; Dupuy).
+  it('a Gulf-War-style mismatch collapses within days despite the defender digging in', () => {
+    const s = setup();
+    const USA = id.nation('USA'), IRQ = id.nation('IRQ');
+    s.war('USA', 'IRQ');
+    const kuwait = MAP.nodeAt(29.5, 47.5), saudi = MAP.nodeAt(28.5, 46.5);
+    s.world.control[kuwait] = IRQ;
+    const conscripts = { readiness: 0.5, experience: 0.3, morale: 0.3, entrenchment: 1 };
+    const iraqis = [0, 1].map((i) => s.add({ nation: IRQ, name: `iraqi ${i}`, kind: 'maneuver', echelon: 'division', node: kuwait, equipment: brigade(1), ...conscripts }));
+    const coalition = [0, 1].map((i) => s.add({ nation: USA, name: `armored ${i}`, kind: 'maneuver', echelon: 'brigade', node: saudi, equipment: brigade(1), readiness: 0.95, experience: 0.8, morale: 0.85 }));
+    for (const n of [kuwait, saudi]) s.world.theater.airControl[n] = { nation: USA, level: 1 };
+    const total = (fs: Formation[]) => fs.reduce((a, f) => a + platformCount(f), 0);
+    const iraq0 = total(iraqis), usa0 = total(coalition);
+    for (const f of coalition) s.order(f, { posture: 'attack', target: kuwait });
+    // Three days to close 150 km from the Saudi start, then about 100 hours to clear the cell.
+    s.days(8);
+    expect(s.world.control[kuwait]).toBe(USA);
+    const iraqLoss = 1 - total(iraqis) / iraq0, usaLoss = 1 - total(coalition) / usa0;
+    expect(iraqLoss).toBeGreaterThan(4 * usaLoss);
+    expect(usaLoss).toBeLessThan(0.05);
+    expect(iraqis.every((f) => f.node !== kuwait && f.status !== 'active')).toBe(true);
+  });
 });
