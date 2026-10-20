@@ -1,7 +1,6 @@
 import type { Catalog } from '../core/catalog';
 import type { ItemId, MunitionId, NationId, World } from '../core/types';
-import { itemSpec } from '../data/industry';
-import { AID_FLOWS, ITEMS } from '../data/industry';
+import { AID_FLOWS, ITEMS, itemSpec } from '../data/industry';
 import { aidKey, defenseShare } from '../systems/economy';
 
 /** War-economy outcomes for one nation over a run. */
@@ -68,6 +67,7 @@ export function economyProbe(world: World, catalog: Catalog) {
   const shortage = new Map<NationId, Record<string, number>>();
   const weekly = new Map<NationId, EconomyMetrics['weekly']>();
   const ticksPerWeek = Math.round((7 * 24) / world.dtHours);
+  let endHeld: Map<NationId, Held> | undefined;
 
   return {
     tick(): void {
@@ -119,7 +119,7 @@ export function economyProbe(world: World, catalog: Catalog) {
       const fuelIn = e.fuelDelivered - before.fuelDelivered;
       const items: EconomyMetrics['items'] = {};
       const empty: Held = { fielded: new Map(), stockpile: new Map() };
-      const h0 = startHeld.get(id) ?? empty, h1 = itemsHeld(world).get(id) ?? empty;
+      const h0 = startHeld.get(id) ?? empty, h1 = (endHeld ??= itemsHeld(world)).get(id) ?? empty;
       for (const item of new Set([...h0.fielded.keys(), ...h0.stockpile.keys(), ...h1.fielded.keys(), ...h1.stockpile.keys(), ...Object.keys(produced)])) {
         if (bulkTons(item as ItemId)) continue;
         const fielded: [number, number] = [Math.round(h0.fielded.get(item) ?? 0), Math.round(h1.fielded.get(item) ?? 0)];
