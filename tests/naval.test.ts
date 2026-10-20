@@ -34,6 +34,7 @@ const navalPlatforms: Platform[] = [
   ship('n_cruiser', 'cruiser', { crew: 500, engagementChannels: 10, loadout: [mun('t_sam', 64)] }),
   ship('n_lhd', 'amphibious', { crew: 1000, capacity: { troops: 6000, vehicles: 200 }, loadout: [] }),
   ship('n_mcm', 'mine_warfare', { crew: 50 }),
+  ship('n_usv', 'usv', { crew: 0, unitCostUsdM: 0.25, mobility: { speedKph: 40, rangeKm: 800, fuelTonsPerHour: 0 }, firepower: { ship: 0.05 } }),
   ship('n_minelayer', 'corvette', { loadout: [mun('n_mine', 60)] }),
   ship('n_carrier', 'carrier', { crew: 3000, mobility: { speedKph: 55, rangeKm: 1e6, fuelTonsPerHour: 0 }, engagementChannels: 4, capacity: { aircraft: 60 }, loadout: [mun('t_sam', 16)] }),
   P({ id: 'n_helo', name: 'ASW helicopter', class: 'asw_helo', domain: 'air', unitCostUsdM: 40, crew: 4, mobility: { speedKph: 250, rangeKm: 300, fuelTonsPerHour: 0.5 }, protection: { armor: 0.1, stealth: 0.1 }, sensors: { detectionKm: 50 }, firepower: {}, loadout: [mun('n_lwt', 2)] }),
@@ -253,6 +254,29 @@ describe('submarine warfare', () => {
     expect(bare.attacks).toBeLessThanOrEqual(9);
     expect(bare.torpedoes).toBe(bare.attacks * 3);
     expect(attacksOn(true).attacks).toBeLessThan(bare.attacks * 0.6);
+  });
+});
+
+describe('strike USVs', () => {
+  it('a wave of strike USVs expends itself on a tracked warship group, gets past its SAMs, and sinks ships', () => {
+    let sunk = 0, samsSpent = 0, launched = 0;
+    for (const seed of [1, 2, 3, 4, 5, 6]) {
+      const t = navalWorld(seed);
+      const at = t.nodeAt(44.5, 31.5);
+      t.war('UKR', 'RUS');
+      const usvs = t.add({ nation: UKR, name: 'USV squadron', kind: 'surface_group', node: at, equipment: t.eq({ n_usv: 8 }), magazine: {} });
+      usvs.order = { posture: 'patrol', issuedTick: 0 };
+      const fleet = t.add({ nation: RUS, name: 'Corvette group', kind: 'surface_group', node: at, equipment: t.eq({ n_minelayer: 4 }), magazine: { t_sam: 40 } as never });
+      fleet.order = { posture: 'reserve', issuedTick: 0 };
+      t.world.slices.naval.oceanSurveillance.UKR = 5;
+      for (let i = 0; i < 4 && (usvs.equipment['n_usv' as PlatformId] ?? 0) > 0; i++) t.engine.step(t.world);
+      launched += 8 - (usvs.equipment['n_usv' as PlatformId] ?? 0);
+      sunk += 4 - (fleet.equipment['n_minelayer' as PlatformId] ?? 0) - (fleet.damaged['n_minelayer' as PlatformId] ?? 0);
+      samsSpent += 40 - (fleet.magazine['t_sam' as MunitionId] ?? 0);
+    }
+    expect(launched).toBe(48);
+    expect(sunk).toBeGreaterThan(4);
+    expect(samsSpent).toBe(0);
   });
 });
 

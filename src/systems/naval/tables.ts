@@ -1,4 +1,4 @@
-import type { MunitionKind, NationId, PlatformClass } from '../../core/types';
+import type { Munition, MunitionId, MunitionKind, NationId, PlatformClass } from '../../core/types';
 
 /**
  * Per-hull-class naval facts. `hitsToKill` is in Exocet-equivalent hits (a 165 kg
@@ -105,6 +105,20 @@ export const SORTIES_PER_HOUR = 0.05;
 export const LAUNCHES_PER_HULL = 8;
 /** Torpedoes one boat fires in an attack on a surface group: a spread of three (Conqueror at the Belgrano, 1982: three Mk 8s, two hits). */
 export const TORPEDO_SPREAD = 3;
+
+/**
+ * A strike USV (Magura V5, Sea Baby) is itself the weapon: a boat at ~40 km/h with a 300-850 kg
+ * charge. Too slow for missile interceptors or CAP; guns, helicopters and the target's point
+ * defense are what stop it. Hit chance per boat launched is an estimate from 2023-24 Black Sea
+ * attacks (Ivanovets and Sergei Kotov each sunk by waves of 5-10 boats, several hitting; many
+ * waves repelled). The pseudo-munition carries those numbers through the salvo model.
+ */
+export const USV_STRIKE: Munition = {
+  id: 'usv_strike' as MunitionId, name: 'Strike USV (one-way)', kind: 'drone_oneway', producers: [], rangeKm: 800, speedMach: 0.035,
+  warheadKg: 300, cepM: 2, pk: { ship: 0.35 }, interceptDifficulty: 0.3, unitCostUsdM: 0.25, weightKg: 1000,
+};
+/** Strike USVs a group launches at one target per tick: one wave (2024 attacks used 5-10 boats). */
+export const USV_WAVE = 8;
 
 /** Crew lost when a hull sinks: Belgrano 1982 ~30%, Sheffield 7%, Moskva disputed; mean estimate. */
 export const CREW_LOSS_SUNK = 0.3;

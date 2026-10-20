@@ -4,7 +4,7 @@ import { tracked } from './detection';
 import type { TickEnv } from './env';
 import { resolveSalvo, type SalvoDefense, type SalvoOutcome } from './salvo';
 import { effectiveHitsToKill, ledger } from './state';
-import { ANTISHIP_KINDS, CREW_LOSS_SUNK, INTERCEPTOR_KINDS, LAUNCHES_PER_HULL, SORTIES_PER_HOUR, TORPEDO_SPREAD } from './tables';
+import { ANTISHIP_KINDS, CREW_LOSS_SUNK, INTERCEPTOR_KINDS, LAUNCHES_PER_HULL, SORTIES_PER_HOUR, TORPEDO_SPREAD, USV_STRIKE, USV_WAVE } from './tables';
 
 type Tracks = Map<FormationId, Set<NationId>>;
 
@@ -99,7 +99,31 @@ export function navalCombat(env: TickEnv, tracks: Tracks): void {
     if (n > 0) queue(target, f.nation, fire(env, f, target, m, n, 'ship', defense));
   }
 
+  for (const f of env.naval) if (ENGAGING.has(f.order.posture)) usvAttack(env, tracks, f, queue);
+
   for (const { target, hits, by } of pending.values()) applyHits(env, target, hits, by);
+}
+
+/** Strike USVs in the group run at the best tracked hostile surface group here or next door, expending themselves. */
+function usvAttack(env: TickEnv, tracks: Tracks, f: Formation, queue: (t: Formation, by: NationId, out: SalvoOutcome) => void): void {
+  const boats = env.comp(f).hulls.filter((h) => h.platform.class === 'usv' && (h.platform.firepower.ship ?? 0) > 0);
+  if (!boats.length) return;
+  const target = pickTarget(env, tracks, f, (t) => !env.comp(t).submerged && (t.node === f.node || isNeighbour(env, f.node, t.node)));
+  if (!target) return;
+  let launched = 0;
+  for (const b of boats) {
+    const n = Math.min(b.count, USV_WAVE - launched);
+    f.equipment[b.pid] -= n;
+    if (f.equipment[b.pid] <= 0) delete f.equipment[b.pid];
+    launched += n;
+    if (launched >= USV_WAVE) break;
+  }
+  env.invalidate(f);
+  const out = resolveSalvo(env.ctx.rng, USV_STRIKE, launched, poolDefense(env, target), 'ship');
+  const lb = ledger(env.world, f.nation);
+  lb.leakers += out.leakers;
+  env.ctx.emit({ type: 'message', tick: env.world.tick, nation: f.nation, text: `${launched} strike USVs from ${f.name} attacked ${target.name}: ${out.hits.length} hits` });
+  queue(target, f.nation, out);
 }
 
 /** ASW effort screening a group against an approaching submarine: its own sensors and those of the groups escorting it. */
