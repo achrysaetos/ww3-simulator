@@ -189,23 +189,18 @@ function maritimeFocus(p: Plan, assault: Assault | undefined): { node: NodeId; e
 }
 
 /**
- * Share of a fleet's surface hulls lost recently (fleetLosses) at which it stops sending its
+ * Recent hull losses (fleetLosses, fading over three months) at which a fleet stops sending its
  * groups out when there is no enemy fleet to fight: losses to shore missiles and drones buy
- * nothing, so the fleet stays in its home waters as a fleet in being. The Black Sea Fleet did
- * this in 2023-24 after losing about a third of its ships, operating from Novorossiysk
- * (UK MoD, ISW). Judgement: a tenth of the fleet.
+ * nothing, so the fleet stays in its home waters as a fleet in being. One ship lost in the last
+ * two months is enough: after Moskva sank in April 2022 the Black Sea Fleet pulled back from the
+ * northwestern Black Sea, and from 2023 it operated from Novorossiysk (UK MoD, ISW).
  */
-const WITHDRAW_SHARE = 0.1;
+const WITHDRAW_LOSSES = 0.5;
 
-/** Home ports of this nation's fleets that have lost WITHDRAW_SHARE of their surface hulls. */
+/** Home ports of this nation's fleets that lost WITHDRAW_LOSSES hulls recently. */
 function batteredFleets(p: Plan, groups: Formation[]): Set<NodeId> {
-  const hulls = new Map<NodeId, number>();
-  for (const g of groups) if (g.kind === 'surface_group') hulls.set(g.home, (hulls.get(g.home) ?? 0) + compose(g, p.ctx.catalog).hullCount);
   const out = new Set<NodeId>();
-  for (const [home, n] of hulls) {
-    const lost = fleetLosses(p.world, p.nation, home);
-    if (lost > 0 && lost >= WITHDRAW_SHARE * (n + lost)) out.add(home);
-  }
+  for (const g of groups) if (fleetLosses(p.world, p.nation, g.home) >= WITHDRAW_LOSSES) out.add(g.home);
   return out;
 }
 

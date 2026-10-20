@@ -31,7 +31,7 @@ describe('naval AI fleet in being', () => {
   const blackSeaFleet = (s: ReturnType<typeof createSession>) =>
     Object.values(s.world.formations).filter((f) => f.nation === 'RUS' && f.status === 'active' && (f.kind === 'surface_group' || f.kind === 'submarine') && f.name.startsWith('Black Sea Fleet'));
 
-  it('a fleet that has lost a tenth of its hulls with no enemy fleet at sea to fight keeps to its home waters', () => {
+  it('a fleet that keeps losing ships with no enemy fleet at sea to fight stays in its home waters', () => {
     const fresh = createSession('ukraine-2026', 1);
     const battered = createSession('ukraine-2026', 1);
     const home = blackSeaFleet(battered)[0].home;
