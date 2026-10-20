@@ -277,6 +277,15 @@ export const TUNING = {
   runwayRepairPerDay: 1,
   /** Share of parked aircraft in hardened shelters (CSIS 2023 notes few shelters in Japan/Guam). */
   shelteredShare: 0.3,
+  /**
+   * Aircraft on a cell's fields at which the ramps are packed and every warhead that
+   * lands among them finds one. Fewer aircraft spread over dispersal strips and
+   * revetments, so a hit finds one in proportion. CSIS 2023 found crowded open ramps
+   * at Kadena and Guam drove US losses on the ground. Ukraine's dispersed air force
+   * lost a handful of aircraft on the ground a year to Iskander strikes (Oryx). The
+   * number is a judgment.
+   */
+  packedRampAircraft: 200,
   /** Suppression of a SAM's channels per ARM fired at it, and the cap (ODS: Iraqi radars largely silenced, few destroyed). */
   armSuppressionPerShot: 0.15,
   maxArmSuppression: 0.8,

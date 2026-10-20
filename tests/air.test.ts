@@ -211,6 +211,23 @@ describe('strikes', () => {
     expect(t.world.slices.air.runway[tw]).toBeLessThan(1);
   });
 
+  it('the same salvo kills a larger share of a packed ramp than of a few dispersed aircraft', () => {
+    const lostShare = (n: number) => {
+      let lost = 0;
+      for (let seed = 1; seed <= 4; seed++) {
+        const t = airWorld(seed);
+        t.war('USA', 'CHN');
+        const tw = t.node(...TAIPEI), fz = t.node(...FUZHOU);
+        const parked = wing(t, 'USA', tw, { t_fighter: n });
+        launchers(t, 'CHN', fz, { t_tel: 40 }, { posture: 'strike', target: tw, targetClass: 'aircraft' });
+        t.tick();
+        lost += n - count(parked) + Object.values(parked.damaged).reduce((a, b) => a + b, 0);
+      }
+      return lost / (4 * n);
+    };
+    expect(lostShare(200)).toBeGreaterThan(2 * lostShare(10));
+  });
+
   it('applyAirOrder ignores formations it does not own and rebases wings within ferry range', () => {
     const t = airWorld();
     const tank = t.add({ nation: UKR, name: 'tanks', kind: 'maneuver', echelon: 'brigade', node: t.node(...KYIV), equipment: { [pid('t_mbt')]: 30 } });

@@ -1,5 +1,5 @@
 import type { Formation, NodeId, PlatformClass, PlatformId, TargetClass } from '../../core/types';
-import { visibility } from '../air';
+import { effectPk, visibility } from '../air';
 import { TUNING } from '../air/tables';
 import { dominant, issue } from './forces';
 import { arsenal, FireBudget, pickTarget, SamCover, reachKm, strikeOptions, withinKm, type StrikeTarget, type TargetGrid } from './strikes';
@@ -75,10 +75,10 @@ export function planAir(p: Plan, targets: TargetGrid): void {
     const canHit = (t: StrikeTarget) => {
       let km = standoff.get(t.cls);
       if (km === undefined) {
-        km = stock.reduce((best, m) => ((m.pk[t.cls] ?? 0) > 0 ? Math.max(best, m.rangeKm) : best), hasFirepower(p, w, t.cls) ? 0 : -1);
+        km = stock.reduce((best, m) => (effectPk(m, t.cls) > 0 ? Math.max(best, m.rangeKm) : best), hasFirepower(p, w, t.cls) ? 0 : -1);
         standoff.set(t.cls, km);
       }
-      return km >= 0 && withinKm(map, w.node, t.node, radius + km) && sams.clear(t.node, km, vis);
+      return km >= 0 && withinKm(map, w.node, t.node, radius + km) && sams.clear(w.node, t.node, km, vis);
     };
     const longest = stock.reduce((best, m) => Math.max(best, m.rangeKm), 0);
     const t = pickTarget(targets.near(w.node, radius + longest), canHit);

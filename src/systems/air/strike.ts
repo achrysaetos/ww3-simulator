@@ -288,9 +288,10 @@ function applyEffect(world: World, ctx: SimContext, pic: AirPicture, slice: AirS
     }
   }
   const pool = victims((f, pid) => TARGET_OF_CLASS[ctx.catalog.platform(pid).class] === tc && (tc !== 'aircraft' || f.kind === 'air_wing'));
+  let left = pool.reduce((s, v) => s + v.f.equipment[v.pid], 0);
+  if (tc === 'aircraft') p *= Math.min(1, left / TUNING.packedRampAircraft);
   const kills = ctx.rng.binomial(hits, p);
   const picked = new Map<{ f: Formation; pid: PlatformId }, number>();
-  let left = pool.reduce((s, v) => s + v.f.equipment[v.pid], 0);
   for (let k = 0; k < kills && left > 0; k++, left--) {
     let r = ctx.rng.next() * left, i = 0;
     const remaining = (v: (typeof pool)[number]) => v.f.equipment[v.pid] - (picked.get(v) ?? 0);

@@ -2,7 +2,7 @@ import { relation } from '../../core/engine';
 import type { GameMap } from '../../core/map';
 import type { Formation, FormationId, FormationKind, Munition, MunitionId, NationId, NodeId, Order, PlatformId, TargetClass } from '../../core/types';
 import { rung } from '../diplomacy/wars';
-import { dailyRounds } from '../air';
+import { dailyRounds, effectPk } from '../air';
 import { isGround, issue } from './forces';
 import type { Plan } from './types';
 
@@ -18,11 +18,13 @@ export interface StrikeTarget {
  * Target values follow the order of the opening air campaign in 1991 Iraq
  * (Gulf War Air Power Survey) and the lessons of 2022 Ukraine: suppress air
  * defences first, then air bases and long-range fires, then the logistics
- * that sustain the front, then forces in contact.
+ * that sustain the front, then forces in contact. Air bases are struck for the
+ * aircraft on them: CSIS's 2023 Taiwan wargames had most US aircraft losses on
+ * the ground to PLARF missile salvos on the ramps.
  */
 const VALUE_BY_KIND: Partial<Record<FormationKind, { value: number; cls: TargetClass }>> = {
   air_defense: { value: 5, cls: 'soft' },
-  air_wing: { value: 4, cls: 'structure' },
+  air_wing: { value: 4, cls: 'aircraft' },
   missile: { value: 3.5, cls: 'soft' },
   surface_group: { value: 3.5, cls: 'ship' },
   logistics: { value: 3, cls: 'soft' },
@@ -209,8 +211,8 @@ export class FireBudget {
 
 /** Weapons in `stock` that can kill a `cls` target, cheapest per expected kill first. */
 export function strikeOptions(stock: readonly Munition[], cls: TargetClass): Munition[] {
-  const perKill = (m: Munition) => m.unitCostUsdM / (m.pk[cls] ?? 0);
-  return stock.filter((m) => (m.pk[cls] ?? 0) > 0).sort((a, b) => perKill(a) - perKill(b));
+  const perKill = (m: Munition) => m.unitCostUsdM / effectPk(m, cls);
+  return stock.filter((m) => effectPk(m, cls) > 0).sort((a, b) => perKill(a) - perKill(b));
 }
 
 const INTERCEPTOR_KINDS: ReadonlySet<Munition['kind']> = new Set(['sam', 'abm', 'shorad_missile']);
@@ -220,14 +222,32 @@ const INTERCEPTOR_KINDS: ReadonlySet<Munition['kind']> = new Set(['sam', 'abm', 
  * at or just inside the edge of known coverage, not over it (judgment).
  */
 const TOLERATED_DEPTH_KM = 15;
+const ROUTE_SAMPLE_KM = 50;
+/**
+ * Below this visibility (a stealth airframe) a package flies over the enemy's rear
+ * without first winning the air there, as B-2s and F-35Is did over Iran in 2025.
+ */
+const PENETRATOR_VISIBILITY = 0.1;
+/**
+ * Air bases are the first thing a defender's short- and medium-range SAMs cover
+ * (Ukraine's Starokostiantyniv and Myrhorod, Patriot at Kadena), whether or not the
+ * order of battle lists a battery there, so planners treat each as ringed (judgment).
+ */
+const AIRBASE_DEFENSE_KM = 60;
 
 /** Enemy SAM envelopes, for keeping strike aircraft out of coverage they cannot outrange. */
 export class SamCover {
   private readonly sams: { node: NodeId; km: number }[] = [];
+  private readonly battleArea: Set<number>;
 
   constructor(private readonly p: Plan) {
+    this.battleArea = battleAreaOf(p);
     for (const e of p.enemies)
       for (const f of p.index.byNation.get(e) ?? []) {
+        if (f.kind === 'air_wing') {
+          this.sams.push({ node: f.node, km: AIRBASE_DEFENSE_KM });
+          continue;
+        }
         if (f.kind !== 'air_defense' && f.kind !== 'surface_group') continue;
         let km = 0;
         for (const [id, n] of Object.entries(f.magazine)) {
@@ -240,17 +260,50 @@ export class SamCover {
 
   /**
    * Whether an aircraft of `visibility` (1 = conventional; stealth shrinks the
-   * range at which a SAM can engage it) with a weapon reaching `standoffKm` can hit
-   * `node` without flying deeper than tolerated into an envelope (SAMs taken to
-   * sit behind the target).
+   * range at which a SAM can engage it) flying from `from` with a weapon reaching
+   * `standoffKm` can hit `node` without flying deeper than tolerated into an
+   * envelope, either on the way to the release point (straight line) or at it
+   * (SAMs taken to sit behind the target). Nor does a conventional package cross
+   * the enemy's rear, behind the battle area, where it does not hold the air: short-range
+   * air defenses and fighters there are not in the SAM list but kill as surely. This
+   * keeps both air forces in Ukraine launching from their own side of the front, as
+   * they have since 2022.
    */
-  clear(node: NodeId, standoffKm: number, visibility = 1): boolean {
+  clear(from: NodeId, node: NodeId, standoffKm: number, visibility = 1): boolean {
     const { map } = this.p.ctx;
     for (const s of this.sams) {
       const need = s.km * visibility - standoffKm - TOLERATED_DEPTH_KM;
       if (need > 0 && withinKm(map, s.node, node, need)) return false;
     }
+    const dist = map.distanceKm(from, node);
+    const leg = dist - standoffKm;
+    if (leg <= 0) return true;
+    const lat0 = map.lat[from], lon0 = map.lon[from];
+    const dLon = ((((map.lon[node] - lon0) % 360) + 540) % 360) - 180;
+    for (let km = ROUTE_SAMPLE_KM; km <= leg; km += ROUTE_SAMPLE_KM) {
+      const t = km / dist;
+      const at = map.nodeAt(lat0 + (map.lat[node] - lat0) * t, lon0 + dLon * t);
+      if (this.inside(at, visibility)) return false;
+    }
     return true;
+  }
+
+  private readonly depth = new Map<string, boolean>();
+
+  private inside(at: NodeId, visibility: number): boolean {
+    const key = `${at}:${visibility}`;
+    let hit = this.depth.get(key);
+    if (hit === undefined) {
+      const { map } = this.p.ctx;
+      const { world, enemies, nation } = this.p;
+      const rear = !map.isSea(at) && enemies.has(world.control[at]) && !this.battleArea.has(at) && world.theater.airControl[at]?.nation !== nation;
+      hit = (rear && visibility >= PENETRATOR_VISIBILITY) || this.sams.some((s) => {
+        const need = s.km * visibility - TOLERATED_DEPTH_KM;
+        return need > 0 && withinKm(map, s.node, at, need);
+      });
+      this.depth.set(key, hit);
+    }
+    return hit;
   }
 }
 
@@ -258,7 +311,7 @@ export class SamCover {
 export function bestMunition(munitions: readonly Munition[], cls: TargetClass, km: number): MunitionId | undefined {
   let best: MunitionId | undefined, bestPk = 0;
   for (const m of munitions) {
-    const pk = m.rangeKm >= km ? (m.pk[cls] ?? 0) : 0;
+    const pk = m.rangeKm >= km ? effectPk(m, cls) : 0;
     if (pk > bestPk) { bestPk = pk; best = m.id; }
   }
   return best;
