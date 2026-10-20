@@ -194,7 +194,6 @@ interface Scan {
 function scan(world: World, ctx: SimContext): Scan {
   const integrity = industrialIntegrity(world, ctx.map);
   for (const [id, v] of integrity) integrity.set(id, v / (world.slices.economy.nations[id]?.baseIntegrity || 1));
-  world.slices.economy.energyPrice = energyPrice(world, integrity);
   const personnel = new Map<NationId, number>();
   for (const f of Object.values(world.formations)) if (f.status !== 'destroyed') personnel.set(f.nation, (personnel.get(f.nation) ?? 0) + f.personnel);
   let worldGdp = 0;
@@ -331,7 +330,7 @@ function stepNation(world: World, ctx: SimContext, s: Scan, n: Nation, e: Nation
 
   // Depots hold ~6 months of what the budget buys. Refills are the larger of what the budget buys
   // abroad and what the state can commandeer from national oil supply, which in war far exceeds the
-  // peacetime budget (Russia's army is not short of diesel). The military takes first claim on scarce energy.
+  // peacetime budget. The military takes first claim on scarce energy.
   const budgetFuelPerMonth = (((n.stats.milexUsd ?? 0) / 1e6) * MIL_FUEL_TONS_PER_USD_M / 12) * (1 + (FUEL_MOBILIZATION_MULTIPLE - 1) * n.mobilization);
   const oilMt = OIL_CONSUMPTION_MT[n.id];
   const oilTonsPerYear = oilMt !== undefined ? oilMt * 1e6 : ((n.stats.gdpPpp ?? n.stats.gdp ?? 0) / 1e6) * OIL_TONS_PER_PPP_USD_M;
@@ -457,6 +456,7 @@ export const economy: System = {
   step(world, ctx) {
     const dtMonths = world.dtHours / HOURS_PER_MONTH;
     const s = scan(world, ctx);
+    world.slices.economy.energyPrice = energyPrice(world, s.integrity);
     for (const [id, e] of Object.entries(world.slices.economy.nations) as [NationId, NationEconomy][]) {
       const n = world.nations[id];
       if (n && n.status !== 'collapsed') stepNation(world, ctx, s, n, e, dtMonths);
