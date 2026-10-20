@@ -1,4 +1,5 @@
 import type { ItemId, Nation, NationId } from '../../core/types';
+import { DEFAULT_DRAFT_LAW, DRAFT_LAWS } from '../../data/nations/conscription';
 import { CATEGORIES, GENERIC_AMMO_SURGE_MULTIPLE, GENERIC_AMMO_TONS_PER_MFG_USD_B, ITEMS, LINES, RESOURCES, RESOURCE_SPECS, type Resource, type Stock } from '../../data/industry';
 
 export interface LineState {
@@ -40,6 +41,8 @@ export interface NationEconomy {
   deficitPctGdp: number;
   /** Recruits in the training pipeline, not yet available as reserves. */
   inTraining: number;
+  /** Men the state can still call up: liable, available, not yet under arms or lost. */
+  draftPool: number;
   /** Resources currently reported short, so a shortage is announced once, not every tick. */
   short: Resource[];
   /** Units delivered since the last monthly production report. */
@@ -95,6 +98,17 @@ export function newLine(item: ItemId, baselinePerYear: number, surgePerYear: num
   };
 }
 
+/**
+ * Men in the liable age band, approximated as half the 15-64 working-age share spread
+ * evenly over its 50 years, less the unavailable, standing forces, reserves and prior losses.
+ */
+function draftPool(nation: Nation): number {
+  const law = DRAFT_LAWS[nation.id] ?? DEFAULT_DRAFT_LAW;
+  const [from, to] = law.ages;
+  const liable = nation.population * 0.5 * ((nation.stats.workingAgePct ?? 65) / 100) * ((Math.min(to, 64) - Math.max(from, 15)) / 50);
+  return Math.max(0, liable * (1 - law.unavailable) - (nation.stats.armedForces ?? 0) - nation.reserves - law.priorLosses);
+}
+
 export function newNationEconomy(nation: Nation): NationEconomy {
   const lines: Record<ItemId, LineState> = {};
   const mfgB = (nation.stats.manufacturing ?? (nation.stats.gdp ?? 0) * 0.12) / 1e9;
@@ -115,6 +129,7 @@ export function newNationEconomy(nation: Nation): NationEconomy {
     gdpIndex: 1,
     deficitPctGdp: 0,
     inTraining: 0,
+    draftPool: draftPool(nation),
     short: [],
     produced: {},
     delivered: {},

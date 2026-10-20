@@ -117,8 +117,14 @@ export const USV_STRIKE: Munition = {
   id: 'usv_strike' as MunitionId, name: 'Strike USV (one-way)', kind: 'drone_oneway', producers: [], rangeKm: 800, speedMach: 0.035,
   warheadKg: 300, cepM: 2, pk: { ship: 0.35 }, interceptDifficulty: 0.3, unitCostUsdM: 0.25, weightKg: 1000,
 };
-/** Strike USVs a group launches at one target per tick: one wave (2024 attacks used 5-10 boats). */
+/** Strike USVs a group launches at one target in a raid: one wave (2024 attacks used 5-10 boats). */
 export const USV_WAVE = 8;
+/**
+ * Hours between raids by one USV group. A raid waits on a located target, weather and a night
+ * approach: GUR's Group 13 struck Ivanovets on 1 Feb, Tsezar Kunikov on 14 Feb and Sergei Kotov
+ * on 5 Mar 2024, two to three weeks apart.
+ */
+export const USV_RAID_HOURS = 14 * 24;
 
 /** Crew lost when a hull sinks: Belgrano 1982 ~30%, Sheffield 7%, Moskva disputed; mean estimate. */
 export const CREW_LOSS_SUNK = 0.3;

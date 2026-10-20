@@ -79,17 +79,20 @@ describe.each(SEEDS)('ukraine-2026 war economy, seed %i', (seed) => {
     expect(eco(seed, 'UKR').recruitsPerMonth).toBeLessThanOrEqual(45_000);
   });
 
-  // Known gaps outside the economy. Each `it.fails` documents a band the run misses today
-  // and flips red when the owning system is fixed, so the band can be promoted to `it`.
-
-  it.fails('[land, diplomacy] Ukraine keeps 0.85-1.02 of its 2024 GDP (IMF: +2-3% a year in 2024-25)', () => {
-    // Misses because Ukraine loses ~7 cells (~70,000 km2) in 120 days against ~4-5,000 km2 a year
-    // in 2024-25 (ISW), and diplomacy pulls China and Central Asia into war with it, cutting trade.
-    expect(eco(seed, 'UKR').gdpIndex).toBeGreaterThanOrEqual(0.85);
-  });
-
-  it('missiles Russia builds reach launcher magazines', () => {
+  it('missiles Russia builds reach launcher magazines (logistics refills magazines from the national stockpile)', () => {
     const kh = eco(seed, 'RUS').items.kh101;
     expect(kh.stockpile[1]).toBeLessThan(kh.stockpile[0] + kh.produced);
+  });
+
+  // Known gap outside the economy: `it.fails` documents a band the run misses today and flips
+  // red when the owning systems are fixed, so the band can be promoted to `it`.
+
+  it.fails('[strike, naval, land] Ukraine keeps 0.85-1.02 of its 2024 GDP (IMF: +2-3% a year in 2024-25)', () => {
+    // Measured at day 120: 0.84, 0.74, 0.74 on seeds 1-3. On seed 1, with one cell lost, strikes
+    // ruin ~10% of the population-weighted infrastructure Ukraine holds (theater.infrastructure)
+    // and a Black Sea blockade from the first week cuts a third of its seaborne trade
+    // (theater.tradeBlocked), where in 2024-25 the grain corridor carried most exports. On
+    // seeds 2-3 Russia also takes 5-10 cells (~50-100,000 km2) against ~4-5,000 km2 a year (ISW).
+    expect(eco(seed, 'UKR').gdpIndex).toBeGreaterThanOrEqual(0.85);
   });
 });
