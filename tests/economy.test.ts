@@ -151,6 +151,18 @@ describe('economy: blockade', () => {
   });
 });
 
+describe('economy: blockade by geography', () => {
+  it('cuts an island nation off far more than one trading over land', () => {
+    const t = dailyWorld();
+    t.world.theater.tradeBlocked[JPN] = 0.8;
+    t.world.theater.tradeBlocked[DEU] = 0.8;
+    t.days(2);
+    const jp = t.world.slices.economy.nations[JPN].tradeLoss, de = t.world.slices.economy.nations[DEU].tradeLoss;
+    expect(jp).toBeGreaterThan(0.75);
+    expect(de).toBeLessThan(0.5 * jp);
+  });
+});
+
 describe('economy: sanctions', () => {
   const bloc = ['USA', 'JPN', 'KOR', 'TWN', 'DEU', 'NLD', 'GBR', 'FRA'];
 

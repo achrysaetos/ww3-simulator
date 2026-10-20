@@ -17,7 +17,7 @@ export interface EconomyMetrics {
   /** National bulk ammunition, tons: what the depots held, what industry added, what forces drew. */
   ammo: { start: number; end: number; producedTons: number; drawnTonsPerDay: number };
   /** Sampled every 7 days from the start. */
-  weekly: { ammoTons: number[]; fuelTons: number[]; energySupply: number[]; tradeBlocked: number[]; gdpIndex: number[] };
+  weekly: { ammoTons: number[]; fuelTons: number[]; energySupply: number[]; tradeBlocked: number[]; tradeLoss: number[]; integrity: number[]; gdpIndex: number[] };
   fuel: { start: number; end: number; deliveredTonsPerDay: number; drawnTonsPerDay: number };
   /** Days a supply class (logistics) or strategic resource (economy) was flagged short. */
   shortageDays: Record<string, number>;
@@ -74,12 +74,14 @@ export function economyProbe(world: World, catalog: Catalog) {
       for (const [n, e] of Object.entries(world.slices.economy?.nations ?? {})) for (const r of e.short) add(n as NationId, r);
       if ((world.tick - startTick) % ticksPerWeek === 0)
         for (const n of Object.values(world.nations)) {
-          const w = weekly.get(n.id) ?? weekly.set(n.id, { ammoTons: [], fuelTons: [], energySupply: [], tradeBlocked: [], gdpIndex: [] }).get(n.id)!;
+          const w = weekly.get(n.id) ?? weekly.set(n.id, { ammoTons: [], fuelTons: [], energySupply: [], tradeBlocked: [], tradeLoss: [], integrity: [], gdpIndex: [] }).get(n.id)!;
           const e = world.slices.economy?.nations[n.id];
           w.ammoTons.push(Math.round(n.bulk.ammo));
           w.fuelTons.push(Math.round(n.bulk.fuel));
           w.energySupply.push(Math.round((e?.supply.energy ?? 1) * 100) / 100);
           w.tradeBlocked.push(Math.round((world.theater.tradeBlocked[n.id] ?? 0) * 100) / 100);
+          w.tradeLoss.push(Math.round((e?.tradeLoss ?? 0) * 100) / 100);
+          w.integrity.push(Math.round((e?.integrity ?? 1) * 100) / 100);
           w.gdpIndex.push(Math.round((e?.gdpIndex ?? 1) * 1000) / 1000);
         }
     },
@@ -123,7 +125,7 @@ export function economyProbe(world: World, catalog: Catalog) {
         ammo: { start: Math.round(s.ammo), end: Math.round(n.bulk.ammo), producedTons: Math.round(producedTons), drawnTonsPerDay: Math.round((s.ammo + producedTons - n.bulk.ammo) / days) },
         fuel: { start: Math.round(s.fuel), end: Math.round(n.bulk.fuel), deliveredTonsPerDay: Math.round(fuelIn / days), drawnTonsPerDay: Math.round((s.fuel + fuelIn - n.bulk.fuel) / days) },
         shortageDays: Object.fromEntries(Object.entries(shortage.get(id) ?? {}).map(([k, v]) => [k, round(v, 10)])),
-        weekly: weekly.get(id) ?? { ammoTons: [], fuelTons: [], energySupply: [], tradeBlocked: [], gdpIndex: [] },
+        weekly: weekly.get(id) ?? { ammoTons: [], fuelTons: [], energySupply: [], tradeBlocked: [], tradeLoss: [], integrity: [], gdpIndex: [] },
         produced,
         items,
       };

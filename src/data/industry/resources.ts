@@ -19,6 +19,24 @@ export const OIL_CONSUMPTION_MT: Record<string, number> = {
 /** World oil use (~4.5 Gt) over world GDP at PPP (~USD 185T), tons per year per USD 1M (est.). */
 export const OIL_TONS_PER_PPP_USD_M = 25;
 
+/**
+ * Share of a nation's foreign trade that moves by sea, so a naval blockade
+ * (`theater.tradeBlocked`, a share of seaborne trade) cannot touch the rest. About 80%
+ * of world trade by volume goes by sea (UNCTAD Review of Maritime Transport 2024); the
+ * overrides are estimates from land borders, pipelines and rail links.
+ */
+export const SEABORNE_TRADE_SHARE: Record<string, number> = {
+  JPN: 0.99, TWN: 0.99, KOR: 0.99, AUS: 0.99, NZL: 0.99, PHL: 0.99, IDN: 0.97, ISR: 0.95, IND: 0.95, GBR: 0.85,
+  // Ukraine moved ~60% of 2024 exports through its Black Sea ports, the rest by rail, road and the Danube.
+  UKR: 0.6,
+  // Russia: pipelines and rail to China, Central Asia and Belarus.
+  RUS: 0.6,
+  CHN: 0.85, IRN: 0.85, SAU: 0.9,
+  // Land trade inside the EU single market and across North America.
+  USA: 0.7, CAN: 0.3, MEX: 0.3, DEU: 0.4, FRA: 0.5, POL: 0.4, ITA: 0.6, ESP: 0.6, NLD: 0.6,
+};
+export const DEFAULT_SEABORNE_TRADE_SHARE = 0.8;
+
 /** One national stock of an import stream: its share of the resource's imports and the months of those imports it holds. */
 export interface Stock {
   share: number;

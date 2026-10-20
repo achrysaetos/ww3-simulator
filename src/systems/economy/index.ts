@@ -3,7 +3,7 @@ import { relationMut } from '../../core/engine';
 import type { GameMap } from '../../core/map';
 import type { ItemId, MunitionId, Nation, NationId, PlatformId, World } from '../../core/types';
 import {
-  CATEGORIES, MIL_FUEL_TONS_PER_USD_M, OIL_CONSUMPTION_MT, OIL_TONS_PER_PPP_USD_M, RATION_TONS_PER_DAY, RESOURCES, RESOURCE_SPECS, SHIPBUILDING_GT_PER_YEAR, SHIPYARD_WARSHIP_SHARE,
+  CATEGORIES, DEFAULT_SEABORNE_TRADE_SHARE, MIL_FUEL_TONS_PER_USD_M, SEABORNE_TRADE_SHARE, OIL_CONSUMPTION_MT, OIL_TONS_PER_PPP_USD_M, RATION_TONS_PER_DAY, RESOURCES, RESOURCE_SPECS, SHIPBUILDING_GT_PER_YEAR, SHIPYARD_WARSHIP_SHARE,
   itemSpec, type ItemCategory, type Resource,
 } from '../../data/industry';
 import { newLine, newNationEconomy, stocksOf, type LineState, type NationEconomy } from './state';
@@ -189,12 +189,17 @@ function scan(world: World, ctx: SimContext): Scan {
 
 // ---------------------------------------------------------------- per-nation model
 
+/** Share of a nation's total foreign trade a naval blockade has cut. */
+function seaCut(world: World, id: NationId): number {
+  return (world.theater.tradeBlocked[id] ?? 0) * (SEABORNE_TRADE_SHARE[id] ?? DEFAULT_SEABORNE_TRADE_SHARE);
+}
+
 /** How much of a supplier's exports reach `buyer`, 0..1. */
 function supplierFlow(world: World, s: Scan, buyer: NationId, supplier: string): number {
   if (supplier === 'other' || !world.nations[supplier as NationId]) return 1;
   const cut = s.cut.get(buyer)?.get(supplier as NationId);
   const politics = cut ?? 1;
-  return politics * (1 - (world.theater.tradeBlocked[supplier as NationId] ?? 0)) * (s.integrity.get(supplier as NationId) ?? 1);
+  return politics * (1 - seaCut(world, supplier as NationId)) * (s.integrity.get(supplier as NationId) ?? 1);
 }
 
 function rawAccess(world: World, s: Scan, n: Nation, r: Resource): number {
@@ -207,7 +212,7 @@ function rawAccess(world: World, s: Scan, n: Nation, r: Resource): number {
     den += share;
     num += share * supplierFlow(world, s, n.id, supplier);
   }
-  const imported = (den > 0 ? num / den : 1) * (1 - (world.theater.tradeBlocked[n.id] ?? 0));
+  const imported = (den > 0 ? num / den : 1) * (1 - seaCut(world, n.id));
   return self + (1 - self) * imported;
 }
 
@@ -232,7 +237,7 @@ function tradeLossOf(world: World, s: Scan, n: Nation): number {
   let lost = 0;
   const gdpOthers = s.worldGdp - (n.stats.gdp ?? 0);
   for (const [p, flow] of s.cut.get(n.id) ?? []) lost += ((world.nations[p]?.stats.gdp ?? 0) / gdpOthers) * (1 - flow);
-  const blocked = world.theater.tradeBlocked[n.id] ?? 0;
+  const blocked = seaCut(world, n.id);
   return clamp01(1 - (1 - blocked) * (1 - clamp01(lost)));
 }
 
