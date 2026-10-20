@@ -33,6 +33,8 @@ export interface AllianceTreaty {
   id: string;
   kind: CommitmentKind;
   members: Record<NationId, TreatyMember>;
+  /** Nuclear guarantors: their credibility across every alliance rides on honouring this one. */
+  guarantors?: readonly NationId[];
 }
 
 /** Strategic personality of a nation's leadership. All fields 0..1. */
@@ -75,6 +77,8 @@ export interface PendingJoin {
   /** The attacked party the commitment is to. */
   victim: NationId;
   aggressor: NationId;
+  /** Set on the second look after a refusal; a second refusal stands. */
+  reconsidered?: boolean;
 }
 
 /** Battlefield situation of one nation, recomputed each tick from control and events. Read by AI. */
@@ -114,6 +118,8 @@ export interface DiplomacyState {
   offers: Record<string, NationId>;
   /** Formations carrying SSBNs, so their loss can be recognised after they are emptied. */
   ssbnFormations: FormationId[];
+  /** `${war}|${victim}` pairs whose defensive treaties have been called, so each is called once. */
+  invoked: string[];
 }
 
 declare module '../../core/types' {

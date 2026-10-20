@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { System } from '../src/core/engine';
+import { relationMut, type System } from '../src/core/engine';
 import type { Command, NodeId, SimEvent } from '../src/core/types';
 import { createAi } from '../src/systems/ai';
 import { createDiplomacy } from '../src/systems/diplomacy';
@@ -138,5 +138,28 @@ describe('nuclear release', () => {
     const fired = run(0.15);
     expect(fired.length).toBeGreaterThan(0);
     expect(fired[0]).toMatchObject({ munition: 't_nuke', warheads: 1 });
+  });
+});
+
+describe('strikes on a neutral host', () => {
+  /** Strike orders China's missile brigade aims at a US air wing based at Yonaguni, Japan, ~150 km from Taiwan. */
+  const strikesOnJapan = (japanOpinionOfChina: number) => {
+    const t = testWorld([createDiplomacy(), createAi()]);
+    const base = t.map.nodeAt(24.45, 123.0);
+    const launch = t.map.nodesOf(N('CHN')).sort((a, b) => t.map.distanceKm(a, base) - t.map.distanceKm(b, base))[0];
+    t.add({ nation: N('USA'), name: 'US air wing', kind: 'air_wing', echelon: 'wing', node: base, equipment: { [id.platform('t_fighter')]: 24 } });
+    t.add({ nation: N('CHN'), name: 'PLARF brigade', kind: 'missile', echelon: 'brigade', node: launch, equipment: { [id.platform('t_tel')]: 12 } });
+    relationMut(t.world, N('CHN'), N('JPN')).opinion = japanOpinionOfChina;
+    t.war('CHN', 'TWN');
+    t.war('CHN', 'USA');
+    return commandsOver(t, 8).filter((c) => c.type === 'order' && c.nation === 'CHN' && c.order.posture === 'strike' && c.order.target === base);
+  };
+
+  it('hits enemy forces on a hostile host inside the theatre', () => {
+    expect(strikesOnJapan(-55).length).toBeGreaterThan(0);
+  });
+
+  it('leaves them alone on a host that is not hostile', () => {
+    expect(strikesOnJapan(20)).toEqual([]);
   });
 });

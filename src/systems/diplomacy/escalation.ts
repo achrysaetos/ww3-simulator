@@ -1,7 +1,7 @@
-import { atWar, relationKey, relationMut, type SimContext } from '../../core/engine';
+import { atWar, relation, relationKey, relationMut, type SimContext } from '../../core/engine';
 import type { EscalationLevel, NationId, World } from '../../core/types';
 import type { DiplomacyState, WarRecord } from './types';
-import { raiseEscalation } from './wars';
+import { raiseEscalation, sideOf } from './wars';
 
 /**
  * Escalation pressure added per event. A dyad moves from 'conventional' to
@@ -40,16 +40,34 @@ function record(s: DiplomacyState, n: NationId): WarRecord {
   return (s.records[n] ??= { baseline: 0.6, rally: 0, rallyTick: 0, enteredTick: -1, casualties: 0, nuclearHits: 0, nuclearStruckBy: [], ssbnLost: 0 });
 }
 
-/** Fold this tick's events into escalation pressure and war records, then climb the ladder where warranted. */
-export function processEvents(world: World, ctx: SimContext, s: DiplomacyState, enemies: Map<NationId, Set<NationId>>, lostTo: Map<string, number>, prevThreatened: Set<NationId>): void {
+/**
+ * Opinion at or below which a nation treats a strike on its soil as an act of
+ * war rather than a provocation. Estimate: Qatar (opinion of Iran ~+20) absorbed
+ * Iran's telegraphed strike on Al Udeid in June 2025 without entering the war.
+ */
+export const HOSTILE_OPINION = -30;
+
+/**
+ * Fold this tick's events into escalation pressure and war records, then climb
+ * the ladder where warranted. Returns strikes that landed on the homeland of a
+ * nation the striker was not at war with: an armed attack on that nation, as a
+ * Chinese strike on US bases in Okinawa would be on Japan (US-Japan treaty Art. V).
+ */
+export function processEvents(world: World, ctx: SimContext, s: DiplomacyState, enemies: Map<NationId, Set<NationId>>, lostTo: Map<string, number>, prevThreatened: Set<NationId>): [by: NationId, on: NationId][] {
   const { map } = ctx;
+  const attacks: [NationId, NationId][] = [];
   const ssbn = new Set<string>(s.ssbnFormations);
   for (const e of world.events) {
     switch (e.type) {
       case 'strike': {
         if (map.isSea(e.target)) break;
         const victim = map.owner[e.target];
-        if (!atWar(world, e.by, victim)) break;
+        if (!atWar(world, e.by, victim)) {
+          const bystander = victim !== e.by && world.control[e.target] === victim && e.fired > e.intercepted
+            && relation(world, victim, e.by).opinion <= HOSTILE_OPINION;
+          if (bystander && !s.wars.some((w) => sideOf(w, e.by) !== -1 && sideOf(w, e.by) === sideOf(w, victim))) attacks.push([e.by, victim]);
+          break;
+        }
         addPressure(s, e.by, victim, e.target === world.nations[victim].capital ? PRESSURE.capitalStrike : PRESSURE.homelandStrike);
         break;
       }
@@ -101,4 +119,5 @@ export function processEvents(world: World, ctx: SimContext, s: DiplomacyState, 
       raiseEscalation(world, ctx, a, b, 'strategic_conventional');
     }
   }
+  return attacks;
 }

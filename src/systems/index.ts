@@ -5,6 +5,7 @@ import type { Alliance, StrategicProfile as NationStrategy } from '../data/natio
 import { createAi } from './ai';
 import { airWar, applyAirOrder } from './air';
 import { createDiplomacy } from './diplomacy';
+import { shiftOdds } from './diplomacy/wars';
 import type { AllianceTreaty, StrategicProfile, TreatyMember } from './diplomacy/types';
 import { economy } from './economy';
 import { applyLandOrder, landCombat, landMovement } from './land';
@@ -32,7 +33,16 @@ const KIND: Partial<Record<Alliance['obligation'], AllianceTreaty['kind']>> = {
   ambiguous: 'ambiguous',
 };
 
-/** Treaties that can pull a nation into a war; consultative and economic groupings never do. */
+/** Log-odds shift per unit of member reliability away from the 0.5 midpoint. Estimate: spans HUN (0.4) to SWE (0.85) by ~2.5x odds. */
+const RELIABILITY_LOGIT = 4;
+
+/**
+ * Treaties that can pull a nation into a war; consultative and economic groupings never do.
+ * A treaty's commitment is the typical member's odds of honouring it, and a member's own
+ * record shifts those odds. Weak treaties stay weak: the Rio Treaty (0.3) was not honoured
+ * for Argentina in 1982, the CSTO (0.4) refused Armenia in 2021-22, the Arab League
+ * Joint Defence Treaty (0.1) has never brought its members into a member's war.
+ */
 export function warTreaties(table: readonly Alliance[], profiles: Readonly<Record<string, NationStrategy>>): AllianceTreaty[] {
   const out: AllianceTreaty[] = [];
   for (const a of table) {
@@ -41,8 +51,7 @@ export function warTreaties(table: readonly Alliance[], profiles: Readonly<Recor
     const members: Record<NationId, TreatyMember> = {};
     const protectedOnly = new Set(a.protectedOnly ?? []);
     for (const m of a.members) {
-      // Either the treaty's pull or the member's own reliability can carry it into the war.
-      const reliability = 1 - (1 - a.commitment) * (1 - (profiles[m]?.allianceReliability ?? 0.5));
+      const reliability = shiftOdds(a.commitment, RELIABILITY_LOGIT * ((profiles[m]?.allianceReliability ?? 0.5) - 0.5));
       members[m] = {
         role: protectedOnly.has(m) ? 'protected' : protectedOnly.size ? 'guarantor' : 'mutual',
         reliability,
@@ -50,7 +59,7 @@ export function warTreaties(table: readonly Alliance[], profiles: Readonly<Recor
         delayDays: Math.round(2 + (1 - reliability) * 14),
       };
     }
-    out.push({ id: a.id, kind, members });
+    out.push({ id: a.id, kind, members, guarantors: a.nuclearGuarantors ?? [] });
   }
   return out;
 }
