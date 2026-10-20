@@ -18,8 +18,14 @@ const REPORT_HOURS = 720;
  * USSR ~60% (Harrison, The Economics of World War II, 1998).
  */
 const MAX_DEFENSE_SHARE = 0.5;
-/** Extra revenue a state can raise in war, share of GDP at mobilization 1. US federal receipts rose from ~7% to ~20% of GDP 1940-45. */
-const WAR_TAX_SHARE = 0.12;
+/** Defence share of a nation at peace with no threat; the 2024 world median is ~1.5-2% (SIPRI). */
+const NORMAL_PEACE_SHARE = 0.02;
+/**
+ * Share of extra war spending paid from taxes rather than borrowing. The US raised ~45%
+ * of WWII spending in taxes (Rockoff, NBER 2012); Russia 2023-24 covered most of its
+ * defence rise with revenue and ran deficits of ~1-2% of GDP (MinFin).
+ */
+const WAR_TAX_FINANCED = 0.45;
 /** Months for the economy to convert toward a new mobilization level (contracts, laws, labour). Demobilization is faster. */
 const MOBILIZE_MONTHS = 3;
 const DEMOBILIZE_MONTHS = 1;
@@ -61,10 +67,17 @@ function peaceShare(n: Nation): number {
   return Math.max(0.005, (n.stats.milexPctGdp ?? 2) / 100);
 }
 
-/** Defence spending as a share of GDP at the nation's current mobilization. */
+/**
+ * Defence spending as a share of GDP at the nation's current mobilization, never below
+ * what the baseline stats already show it spending. Mobilization buys spending
+ * quadratically: partial mobilization (0.5) matches the US Korean War peak of ~14% of
+ * GDP (OMB Historical Tables 3.1, 1953), full mobilization (1) the WWII peaks. Nations
+ * whose baseline is already wartime (Russia 5.9%, Ukraine 34%) need a high level before
+ * spending rises further, so a scenario's "partial mobilization" for Russia keeps it near
+ * the 6-9% it spends in 2024-25 (SIPRI 2025) instead of tripling it.
+ */
 export function defenseShare(n: Nation): number {
-  const s0 = peaceShare(n);
-  return s0 + n.mobilization * Math.max(0, MAX_DEFENSE_SHARE - s0);
+  return Math.max(peaceShare(n), NORMAL_PEACE_SHARE + (MAX_DEFENSE_SHARE - NORMAL_PEACE_SHARE) * n.mobilization ** 2);
 }
 
 /**
@@ -252,7 +265,7 @@ function stepNation(world: World, ctx: SimContext, s: Scan, n: Nation, e: Nation
   const gdpB = ((n.stats.gdp ?? 0) / 1e9) * e.gdpIndex;
   const share = defenseShare(n);
   const s0 = peaceShare(n);
-  const deficitB = gdpB * (share - s0 - WAR_TAX_SHARE * n.mobilization);
+  const deficitB = gdpB * (share - s0) * (1 - WAR_TAX_FINANCED);
   e.deficitPctGdp = gdpB > 0 ? deficitB / gdpB : 0;
   n.treasuryUsdB -= deficitB * (dtMonths / 12);
 
