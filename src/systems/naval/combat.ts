@@ -4,7 +4,7 @@ import { tracked } from './detection';
 import type { TickEnv } from './env';
 import { resolveSalvo, type SalvoDefense, type SalvoOutcome } from './salvo';
 import { effectiveHitsToKill, ledger } from './state';
-import { ANTISHIP_KINDS, CREW_LOSS_SUNK, INTERCEPTOR_KINDS, LAUNCHES_PER_HULL, SORTIES_PER_HOUR, TORPEDO_SPREAD, USV_STRIKE, USV_WAVE } from './tables';
+import { ANTISHIP_KINDS, CREW_LOSS_SUNK, INTERCEPTOR_KINDS, LAUNCHES_PER_HULL, SORTIES_PER_HOUR, TORPEDO_SPREAD, USV_RAID_HOURS, USV_STRIKE, USV_WAVE } from './tables';
 
 type Tracks = Map<FormationId, Set<NationId>>;
 
@@ -104,12 +104,19 @@ export function navalCombat(env: TickEnv, tracks: Tracks): void {
   for (const { target, hits, by } of pending.values()) applyHits(env, target, hits, by);
 }
 
-/** Strike USVs in the group run at the best tracked hostile surface group here or next door, expending themselves. */
+/**
+ * Strike USVs in the group raid the best tracked hostile surface group within their range,
+ * expending themselves. A raid is a planned operation, so a group mounts one every
+ * USV_RAID_HOURS at most.
+ */
 function usvAttack(env: TickEnv, tracks: Tracks, f: Formation, queue: (t: Formation, by: NationId, out: SalvoOutcome) => void): void {
   const boats = env.comp(f).hulls.filter((h) => h.platform.class === 'usv' && (h.platform.firepower.ship ?? 0) > 0);
   if (!boats.length) return;
-  const target = pickTarget(env, tracks, f, (t) => !env.comp(t).submerged && (t.node === f.node || isNeighbour(env, f.node, t.node)));
+  const { lastFired } = env.world.slices.naval;
+  if ((env.world.tick - (lastFired[f.id] ?? -Infinity)) * env.world.dtHours < USV_RAID_HOURS) return;
+  const target = pickTarget(env, tracks, f, (t) => !env.comp(t).submerged && env.ctx.map.distanceKm(f.node, t.node) <= USV_STRIKE.rangeKm, env.naval);
   if (!target) return;
+  lastFired[f.id] = env.world.tick;
   let launched = 0;
   for (const b of boats) {
     const n = Math.min(b.count, USV_WAVE - launched);
@@ -140,22 +147,28 @@ function isNeighbour(env: TickEnv, a: number, b: number): boolean {
   return false;
 }
 
-/** Most valuable tracked hostile formation the predicate allows; an ordered targetFormation wins if eligible. */
-function pickTarget(env: TickEnv, tracks: Tracks, f: Formation, ok: (t: Formation) => boolean): Formation | undefined {
+/**
+ * Most valuable tracked hostile formation the predicate allows; an ordered targetFormation wins if eligible.
+ * Candidates are the groups at f's node and next door, or `among` when given.
+ */
+function pickTarget(env: TickEnv, tracks: Tracks, f: Formation, ok: (t: Formation) => boolean, among?: Formation[]): Formation | undefined {
   const { map } = env.ctx;
   const ordered = f.order.targetFormation ? env.world.formations[f.order.targetFormation] : undefined;
   if (ordered && ordered.status === 'active' && tracked(tracks, f.nation, ordered) && ok(ordered)) return ordered;
   let best: Formation | undefined, bestValue = 0;
-  const consider = (node: number) => {
-    for (const t of env.byNode.get(node) ?? []) {
+  const consider = (candidates: Formation[]) => {
+    for (const t of candidates) {
       if (!atWar(env.world, f.nation, t.nation) || !tracked(tracks, f.nation, t) || !ok(t)) continue;
       let v = 0;
       for (const h of env.comp(t).hulls) v += h.platform.unitCostUsdM * h.count;
       if (v > bestValue) { bestValue = v; best = t; }
     }
   };
-  consider(f.node);
-  for (let k = map.adjStart[f.node]; k < map.adjStart[f.node + 1]; k++) consider(map.adj[k]);
+  if (among) consider(among);
+  else {
+    consider(env.byNode.get(f.node) ?? []);
+    for (let k = map.adjStart[f.node]; k < map.adjStart[f.node + 1]; k++) consider(env.byNode.get(map.adj[k]) ?? []);
+  }
   return best;
 }
 

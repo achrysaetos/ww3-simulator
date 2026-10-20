@@ -278,6 +278,24 @@ describe('strike USVs', () => {
     expect(sunk).toBeGreaterThan(4);
     expect(samsSpent).toBe(0);
   });
+
+  it('a USV group raids from its port at a group within range, then waits about two weeks before the next raid', () => {
+    const t = navalWorld();
+    t.war('UKR', 'RUS');
+    const port = t.portOf('UKR', 46.5, 30.7);
+    const usvs = t.add({ nation: UKR, name: 'USV squadron', kind: 'surface_group', node: port, equipment: t.eq({ n_usv: 40 }), magazine: {} });
+    usvs.order = { posture: 'defend', issuedTick: 0 };
+    const fleet = t.add({ nation: RUS, name: 'Patrol', kind: 'surface_group', node: t.nodeAt(43.5, 34.5), equipment: t.eq({ t_destroyer: 20 }), magazine: {} });
+    fleet.order = { posture: 'reserve', issuedTick: 0 };
+    t.world.slices.naval.oceanSurveillance[UKR] = 5;
+    const left = () => usvs.equipment['n_usv' as PlatformId] ?? 0;
+    t.engine.step(t.world);
+    expect(left()).toBe(32);
+    for (let i = 0; i < 13 * 4; i++) t.engine.step(t.world);
+    expect(left()).toBe(32);
+    for (let i = 0; i < 2 * 4; i++) t.engine.step(t.world);
+    expect(left()).toBe(24);
+  });
 });
 
 describe('sea control and blockade', () => {

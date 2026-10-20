@@ -66,14 +66,14 @@ function coast(map: GameMap): NodeId[] {
   return c;
 }
 
-type NavalRole = 'ssbn' | 'submarine' | 'capital' | 'lift' | 'escort';
+type NavalRole = 'ssbn' | 'submarine' | 'capital' | 'lift' | 'escort' | 'raider';
 const NAVAL_ROLE: Partial<Record<PlatformClass, NavalRole>> = {
   ssbn: 'ssbn',
   ssn: 'submarine', ssk: 'submarine', ssgn: 'submarine', uuv: 'submarine',
   carrier: 'capital', amphibious: 'capital',
-  cruiser: 'escort', destroyer: 'escort', frigate: 'escort', corvette: 'escort', patrol: 'escort', mine_warfare: 'escort', usv: 'escort',
+  cruiser: 'escort', destroyer: 'escort', frigate: 'escort', corvette: 'escort', patrol: 'escort', mine_warfare: 'escort', usv: 'raider',
 };
-const PRIORITY: NavalRole[] = ['ssbn', 'capital', 'submarine', 'escort'];
+const PRIORITY: NavalRole[] = ['ssbn', 'capital', 'submarine', 'escort', 'raider'];
 
 function roleOf(p: Plan, f: Formation, liftCapable: boolean): NavalRole | undefined {
   if (liftCapable) return 'lift';
@@ -329,6 +329,10 @@ export function planNaval(p: Plan): void {
       // Without a landing to make, amphibious groups stay out of the missile zone in home waters.
       case 'lift':
         if (!assault) issue(p, g, { posture: 'patrol', target: nearestSea(map, g.home) });
+        break;
+      // Strike USVs are launched from shore at targets within their range; they do not keep the sea.
+      case 'raider':
+        issue(p, g, { posture: 'defend', target: g.home });
         break;
       case 'escort': {
         let ward: Formation | undefined, bestD = Infinity;
