@@ -130,7 +130,8 @@ function usvAttack(env: TickEnv, tracks: Tracks, f: Formation, queue: (t: Format
   const lb = ledger(env.world, f.nation);
   lb.leakers += out.leakers;
   env.ctx.emit({ type: 'message', tick: env.world.tick, nation: f.nation, text: `${launched} strike USVs from ${f.name} attacked ${target.name}: ${out.hits.length} hits` });
-  queue(target, f.nation, out);
+  // Operators steer the whole wave onto one ship: Ivanovets and Sergei Kotov each took several boats.
+  if (out.hits.length) queue(target, f.nation, { ...out, hits: [out.hits.reduce((a, h) => a + h, 0)] });
 }
 
 /** ASW effort screening a group against an approaching submarine: its own sensors and those of the groups escorting it. */
