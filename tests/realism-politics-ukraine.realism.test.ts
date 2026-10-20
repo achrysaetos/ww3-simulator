@@ -29,9 +29,7 @@ describe.each([1, 2, 3])('ukraine-2026 seed %i, 60 days', (seed) => {
     if (invaded === Infinity) expect(CSTO_OTHERS.filter((m) => status(r, m) !== 'peace')).toEqual([]);
   }, 600_000);
 
-  // Known land-combat defect, outside diplomacy: Ukrainian brigades reach ~130 km from Moscow by day
-  // 34-44 in every seed. it.fails keeps the suite green and turns red once land combat is fixed.
-  it.fails('Ukraine does not overrun Russia: Moscow unthreatened and under 2% of its people held [land realism]', () => {
+  it('Ukraine does not overrun Russia: Moscow unthreatened and under 2% of its people held [land realism]', () => {
     expect(run(seed).seriouslyInvaded.get('RUS' as never)).toBeUndefined();
   }, 600_000);
 
