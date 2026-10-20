@@ -3,7 +3,7 @@ import { relationMut } from '../../core/engine';
 import type { GameMap } from '../../core/map';
 import type { ItemId, MunitionId, Nation, NationId, PlatformId, World } from '../../core/types';
 import {
-  CATEGORIES, MIL_FUEL_TONS_PER_USD_M, RATION_TONS_PER_DAY, RESOURCES, RESOURCE_SPECS, SHIPBUILDING_GT_PER_YEAR, SHIPYARD_WARSHIP_SHARE,
+  CATEGORIES, MIL_FUEL_TONS_PER_USD_M, OIL_CONSUMPTION_MT, OIL_TONS_PER_PPP_USD_M, RATION_TONS_PER_DAY, RESOURCES, RESOURCE_SPECS, SHIPBUILDING_GT_PER_YEAR, SHIPYARD_WARSHIP_SHARE,
   itemSpec, type ItemCategory, type Resource,
 } from '../../data/industry';
 import { bufferMonths, newLine, newNationEconomy, type LineState, type NationEconomy } from './state';
@@ -68,8 +68,15 @@ const CONSCRIPTION_POP_SHARE = 0.0025;
 const CONSCRIPTION_EXPONENT = 2.5;
 /** Mean months from call-up to a usable reservist: Russia 2022 weeks, Ukraine 1-2 months, NATO basic plus branch 3-6 months. */
 const TRAINING_MONTHS = 2.5;
-/** Full mobilization quadruples peacetime military fuel draw (est.). */
+/** Full mobilization quadruples the fuel depots a military keeps stocked (est.). */
 const FUEL_MOBILIZATION_MULTIPLE = 4;
+/**
+ * Share of national oil use a state can route to its forces. In peacetime militaries
+ * burn ~1-2% (US DoD ~11.6 Mt of ~1,000 Mt); in WWII the US armed forces took about a
+ * third of US petroleum output (Petroleum Administration for War, 1946). Linear between (est.).
+ */
+const MIL_OIL_SHARE_PEACE = 0.02;
+const MIL_OIL_SHARE_FULL = 0.3;
 const SHORT_BELOW = 0.8;
 const RECOVERED_ABOVE = 0.95;
 
@@ -287,9 +294,16 @@ function stepNation(world: World, ctx: SimContext, s: Scan, n: Nation, e: Nation
   const spendMultiple = share / s0;
   for (const line of Object.values(e.lines)) runLine(n, e, line, spendMultiple, dtMonths);
 
-  const fuelPerMonth = (((n.stats.milexUsd ?? 0) / 1e6) * MIL_FUEL_TONS_PER_USD_M / 12) * (1 + (FUEL_MOBILIZATION_MULTIPLE - 1) * n.mobilization);
+  // Depots hold ~6 months of what the budget buys. Refills are the larger of what the budget buys
+  // abroad and what the state can commandeer from national oil supply, which in war far exceeds the
+  // peacetime budget (Russia's army is not short of diesel). The military takes first claim on scarce energy.
+  const budgetFuelPerMonth = (((n.stats.milexUsd ?? 0) / 1e6) * MIL_FUEL_TONS_PER_USD_M / 12) * (1 + (FUEL_MOBILIZATION_MULTIPLE - 1) * n.mobilization);
+  const oilMt = OIL_CONSUMPTION_MT[n.id];
+  const oilTonsPerYear = oilMt !== undefined ? oilMt * 1e6 : ((n.stats.gdpPpp ?? n.stats.gdp ?? 0) / 1e6) * OIL_TONS_PER_PPP_USD_M;
+  const commandeeredPerMonth = (oilTonsPerYear / 12) * (MIL_OIL_SHARE_PEACE + (MIL_OIL_SHARE_FULL - MIL_OIL_SHARE_PEACE) * n.mobilization);
+  const fuelPerMonth = Math.max(budgetFuelPerMonth, commandeeredPerMonth);
   const fuelBefore = n.bulk.fuel;
-  n.bulk.fuel = Math.min(Math.max(n.bulk.fuel, fuelPerMonth * 6), n.bulk.fuel + fuelPerMonth * dtMonths * Math.min(1, 2 * e.supply.energy));
+  n.bulk.fuel = Math.min(Math.max(n.bulk.fuel, 6 * budgetFuelPerMonth), n.bulk.fuel + fuelPerMonth * dtMonths * Math.min(1, 2 * e.supply.energy));
   e.fuelDelivered += n.bulk.fuel - fuelBefore;
 
   const personnel = s.personnel.get(n.id) ?? 0;

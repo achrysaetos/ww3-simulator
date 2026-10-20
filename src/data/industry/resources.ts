@@ -8,6 +8,17 @@ export const STEEL_OUTPUT_MT: Record<string, number> = {
 };
 const STEEL_WORLD_MT = 1_885;
 
+/**
+ * Oil products consumed per year, Mt (Energy Institute Statistical Review 2024, 2023
+ * data, kb/d x 0.05). Nations not listed use OIL_TONS_PER_PPP_USD_M.
+ */
+export const OIL_CONSUMPTION_MT: Record<string, number> = {
+  USA: 1_010, CHN: 830, IND: 270, SAU: 200, RUS: 185, JPN: 165, KOR: 140, BRA: 160, CAN: 120, DEU: 100, IRN: 100, MEX: 90,
+  FRA: 75, GBR: 70, TWN: 50, ITA: 60, ESP: 63, TUR: 50, POL: 35, ISR: 12, UKR: 10, PRK: 1,
+};
+/** World oil use (~4.5 Gt) over world GDP at PPP (~USD 185T), tons per year per USD 1M (est.). */
+export const OIL_TONS_PER_PPP_USD_M = 25;
+
 export interface ResourceSpec {
   /**
    * Share of world exports (or processing) by supplier. 'other' stands for the

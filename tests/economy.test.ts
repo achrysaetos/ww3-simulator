@@ -174,6 +174,27 @@ describe('economy: sanctions', () => {
   });
 });
 
+describe('economy: military fuel', () => {
+  it('keeps an oil producer at war fuelled beyond its peacetime budget, without overfilling depots in peace', () => {
+    const t = dailyWorld();
+    t.world.pending.push({ type: 'set_mobilization', nation: RUS, level: 0.35 });
+    const rus = t.world.nations[RUS], de = t.world.nations[DEU];
+    // Russian forces in ukraine-2026 draw ~16-18k t/day; the defence budget buys ~4k t/day of it.
+    rus.bulk.fuel = 327_000;
+    let short = 0;
+    for (let d = 0; d < 120; d++) {
+      rus.bulk.fuel -= 17_000;
+      if (rus.bulk.fuel < 0) short++;
+      t.days(1);
+    }
+    expect(short).toBe(0);
+    expect(rus.bulk.fuel).toBeGreaterThan(100_000);
+
+    const depot = 6 * ((de.stats.milexUsd ?? 0) / 1e6) * 12 / 12;
+    expect(de.bulk.fuel).toBeLessThanOrEqual(depot * 1.001);
+  });
+});
+
 describe('economy: manpower', () => {
   it('trains reserves under mobilization up to a ceiling set by working-age population, and not in peacetime', () => {
     const t = testWorld([economy]);
