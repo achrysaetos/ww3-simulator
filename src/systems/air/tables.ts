@@ -103,16 +103,17 @@ export const BULK_AMMO_KINDS: ReadonlySet<MunitionKind> = new Set(['unguided_bom
  * nights, weather), so the belt alone never exceeds maxKill. Fitted to Ukrainian Air
  * Force 2024-25 reports of ~80-90 % of Shaheds downed or "locationally lost" to EW,
  * of which SAMs and fighters took a minority (estimate; UAF and ISW daily summaries).
+ * The same groups also down low, subsonic cruise missiles, far less often (judgment:
+ * UAF credits mobile fire groups with a minority of Kh-101/Kalibr kills).
  */
 export const COUNTER_DRONE = {
-  kinds: new Set<MunitionKind>(['drone_oneway', 'loitering']),
-  maxKill: 0.85,
+  maxKill: new Map<MunitionKind, number>([['drone_oneway', 0.85], ['loitering', 0.85], ['cruise', 0.3]]),
   beltKm: 100,
   sampleKm: 50,
 };
 
-export function beltKillProbability(overflightKm: number, difficulty: number): number {
-  return COUNTER_DRONE.maxKill * (1 - Math.exp((-(1 - difficulty) * overflightKm) / COUNTER_DRONE.beltKm));
+export function beltKillProbability(kind: MunitionKind, overflightKm: number, difficulty: number): number {
+  return (COUNTER_DRONE.maxKill.get(kind) ?? 0) * (1 - Math.exp((-(1 - difficulty) * overflightKm) / COUNTER_DRONE.beltKm));
 }
 
 /** How a threat behaves for air defense. */

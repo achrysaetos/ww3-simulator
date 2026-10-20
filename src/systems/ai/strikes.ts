@@ -35,13 +35,16 @@ const DEEP_STRIKE_RISK = 0.7;
 
 /**
  * Whether striking cells of `owner`'s homeland outside the battle area is
- * politically allowed. Deep strikes on a nuclear-armed enemy wait until the
- * dyad has reached strategic conventional war (cf. the 2024 US decision to let
- * Ukraine hit Russian territory near Kharkiv but not deeper).
+ * politically allowed. A nuclear power weighs deep strikes on another nuclear
+ * power's homeland against escalation and waits until the dyad has reached
+ * strategic conventional war (cf. the 2024 US decision to let Ukraine use US
+ * weapons near Kharkiv but not deeper). A non-nuclear belligerent has no such
+ * ladder to climb and strikes deep from the start: Ukraine's drone campaign on
+ * Russian refineries and airbases from 2023, Iran's salvos on Israel in 2024.
  */
 function deepStrikeAllowed(p: Plan, owner: NationId): boolean {
   if (!p.enemies.has(owner) || p.world.nations[owner].nuclear.warheads <= 0) return true;
-  if (p.profile.riskTolerance >= DEEP_STRIKE_RISK) return true;
+  if (p.world.nations[p.nation].nuclear.warheads <= 0 || p.profile.riskTolerance >= DEEP_STRIKE_RISK) return true;
   return rung(relation(p.world, p.nation, owner).escalation) >= rung('strategic_conventional');
 }
 
@@ -135,11 +138,22 @@ function launchable(p: Plan, f: Formation, m: MunitionId): boolean {
 const RATIONED_COST_USD_M = 0.3;
 /**
  * Days a nation spreads its precision-munition stocks over, on top of new
- * production. Russia's 2023-25 launches tracked production plus a slow draw on
- * reserves (Ukrainian GUR stock estimates vs monthly launch tallies imply
- * roughly a year of reserve held back). A judgment, not a doctrine figure.
+ * production. Against an enemy across a land front (a war of attrition), Russia's 2023-25 launches
+ * tracked production plus a slow draw on reserves (Ukrainian GUR stock estimates vs
+ * monthly launch tallies imply roughly a year held back). Against an enemy with no
+ * shared front the war is a stand-off exchange decided by stocks and launcher attrition, and stocks
+ * go fast: Iran fired ~550 ballistic missiles, a quarter or more of its force, in
+ * the 12 days of June 2025. Both are judgments, not doctrine figures.
  */
-const STOCK_HORIZON_DAYS = 365;
+const ATTRITION_HORIZON_DAYS = 365;
+const STANDOFF_HORIZON_DAYS = 30;
+/**
+ * Rationed weapons go in massed salvos every few days, starting the day the war
+ * does, to saturate defenses rather than trickle into them: Russia's combined
+ * missile strikes on Ukraine came every 4-10 days in 2024-25; Iran's 2024 attacks
+ * were single massed salvos (judgment).
+ */
+const SALVO_EVERY_DAYS = 3;
 
 /**
  * A nation's daily firing budget per rationed munition: production plus stock
@@ -163,15 +177,19 @@ export class FireBudget {
     const { world, nation, ctx } = this.p;
     const capacity = new Map<MunitionId, number>();
     for (const x of this.proposals) for (const m of x.options) capacity.set(m.id, (capacity.get(m.id) ?? 0) + dailyRounds(x.f, m.id, ctx.catalog));
-    const share = new Map<MunitionId, number>();
-    for (const [m, cap] of capacity) {
+    const front = new Set<NationId>();
+    for (const sec of this.p.sectors) for (const n of sec.enemyNodes) front.add(world.control[n]);
+    const salvo = this.salvoDay() ? SALVO_EVERY_DAYS : 0;
+    const share = (m: MunitionId, horizon: number) => {
+      const cap = capacity.get(m) ?? 0;
       let stock = world.nations[nation].stockpile[m] ?? 0;
       for (const f of this.p.index.byNation.get(nation) ?? []) if (f.kind === 'air_wing' || f.kind === 'missile') stock += f.magazine[m] ?? 0;
       const produced = (world.slices.economy?.nations[nation]?.lines[m]?.capacityPerMonth ?? 0) / 30;
-      share.set(m, cap > 0 ? Math.min(1, (produced + stock / STOCK_HORIZON_DAYS) / cap) : 0);
-    }
+      return cap > 0 ? Math.min(1, (salvo * (produced + stock / horizon)) / cap) : 0;
+    };
     for (const x of this.proposals) {
-      const m = x.options.find((m) => ctx.rng.chance(share.get(m.id) ?? 0));
+      const horizon = front.has(world.control[x.t.node]) ? ATTRITION_HORIZON_DAYS : STANDOFF_HORIZON_DAYS;
+      const m = x.options.find((m) => ctx.rng.chance(share(m.id, horizon)));
       if (m) issue(this.p, x.f, { ...x.order, munition: m.id });
       else {
         x.t.assigned--;
@@ -179,6 +197,13 @@ export class FireBudget {
       }
     }
     this.proposals.length = 0;
+  }
+
+  private salvoDay(): boolean {
+    const { world, nation, enemies } = this.p;
+    let since = world.tick;
+    for (const e of enemies) since = Math.min(since, relation(world, nation, e).warSince ?? since);
+    return Math.floor(((world.tick - since) * world.dtHours) / 24) % SALVO_EVERY_DAYS === 0;
   }
 }
 
@@ -213,11 +238,16 @@ export class SamCover {
       }
   }
 
-  /** Whether a weapon reaching `standoffKm` can hit `node` without flying deeper than tolerated into an envelope (SAMs taken to sit behind the target). */
-  clear(node: NodeId, standoffKm: number): boolean {
+  /**
+   * Whether an aircraft of `visibility` (1 = conventional; stealth shrinks the
+   * range at which a SAM can engage it) with a weapon reaching `standoffKm` can hit
+   * `node` without flying deeper than tolerated into an envelope (SAMs taken to
+   * sit behind the target).
+   */
+  clear(node: NodeId, standoffKm: number, visibility = 1): boolean {
     const { map } = this.p.ctx;
     for (const s of this.sams) {
-      const need = s.km - standoffKm - TOLERATED_DEPTH_KM;
+      const need = s.km * visibility - standoffKm - TOLERATED_DEPTH_KM;
       if (need > 0 && withinKm(map, s.node, node, need)) return false;
     }
     return true;

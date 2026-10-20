@@ -120,8 +120,8 @@ export function defendRaid(world: World, ctx: SimContext, pic: AirPicture, node:
     const cat = threatCategory(m);
     if (!cat) continue;
     const threat = { speedMach: m.speedMach, interceptDifficulty: m.interceptDifficulty };
-    if (COUNTER_DRONE.kinds.has(m.kind) && streams[i].overflightKm > 0)
-      leaked[i] -= ctx.rng.binomial(leaked[i], beltKillProbability(streams[i].overflightKm, m.interceptDifficulty));
+    if (streams[i].overflightKm > 0)
+      leaked[i] -= ctx.rng.binomial(leaked[i], beltKillProbability(m.kind, streams[i].overflightKm, m.interceptDifficulty));
     if (cat === 'air_breathing')
       for (const g of fighters) {
         if (!leaked[i]) break;
