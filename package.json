@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "data": "tsx scripts/build-data.ts",
     "sim": "tsx src/cli/run.ts",
-    "perf": "PERF=1 vitest run"
+    "perf": "PERF=1 vitest run",
+    "realism": "REALISM=1 vitest run"
   },
   "devDependencies": {
     "@types/d3-geo": "^3.1.1",

@@ -36,6 +36,8 @@ export interface NationMetrics {
   frontAirControl: number;
   /** Interceptor rounds (SAM, ABM, SHORAD missile) in magazines and national stockpile, at start and end. */
   interceptors: { start: number; end: number };
+  /** Crewed aircraft destroyed or damaged in air wings whose base was hit by a strike that tick (losses on the ground). */
+  aircraftLostOnGround: number;
   formationsDestroyed: number;
   warSupport: number;
   mobilization: number;
@@ -101,6 +103,18 @@ function sampleFrontAir(world: World, map: GameMap, front: Map<NationId, number>
   }
 }
 
+/** Crewed aircraft fit to fly in each live air wing, with where the wing sits. */
+function parkedAircraft(world: World, catalog: Catalog): Map<string, { nation: NationId; node: NodeId; n: number }> {
+  const out = new Map<string, { nation: NationId; node: NodeId; n: number }>();
+  for (const f of Object.values(world.formations)) {
+    if (f.kind !== 'air_wing' || f.status === 'destroyed') continue;
+    let n = 0;
+    for (const [p, c] of Object.entries(f.equipment)) if (catalog.platform(p as PlatformId).crew > 0) n += c;
+    out.set(f.id, { nation: f.nation, node: f.node, n });
+  }
+  return out;
+}
+
 function totals(world: World, catalog: Catalog): Map<NationId, Map<PlatformId, number>> {
   const out = new Map<NationId, Map<PlatformId, number>>();
   for (const f of Object.values(world.formations)) {
@@ -128,7 +142,7 @@ export function measureRun(engine: Engine, world: World, map: GameMap, days: num
   const per = new Map<string, NationMetrics>();
   const get = (n: string) => {
     let m = per.get(n);
-    if (!m) per.set(n, (m = { territoryDelta: 0, lossesByClass: {}, lossesByDomain: {}, casualties: 0, missilesFired: 0, missilesIntercepted: 0, strikes: {}, strikesOn: {}, frontAirControl: 0, interceptors: { start: 0, end: 0 }, formationsDestroyed: 0, warSupport: 0, mobilization: 0, civilianDeaths: 0 }));
+    if (!m) per.set(n, (m = { territoryDelta: 0, lossesByClass: {}, lossesByDomain: {}, casualties: 0, missilesFired: 0, missilesIntercepted: 0, strikes: {}, strikesOn: {}, frontAirControl: 0, interceptors: { start: 0, end: 0 }, aircraftLostOnGround: 0, formationsDestroyed: 0, warSupport: 0, mobilization: 0, civilianDeaths: 0 }));
     return m;
   };
   const nukes: RunMetrics['nuclearDetonations'] = [];
@@ -138,12 +152,15 @@ export function measureRun(engine: Engine, world: World, map: GameMap, days: num
   const t0 = performance.now();
   for (let i = 0; i < ticks; i++) {
     const day = (world.tick * world.dtHours) / 24;
+    const parked = parkedAircraft(world, catalog);
+    const struck = new Set<NodeId>();
     for (const e of engine.step(world) as SimEvent[]) {
       if (e.type === 'battle') for (const [n, c] of Object.entries(e.casualties)) get(n).casualties += c;
       else if (e.type === 'strike') {
         const m = catalog.munitions.get(e.munition);
         const cls = m ? strikeWeaponClass(m) : 'air_ordnance';
         const by = get(e.by), victim = map.isSea(e.target) ? undefined : world.control[e.target];
+        if (e.fired > e.intercepted) struck.add(e.target);
         for (const t of [(by.strikes[cls] ??= { fired: 0, intercepted: 0 }), ...(victim ? [((by.strikesOn[victim] ??= {})[cls] ??= { fired: 0, intercepted: 0 })] : [])]) {
           t.fired += e.fired;
           t.intercepted += e.intercepted;
@@ -158,6 +175,8 @@ export function measureRun(engine: Engine, world: World, map: GameMap, days: num
       else if (e.type === 'capitulation') caps.push({ nation: e.nation, day });
     }
     sampleFrontAir(world, map, frontCells, frontHeld);
+    const after = parkedAircraft(world, catalog);
+    for (const [f, before] of parked) if (struck.has(before.node)) get(before.nation).aircraftLostOnGround += Math.max(0, before.n - (after.get(f)?.n ?? 0));
   }
   const msPerTick = (performance.now() - t0) / ticks;
   const endTotals = totals(world, catalog);
