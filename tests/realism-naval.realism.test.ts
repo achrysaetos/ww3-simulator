@@ -7,9 +7,12 @@ import { nearestSea } from '../src/systems/naval/geography';
 const DAYS = 30;
 const SEEDS = [1, 2, 3];
 const SURFACE: PlatformClass[] = ['cruiser', 'destroyer', 'frigate', 'corvette'];
+/** CSIS's base case has the US fighting from D-day; a US entry after this many days is a different game and gets no loss band. */
+const US_EARLY_DAYS = 10;
 
 interface TaiwanRun {
   m: RunMetrics;
+  /** The US at war with China by US_EARLY_DAYS, as in the CSIS base case. */
   usInWar: boolean;
   /** Taiwan's 1-degree land cells (4 at this resolution) held by China at the end. */
   cellsTaken: number;
@@ -38,11 +41,13 @@ function taiwan(seed: number): TaiwanRun {
   const m = measureRun(s.engine, s.world, s.map, DAYS);
   let cellsTaken = 0;
   for (let n = 0; n < s.map.landCount; n++) if (s.map.owner[n] === 'TWN' && s.world.control[n] === 'CHN') cellsTaken++;
-  const usInWar = m.wars.some((w) => [w.a, w.b].sort().join() === 'CHN,USA');
+  const entry = (n: string) => m.wars.find((w) => [w.a, w.b].sort().join() === ['CHN', n].sort().join())?.since;
+  const day = (tick: number | undefined) => (tick === undefined ? undefined : (tick * s.world.dtHours) / 24);
+  const usInWar = (day(entry('USA')) ?? Infinity) <= US_EARLY_DAYS;
   r = { m, usInWar, cellsTaken, taipeiHeld: s.world.control[s.world.nations['TWN' as NationId].capital] === 'TWN', start };
   taiwanRuns.set(seed, r);
   const lost = (n: string, c: PlatformClass) => m.nations[n]?.lossesByClass[c] ?? 0;
-  console.log(`taiwan seed ${seed}: US in war ${usInWar}; first landing day ${m.nations.CHN?.naval?.firstAssaultDay}; landings ${m.nations.CHN?.naval?.assaultLandings}; ` +
+  console.log(`taiwan seed ${seed}: US enters day ${day(entry('USA'))}, JPN day ${day(entry('JPN'))}; first landing day ${m.nations.CHN?.naval?.firstAssaultDay}; landings ${m.nations.CHN?.naval?.assaultLandings}; ` +
     `landed ${m.nations.CHN?.naval?.troopsLanded} lost ${m.nations.CHN?.naval?.troopsLostLanding} ashore ${m.nations.CHN?.naval?.troopsOnEnemySoil}; cells taken ${cellsTaken}; ` +
     `CHN major ${m.nations.CHN?.naval?.majorShipsLost} (amphib ${lost('CHN', 'amphibious')}, carrier ${lost('CHN', 'carrier')}); ` +
     `USA carriers ${lost('USA', 'carrier')} surface ${SURFACE.reduce((a, c) => a + lost('USA', c), 0)} ssn ${lost('USA', 'ssn')}; ` +
@@ -69,7 +74,7 @@ describe('Taiwan 2027 naval war and invasion (CSIS "The First Battle of the Next
 
   // CSIS base case over the whole campaign: China ~138 major ships, the US 2 carriers and 7-20 major surface
   // warships. A 30-day run covers most of the decisive fighting; bands are widened for that (judgement).
-  it.each(SEEDS)('once the US is in, the PLAN loses dozens of major ships including amphibious lift, and the US loses 0-3 carriers and a band of surface combatants (seed %i)', (seed) => {
+  it.each(SEEDS)('with the US in from the start, the PLAN loses dozens of major ships including amphibious lift, and the US loses 0-3 carriers and a band of surface combatants (seed %i)', (seed) => {
     const { m, usInWar } = taiwan(seed);
     if (!usInWar) return;
     const chn = m.nations.CHN, usa = m.nations.USA;
@@ -83,7 +88,7 @@ describe('Taiwan 2027 naval war and invasion (CSIS "The First Battle of the Next
   }, 300_000);
 
   // CSIS base case: the PLA gets ashore but cannot be sustained once its shipping is attrited; Taipei never falls.
-  it('with the US in, the landing fails or holds a small lodgement without breakout in most seeds, and Taipei holds in every seed', () => {
+  it('with the US in from the start, the landing fails or holds a small lodgement without breakout in most seeds, and Taipei holds in every seed', () => {
     const runs = SEEDS.map(taiwan).filter((r) => r.usInWar);
     expect(runs.length).toBeGreaterThan(0);
     for (const r of runs) expect(r.taipeiHeld).toBe(true);
@@ -92,6 +97,8 @@ describe('Taiwan 2027 naval war and invasion (CSIS "The First Battle of the Next
 });
 
 describe('Black Sea 2026 (Russian Black Sea Fleet after 2022-24: ~a third lost to missiles and USVs, withdrawn east of Crimea)', () => {
+  // Since mid-2023 Russian warships no longer operate west of Crimea and Ukrainian grain sails from Odesa
+  // (UK MoD and ISW updates 2023-24). Judgement: Russia is the controlling navy off Odesa on at most a third of days.
   it.each(SEEDS)('the Russian fleet does not hold the sea off Odesa (seed %i)', (seed) => {
     const s = createSession('ukraine-2026', seed);
     const odesaSea = nearestSea(s.map, 46.5, 30.7) as NodeId;
@@ -99,9 +106,9 @@ describe('Black Sea 2026 (Russian Black Sea Fleet after 2022-24: ~a third lost t
     for (let d = 0; d < DAYS; d++) {
       measureRun(s.engine, s.world, s.map, 1);
       const c = s.world.theater.seaControl[odesaSea];
-      if (c?.nation === 'RUS' && c.level >= 0.5) russianDays++;
+      if (c?.nation === 'RUS') russianDays++;
     }
-    console.log(`ukraine seed ${seed}: days of firm Russian sea control off Odesa ${russianDays}/${DAYS}`);
+    console.log(`ukraine seed ${seed}: days of Russian sea control off Odesa ${russianDays}/${DAYS}`);
     expect(russianDays).toBeLessThanOrEqual(DAYS / 3);
   }, 300_000);
 });
