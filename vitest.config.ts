@@ -14,5 +14,6 @@ export default defineConfig({
     fileParallelism: !perf,
     // Simulation tests step the real map for weeks; a loaded machine stretches them past the 5 s default.
     testTimeout: realism ? 600_000 : 60_000,
+    hookTimeout: realism ? 600_000 : 60_000,
   },
 });
