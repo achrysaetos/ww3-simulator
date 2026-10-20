@@ -106,7 +106,7 @@ interface Assault {
 
 /**
  * Whether and where this nation mounts an amphibious assault: only on enemy land it cannot
- * reach by land, within ASSAULT_RANGE_KM of an own port, and only with lift to carry troops.
+ * reach by land, within ASSAULT_RANGE_KM of an own port and of a war aim, and only with lift.
  * A held lodgement is reinforced before any new beach is opened; otherwise the beach trades
  * off the pull of war aims against the defenders on and next to it, as the land planner does.
  */
@@ -139,8 +139,10 @@ function planAssault(p: Plan, lifts: Formation[]): Assault | undefined {
   };
 
   let best: Assault | undefined, bestScore = 0;
+  // A landing must open a road to something worth taking: a war aim on the same shore within reach of the beach.
+  const aimed = (n: NodeId) => aims.some((o) => mass[o.node] === mass[n] && map.distanceKm(o.node, n) <= ASSAULT_RANGE_KM);
   for (const n of coast(map)) {
-    if (!contested.has(mass[n])) continue;
+    if (!contested.has(mass[n]) || !aimed(n)) continue;
     const holder = world.control[n];
     const lodgement = holder === p.nation;
     if (!lodgement && !p.enemies.has(holder)) continue;

@@ -67,10 +67,10 @@ const MIN_LANDING_TEAM = 0.1;
 
 /** Split `share` of a formation off as a landing team; the parent keeps the rest at the port. */
 function detach(world: World, ctx: SimContext, f: Formation, share: number): Formation {
-  const take = <K extends string>(r: Record<K, number>, round: boolean): Record<K, number> => {
+  const take = <K extends string>(r: Record<K, number>): Record<K, number> => {
     const out = {} as Record<K, number>;
     for (const [k, n] of Object.entries(r) as [K, number][]) {
-      const t = round ? Math.round(n * share) : n * share;
+      const t = Math.round(n * share);
       if (t <= 0) continue;
       out[k] = t;
       if (n - t > 0) r[k] = n - t;
@@ -82,9 +82,9 @@ function detach(world: World, ctx: SimContext, f: Formation, share: number): For
     ...f,
     id: newId(world, `${f.id}-lt`),
     name: f.name.endsWith(' landing team') ? f.name : `${f.name} landing team`,
-    equipment: take(f.equipment, true),
+    equipment: take(f.equipment),
     damaged: {},
-    magazine: take(f.magazine, true),
+    magazine: take(f.magazine),
     personnel: Math.round(f.personnel * share),
     supply: scaled(f.supply, share),
     supplyCapacity: scaled(f.supplyCapacity, share),
