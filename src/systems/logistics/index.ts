@@ -1,5 +1,7 @@
 import { atWar, type SimContext, type System } from '../../core/engine';
+import type { GameMap } from '../../core/map';
 import type { Formation, FormationId, NationId, NodeId, PlatformId, World } from '../../core/types';
+import { Controllers } from './network';
 import { refreshNetworks, snapshotInputs, type InputSnapshot, type SupplyNetwork } from './refresh';
 import {
   FOOD_TONS_PER_PERSON_DAY, IDLE_FUEL_HOURS_PER_DAY, INFRA_REPAIR_PER_DAY, MAX_REFILL_FRACTION_PER_DAY, NODE_TONS_PER_DAY,
@@ -38,21 +40,27 @@ declare module '../../core/types' {
 export function supplyFactor(world: World, node: NodeId, nation: NationId): number {
   const s = world.slices.logistics;
   const key = s?.networkOf[nation];
-  return key ? (s.networks[key]?.factor[node] ?? 0) : 0;
+  const net = key ? s.networks[key] : undefined;
+  return net ? net.search.milliAt(s.seen, node) / 1000 : 0;
 }
 
-const initialState = (world: World): LogisticsState => ({ networks: {}, networkOf: {}, seen: snapshotInputs(world), establishment: {}, short: {} });
+const initialState = (world: World, map: GameMap): LogisticsState => ({
+  networks: {}, networkOf: {}, seen: snapshotInputs(world, new Controllers(world, map)), establishment: {}, short: {},
+});
 
 export const logistics: System = {
   id: 'logistics',
-  init(world) {
-    world.slices.logistics = initialState(world);
+  init(world, ctx) {
+    const s = (world.slices.logistics = initialState(world, ctx.map));
+    // The opening networks belong to a ready-to-run world, so they are searched at setup rather than on the first tick.
+    const forces = Object.values(world.formations).filter((f) => f.status !== 'destroyed' && f.status !== 'embarked');
+    s.networkOf = refreshNetworks(world, ctx.map, s.networks, s.seen, forces);
   },
   step(world, ctx) {
-    const s = (world.slices.logistics ??= initialState(world));
+    const s = (world.slices.logistics ??= initialState(world, ctx.map));
     const dtDays = world.dtHours / 24;
     const forces = activeFormations(world, s);
-    s.networkOf = refreshNetworks(world, ctx, s.networks, s.seen, forces);
+    s.networkOf = refreshNetworks(world, ctx.map, s.networks, s.seen, forces);
     repairInfrastructure(world, ctx, dtDays);
     sustain(world, ctx, s, forces, dtDays);
   },
@@ -107,7 +115,8 @@ function sustain(world: World, ctx: SimContext, s: LogisticsState, forces: Forma
   for (let i = 0; i < n; i++) {
     const f = forces[i];
     consumeBaseline(f, ctx, idleHours[f.kind] * dtDays, food);
-    const phi = (factor[i] = networks[networkOf[f.nation]]?.factor[f.node] ?? 0);
+    const net = networks[networkOf[f.nation]];
+    const phi = (factor[i] = net ? net.search.milliAt(s.seen, f.node) / 1000 : 0);
     if (phi <= 0) continue;
     let tons = 0;
     for (let c = 0; c < 3; c++) {
