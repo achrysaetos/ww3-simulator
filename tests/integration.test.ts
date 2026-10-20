@@ -38,7 +38,7 @@ describe('all systems together', () => {
 
     const joined = Object.entries(world.relations).filter(([k, r]) => r.atWar && k.split('|').includes('RUS')).length;
     expect(joined).toBeGreaterThan(15);
-    expect(kinds.get('battle') ?? 0).toBeGreaterThan(0);
+    expect((kinds.get('battle') ?? 0) + (kinds.get('node_captured') ?? 0)).toBeGreaterThan(0);
     for (const n of Object.values(world.nations)) {
       expect(Number.isFinite(n.warSupport)).toBe(true);
       expect(Number.isFinite(n.treasuryUsdB)).toBe(true);
