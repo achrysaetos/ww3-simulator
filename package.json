@@ -10,7 +10,7 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "data": "tsx scripts/build-data.ts",
-    "sim": "tsx scripts/sim.ts",
+    "sim": "tsx src/cli/run.ts",
     "perf": "PERF=1 vitest run"
   },
   "devDependencies": {
