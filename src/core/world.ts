@@ -46,12 +46,18 @@ export function createWorld(map: GameMap, opts: WorldOptions = {}): World {
       status: 'peace',
     };
   }
-  const relations: World['relations'] = {};
+  // Relations are symmetric, so a pair's opinion is the mean of both directions given.
+  const sums = new Map<string, { total: number; n: number }>();
   for (const [a, p] of Object.entries(opts.profiles ?? {}))
     for (const [b, opinion] of Object.entries(p.opinions ?? {})) {
       const k = a < b ? `${a}|${b}` : `${b}|${a}`;
-      relations[k] = { opinion, atWar: false, escalation: 'peace', sanctions: false };
+      const s = sums.get(k) ?? { total: 0, n: 0 };
+      s.total += opinion;
+      s.n++;
+      sums.set(k, s);
     }
+  const relations: World['relations'] = {};
+  for (const [k, s] of sums) relations[k] = { opinion: Math.round(s.total / s.n), atWar: false, escalation: 'peace', sanctions: false };
   return {
     seed,
     rngState: seed,
