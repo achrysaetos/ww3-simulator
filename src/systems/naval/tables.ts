@@ -103,8 +103,8 @@ export const CAP_AIRBORNE_SHARE = 0.25;
 export const SORTIES_PER_HOUR = 0.05;
 /** VLS ripple: missiles a launching hull can put in the air per tick. */
 export const LAUNCHES_PER_HULL = 8;
-/** Torpedoes per attacking submarine per tick (4-6 tubes, one reload). */
-export const TORPEDOES_PER_SUB = 6;
+/** Torpedoes one boat fires in an attack on a surface group: a spread of three (Conqueror at the Belgrano, 1982: three Mk 8s, two hits). */
+export const TORPEDO_SPREAD = 3;
 
 /** Crew lost when a hull sinks: Belgrano 1982 ~30%, Sheffield 7%, Moskva disputed; mean estimate. */
 export const CREW_LOSS_SUNK = 0.3;

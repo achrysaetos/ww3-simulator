@@ -4,7 +4,7 @@ import { tracked } from './detection';
 import type { TickEnv } from './env';
 import { resolveSalvo, type SalvoDefense, type SalvoOutcome } from './salvo';
 import { effectiveHitsToKill, ledger } from './state';
-import { ANTISHIP_KINDS, CREW_LOSS_SUNK, INTERCEPTOR_KINDS, LAUNCHES_PER_HULL, SORTIES_PER_HOUR, TORPEDOES_PER_SUB } from './tables';
+import { ANTISHIP_KINDS, CREW_LOSS_SUNK, INTERCEPTOR_KINDS, LAUNCHES_PER_HULL, SORTIES_PER_HOUR, TORPEDO_SPREAD } from './tables';
 
 type Tracks = Map<FormationId, Set<NationId>>;
 
@@ -16,6 +16,14 @@ const ENGAGING = new Set(['attack', 'patrol', 'blockade', 'escort', 'defend', 's
  * are not localized by it (submarines operate dispersed; USN ASW doctrine, estimate).
  */
 const ASW_SALVO = 2;
+/**
+ * Ticks one boat needs after an attack before it attacks again: it clears the datum, evades
+ * the counterattack and works back into a firing position (~a day; WWII U-boat and Falklands
+ * 1982 experience; estimate). A formation's boats patrol dispersed and take turns, so a
+ * formation of n boats makes one attack every SUB_REATTACK_TICKS / n ticks, never more than
+ * one per tick.
+ */
+const SUB_REATTACK_TICKS = 4;
 /** Decoy/evasion chance for a surface ship against one torpedo (Nixie-type towed decoys; estimate). */
 const SHIP_TORPEDO_DEFENSE = 0.15;
 
@@ -39,11 +47,12 @@ export function navalCombat(env: TickEnv, tracks: Tracks): void {
     if (!ENGAGING.has(f.order.posture) || f.order.path?.length) continue;
     const c = env.comp(f);
     if (!c.submerged || c.hulls.every((h) => h.platform.class === 'ssbn')) continue;
+    if (env.world.tick - (env.world.slices.naval.lastFired[f.id] ?? -Infinity) < SUB_REATTACK_TICKS / c.hullCount) continue;
     const target = pickTarget(env, tracks, f, (t) => t.node === f.node && !env.comp(t).submerged);
     if (!target) continue;
     const torp = bestMunition(env, f, 'ship', 0, (m) => m.kind === 'torpedo');
     if (!torp) continue;
-    const n = Math.min(f.magazine[torp.id], TORPEDOES_PER_SUB * c.hullCount, 2 * env.comp(target).hullCount + 2);
+    const n = Math.min(Math.floor(f.magazine[torp.id]), TORPEDO_SPREAD);
     queue(target, f.nation, fire(env, f, target, torp, n, 'ship'));
   }
 
