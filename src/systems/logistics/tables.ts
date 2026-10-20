@@ -1,4 +1,4 @@
-import type { FormationKind, Terrain } from '../../core/types';
+import type { FormationKind, PlatformClass, Terrain } from '../../core/types';
 
 /**
  * Planning factors for the supply model. Each number is either a published
@@ -73,6 +73,16 @@ export const MIN_RAIL_KM = 20;
 export const RAIL_CUT_INFRASTRUCTURE = 0.3;
 /** Port size (map.ports count) at which a port is not the bottleneck. */
 export const FULL_PORT = 3;
+/**
+ * Throughput over a beach or minor harbour the map does not list as a port, as a
+ * share of a full port: island bases such as Okinawa, and a lodgement on an enemy
+ * coast supplied from the sea. Estimate: Omaha and Utah together landed roughly
+ * 10,000-15,000 t/day by late June 1944 (Ruppenthal, Logistical Support of the
+ * Armies, vol. 1), against NODE_TONS_PER_DAY of 15,000 for a full cell.
+ */
+export const BEACH_CAPACITY = 0.25;
+/** Ships that carry a lodgement's supplies across the beach. */
+export const SEALIFT_CLASSES: ReadonlySet<PlatformClass> = new Set(['amphibious', 'cargo_ship']);
 
 /**
  * Road cost multiplier by terrain of the cell entered. Estimates from relative
@@ -151,3 +161,51 @@ export const INFRA_REPAIR_PER_DAY = 0.03;
 
 /** Formation kinds that occupy ground and block enemy supply through their cell. */
 export const LAND_KINDS: ReadonlySet<FormationKind> = new Set(['maneuver', 'artillery', 'air_defense', 'missile', 'logistics', 'strategic']);
+
+/**
+ * Share of its full munition load a formation can take back from the national
+ * stockpile per day at a supply factor of 1; ships rearm only in port (REARMS_IN_PORT_ONLY).
+ * - Bombers rearm at their base between sorties; turning an aircraft round takes
+ *   hours, so a regiment reloads fully in a day. Estimate.
+ * - Land launchers reload from depot stocks over days: a Patriot launcher reloads in
+ *   about an hour once missiles reach it (US Army FM 3-01.85), so delivery from the
+ *   depot binds, about half a load a day at full supply. Estimate.
+ * - Ships reload only alongside in port: Mk 41 VLS cells are not reloadable at sea
+ *   (the US Navy first demonstrated an at-sea rig, TRAM, in 2024), and a full
+ *   destroyer reload takes days pierside. Estimate.
+ */
+export const REARM_PER_DAY: Record<FormationKind, number> = {
+  maneuver: 0.5,
+  artillery: 0.5,
+  // Air wings, missile brigades and air defence rearm in the air system (air/rearm.ts).
+  air_defense: 0,
+  missile: 0,
+  air_wing: 0,
+  surface_group: 0.33,
+  submarine: 0.33,
+  strategic: 1,
+  logistics: 0.5,
+  space: 0,
+};
+/** Kinds that can rearm only in a friendly port, never at sea. */
+export const REARMS_IN_PORT_ONLY: ReadonlySet<FormationKind> = new Set(['surface_group', 'submarine']);
+
+/**
+ * Platform classes a formation regenerates without drawing them from the national
+ * stockpile. Rifle squads are raised from the troops a formation already has (personnel
+ * replacement draws them from reserves); trucks are requisitioned from the civilian fleet,
+ * as both Russia and Ukraine have done since 2022.
+ */
+export const REGENERATED_CLASSES: ReadonlySet<PlatformClass> = new Set(['infantry', 'truck']);
+
+/**
+ * Days after its destruction that a land formation can be re-formed at its home
+ * garrison from reserves and stockpiled equipment. Russia re-formed units destroyed in
+ * 2022 (e.g. 1st Guards Tank Army, 4th Guards Tank Division) within about 3-6 months
+ * (ISW, RUSI 2023); Ukraine withdraws brigades for 2-3 months of restoration. Estimate.
+ */
+export const RECONSTITUTE_DAYS = 90;
+/** A re-formed formation must field at least this share of its establishment platforms. */
+export const RECONSTITUTE_MIN_STRENGTH = 0.5;
+/** Kinds that are re-formed after destruction. Lost ships and air wings are not rebuilt this way. */
+export const RECONSTITUTED_KINDS: ReadonlySet<FormationKind> = new Set(['maneuver', 'artillery', 'air_defense', 'missile']);

@@ -1,7 +1,7 @@
 import type { Catalog } from '../../core/catalog';
 import type { GameMap } from '../../core/map';
 import { atWar, type SimContext, type System } from '../../core/engine';
-import { platformCount } from '../../core/forces';
+import { platformCount, supplyCapacityOf } from '../../core/forces';
 import type { Formation, FormationId, NationId, NodeId, PlatformId, TargetClass, Terrain, World } from '../../core/types';
 import { TARGET_CLASSES } from '../../core/types';
 import { marchKmPerDay } from './movement';
@@ -11,7 +11,7 @@ import {
   AIR_SUPPRESSION, AMMO_DAYS_INTENSE, ATTRITION_KM_PER_DAY, ATTRITION_MAX_KM_PER_DAY, BREAKTHROUGH_KM_PER_DAY, HOSTILE_GROUND_COST,
   ASSAULT_EXPOSURE, DELIBERATE_ASSAULT_RATIO, FRONTAGE_PLATFORMS, WITHDRAWAL_KM, POSITIONAL_INTENSITY, AMMO_RATION_BELOW, AREA_FIRE_REF_DENSITY, CAS_BONUS, DIRECT_DENSITY_EXP, COMBAT_FUEL_DUTY, COMBINED_ARMS,
   ENGAGED_HOURS_PER_DAY, ENTRENCH_MAX_BONUS, EXPERIENCE_PER_COMBAT_DAY, FATIGUE_COMBAT_PER_DAY, INDIRECT_FIRE, RETREAT_LOSS,
-  RETREAT_MORALE, ROUT_ABANDON, ROUT_MORALE, TERRAIN, exposureOf, targetClassOf,
+  RETREAT_MORALE, ROUT_ABANDON, ROUT_MORALE, SHELL_TONS, SHELLS_PER_TUBE_DAY, TERRAIN, TUBE_ARTILLERY, exposureOf, targetClassOf,
 } from './tables';
 
 /** Relative weight of each target class in an opposing force; need not be normalised. */
@@ -163,9 +163,32 @@ function applyKills(ctx: SimContext, side: Side, kills: ClassVector, totals: Cla
   return lostBy;
 }
 
-function consume(f: Formation, dtHours: number): void {
+/**
+ * Combat consumption over `dtHours` of full-intensity combat. Gun tubes fire rounds
+ * at a per-tube rate, other armed platforms spend their basic load over
+ * AMMO_DAYS_INTENSE, and trucks and other unarmed platforms fire nothing. Rounds
+ * fired are tallied per nation, the unit open sources count shelling in.
+ */
+function consume(world: World, catalog: Catalog, f: Formation, dtHours: number): void {
   const dtDays = dtHours / 24;
-  f.supply.ammo = Math.max(0, f.supply.ammo - (f.supplyCapacity.ammo * dtDays) / AMMO_DAYS_INTENSE);
+  const armed: Record<PlatformId, number> = {};
+  let tubes = 0;
+  for (const key in f.equipment) {
+    const pid = key as PlatformId, k = f.equipment[pid];
+    if (k <= 0) continue;
+    const p = catalog.platform(pid);
+    if (TUBE_ARTILLERY.has(p.class)) tubes += k;
+    else for (const c in p.firepower) if (p.firepower[c as TargetClass]) { armed[pid] = k; break; }
+  }
+  // A unit short of ammunition rations fire, and so spends less, the same way it hits less.
+  const ration = ammoFactor(f) * dtDays;
+  const otherLoad = supplyCapacityOf(catalog, armed).ammo;
+  const fired = Math.min(tubes * SHELLS_PER_TUBE_DAY * ration, Math.max(0, f.supply.ammo) / SHELL_TONS);
+  f.supply.ammo = Math.max(0, f.supply.ammo - fired * SHELL_TONS - (otherLoad * ration) / AMMO_DAYS_INTENSE);
+  if (fired > 0) {
+    const tally = landSlice(world).shellsFired;
+    tally[f.nation] = (tally[f.nation] ?? 0) + fired;
+  }
   f.supply.fuel = Math.max(0, f.supply.fuel - (f.supplyCapacity.fuel / 72) * dtHours * COMBAT_FUEL_DUTY);
 }
 
@@ -257,7 +280,7 @@ function resolveBattle(world: World, ctx: SimContext, node: NodeId, att: Side, d
       f.morale = Math.max(0, Math.min(1, f.morale - (2 * (lost.get(f) ?? 0)) / Math.max(1, before) + (winning ? 0.01 : 0)));
       f.fatigue = Math.min(1, f.fatigue + FATIGUE_COMBAT_PER_DAY * dtDays * intensity);
       f.experience = Math.min(1, f.experience + EXPERIENCE_PER_COMBAT_DAY * dtDays);
-      consume(f, world.dtHours * intensity);
+      consume(world, catalog, f, world.dtHours * intensity);
       const left = platformCount(f);
       if (left === 0 || f.personnel <= 0) {
         destroyFormation(world, ctx, f);
@@ -274,7 +297,7 @@ function resolveBattle(world: World, ctx: SimContext, node: NodeId, att: Side, d
         onRetreat(f);
       } else if (lossFrac > RETREAT_LOSS || f.morale < RETREAT_MORALE) onRetreat(f);
     }
-    for (const f of side.support) consume(f, world.dtHours * intensity);
+    for (const f of side.support) consume(world, catalog, f, world.dtHours * intensity);
   };
   let yielded = false;
   const fallBackFrom = (threat: NodeId) => (f: Formation) => {

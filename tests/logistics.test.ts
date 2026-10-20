@@ -5,6 +5,7 @@ import { loadMap } from '../src/data/load';
 
 const MAP = loadMap();
 import { logistics, supplyFactor } from '../src/systems/logistics';
+import { BEACH_CAPACITY, NODE_TONS_PER_DAY } from '../src/systems/logistics/tables';
 
 const PLENTY = { fuel: 1e7, ammo: 1e7, food: 1e7 };
 const DAY = 4; // ticks at the default 6 h
@@ -64,6 +65,60 @@ describe('logistics', () => {
     expect(f.supply.food).toBe(0);
     expect(f.supply.fuel).toBeLessThan(fuelBefore);
     expect(t.world.nations[id.nation('UKR')].bulk.food).toBe(bulkBefore);
+  });
+
+  it('supplies an island base the map lists no port for by sea', () => {
+    const t = setup();
+    for (const n of ['USA', 'JPN']) t.world.nations[id.nation(n)].blocs = ['us_japan'];
+    t.war('USA', 'CHN');
+    const okinawa = t.nodeAt(26.3, 127.8);
+    expect(t.map.ports[okinawa]).toBe(0);
+    const marines = t.brigade('USA', okinawa);
+    t.drain(marines, 0.3);
+    t.engine.run(t.world, 2 * DAY);
+    expect(supplyFactor(t.world, okinawa, id.nation('USA'))).toBeGreaterThan(0.05);
+    expect(t.fill(marines, 'ammo')).toBeGreaterThan(0.31);
+  });
+
+  it('supplies a lodgement on an enemy coast over the beach in step with its sealift, and not once the enemy takes the sea lane', () => {
+    const t = setup();
+    const chn = id.nation('CHN');
+    t.war('CHN', 'TWN');
+    const beach = t.nodeAt(23.5, 120.5);
+    expect(t.world.control[beach]).toBe(id.nation('TWN'));
+    const zone = [...t.map.neighbors(beach)].find((n) => t.map.isSea(n))!;
+    const landing = t.brigade('CHN', beach);
+    const lift = t.add({ nation: chn, name: 'landing ships', kind: 'surface_group', echelon: 'squadron', node: zone, equipment: { [id.platform('t_lst')]: 10 } });
+    t.drain(landing, 0.3);
+    t.engine.run(t.world, 2 * DAY);
+    const held = supplyFactor(t.world, beach, chn);
+    expect(held).toBeGreaterThan(0.05);
+    expect(held).toBeLessThanOrEqual(0.25);
+    expect(t.fill(landing, 'ammo')).toBeGreaterThan(0.31);
+    lift.equipment[id.platform('t_lst')] = 5;
+    t.engine.run(t.world, 1);
+    expect(supplyFactor(t.world, beach, chn)).toBeCloseTo(held / 2, 2);
+    for (const n of t.map.nodesWithin(zone, 600)) if (t.map.isSea(n)) t.world.theater.seaControl[n] = { nation: id.nation('TWN'), level: 1 };
+    t.engine.run(t.world, 2 * DAY);
+    expect(supplyFactor(t.world, beach, chn)).toBe(0);
+  });
+
+  it('lands no more over the beach than one beach can take, however many lodgements a nation holds', () => {
+    const t = setup();
+    t.war('CHN', 'TWN');
+    const cells = [t.nodeAt(23.5, 120.5), t.nodeAt(25, 121.5)];
+    expect(new Set(cells.map((n) => t.world.control[n]))).toEqual(new Set([id.nation('TWN')]));
+    const zone = [...t.map.neighbors(cells[0])].find((n) => t.map.isSea(n))!;
+    t.add({ nation: id.nation('CHN'), name: 'landing ships', kind: 'surface_group', echelon: 'squadron', node: zone, equipment: { [id.platform('t_lst')]: 10 } });
+    const ashore = cells.flatMap((n) => Array.from({ length: 100 }, () => t.brigade('CHN', n)));
+    t.engine.step(t.world);
+    for (const n of cells) expect(supplyFactor(t.world, n, id.nation('CHN'))).toBeGreaterThan(0);
+    for (const f of ashore) t.drain(f, 0);
+    t.engine.step(t.world);
+    const landed = ashore.reduce((a, f) => a + f.supply.fuel + f.supply.ammo + f.supply.food, 0);
+    const beach = (NODE_TONS_PER_DAY * BEACH_CAPACITY * t.world.dtHours) / 24;
+    expect(landed).toBeGreaterThan(0.9 * beach);
+    expect(landed).toBeLessThanOrEqual(beach * 1.001);
   });
 
   it('cuts an expeditionary force when the enemy takes the sea lanes', () => {
@@ -183,6 +238,61 @@ describe('logistics', () => {
     g.equipment[mbt] = 40;
     t2.engine.run(t2.world, 10 * DAY);
     expect(g.equipment[mbt]).toBe(40);
+  });
+
+  it('re-forms rifle squads from the troops a formation has, with no stockpile, in step with its manpower', () => {
+    const t = setup();
+    const inf = id.platform('t_inf');
+    const f = t.brigade('POL', t.nodeAt(52.4, 16.9));
+    t.engine.step(t.world);
+    const full = f.personnel;
+    t.world.nations[id.nation('POL')].reserves = 0;
+    f.equipment[inf] = 20;
+    f.personnel = Math.round(full * 0.5);
+    t.engine.run(t.world, 30 * DAY);
+    expect(t.world.nations[id.nation('POL')].stockpile[inf] ?? 0).toBe(0);
+    expect(f.equipment[inf]).toBe(30);
+  });
+
+  it('re-forms a destroyed brigade at its garrison months later from reserves and stockpile, and only then', () => {
+    const t = setup();
+    const pol = t.world.nations[id.nation('POL')];
+    const home = t.nodeAt(52.4, 16.9);
+    const mbt = id.platform('t_mbt'), ifv = id.platform('t_ifv'), inf = id.platform('t_inf');
+    const f = t.brigade('POL', home);
+    t.engine.step(t.world);
+    const est = { ...f.equipment }, crew = f.personnel;
+    Object.assign(f, { status: 'destroyed', equipment: {}, personnel: 0, node: t.nodeAt(50.5, 23.5) });
+    pol.stockpile[mbt] = 200;
+    pol.stockpile[ifv] = 60;
+    pol.reserves = crew * 2;
+    t.engine.run(t.world, 80 * DAY);
+    expect(f.status).toBe('destroyed');
+    t.engine.run(t.world, 15 * DAY);
+    expect(f.status).toBe('active');
+    expect(f.node).toBe(home);
+    expect(f.equipment[mbt]).toBe(est[mbt]);
+    expect(f.equipment[ifv]).toBe(60);
+    expect(f.equipment[inf]).toBe(est[inf]);
+    expect(pol.stockpile[mbt]).toBe(200 - est[mbt]);
+    expect(pol.reserves).toBeLessThanOrEqual(crew);
+  });
+
+  it('reloads a warship from the national stockpile in port but not at sea', () => {
+    const t = setup();
+    const cruise = id.munition('t_cruise');
+    const pol = t.world.nations[id.nation('POL')];
+    const port = t.nodeAt(54.5, 18.5); // Gdansk/Gdynia
+    expect(t.map.ports[port]).toBeGreaterThan(0);
+    const sea = [...t.map.neighbors(port)].find((n) => t.map.isSea(n))!;
+    const ship = (node: NodeId) => t.add({ nation: id.nation('POL'), name: 'frigate', kind: 'surface_group', echelon: 'squadron', node, equipment: { [id.platform('t_destroyer')]: 1 } });
+    const docked = ship(port), afloat = ship(sea);
+    docked.magazine[cruise] = afloat.magazine[cruise] = 0;
+    pol.stockpile[cruise] = 100;
+    t.engine.run(t.world, 4 * DAY);
+    expect(docked.magazine[cruise]).toBe(24);
+    expect(afloat.magazine[cruise]).toBe(0);
+    expect(pol.stockpile[cruise]).toBe(76);
   });
 
   it('rations a cell shared by many formations', () => {

@@ -1,10 +1,11 @@
 import { atWar, type SimContext, type System } from '../../core/engine';
 import type { GameMap } from '../../core/map';
-import type { Formation, FormationId, NationId, NodeId, PlatformId, World } from '../../core/types';
+import type { Formation, FormationId, MunitionId, NationId, NodeId, PlatformId, World } from '../../core/types';
 import { Controllers } from './network';
 import { refreshNetworks, snapshotInputs, type InputSnapshot, type SupplyNetwork } from './refresh';
 import {
-  FOOD_TONS_PER_PERSON_DAY, IDLE_FUEL_HOURS_PER_DAY, INFRA_REPAIR_PER_DAY, MAX_REFILL_FRACTION_PER_DAY, NODE_TONS_PER_DAY,
+  FOOD_TONS_PER_PERSON_DAY, IDLE_FUEL_HOURS_PER_DAY, BEACH_CAPACITY, INFRA_REPAIR_PER_DAY, MAX_REFILL_FRACTION_PER_DAY, NODE_TONS_PER_DAY,
+  REARM_PER_DAY, REARMS_IN_PORT_ONLY, SEALIFT_CLASSES, RECONSTITUTE_DAYS, RECONSTITUTE_MIN_STRENGTH, RECONSTITUTED_KINDS, REGENERATED_CLASSES,
   REPAIR_FRACTION_PER_DAY, REPLACE_FRACTION_PER_DAY, RESERVE_REPLACE_MULTIPLIER, SUPPLY_CLASSES, type SupplyClass,
 } from './tables';
 
@@ -24,8 +25,12 @@ export interface LogisticsState {
   networkOf: Record<NationId, string>;
   /** Network inputs as last seen, for change detection. */
   seen: InputSnapshot;
-  /** Strength each formation is rebuilt toward, captured the first tick it is seen. */
+  /** Strength each formation is rebuilt toward, captured the first tick it is seen; kept for a destroyed formation that can be re-formed. */
   establishment: Record<FormationId, Establishment>;
+  /** Tick each destroyed formation awaiting re-forming was destroyed. */
+  fallen: Record<FormationId, number>;
+  /** Sealift hulls (amphibious and cargo ships) each nation fields now, and the most it has fielded; a lodgement's beach supply scales with their ratio. */
+  lift: Record<NationId, { now: number; most: number }>;
   /** Bulk classes each nation is currently short of, so a shortage is reported once per episode. */
   short: Record<NationId, SupplyClass[]>;
 }
@@ -41,11 +46,19 @@ export function supplyFactor(world: World, node: NodeId, nation: NationId): numb
   const s = world.slices.logistics;
   const key = s?.networkOf[nation];
   const net = key ? s.networks[key] : undefined;
-  return net ? net.search.milliAt(s.seen, node) / 1000 : 0;
+  return net ? forcesFactor(world, s, net, node, nation) : 0;
+}
+
+function forcesFactor(world: World, s: LogisticsState, net: SupplyNetwork, node: NodeId, nation: NationId): number {
+  const phi = net.search.milliForForcesAt(s.seen, node) / 1000;
+  const holder = world.control[node];
+  if (phi <= 0 || !holder || !atWar(world, nation, holder)) return phi;
+  const lift = s.lift[nation];
+  return lift ? (phi * lift.now) / lift.most : 0;
 }
 
 const initialState = (world: World, map: GameMap): LogisticsState => ({
-  networks: {}, networkOf: {}, seen: snapshotInputs(world, new Controllers(world, map)), establishment: {}, short: {},
+  networks: {}, networkOf: {}, seen: snapshotInputs(world, new Controllers(world, map)), establishment: {}, fallen: {}, lift: {}, short: {},
 });
 
 export const logistics: System = {
@@ -59,23 +72,35 @@ export const logistics: System = {
   step(world, ctx) {
     const s = (world.slices.logistics ??= initialState(world, ctx.map));
     const dtDays = world.dtHours / 24;
-    const forces = activeFormations(world, s);
+    reconstitute(world, ctx, s);
+    const forces = activeFormations(world, ctx, s);
     s.networkOf = refreshNetworks(world, ctx.map, s.networks, s.seen, forces);
     repairInfrastructure(world, ctx, dtDays);
     sustain(world, ctx, s, forces, dtDays);
   },
 };
 
-function activeFormations(world: World, s: LogisticsState): Formation[] {
+function activeFormations(world: World, ctx: SimContext, s: LogisticsState): Formation[] {
   const out: Formation[] = [];
+  const lift = new Map<NationId, number>();
   for (const id in world.formations) {
     const f = world.formations[id as FormationId];
     if (f.status === 'destroyed') {
-      delete s.establishment[f.id];
+      if (RECONSTITUTED_KINDS.has(f.kind) && s.establishment[f.id]) s.fallen[f.id] ??= world.tick;
+      else delete s.establishment[f.id];
       continue;
     }
     s.establishment[f.id] ??= { equipment: sumCounts(f.equipment, f.damaged), personnel: f.personnel };
     if (f.status !== 'embarked') out.push(f);
+    if (f.kind === 'surface_group')
+      for (const pid in f.equipment)
+        if (SEALIFT_CLASSES.has(ctx.catalog.platform(pid as PlatformId).class)) lift.set(f.nation, (lift.get(f.nation) ?? 0) + f.equipment[pid as PlatformId]);
+  }
+  for (const n in s.lift) s.lift[n as NationId].now = 0;
+  for (const [n, now] of lift) {
+    const l = (s.lift[n] ??= { now, most: now });
+    l.now = now;
+    l.most = Math.max(l.most, now);
   }
   return out;
 }
@@ -101,13 +126,16 @@ function repairInfrastructure(world: World, ctx: SimContext, dtDays: number): vo
  * Baseline consumption, then resupply. Each formation asks for its deficit, capped by
  * what the chain can push in a tick and scaled by the supply factor at its node. A
  * cell's throughput is shared by everyone in it, and each nation's bulk stocks are
- * shared pro rata when they cannot cover all requests.
+ * shared pro rata when they cannot cover all requests. Forces ashore on an enemy
+ * coast also share one beach for the whole nation, BEACH_CAPACITY of a full cell
+ * scaled by surviving sealift, and their repair and replacement shrink with it.
  */
 function sustain(world: World, ctx: SimContext, s: LogisticsState, forces: Formation[], dtDays: number): void {
   const n = forces.length;
   const factor = new Float64Array(n);
   const want = new Float64Array(n * 3); // fuel, ammo, food per formation
   const nodeTons = new Map<number, number>(), nodeFactor = new Map<number, number>();
+  const ashore = new Uint8Array(n), beachTons = new Map<NationId, number>();
   // Hoisted: dev loaders (vitest, tsx) compile imported bindings to getters, which dominates this loop.
   const refill = MAX_REFILL_FRACTION_PER_DAY * dtDays, idleHours = IDLE_FUEL_HOURS_PER_DAY, food = FOOD_TONS_PER_PERSON_DAY * dtDays;
   const { networks, networkOf } = s;
@@ -116,8 +144,10 @@ function sustain(world: World, ctx: SimContext, s: LogisticsState, forces: Forma
     const f = forces[i];
     consumeBaseline(f, ctx, idleHours[f.kind] * dtDays, food);
     const net = networks[networkOf[f.nation]];
-    const phi = (factor[i] = net ? net.search.milliAt(s.seen, f.node) / 1000 : 0);
+    const phi = (factor[i] = net ? forcesFactor(world, s, net, f.node, f.nation) : 0);
     if (phi <= 0) continue;
+    const holder = world.control[f.node];
+    ashore[i] = holder && atWar(world, f.nation, holder) ? 1 : 0;
     // Spelled out per class: keyed access by class name dominated this loop.
     const cap = f.supplyCapacity, have = f.supply, j = i * 3;
     const tons =
@@ -135,8 +165,25 @@ function sustain(world: World, ctx: SimContext, s: LogisticsState, forces: Forma
     const tons = nodeTons.get(f.node)!;
     if (tons <= 0) continue;
     const ration = Math.min(1, (NODE_TONS_PER_DAY * nodeFactor.get(f.node)! * dtDays) / tons);
+    for (let c = 0; c < 3; c++) want[i * 3 + c] *= ration;
+    if (ashore[i]) beachTons.set(f.nation, (beachTons.get(f.nation) ?? 0) + want[i * 3] + want[i * 3 + 1] + want[i * 3 + 2]);
+  }
+  const beachRation = new Map<NationId, number>();
+  for (const [id, tons] of beachTons) {
+    const lift = s.lift[id]!;
+    if (tons <= 0) continue;
+    beachRation.set(id, Math.min(1, (NODE_TONS_PER_DAY * BEACH_CAPACITY * (lift.now / lift.most) * dtDays) / tons));
+  }
+  for (let i = 0; i < n; i++) {
+    if (factor[i] <= 0) continue;
+    const f = forces[i];
+    if (ashore[i]) {
+      const r = beachRation.get(f.nation) ?? 1;
+      factor[i] *= r;
+      for (let c = 0; c < 3; c++) want[i * 3 + c] *= r;
+    }
     const req = nationWant.get(f.nation) ?? nationWant.set(f.nation, [0, 0, 0]).get(f.nation)!;
-    for (let c = 0; c < 3; c++) req[c] += want[i * 3 + c] *= ration;
+    for (let c = 0; c < 3; c++) req[c] += want[i * 3 + c];
   }
 
   const share = new Map<NationId, number[]>();
@@ -155,6 +202,95 @@ function sustain(world: World, ctx: SimContext, s: LogisticsState, forces: Forma
     }
     repair(f, ctx, phi * REPAIR_FRACTION_PER_DAY * dtDays);
     replace(world, ctx, f, s.establishment[f.id], phi * REPLACE_FRACTION_PER_DAY * dtDays * (f.order.posture === 'reserve' ? RESERVE_REPLACE_MULTIPLIER : 1));
+  }
+  rearm(world, ctx, s, forces, factor, dtDays);
+}
+
+/**
+ * Reloads magazines from the national stockpile toward the platforms' full loadouts,
+ * at a rate set by formation kind and scaled by the supply factor; ships only in a
+ * friendly port. A nation's stock of each munition is shared pro rata when it cannot
+ * cover every request. Rounds an ORBAT carries beyond the loadouts are not topped up.
+ */
+function rearm(world: World, ctx: SimContext, s: LogisticsState, forces: Formation[], factor: Float64Array, dtDays: number): void {
+  const requests: { f: Formation; m: MunitionId; want: number }[] = [];
+  const asked = new Map<string, number>();
+  const landCount = ctx.map.landCount;
+  for (let i = 0; i < forces.length; i++) {
+    const f = forces[i], phi = factor[i];
+    const rate = REARM_PER_DAY[f.kind] * phi * dtDays;
+    if (rate <= 0 || (REARMS_IN_PORT_ONLY.has(f.kind) && f.node >= landCount)) continue;
+    const stock = world.nations[f.nation].stockpile;
+    for (const [m, full] of fullLoad(f, ctx)) {
+      const missing = full - (f.magazine[m] ?? 0);
+      if (missing <= 0 || !((stock[m] ?? 0) >= 1)) continue;
+      const want = Math.min(missing, full * rate);
+      requests.push({ f, m, want });
+      const k = `${f.nation}|${m}`;
+      asked.set(k, (asked.get(k) ?? 0) + want);
+    }
+  }
+  for (const { f, m, want } of requests) {
+    const stock = world.nations[f.nation].stockpile;
+    const x = want * Math.min(1, stock[m] / asked.get(`${f.nation}|${m}`)!);
+    const k = Math.min(stock[m], Math.floor(x) + (ctx.rng.chance(x - Math.floor(x)) ? 1 : 0));
+    if (k <= 0) continue;
+    f.magazine[m] = (f.magazine[m] ?? 0) + k;
+    stock[m] -= k;
+  }
+}
+
+function fullLoad(f: Formation, ctx: SimContext): Map<MunitionId, number> {
+  const out = new Map<MunitionId, number>();
+  for (const key in f.equipment) {
+    const n = f.equipment[key as PlatformId];
+    if (n > 0) for (const l of ctx.catalog.platform(key as PlatformId).loadout) out.set(l.munition, (out.get(l.munition) ?? 0) + l.count * n);
+  }
+  return out;
+}
+
+/**
+ * Re-forms land formations destroyed at least RECONSTITUTE_DAYS ago at their home
+ * garrison, or the capital if that is lost: full manpower from reserves, equipment
+ * from the stockpile, green and with empty stocks for logistics to fill. A formation
+ * waits while reserves cannot man it or the stockpile cannot field half its platforms.
+ */
+function reconstitute(world: World, ctx: SimContext, s: LogisticsState): void {
+  const due = world.tick - (RECONSTITUTE_DAYS * 24) / world.dtHours;
+  for (const key in s.fallen) {
+    const id = key as FormationId;
+    if (s.fallen[id] > due) continue;
+    const f = world.formations[id], est = s.establishment[id], nation = world.nations[f.nation];
+    if (nation.status === 'capitulated' || nation.status === 'collapsed') {
+      delete s.fallen[id];
+      delete s.establishment[id];
+      continue;
+    }
+    const node = world.control[f.home] === f.nation ? f.home : world.control[nation.capital] === f.nation ? nation.capital : undefined;
+    if (node === undefined || nation.reserves < est.personnel) continue;
+    const equipment: Record<PlatformId, number> = {};
+    let fielded = 0, full = 0;
+    for (const k in est.equipment) {
+      const pid = k as PlatformId, n = est.equipment[pid];
+      const free = REGENERATED_CLASSES.has(ctx.catalog.platform(pid).class);
+      const take = free ? n : Math.min(n, Math.max(0, Math.floor(nation.stockpile[pid] ?? 0)));
+      if (take > 0) equipment[pid] = take;
+      fielded += take;
+      full += n;
+    }
+    if (fielded < RECONSTITUTE_MIN_STRENGTH * full) continue;
+    for (const k in equipment) {
+      const pid = k as PlatformId;
+      if (!REGENERATED_CLASSES.has(ctx.catalog.platform(pid).class)) nation.stockpile[pid] -= equipment[pid];
+    }
+    nation.reserves -= est.personnel;
+    Object.assign(f, {
+      node, home: node, equipment, damaged: {}, personnel: est.personnel, magazine: {}, supply: { fuel: 0, ammo: 0, food: 0 },
+      readiness: 0.5, morale: 0.6, experience: 0.2, fatigue: 0, entrenchment: 0, progressKm: 0,
+      order: { posture: 'reserve', issuedTick: world.tick }, status: 'active',
+    } satisfies Partial<Formation>);
+    delete s.fallen[id];
+    ctx.emit({ type: 'message', tick: world.tick, nation: f.nation, text: `${f.name} re-formed at full manpower from reserves` });
   }
 }
 
@@ -196,20 +332,26 @@ function repair(f: Formation, ctx: SimContext, p: number): void {
   }
 }
 
-/** Draws platforms from the national stockpile and troops from reserves toward the formation's establishment. */
+/**
+ * Draws platforms from the national stockpile and troops from reserves toward the
+ * formation's establishment. Rifle squads re-form from the troops the formation has,
+ * in proportion to its manpower, and trucks are requisitioned, so neither needs stock.
+ */
 function replace(world: World, ctx: SimContext, f: Formation, est: Establishment, rate: number): void {
   const nation = world.nations[f.nation];
+  const manned = Math.min(1, f.personnel / Math.max(1, est.personnel));
   for (const key in est.equipment) {
     const pid = key as PlatformId, full = est.equipment[pid];
-    const missing = full - (f.equipment[pid] ?? 0) - (f.damaged[pid] ?? 0);
+    const free = REGENERATED_CLASSES.has(ctx.catalog.platform(pid).class);
+    const missing = (free ? Math.floor(full * manned) : full) - (f.equipment[pid] ?? 0) - (f.damaged[pid] ?? 0);
     if (missing <= 0) continue;
-    const stock = nation.stockpile[pid] ?? 0;
+    const stock = free ? Infinity : nation.stockpile[pid] ?? 0;
     if (stock <= 0) continue;
     const x = full * rate;
     const k = Math.min(missing, stock, Math.floor(x) + (ctx.rng.chance(x - Math.floor(x)) ? 1 : 0));
     if (k <= 0) continue;
     f.equipment[pid] = (f.equipment[pid] ?? 0) + k;
-    nation.stockpile[pid] = stock - k;
+    if (!free) nation.stockpile[pid] = stock - k;
   }
   if (f.personnel >= est.personnel) return;
   const troops = Math.min(est.personnel - f.personnel, nation.reserves, Math.round(est.personnel * rate));

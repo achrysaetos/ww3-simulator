@@ -46,8 +46,13 @@ function draw(nation: Nation, ctx: SimContext, mid: MunitionId, item: ItemId, wa
     nation.bulk.ammo -= (got * m.weightKg) / 1000;
     return got;
   }
-  const stock = nation.stockpile[item] ?? 0;
-  const got = Math.min(want, Math.floor(stock));
-  if (got > 0) nation.stockpile[item] = stock - got;
+  // Rounds stocked as the rail row first, then fresh production, which the economy books under the munition.
+  let got = 0;
+  for (const key of item === mid ? [item] : [item, mid]) {
+    const stock = nation.stockpile[key] ?? 0;
+    const take = Math.min(want - got, Math.floor(stock));
+    if (take > 0) nation.stockpile[key] = stock - take;
+    got += Math.max(0, take);
+  }
   return got;
 }
