@@ -1,4 +1,4 @@
-import type { SimContext } from '../../core/engine';
+import { newId, type SimContext } from '../../core/engine';
 import type { Command, Formation, NodeId, PlatformId, World } from '../../core/types';
 import { canBoard, liftShare, liftUsed } from './amphibious';
 import { tickEnv } from './env';
@@ -32,12 +32,15 @@ export function applyNavalOrder(world: World, cmd: OrderCommand, ctx: SimContext
     const env = tickEnv(world, ctx);
     const comp = env.comp(lift);
     if (!canBoard(env, f, lift)) return refuse('must stand in a port with the lift group in port or offshore');
-    if (liftUsed(env, lift, comp) + liftShare(ctx.catalog, f, comp) > 1 + 1e-9) return refuse(`${lift.name} lacks lift capacity`);
-    f.status = 'embarked';
-    f.embarkedOn = lift.id;
-    f.node = lift.node;
-    f.order = { posture: 'embark', targetFormation: lift.id, issuedTick: world.tick };
-    (env.embarked.get(lift.id) ?? env.embarked.set(lift.id, []).get(lift.id)!).push(f);
+    const room = 1 - liftUsed(env, lift, comp);
+    const share = liftShare(ctx.catalog, f, comp);
+    if (room < MIN_LANDING_TEAM * share || room <= 0) return refuse(`${lift.name} lacks lift capacity`);
+    const boarding = share > room + 1e-9 ? detach(world, ctx, f, room / share) : f;
+    boarding.status = 'embarked';
+    boarding.embarkedOn = lift.id;
+    boarding.node = lift.node;
+    boarding.order = { posture: 'embark', targetFormation: lift.id, issuedTick: world.tick };
+    (env.embarked.get(lift.id) ?? env.embarked.set(lift.id, []).get(lift.id)!).push(boarding);
     return;
   }
   if (f.status === 'embarked') return refuse('embarked formations land by ordering their lift group to attack or move to a coast');
@@ -54,6 +57,48 @@ export function applyNavalOrder(world: World, cmd: OrderCommand, ctx: SimContext
   f.order = { ...order, target: goal, path };
   f.progressKm = 0;
 }
+
+/**
+ * Smallest share of a formation worth embarking as a separate landing team. A brigade too big
+ * for one lift group sails as battalion landing teams spread over several ships and waves
+ * (USMC MEU doctrine; PLA assault echelons in the CMPR 2024), the rest following later.
+ */
+const MIN_LANDING_TEAM = 0.1;
+
+/** Split `share` of a formation off as a landing team; the parent keeps the rest at the port. */
+function detach(world: World, ctx: SimContext, f: Formation, share: number): Formation {
+  const take = <K extends string>(r: Record<K, number>, round: boolean): Record<K, number> => {
+    const out = {} as Record<K, number>;
+    for (const [k, n] of Object.entries(r) as [K, number][]) {
+      const t = round ? Math.round(n * share) : n * share;
+      if (t <= 0) continue;
+      out[k] = t;
+      if (n - t > 0) r[k] = n - t;
+      else delete r[k];
+    }
+    return out;
+  };
+  const team: Formation = {
+    ...f,
+    id: newId(world, `${f.id}-lt`),
+    name: f.name.endsWith(' landing team') ? f.name : `${f.name} landing team`,
+    equipment: take(f.equipment, true),
+    damaged: {},
+    magazine: take(f.magazine, true),
+    personnel: Math.round(f.personnel * share),
+    supply: scaled(f.supply, share),
+    supplyCapacity: scaled(f.supplyCapacity, share),
+    order: { ...f.order },
+  };
+  f.personnel -= team.personnel;
+  f.supply = scaled(f.supply, 1 - share);
+  f.supplyCapacity = scaled(f.supplyCapacity, 1 - share);
+  world.formations[team.id] = team;
+  ctx.emit({ type: 'message', tick: world.tick, nation: f.nation, text: `${team.name} formed to embark (${Math.round(share * 100)}% of ${f.name})` });
+  return team;
+}
+
+const scaled = (b: Formation['supply'], k: number) => ({ fuel: b.fuel * k, ammo: b.ammo * k, food: b.food * k });
 
 function goalNode(world: World, target?: NodeId, targetFormation?: Formation['id']): NodeId | undefined {
   if (targetFormation) {

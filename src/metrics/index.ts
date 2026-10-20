@@ -1,5 +1,5 @@
 import type { Catalog } from '../core/catalog';
-import type { Engine } from '../core/engine';
+import { atWar, type Engine } from '../core/engine';
 import type { GameMap } from '../core/map';
 import type { Domain, NationId, PlatformClass, PlatformId, SimEvent, World } from '../core/types';
 
@@ -27,7 +27,26 @@ export interface NationMetrics {
   warSupport: number;
   mobilization: number;
   civilianDeaths: number;
+  /** Naval war at sea, from the naval system's ledger; absent when the nation fought no naval action. */
+  naval?: NavalMetrics;
 }
+
+export interface NavalMetrics {
+  /** Hulls sunk in naval combat, mines and air or missile strikes resolved by the naval system. */
+  hullsSunk: number;
+  /** Major combatants and amphibious ships lost (carrier, cruiser, destroyer, frigate, amphibious, ssn, ssk, ssgn), from the fielded-platform drop. */
+  majorShipsLost: number;
+  /** Opposed amphibious landings attempted. */
+  assaultLandings: number;
+  /** Day of the first opposed landing, from the start of the scenario. */
+  firstAssaultDay?: number;
+  troopsLanded: number;
+  troopsLostLanding: number;
+  /** Own ground personnel standing at the end on land cells that belonged to a nation it is at war with: the lodgement. */
+  troopsOnEnemySoil: number;
+}
+
+const MAJOR_SHIPS: ReadonlySet<PlatformClass> = new Set(['carrier', 'cruiser', 'destroyer', 'frigate', 'amphibious', 'ssn', 'ssk', 'ssgn']);
 
 function totals(world: World, catalog: Catalog): Map<NationId, Map<PlatformId, number>> {
   const out = new Map<NationId, Map<PlatformId, number>>();
@@ -97,6 +116,17 @@ export function measureRun(engine: Engine, world: World, map: GameMap, days: num
     mm.warSupport = n.warSupport;
     mm.mobilization = n.mobilization;
     mm.civilianDeaths = Math.max(0, (startPop.get(n.id) ?? 0) - n.population);
+  }
+  const onEnemySoil = new Map<string, number>();
+  for (const f of Object.values(world.formations)) {
+    if (f.status !== 'active' || f.node >= map.landCount || (f.kind !== 'maneuver' && f.kind !== 'artillery')) continue;
+    const owner = map.owner[f.node];
+    if (owner && owner !== f.nation && atWar(world, owner, f.nation)) onEnemySoil.set(f.nation, (onEnemySoil.get(f.nation) ?? 0) + f.personnel);
+  }
+  for (const [nation, l] of Object.entries(world.slices.naval?.ledger ?? {})) {
+    let major = 0;
+    for (const [c, n] of Object.entries(per.get(nation)?.lossesByClass ?? {})) if (MAJOR_SHIPS.has(c as PlatformClass)) major += n;
+    get(nation).naval = { hullsSunk: l.hullsSunk, majorShipsLost: major, assaultLandings: l.assaultLandings, firstAssaultDay: l.firstAssaultTick === undefined ? undefined : (l.firstAssaultTick * world.dtHours) / 24, troopsLanded: l.troopsLanded, troopsLostLanding: l.troopsLostLanding, troopsOnEnemySoil: onEnemySoil.get(nation) ?? 0 };
   }
   const wars = Object.entries(world.relations).filter(([, r]) => r.atWar).map(([k, r]) => { const [a, b] = k.split('|'); return { a, b, since: r.warSince ?? 0 }; });
   return { days, nations: Object.fromEntries(per), wars, nuclearDetonations: nukes, capitulations: caps, msPerTick };

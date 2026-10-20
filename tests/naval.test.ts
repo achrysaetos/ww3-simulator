@@ -352,13 +352,26 @@ describe('naval movement and lift', () => {
     });
   });
 
-  it('refuses to embark more troops than the lift carries', () => {
+  it('embarks only the landing team the lift can carry, leaves the rest ashore, and refuses once the lift is full', () => {
     const t = navalWorld();
     const port = t.portOf('CHN', 24.5, 118.1);
     const lift = t.add({ nation: CHN, name: 'Lift', kind: 'surface_group', node: port, equipment: t.eq({ n_lhd: 1 }) });
     const big = t.add({ nation: CHN, name: 'Group army', kind: 'maneuver', echelon: 'corps', node: port, equipment: t.eq({ t_inf: 2000 }) });
+    const troops = big.personnel, inf = big.equipment['t_inf' as never];
+    const capacity = t.catalog.platform('n_lhd' as never).capacity!.troops!;
     t.order(big, { posture: 'embark', targetFormation: lift.id });
+    const team = Object.values(t.world.formations).find((f) => f.embarkedOn === lift.id)!;
     expect(big.status).toBe('active');
+    expect(big.node).toBe(port);
+    expect(team.status).toBe('embarked');
+    expect(team.personnel).toBeLessThanOrEqual(capacity);
+    expect(team.personnel).toBeGreaterThan(capacity * 0.9);
+    expect(team.personnel + big.personnel).toBe(troops);
+    expect(team.equipment['t_inf' as never] + big.equipment['t_inf' as never]).toBe(inf);
+
+    const second = t.add({ nation: CHN, name: 'Second brigade', kind: 'maneuver', echelon: 'brigade', node: port, equipment: t.eq({ t_inf: 100 }) });
+    t.order(second, { posture: 'embark', targetFormation: lift.id });
+    expect(second.status).toBe('active');
     expect(t.world.events.some((e) => e.type === 'message' && e.text.includes('lacks lift capacity'))).toBe(true);
   });
 });

@@ -52,6 +52,9 @@ export function landings(env: TickEnv): void {
     const defense = beachDefense(env, lift, target);
     const r = attack > 0 ? defense / attack : 10;
     const loss = Math.min(0.95, (LANDING_BASE_LOSS + LANDING_OPPOSED_LOSS * (r / (1 + r)) * (1 - support)) * ctx.rng.range(0.8, 1.2));
+    const lb = ledger(world, lift.nation);
+    lb.assaultLandings++;
+    lb.firstAssaultTick ??= world.tick;
     for (const f of aboard) disembark(env, f, target, loss);
     lift.order = { posture: 'patrol', issuedTick: world.tick, path: [] };
   }
