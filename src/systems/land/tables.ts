@@ -47,9 +47,10 @@ export const DISMOUNTS: ReadonlySet<PlatformClass> = new Set(['infantry', 'atgm'
  * Engaged hours per day of intense combat across the whole force. Not every
  * platform fires every hour: most of a brigade is out of line of sight, moving
  * or resupplying. Calibrated against the testkit catalog's `firepower` so that a
- * 3:1 assault on an entrenched plains defender costs the attacker ~1-3% of its
- * equipment per day (Ukraine 2022-24 assault rates, Oryx-derived; Dupuy TNDM
- * attacker loss ~1-4%/day for division-level attacks) and the defender ~4-8%.
+ * 3:1 assault on an entrenched plains defender costs each side ~2-4% of its
+ * equipment per day, the attacker more than twice the defender's personnel
+ * (Dupuy TNDM attacker loss ~1-4%/day for division-level attacks; Ukraine
+ * 2023-25, where the defender's dug-in advantage outweighed the attacker's mass).
  */
 export const ENGAGED_HOURS_PER_DAY = 1.5;
 
