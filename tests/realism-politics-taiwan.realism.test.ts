@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { atWar } from '../src/core/engine';
-import { EUROPE, fightsAny, runPolitics, type PoliticsRun, status } from './realism-politics.fixture';
+import { EUROPE, enteredOn, fightsAny, runPolitics, type PoliticsRun, status } from './realism-politics.fixture';
 
 /**
  * China attacks Taiwan. Whether the US intervenes is the guarantor's call under the TRA
@@ -16,11 +16,11 @@ describe.each([1, 2, 3])('taiwan-2027 seed %i, 30 days', (seed) => {
     expect(fightsAny(run(seed), 'CHN', EUROPE)).toEqual([]);
   }, 600_000);
 
-  it('the US decides on the TRA within a week', () => {
+  it('the US decides on Taiwan within a week: it fights China or declines the TRA by day 7 (TRA decision due ~6 days in; a refusal may be reconsidered later)', () => {
     const r = run(seed);
-    const joined = r.entries.some((e) => e.by === 'USA' && e.reason.includes('US-TWN-TRA'));
-    const declined = r.declined.some((t) => t.startsWith('USA declines to honour US-TWN-TRA'));
-    expect(joined !== declined).toBe(true);
+    const fights = enteredOn(r, 'USA', 'CHN') ?? Infinity;
+    const declines = r.declined.find((d) => d.text.startsWith('USA declines to honour US-TWN-TRA'))?.day ?? Infinity;
+    expect(Math.min(fights, declines)).toBeLessThanOrEqual(7);
   }, 600_000);
 
   it('Japan fights only once China strikes Japanese territory', () => {

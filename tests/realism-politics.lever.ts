@@ -15,5 +15,5 @@ for (const seed of seeds.split(',').map(Number)) {
   const pairs = Object.values(r.world.relations).filter((x) => x.atWar).length;
   const nukes = r.nukes.map((n) => `${n.by}@${n.day.toFixed(1)}${n.thresholdCrossed ? '' : '!NO-THRESHOLD'}`);
   console.log(`${scenario} seed ${seed} ${days}d: ${pairs} pairs at war, nukes [${nukes.join(' ')}]`);
-  console.log('  ' + [...first.values(), ...r.declined].join('\n  '));
+  console.log('  ' + [...first.values(), ...r.declined.map((d) => `${d.text} @${d.day.toFixed(1)}`)].join('\n  '));
 }

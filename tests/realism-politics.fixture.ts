@@ -13,7 +13,7 @@ export interface Entry { by: NationId; on: NationId; day: number; reason: string
 export interface PoliticsRun {
   world: World;
   entries: Entry[];
-  declined: string[];
+  declined: { text: string; day: number }[];
   /** Nuclear detonations, each with whether the user's own data threshold had been crossed by then. */
   nukes: { by: NationId; day: number; thresholdCrossed: boolean }[];
   /** First day each nation had its capital threatened or 2% of its homeland population held by an enemy. */
@@ -39,7 +39,7 @@ function thresholdCrossed(world: World, n: NationId): boolean {
 export function runPolitics(scenario: string, seed: number, days: number): PoliticsRun {
   const s = createSession(scenario, seed);
   const entries: Entry[] = [];
-  const declined: string[] = [];
+  const declined: PoliticsRun['declined'] = [];
   const nukes: PoliticsRun['nukes'] = [];
   const crossed = new Set<NationId>();
   const seriouslyInvaded = new Map<NationId, number>();
@@ -52,7 +52,7 @@ export function runPolitics(scenario: string, seed: number, days: number): Polit
       if ((a.popLost >= 0.02 || a.capitalThreatened) && !seriouslyInvaded.has(n as NationId)) seriouslyInvaded.set(n as NationId, day);
     for (const e of events) {
       if (e.type === 'war_declared') entries.push({ by: e.by, on: e.on, day, reason: e.reason });
-      else if (e.type === 'message' && /declines/.test(e.text)) declined.push(e.text);
+      else if (e.type === 'message' && /declines/.test(e.text)) declined.push({ text: e.text, day });
       else if (e.type === 'nuclear_detonation') nukes.push({ by: e.by, day, thresholdCrossed: crossed.has(e.by) || thresholdCrossed(s.world, e.by) });
     }
   }
