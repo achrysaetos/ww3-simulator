@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import { Engine } from '../src/core/engine';
 import { addFormation } from '../src/core/forces';
 import type { NationId, NodeId, SimEvent } from '../src/core/types';
 import { initialStockpiles } from '../src/data/industry';
 import { economicStress, economy } from '../src/systems/economy';
-import { id, testWorld } from '../src/testkit';
+import { createWorld } from '../src/core/world';
+import { loadMap } from '../src/data/load';
+import { id, testCatalog, testWorld } from '../src/testkit';
 
 const USA = id.nation('USA'), RUS = id.nation('RUS'), JPN = id.nation('JPN'), DEU = id.nation('DEU');
 
@@ -92,6 +95,25 @@ describe('economy: industrial damage', () => {
     const [after] = t.series(t.months(1), 'USA:shell_155');
     expect(after / before).toBeCloseTo(1 - share, 1);
     expect(after).toBeLessThan(before * 0.95);
+  });
+
+  it('counts only territory lost after the start: baseline GDP already excludes what was occupied before', () => {
+    const map = loadMap();
+    const world = createWorld(map);
+    const UKR = id.nation('UKR');
+    const east = map.nodesOf(UKR).sort((a, b) => map.lon[b] - map.lon[a]);
+    const occupied = east.slice(0, Math.round(east.length * 0.2));
+    for (const n of occupied) world.control[n] = RUS;
+    const engine = new Engine(map, testCatalog(), [economy]);
+    engine.init(world);
+    engine.run(world, 40);
+    expect(world.slices.economy.nations[UKR].gdpIndex).toBeGreaterThan(0.99);
+
+    const next = east.slice(occupied.length, occupied.length + Math.round(east.length * 0.2));
+    const lost = next.reduce((s, n) => s + map.popShare[n], 0) / map.nodesOf(UKR).filter((n) => !occupied.includes(n)).reduce((s, n) => s + map.popShare[n], 0);
+    for (const n of next) world.control[n] = RUS;
+    engine.run(world, 4);
+    expect(world.slices.economy.nations[UKR].integrity).toBeCloseTo(1 - lost, 2);
   });
 });
 

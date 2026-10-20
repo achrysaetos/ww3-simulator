@@ -171,11 +171,13 @@ interface Scan {
 }
 
 function scan(world: World, ctx: SimContext): Scan {
+  const integrity = industrialIntegrity(world, ctx.map);
+  for (const [id, v] of integrity) integrity.set(id, v / (world.slices.economy.nations[id]?.baseIntegrity || 1));
   const personnel = new Map<NationId, number>();
   for (const f of Object.values(world.formations)) if (f.status !== 'destroyed') personnel.set(f.nation, (personnel.get(f.nation) ?? 0) + f.personnel);
   let worldGdp = 0;
   for (const n of Object.values(world.nations)) worldGdp += n.stats.gdp ?? 0;
-  return { integrity: industrialIntegrity(world, ctx.map), cut: tradePartners(world), personnel, worldGdp };
+  return { integrity, cut: tradePartners(world), personnel, worldGdp };
 }
 
 // ---------------------------------------------------------------- per-nation model
@@ -350,9 +352,14 @@ export const economy: System = {
   id: 'economy',
   commands: ['set_mobilization', 'produce', 'sanction'],
 
-  init(world) {
+  init(world, ctx) {
     world.slices.economy = { nations: {}, lastReportTick: world.tick };
-    for (const n of Object.values(world.nations)) world.slices.economy.nations[n.id] = newNationEconomy(n);
+    const integrity = industrialIntegrity(world, ctx.map);
+    for (const n of Object.values(world.nations)) {
+      const e = newNationEconomy(n);
+      e.baseIntegrity = integrity.get(n.id) ?? 1;
+      world.slices.economy.nations[n.id] = e;
+    }
   },
 
   apply(world, cmd, ctx) {

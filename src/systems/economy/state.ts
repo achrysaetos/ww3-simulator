@@ -24,8 +24,14 @@ export interface NationEconomy {
   buffers: Record<Resource, number>;
   /** Share of need actually available this tick after drawing on stocks, 0..1. */
   supply: Record<Resource, number>;
-  /** Share of the nation's population-weighted industry that is intact and still held, 0..1. */
+  /**
+   * Population-weighted industry intact and held, relative to the scenario start. The
+   * baseline GDP in stats already excludes what was occupied or ruined before the start
+   * (Ukraine's 2024 GDP is net of the occupied east), so only later change counts.
+   */
   integrity: number;
+  /** Absolute intact-and-held share at the scenario start, 0..1. */
+  baseIntegrity: number;
   /** Share of foreign trade lost to blockade, sanctions, and war, 0..1. */
   tradeLoss: number;
   /** Output relative to the baseline GDP in stats. */
@@ -93,6 +99,7 @@ export function newNationEconomy(nation: Nation): NationEconomy {
     buffers: perResource((r) => bufferMonths(nation.id, r)),
     supply: perResource(() => 1),
     integrity: 1,
+    baseIntegrity: 1,
     tradeLoss: 0,
     gdpIndex: 1,
     deficitPctGdp: 0,
