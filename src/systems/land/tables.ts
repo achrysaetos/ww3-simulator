@@ -51,7 +51,7 @@ export const DISMOUNTS: ReadonlySet<PlatformClass> = new Set(['infantry', 'atgm'
  * equipment per day (Ukraine 2022-24 assault rates, Oryx-derived; Dupuy TNDM
  * attacker loss ~1-4%/day for division-level attacks) and the defender ~4-8%.
  */
-export const ENGAGED_HOURS_PER_DAY = 3;
+export const ENGAGED_HOURS_PER_DAY = 1.5;
 
 /** Target platform count at which area fire reaches nominal effect (~a brigade in a 1-degree cell). Estimate. */
 export const AREA_FIRE_REF_DENSITY = 400;
@@ -117,3 +117,73 @@ export const ALLIED_OPINION = 50;
 export const SURRENDER_HAZARD_PER_DAY = 0.01;
 /** A fresh pocket holds on its basic load for about a week before surrender becomes possible. */
 export const SURRENDER_GRACE_DAYS = 7;
+
+/**
+ * Holding-the-line fighting between units in contact that are not assaulting:
+ * artillery duels, drone strikes, raids and local counter-attacks. Share of an
+ * assault's engaged hours. Estimate, tuned so a quiet 2024-25 Ukrainian front
+ * sector costs each side a few tenths of a percent of its strength per day.
+ */
+export const POSITIONAL_INTENSITY = 0.25;
+
+/**
+ * Advance across a contested cell, averaged over the cell's ~100 km width.
+ * Attritional assaults gain ATTRITION_KM_PER_DAY per unit of ln(defender loss
+ * rate / attacker loss rate): Russian assaults in 2024-25 took ~3,500-5,000 km2
+ * a year along a ~1,000 km front (ISW, DeepState), i.e. a few km of depth a
+ * year averaged over the front, and 0.1-1 km/day on the active axes.
+ */
+export const ATTRITION_KM_PER_DAY = 0.15;
+export const ATTRITION_MAX_KM_PER_DAY = 1;
+/**
+ * Against a broken (routed) defender: 10-40 km/day, e.g. Kharkiv September 2022
+ * (~50 km in 5 days), Kursk August 2024 (~25-30 km in the first days).
+ */
+export const BREAKTHROUGH_KM_PER_DAY = 25;
+
+/**
+ * Share of a formation's platforms of each class that stand where the enemy can
+ * engage them in a ground fight; the rest are in the rear (supply columns,
+ * long-range air defence, command). Unlisted classes are fully exposed.
+ * Estimate: Oryx counts Russian trucks lost at roughly the tank rate in
+ * 2022-24 although formations field 5-10 times more trucks than tanks; tube and
+ * rocket artillery fight from 10-30 km behind the line and die mostly to
+ * counter-battery fire and drones. Tanks and carriers overwatch and shuttle
+ * the dismounts rather than lead (RUSI "Stormbreak", 2023): Oryx counts
+ * ~3-5 Russian tanks and ~8-10 other armoured vehicles lost per day in 2024
+ * against ~1,000-1,500 personnel casualties (UK MoD).
+ */
+export const EXPOSURE: Partial<Record<PlatformClass, number>> = {
+  mbt: 0.4, ifv: 0.5, apc: 0.5,
+  truck: 0.05, fuel_truck: 0.05, engineer: 0.5, recon: 0.8,
+  sp_artillery: 0.3, towed_artillery: 0.3, mlrs: 0.25,
+  sam_long: 0.05, sam_medium: 0.15, shorad: 0.4, abm: 0.05, ew: 0.2, radar: 0.1,
+  tel_srbm: 0.05, tel_mrbm: 0.05, tel_irbm: 0.05, cruise_launcher: 0.05, coastal_asm: 0.05, icbm_mobile: 0.02,
+};
+export const exposureOf = (c: PlatformClass): number => EXPOSURE[c] ?? 1;
+
+/**
+ * Extra fire an assaulting force draws, at full entrenchment, while it crosses
+ * observed ground into prepared positions (minefields, pre-registered fires,
+ * the drone-watched kill zone), on top of the defender's Dupuy terrain and
+ * posture edge. Scales with the defender's entrenchment, so a hasty defence
+ * gives little of it. Estimate, calibrated so a 3:1 assault on a fully
+ * prepared defence costs the attacker 2-3 times the defender's casualties, the
+ * ratio Western estimates give for Russian assaults on Avdiivka, Bakhmut and
+ * Pokrovsk in 2023-25 (UK MoD; RUSI "Meatgrinder", 2023).
+ */
+export const ASSAULT_EXPOSURE = 2;
+/** Depth given up when a defender falls back to its next prepared line: 2-5 km per withdrawal in 2023-25 (Avdiivka, Vuhledar). */
+export const WITHDRAWAL_KM = 3;
+/**
+ * Local superiority at which an attacker assaults along the whole cell; below
+ * it, assault intensity scales down in proportion (attacks on a few axes, the
+ * rest of the line held). The 3:1 planning ratio (FM 3-90; Mearsheimer 1989).
+ */
+export const DELIBERATE_ASSAULT_RATIO = 3;
+/**
+ * Exposed platforms that can bring direct fire to bear along one cell's
+ * ~100 km front: a mechanised brigade (~300 platforms) holds or attacks on
+ * roughly 10 km (FM 3-90; Ukrainian brigades held 10-20 km sectors in 2024).
+ */
+export const FRONTAGE_PLATFORMS = 3000;

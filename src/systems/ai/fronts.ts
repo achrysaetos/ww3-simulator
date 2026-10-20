@@ -62,6 +62,38 @@ export function enemyPowerAt(node: number, index: ForceIndex, enemies: Set<Natio
   return p;
 }
 
+/**
+ * Border cells of formal allies outside the war (sharing a bloc with `nation`)
+ * that touch the enemy: a front the nation can stage on and attack from, as
+ * Russia did from Belarus in 2022. One sector, or none.
+ */
+export function stagingSector(world: World, map: GameMap, nation: NationId, friends: Set<NationId>, enemies: Set<NationId>, index: ForceIndex): Sector | undefined {
+  const blocs = world.nations[nation]?.blocs ?? [];
+  if (!blocs.length) return undefined;
+  const hosts = new Set<NationId>();
+  for (const n of Object.values(world.nations)) {
+    if (friends.has(n.id) || enemies.has(n.id) || n.status === 'war') continue;
+    if (n.blocs.some((b) => blocs.includes(b))) hosts.add(n.id);
+  }
+  if (!hosts.size) return undefined;
+  const nodes: number[] = [];
+  const enemyNodes = new Set<number>();
+  for (let n = 0; n < map.landCount; n++) {
+    if (!hosts.has(world.control[n])) continue;
+    let touches = false;
+    for (let k = map.adjStart[n]; k < map.adjStart[n + 1]; k++) {
+      const m = map.adj[k];
+      if (m < map.landCount && enemies.has(world.control[m])) { touches = true; enemyNodes.add(m); }
+    }
+    if (touches) nodes.push(n);
+  }
+  if (!nodes.length) return undefined;
+  let threat = 0;
+  for (const m of enemyNodes) threat += enemyPowerAt(m, index, enemies);
+  const sorted = [...enemyNodes].sort((a, b) => a - b);
+  return { nodes: nodes as NodeId[], enemyNodes: sorted as NodeId[], battleArea: new Set(sorted as NodeId[]), threat, key: nodes[0] as NodeId };
+}
+
 /** Group a nation's front cells into connected sectors and weigh the threat facing each. */
 export function sectorsFor(world: World, map: GameMap, edges: Int32Array, friends: Set<NationId>, enemies: Set<NationId>, index: ForceIndex): Sector[] {
   const touching = new Map<number, number[]>();
@@ -95,7 +127,7 @@ export function sectorsFor(world: World, map: GameMap, edges: Int32Array, friend
     const enemyNodes = new Set<number>();
     const pressure = new Map<number, number>();
     for (const n of nodes) {
-      let p = 0;
+      let p = 2 * powerAt(n);
       for (const m of touching.get(n)!) { enemyNodes.add(m); p += powerAt(m); }
       pressure.set(n, p);
     }
@@ -107,8 +139,10 @@ export function sectorsFor(world: World, map: GameMap, edges: Int32Array, friend
         if (j < map.landCount && enemies.has(world.control[j])) battleArea.add(j as NodeId);
       }
     }
+    // Enemy troops already fighting inside the sector's own cells are the most immediate threat.
     let threat = 0;
     for (const n of battleArea) threat += powerAt(n);
+    for (const n of nodes) threat += powerAt(n);
     nodes.sort((a, b) => pressure.get(b)! - pressure.get(a)! || a - b);
     sectors.push({ nodes: nodes as NodeId[], enemyNodes: [...enemyNodes].sort((a, b) => a - b) as NodeId[], battleArea, threat, key: nodes[0] as NodeId });
   }

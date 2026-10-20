@@ -1,15 +1,17 @@
 import type { Catalog } from '../../core/catalog';
+import type { GameMap } from '../../core/map';
 import { atWar, type SimContext, type System } from '../../core/engine';
 import { platformCount } from '../../core/forces';
 import type { Formation, FormationId, NationId, NodeId, PlatformId, TargetClass, Terrain, World } from '../../core/types';
 import { TARGET_CLASSES } from '../../core/types';
-import { atLineOfContact } from './movement';
-import { allied, destroyFormation, hostilesAt, indexByNode, isLandFormation, landSlice } from './state';
+import { marchKmPerDay } from './movement';
+import { allied, cellDepthKm, destroyFormation, hostilesAt, indexByNode, landSlice } from './state';
 import { updateEncirclement } from './encirclement';
 import {
-  AIR_SUPPRESSION, AMMO_DAYS_INTENSE, AMMO_RATION_BELOW, AREA_FIRE_REF_DENSITY, CAS_BONUS, DIRECT_DENSITY_EXP, COMBAT_FUEL_DUTY, COMBINED_ARMS,
+  AIR_SUPPRESSION, AMMO_DAYS_INTENSE, ATTRITION_KM_PER_DAY, ATTRITION_MAX_KM_PER_DAY, BREAKTHROUGH_KM_PER_DAY, HOSTILE_GROUND_COST,
+  ASSAULT_EXPOSURE, DELIBERATE_ASSAULT_RATIO, FRONTAGE_PLATFORMS, WITHDRAWAL_KM, POSITIONAL_INTENSITY, AMMO_RATION_BELOW, AREA_FIRE_REF_DENSITY, CAS_BONUS, DIRECT_DENSITY_EXP, COMBAT_FUEL_DUTY, COMBINED_ARMS,
   ENGAGED_HOURS_PER_DAY, ENTRENCH_MAX_BONUS, EXPERIENCE_PER_COMBAT_DAY, FATIGUE_COMBAT_PER_DAY, INDIRECT_FIRE, RETREAT_LOSS,
-  RETREAT_MORALE, ROUT_ABANDON, ROUT_MORALE, TERRAIN, targetClassOf,
+  RETREAT_MORALE, ROUT_ABANDON, ROUT_MORALE, TERRAIN, exposureOf, targetClassOf,
 } from './tables';
 
 /** Relative weight of each target class in an opposing force; need not be normalised. */
@@ -74,7 +76,10 @@ interface SideState {
 function summarize(world: World, catalog: Catalog, side: Side, node: NodeId, closed: boolean): SideState {
   const count = zeros(), direct = zeros(), indirect = zeros();
   for (const f of side.fighters)
-    for (const [pid, n] of Object.entries(f.equipment)) count[targetClassOf(catalog.platform(pid as PlatformId).class)] += n;
+    for (const [pid, n] of Object.entries(f.equipment)) {
+      const cls = catalog.platform(pid as PlatformId).class;
+      count[targetClassOf(cls)] += n * exposureOf(cls);
+    }
   for (const f of [...side.fighters, ...side.support]) {
     const m = fireModifier(f);
     if (!m) continue;
@@ -86,6 +91,9 @@ function summarize(world: World, catalog: Catalog, side: Side, node: NodeId, clo
   }
   let total = 0;
   for (const c of TARGET_CLASSES) total += count[c];
+  // Only so many direct-fire weapons can see the enemy along one cell's front; the rest wait in depth. Massed artillery is not so limited.
+  const inLine = Math.min(1, FRONTAGE_PLATFORMS / Math.max(1, total));
+  for (const c of TARGET_CLASSES) direct[c] *= inLine;
   const ac = world.theater.airControl[node];
   const air = !ac ? 1 : allied(world, side.nation, ac.nation) ? 1 + CAS_BONUS * ac.level : atWar(world, side.nation, ac.nation) ? 1 - AIR_SUPPRESSION * ac.level : 1;
   const closePenalty = closed && total > 0 && count.armor / total > COMBINED_ARMS.armorShare && count.infantry / total < COMBINED_ARMS.infantryShare;
@@ -113,6 +121,16 @@ function expectedKills(s: SideState, t: SideState, hours: number, fireMult: numb
   return out;
 }
 
+/** Fire `s` can put on `t`'s mix over the fire `t` can put on `s`'s: the raw local force ratio. */
+function fireRatio(s: SideState, t: SideState): number {
+  const on = (x: SideState, y: SideState) => {
+    let v = 0;
+    for (const c of TARGET_CLASSES) if (y.count[c]) v += (x.direct[c] + x.indirect[c]) * (y.count[c] / y.total);
+    return v;
+  };
+  return on(s, t) / Math.max(1e-9, on(t, s));
+}
+
 type Ledger = { losses: Record<PlatformId, number>; casualties: number; lost: number };
 
 /** Apply kills proportionally across the side's platforms and record them in the ledger; returns platforms lost per formation. */
@@ -125,7 +143,7 @@ function applyKills(ctx: SimContext, side: Side, kills: ClassVector, totals: Cla
       const p = ctx.catalog.platform(pid as PlatformId);
       const c = targetClassOf(p.class);
       if (!kills[c]) continue;
-      const expected = (kills[c] * n) / totals[c];
+      const expected = (kills[c] * n * exposureOf(p.class)) / totals[c];
       const lost = Math.min(n, Math.floor(expected) + (ctx.rng.chance(expected % 1) ? 1 : 0));
       if (!lost) continue;
       // Knocked-out vehicles are often recoverable: WWII US and 2022-24 Oryx records put ~40-60% of armour losses as repairable or abandoned.
@@ -173,26 +191,57 @@ function retreat(world: World, ctx: SimContext, f: Formation, threat: NodeId, by
   return true;
 }
 
-function resolveBattle(world: World, ctx: SimContext, node: NodeId, att: Side, def: Side, byNode: Map<number, Formation[]>, engaged: Set<FormationId>): void {
+/** Platform-weighted entrenchment of a group at `node`, 0..1; on its own side's ground it occupies the cell's standing fortifications. */
+function entrenchmentOf(world: World, fighters: Formation[], node: NodeId): number {
+  if (!fighters.length) return 0;
+  const holder = world.control[node];
+  const fort = holder && allied(world, fighters[0].nation, holder) ? landSlice(world).fortified[node] ?? 0 : 0;
+  let entrench = 0, weight = 0;
+  for (const f of fighters) {
+    const n = platformCount(f);
+    entrench += Math.max(fort, f.entrenchment) * n;
+    weight += n;
+  }
+  return weight ? entrench / weight : 0;
+}
+
+/** Terrain and entrenchment of a side's own ground; half of it is cover (fewer hits taken), half prepared fields of fire. */
+function defensiveEdge(world: World, map: GameMap, fighters: Formation[], node: NodeId): number {
+  return Math.sqrt(TERRAIN[map.terrain[node]].defense * (1 + ENTRENCH_MAX_BONUS * entrenchmentOf(world, fighters, node)));
+}
+
+/**
+ * An assault: the attacker fights into the defender's ground, at full
+ * intensity while pressing. Positional: two lines in contact, each dug in on
+ * its own ground, trading fire at reduced intensity.
+ */
+type Engagement = { kind: 'assault' } | { kind: 'positional'; attNode: NodeId };
+
+interface BattleResult {
+  /** The defender's expected loss rate over the attacker's; > 1 means the attacker is winning. */
+  exchange: number;
+  /** A defender still able to fight fell back to its next line inside the cell. */
+  yielded: boolean;
+}
+
+function resolveBattle(world: World, ctx: SimContext, node: NodeId, att: Side, def: Side, byNode: Map<number, Formation[]>, engaged: Set<FormationId>, how: Engagement): BattleResult {
   const { map, catalog, rng } = ctx;
   const slice = landSlice(world);
   const terrain = TERRAIN[map.terrain[node]];
-  let entrench = 0, weight = 0;
-  for (const f of def.fighters) {
-    const n = platformCount(f);
-    entrench += f.entrenchment * n;
-    weight += n;
-  }
-  const defense = terrain.defense * (1 + ENTRENCH_MAX_BONUS * (weight ? entrench / weight : 0));
-  // Half the defensive advantage is cover (fewer hits taken), half is prepared fields of fire.
-  const edge = Math.sqrt(defense);
-  const hours = (ENGAGED_HOURS_PER_DAY * world.dtHours) / 24;
+  const defEdge = defensiveEdge(world, map, def.fighters, node);
+  const attEdge = how.kind === 'positional' ? defensiveEdge(world, map, att.fighters, how.attNode) : 1;
   const a = summarize(world, catalog, att, node, terrain.closed);
   const d = summarize(world, catalog, def, node, terrain.closed);
+  // An attacker without a deliberate-assault superiority attacks on a few narrow axes, not along the whole cell.
+  const intensity = how.kind === 'assault' ? Math.min(1, Math.max(POSITIONAL_INTENSITY, fireRatio(a, d) / DELIBERATE_ASSAULT_RATIO)) : POSITIONAL_INTENSITY;
+  const hours = (ENGAGED_HOURS_PER_DAY * world.dtHours * intensity) / 24;
   const routedVulnerability = (s: Side) => (s.fighters.some((f) => f.status === 'routed') ? 2 : 1);
   const noise = () => Math.exp(rng.normal(0, 0.2));
-  const onDef = expectedKills(a, d, hours, noise(), routedVulnerability(def) / edge);
-  const onAtt = expectedKills(d, a, hours, edge * noise(), routedVulnerability(att));
+  const onDef = expectedKills(a, d, hours, attEdge * noise(), routedVulnerability(def) / defEdge);
+  const exposure = how.kind === 'assault' ? 1 + ASSAULT_EXPOSURE * entrenchmentOf(world, def.fighters, node) : 1;
+  const onAtt = expectedKills(d, a, hours, defEdge * noise(), (exposure * routedVulnerability(att)) / attEdge);
+  const sum = (v: ClassVector) => TARGET_CLASSES.reduce((acc, c) => acc + v[c], 0);
+  const exchange = sum(onDef) / Math.max(1, d.total) / Math.max(1e-9, sum(onAtt) / Math.max(1, a.total));
 
   const ledgers: Record<'att' | 'def', Ledger> = { att: { losses: {}, casualties: 0, lost: 0 }, def: { losses: {}, casualties: 0, lost: 0 } };
   const attLost = applyKills(ctx, att, onAtt, a.count, ledgers.att);
@@ -202,12 +251,13 @@ function resolveBattle(world: World, ctx: SimContext, node: NodeId, att: Side, d
   const dtDays = world.dtHours / 24;
   const settle = (side: Side, lost: Map<Formation, number>, ledger: Ledger, winning: boolean, onRetreat: (f: Formation) => void) => {
     for (const f of side.fighters) {
-      engaged.add(f.id);
+      // Holding a line is not an engagement: units there still rest and recover between exchanges.
+      if (how.kind === 'assault') engaged.add(f.id);
       const before = platformCount(f) + (lost.get(f) ?? 0);
       f.morale = Math.max(0, Math.min(1, f.morale - (2 * (lost.get(f) ?? 0)) / Math.max(1, before) + (winning ? 0.01 : 0)));
-      f.fatigue = Math.min(1, f.fatigue + FATIGUE_COMBAT_PER_DAY * dtDays);
+      f.fatigue = Math.min(1, f.fatigue + FATIGUE_COMBAT_PER_DAY * dtDays * intensity);
       f.experience = Math.min(1, f.experience + EXPERIENCE_PER_COMBAT_DAY * dtDays);
-      consume(f, world.dtHours);
+      consume(f, world.dtHours * intensity);
       const left = platformCount(f);
       if (left === 0 || f.personnel <= 0) {
         destroyFormation(world, ctx, f);
@@ -224,26 +274,39 @@ function resolveBattle(world: World, ctx: SimContext, node: NodeId, att: Side, d
         onRetreat(f);
       } else if (lossFrac > RETREAT_LOSS || f.morale < RETREAT_MORALE) onRetreat(f);
     }
-    for (const f of side.support) consume(f, world.dtHours);
+    for (const f of side.support) consume(f, world.dtHours * intensity);
   };
-  const threat = att.fighters[0].node;
-  settle(att, attLost, ledgers.att, attRate < defRate, (f) => {
-    if (f.status === 'routed') retreat(world, ctx, f, node, byNode);
-    else f.order = { posture: 'defend', issuedTick: world.tick };
-  });
-  settle(def, defLost, ledgers.def, defRate <= attRate, (f) => {
+  let yielded = false;
+  const fallBackFrom = (threat: NodeId) => (f: Formation) => {
     if (!retreat(world, ctx, f, threat, byNode)) f.morale = Math.max(0, f.morale - 0.05);
-  });
+  };
+  if (how.kind === 'positional') {
+    settle(att, attLost, ledgers.att, attRate < defRate, fallBackFrom(node));
+    settle(def, defLost, ledgers.def, defRate <= attRate, fallBackFrom(how.attNode));
+  } else {
+    settle(att, attLost, ledgers.att, attRate < defRate, (f) => {
+      if (f.status === 'routed') retreat(world, ctx, f, node, byNode);
+      else f.order = { posture: 'defend', issuedTick: world.tick };
+    });
+    // A shaken but intact defender gives up its forward line and digs in on the next one; only a routed one leaves the cell.
+    settle(def, defLost, ledgers.def, defRate <= attRate, (f) => {
+      if (f.status === 'routed') return fallBackFrom(node)(f);
+      yielded = true;
+      f.entrenchment = 0;
+      slice.baseline[f.id] = platformCount(f);
+    });
+  }
 
   const holding = def.fighters.some((f) => f.status !== 'destroyed' && f.node === node);
-  const pressing = att.fighters.some((f) => f.status === 'active' && f.order.posture === 'attack');
-  const winner = !holding ? att.nation : !pressing ? def.nation : undefined;
+  const pressing = how.kind === 'assault' && att.fighters.some((f) => f.status === 'active' && f.order.posture === 'attack');
+  const winner = how.kind === 'positional' ? undefined : !holding ? att.nation : !pressing ? def.nation : undefined;
   ctx.emit({
     type: 'battle', tick: world.tick, node, attacker: att.nation, defender: def.nation,
     losses: { [att.nation]: ledgers.att.losses, [def.nation]: ledgers.def.losses } as Record<NationId, Record<PlatformId, number>>,
     casualties: { [att.nation]: ledgers.att.casualties, [def.nation]: ledgers.def.casualties } as Record<NationId, number>,
     ...(winner ? { winner } : {}),
   });
+  return { exchange, yielded };
 }
 
 /** Artillery formations in nodes adjacent to the battle, friendly to `nation`, not on the march, not yet firing elsewhere this tick. */
@@ -258,43 +321,145 @@ function artillerySupport(world: World, ctx: SimContext, node: NodeId, nation: N
   return out;
 }
 
+const isPressing = (f: Formation) => f.status === 'active' && f.kind === 'maneuver' && f.order.posture === 'attack';
+
+/** `nation` takes control of an enemy-held cell. */
+export function seize(world: World, ctx: SimContext, nation: NationId, node: NodeId): void {
+  const from = world.control[node];
+  if (!from || !atWar(world, nation, from)) return;
+  const original = ctx.map.owner[node];
+  // Liberated ground returns to its friendly pre-war owner.
+  const to = original && original !== from && allied(world, nation, original) ? original : nation;
+  world.control[node] = to;
+  delete landSlice(world).fortified[node];
+  ctx.emit({ type: 'node_captured', tick: world.tick, node, from, to });
+}
+
+/**
+ * Cells on either side of a standing line of occupation (territory held by a
+ * nation other than its owner, bordering ground its owner still holds) start
+ * fully fortified: the 2023-25 Ukrainian and Russian defensive belts, the
+ * Abkhazia and South Ossetia lines.
+ */
+function fortifyStandingLines(world: World, map: GameMap): void {
+  const { fortified } = landSlice(world);
+  for (let n = 0; n < map.landCount; n++) {
+    const holder = world.control[n];
+    if (!holder || holder === map.owner[n]) continue;
+    for (const m of map.neighbors(n as NodeId)) {
+      if (m >= map.landCount || world.control[m] !== map.owner[n]) continue;
+      fortified[n] = 1;
+      fortified[m] = 1;
+    }
+  }
+}
+
+/** Hostile manoeuvre units hold a cell next to `node`, so their fire covers it. */
+function underFire(world: World, map: GameMap, byNode: Map<number, Formation[]>, node: NodeId, nation: NationId): boolean {
+  for (const m of map.neighbors(node))
+    for (const f of byNode.get(m) ?? []) if (f.kind === 'maneuver' && f.status === 'active' && atWar(world, nation, f.nation)) return true;
+  return false;
+}
+
+/** Km/day the attacker gains across a contested cell, given who is still holding it. */
+function advanceRate(world: World, ctx: SimContext, node: NodeId, attackers: Formation[], defenders: Formation[], covered: boolean, exchange: number): number {
+  const moveCost = TERRAIN[ctx.map.terrain[node]].moveCost;
+  const movers = attackers.filter(isPressing);
+  if (!movers.length) return 0;
+  if (!defenders.length && !covered) {
+    // Unopposed: a road march through hostile ground (reconnaissance, obstacles, demolitions).
+    return Math.max(...movers.map((f) => marchKmPerDay(world, ctx.catalog, f))) / (HOSTILE_GROUND_COST * moveCost);
+  }
+  // An empty cell still under fire from the enemy line next door is crossed at breakthrough pace, not road-march pace.
+  if (defenders.every((f) => f.status === 'routed')) return BREAKTHROUGH_KM_PER_DAY / moveCost;
+  return Math.min(ATTRITION_MAX_KM_PER_DAY, ATTRITION_KM_PER_DAY * Math.max(0, Math.log(exchange)));
+}
+
+/**
+ * Fight for a cell an enemy has entered, and move the attacker's line across
+ * it. Control changes hands only when the advance has crossed the cell.
+ */
+function contestCell(world: World, ctx: SimContext, node: NodeId, invaders: Formation[], byNode: Map<number, Formation[]>, firing: Set<FormationId>, engaged: Set<FormationId>): void {
+  const slice = landSlice(world);
+  const lead = (invaders.find((f) => f.kind === 'maneuver') ?? invaders[0]).nation;
+  const attackers = invaders.filter((f) => allied(world, lead, f.nation));
+  let contest = slice.contest[node];
+  if (!contest || !allied(world, lead, contest.by)) contest = slice.contest[node] = { by: lead, km: 0 };
+
+  const defenders = hostilesAt(world, byNode, node, lead);
+  let exchange = 1, yielded = false;
+  if (defenders.length) {
+    for (const f of [...attackers, ...defenders]) {
+      firing.add(f.id);
+      if (!(f.id in slice.baseline)) slice.baseline[f.id] = platformCount(f);
+    }
+    const defNation = defenders[0].nation;
+    const att: Side = { nation: lead, fighters: attackers, support: artillerySupport(world, ctx, node, lead, byNode, firing) };
+    const def: Side = { nation: defNation, fighters: defenders, support: artillerySupport(world, ctx, node, defNation, byNode, firing) };
+    ({ exchange, yielded } = resolveBattle(world, ctx, node, att, def, byNode, engaged, attackers.some(isPressing) ? { kind: 'assault' } : { kind: 'positional', attNode: node }));
+  }
+  const holdingOn = defenders.filter((f) => f.status !== 'destroyed' && f.node === node);
+  const stillIn = attackers.filter((f) => f.status !== 'destroyed' && f.node === node);
+  const covered = !holdingOn.length && underFire(world, ctx.map, byNode, node, lead);
+  contest.km += (advanceRate(world, ctx, node, stillIn, holdingOn, covered, exchange) * world.dtHours) / 24 + (yielded ? WITHDRAWAL_KM : 0);
+  if (contest.km < cellDepthKm(ctx.map, node)) return;
+
+  delete slice.contest[node];
+  seize(world, ctx, lead, node);
+  for (const f of holdingOn) retreat(world, ctx, f, node, byNode);
+  for (const f of stillIn) if (!f.order.path?.length) f.order = { posture: 'defend', issuedTick: world.tick };
+}
+
+/**
+ * Lines in contact trade fire every day even where no one is assaulting: each
+ * idle manoeuvre group engages the first idle hostile group across a cell
+ * boundary.
+ */
+function lineOfContact(world: World, ctx: SimContext, byNode: Map<number, Formation[]>, firing: Set<FormationId>, engaged: Set<FormationId>): void {
+  const { map } = ctx;
+  const idle = (n: number, side: NationId) =>
+    (byNode.get(n) ?? []).filter((f) => f.kind === 'maneuver' && f.status === 'active' && !firing.has(f.id) && allied(world, side, f.nation));
+  for (const node of [...byNode.keys()]) {
+    const holder = world.control[node];
+    if (!holder) continue;
+    const mine = idle(node, holder);
+    if (!mine.length) continue;
+    for (const m of map.neighbors(node as NodeId)) {
+      const foe = world.control[m];
+      if (m >= map.landCount || !foe || !atWar(world, holder, foe)) continue;
+      const theirs = idle(m, foe);
+      if (!theirs.length) continue;
+      for (const f of [...mine, ...theirs]) firing.add(f.id);
+      const att: Side = { nation: holder, fighters: mine, support: artillerySupport(world, ctx, m, holder, byNode, firing) };
+      const def: Side = { nation: foe, fighters: theirs, support: artillerySupport(world, ctx, node as NodeId, foe, byNode, firing) };
+      resolveBattle(world, ctx, m, att, def, byNode, engaged, { kind: 'positional', attNode: node as NodeId });
+      break;
+    }
+  }
+}
+
 export const landCombat: System = {
   id: 'landCombat',
-  init(world) {
-    landSlice(world);
+  init(world, ctx) {
+    landSlice(world).origin = world.control.slice(0, ctx.map.landCount);
+    fortifyStandingLines(world, ctx.map);
   },
   step(world, ctx) {
-    const { map } = ctx;
     const slice = landSlice(world);
-    const byNode = indexByNode(world, map);
-
-    // Assaults: manoeuvre formations with an attack order standing at the line of contact.
-    const assaults = new Map<number, Formation[]>();
-    for (const f of Object.values(world.formations)) {
-      if (f.kind !== 'maneuver' || f.status !== 'active' || f.order.posture !== 'attack' || !isLandFormation(f, map)) continue;
-      const next = f.order.path?.[0];
-      if (next === undefined || !hostilesAt(world, byNode, next, f.nation).length || !atLineOfContact(world, map, f)) continue;
-      const list = assaults.get(next);
-      if (list) list.push(f);
-      else assaults.set(next, [f]);
-    }
-
+    const byNode = indexByNode(world, ctx.map);
     const engaged = new Set<FormationId>();
     const firing = new Set<FormationId>();
-    for (const [node, attackers] of assaults) {
-      const lead = attackers[0].nation;
-      const fighters = attackers.filter((f) => allied(world, lead, f.nation));
-      const defenders = hostilesAt(world, byNode, node, lead);
-      if (!defenders.length) continue;
-      const defNation = defenders[0].nation;
-      for (const f of [...fighters, ...defenders]) {
-        firing.add(f.id);
-        if (!(f.id in slice.baseline)) slice.baseline[f.id] = platformCount(f);
-      }
-      const att: Side = { nation: lead, fighters, support: artillerySupport(world, ctx, node as NodeId, lead, byNode, firing) };
-      const def: Side = { nation: defNation, fighters: defenders, support: artillerySupport(world, ctx, node as NodeId, defNation, byNode, firing) };
-      resolveBattle(world, ctx, node as NodeId, att, def, byNode, engaged);
+
+    for (const node of [...byNode.keys()]) {
+      const holder = world.control[node];
+      const invaders = holder ? (byNode.get(node) ?? []).filter((f) => atWar(world, f.nation, holder)) : [];
+      if (invaders.length) contestCell(world, ctx, node as NodeId, invaders, byNode, firing, engaged);
     }
+    for (const key of Object.keys(slice.contest)) {
+      const node = Number(key), c = slice.contest[node];
+      if (!(byNode.get(node) ?? []).some((f) => allied(world, c.by, f.nation) && atWar(world, f.nation, world.control[node]))) delete slice.contest[node];
+    }
+    lineOfContact(world, ctx, byNode, firing, engaged);
     for (const id of Object.keys(slice.baseline) as FormationId[]) if (!engaged.has(id)) delete slice.baseline[id];
 
     updateEncirclement(world, ctx);

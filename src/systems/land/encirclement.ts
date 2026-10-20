@@ -1,4 +1,4 @@
-import type { SimContext } from '../../core/engine';
+import { atWar, type SimContext } from '../../core/engine';
 import type { GameMap } from '../../core/map';
 import type { Formation, NationId, World } from '../../core/types';
 import { allied, destroyFormation, isLandFormation, landSlice } from './state';
@@ -41,6 +41,20 @@ function floodFromSources(world: World, map: GameMap, friends: Set<NationId>): U
   return seen;
 }
 
+/**
+ * A formation is cut off when it stands on friendly ground the supply network
+ * does not reach, or on enemy ground it is fighting over with no supplied cell
+ * behind it. A garrison hosted by a nation outside the war draws on its host.
+ */
+function cutOff(world: World, map: GameMap, f: Formation, friends: Set<NationId>, supplied: Uint8Array): boolean {
+  if (supplied[f.node]) return false;
+  const holder = world.control[f.node];
+  if (friends.has(holder)) return true;
+  if (!atWar(world, f.nation, holder)) return false;
+  for (const n of map.neighbors(f.node)) if (n < map.landCount && supplied[n]) return false;
+  return true;
+}
+
 /** Daily: mark formations cut off from supply, sap their morale, and let long-isolated pockets surrender. */
 export function updateEncirclement(world: World, ctx: SimContext): void {
   const ticksPerDay = Math.max(1, Math.round(24 / world.dtHours));
@@ -69,7 +83,7 @@ export function updateEncirclement(world: World, ctx: SimContext): void {
     let supplied = networks.get(key);
     if (!supplied) networks.set(key, (supplied = floodFromSources(world, ctx.map, friends)));
     for (const f of formations) {
-      if (supplied[f.node]) {
+      if (!cutOff(world, ctx.map, f, friends, supplied)) {
         delete isolated[f.id];
         continue;
       }

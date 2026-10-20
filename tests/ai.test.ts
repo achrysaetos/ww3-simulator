@@ -57,8 +57,10 @@ describe('operational AI', () => {
     }
   });
 
-  const assault = (attackers: number) => {
-    const t = testWorld([createAi()]);
+  const CAUTIOUS = { casualtyTolerance: 0.4, interventionism: 0.3, riskTolerance: 0.3, aggression: 0.1 };
+  const ATTRITIONAL = { casualtyTolerance: 0.85, interventionism: 0.5, riskTolerance: 0.6, aggression: 0.75 };
+  const assault = (attackers: number, profile = CAUTIOUS) => {
+    const t = testWorld([createAi({ RUS: profile })]);
     t.war('EST', 'RUS');
     for (const n of border(t, 'EST', 'RUS')) brigade(t, 'EST', n);
     const staging = border(t, 'RUS', 'EST')[0];
@@ -66,10 +68,28 @@ describe('operational AI', () => {
     return { t, cmds: commandsOver(t, 4) };
   };
 
-  it('does not attack without a 3:1 local superiority', () => {
+  it('a cautious command does not attack without a 3:1 local superiority', () => {
     const { cmds } = assault(4);
     expect(orders(cmds, 'RUS', 'attack')).toEqual([]);
     expect(orders(cmds, 'RUS', 'defend').length).toBeGreaterThan(0);
+  });
+
+  it('an aggressive, casualty-tolerant command keeps assaulting at local parity', () => {
+    const t = testWorld([createAi({ RUS: ATTRITIONAL })]);
+    t.war('EST', 'RUS');
+    const est = border(t, 'EST', 'RUS');
+    for (const n of est) brigade(t, 'EST', n);
+    const staging = border(t, 'RUS', 'EST')[0];
+    brigade(t, 'RUS', staging);
+    const attacks = orders(commandsOver(t, 4), 'RUS', 'attack');
+    expect(attacks.length).toBeGreaterThan(0);
+    for (const a of attacks) expect(est).toContain(a.order.target);
+    // The same lone brigade under a cautious command only defends.
+    const cautious = testWorld([createAi({ RUS: CAUTIOUS })]);
+    cautious.war('EST', 'RUS');
+    for (const n of est) brigade(cautious, 'EST', n);
+    brigade(cautious, 'RUS', staging);
+    expect(orders(commandsOver(cautious, 4), 'RUS', 'attack')).toEqual([]);
   });
 
   it('attacks with at least 3:1 at the point of attack when it has the forces', () => {

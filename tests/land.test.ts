@@ -51,14 +51,21 @@ describe('land combat', () => {
     }
   });
 
-  it('a 4:1 attacker breaks a defender on plains within days and takes the ground', () => {
+  it('a 4:1 attacker wins the exchange and starts across the cell but does not carry it in a week', () => {
     const r = assault({ ratio: 4, defNode: PLAIN_UKR, attNode: PLAIN_RUS, entrench: 0.4, days: 6 });
+    expect(r.world.control[PLAIN_UKR]).toBe(UKR);
+    expect(r.att.node).toBe(PLAIN_UKR);
+    expect(r.world.slices.land.contest[PLAIN_UKR]).toMatchObject({ by: RUS });
+    expect(r.world.slices.land.contest[PLAIN_UKR].km).toBeGreaterThan(0);
+    expect(r.defLoss).toBeGreaterThan(2 * r.attLoss);
+  });
+
+  it('an 8:1 attacker routs an unprepared defender and takes the cell within a week', () => {
+    const r = assault({ ratio: 8, defNode: PLAIN_UKR, attNode: PLAIN_RUS, entrench: 0, days: 7 });
     expect(r.world.control[PLAIN_UKR]).toBe(RUS);
     expect(r.att.node).toBe(PLAIN_UKR);
     expect(r.def.node).not.toBe(PLAIN_UKR);
     expect(r.events).toContainEqual(expect.objectContaining({ type: 'node_captured', node: PLAIN_UKR, from: UKR, to: RUS }));
-    // Attacker losses stay in the 1-3%/day band of intense assaults; the defender bleeds several times faster.
-    expect(r.attLoss).toBeGreaterThan(0.005);
     expect(r.attLoss).toBeLessThan(0.15);
     expect(r.defLoss).toBeGreaterThan(2 * r.attLoss);
   });
@@ -86,17 +93,18 @@ describe('land combat', () => {
     const withAir = (nation: typeof RUS) =>
       assault({ ratio: 1, defNode: PLAIN_UKR, attNode: PLAIN_RUS, entrench: 0, days: 7, before: (s) => (s.world.theater.airControl[PLAIN_UKR] = { nation, level: 1 }) });
     const rusAir = withAir(RUS), ukrAir = withAir(UKR);
-    expect(rusAir.world.control[PLAIN_UKR]).toBe(RUS);
+    // A week of even fighting does not carry a 100 km cell, but the side with the air gains ground.
     expect(ukrAir.world.control[PLAIN_UKR]).toBe(UKR);
-    expect(ukrAir.att.order.posture).toBe('defend');
-    expect(rusAir.defLoss).toBeGreaterThan(rusAir.attLoss);
-    expect(ukrAir.attLoss).toBeGreaterThan(3 * ukrAir.defLoss);
+    expect(rusAir.world.slices.land.contest[PLAIN_UKR]?.km ?? 0).toBeGreaterThan(ukrAir.world.slices.land.contest[PLAIN_UKR]?.km ?? 0);
+    expect(rusAir.defLoss).toBeGreaterThan(2 * ukrAir.defLoss);
+    expect(ukrAir.attLoss).toBeGreaterThan(1.5 * rusAir.attLoss);
+    expect(ukrAir.attLoss).toBeGreaterThan(2 * ukrAir.defLoss);
   });
 
   it('artillery in an adjacent node adds to the defence', () => {
     const attLoss = (arty: boolean) =>
       [1, 2, 3].reduce((sum, seed) => sum + assault({
-        ratio: 3, defNode: PLAIN_UKR, attNode: PLAIN_RUS, entrench: 1, days: 3, seed,
+        ratio: 3, defNode: PLAIN_UKR, attNode: PLAIN_RUS, entrench: 1, days: 5, seed,
         before: (s) => void (arty && s.add({ nation: UKR, name: 'arty', kind: 'artillery', echelon: 'brigade', node: MAP.nodeAt(48.5, 36.5), equipment: { [id.platform('t_spg')]: 72 } })),
       }).attLoss, 0);
     expect(attLoss(true)).toBeGreaterThan(attLoss(false) * 1.25);
@@ -129,7 +137,7 @@ describe('land movement', () => {
     const s = setup();
     const f = s.add({ nation: RUS, name: 'raid', kind: 'maneuver', echelon: 'brigade', node: PLAIN_RUS, equipment: brigade(1) });
     const target = s.nodeAt(48.5, 35.5);
-    s.order(f, { posture: 'move', target });
+    s.order(f, { posture: 'attack', target });
     const path = [...f.order.path!];
     expect(path.length).toBeGreaterThan(1);
     s.days(10);
@@ -167,14 +175,17 @@ describe('land movement', () => {
     expect(s.events.some((e) => e.type === 'node_captured')).toBe(false);
   });
 
-  it('halts at an enemy-held node when only ordered to move', () => {
+  it('halts at an enemy-held node when only ordered to move, trading fire across the line without assaulting', () => {
     const s = setup();
     s.add({ nation: UKR, name: 'def', kind: 'maneuver', echelon: 'brigade', node: PLAIN_UKR, equipment: brigade(1) });
     const f = s.add({ nation: RUS, name: 'x', kind: 'maneuver', echelon: 'brigade', node: PLAIN_RUS, equipment: brigade(1) });
     s.order(f, { posture: 'move', target: PLAIN_UKR });
     s.days(3);
     expect(f.node).toBe(PLAIN_RUS);
-    expect(s.events.some((e) => e.type === 'battle')).toBe(false);
+    expect(s.world.control[PLAIN_UKR]).toBe(UKR);
+    const battles = s.events.filter((e): e is Extract<SimEvent, { type: 'battle' }> => e.type === 'battle');
+    expect(battles.length).toBeGreaterThan(0);
+    expect(battles.every((b) => b.winner === undefined)).toBe(true);
   });
 
   it('moves faster by rail through intact friendly infrastructure, and crawls without fuel', () => {
@@ -200,7 +211,7 @@ describe('land movement', () => {
     const arrive = (air: boolean) => {
       const s = setup();
       const f = s.add({ nation: RUS, name: 'x', kind: 'maneuver', echelon: 'brigade', node: PLAIN_RUS, equipment: brigade(1) });
-      s.order(f, { posture: 'move', target: s.nodeAt(48.5, 35.5) });
+      s.order(f, { posture: 'attack', target: s.nodeAt(48.5, 35.5) });
       if (air) for (let n = 0; n < s.map.landCount; n++) s.world.theater.airControl[n] = { nation: UKR, level: 1 };
       s.days(2);
       return s.map.distanceKm(PLAIN_RUS, f.node);

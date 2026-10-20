@@ -8,6 +8,22 @@ export interface LandState {
   baseline: Record<FormationId, number>;
   /** Days a formation has been cut off from friendly supply. Logistics should withhold refills while present. */
   isolatedDays: Record<FormationId, number>;
+  /**
+   * Enemy-held cells that another nation's troops have entered, keyed by node:
+   * how far (km) the attacker has pushed across the cell. Control changes only
+   * when `km` reaches the cell's depth, so a 1-degree cell is taken by a
+   * sustained advance, not by one won battle.
+   */
+  contest: Record<number, Contest>;
+  /** Standing fortifications per land cell, 0..1, which whoever holds the cell defends from. Lost when the cell changes hands. */
+  fortified: Record<number, number>;
+  /** Controller of each land cell when the world was set up; offensives culminate with distance from it. */
+  origin: NationId[];
+}
+
+export interface Contest {
+  by: NationId;
+  km: number;
 }
 
 declare module '../../core/types' {
@@ -17,7 +33,12 @@ declare module '../../core/types' {
 }
 
 export function landSlice(world: World): LandState {
-  return (world.slices.land ??= { baseline: {}, isolatedDays: {} });
+  return (world.slices.land ??= { baseline: {}, isolatedDays: {}, contest: {}, fortified: {}, origin: [] });
+}
+
+/** North-south and east-west extent of a 1-degree cell, as one depth of advance: ~111 km by 111*cos(lat) km. */
+export function cellDepthKm(map: GameMap, node: NodeId): number {
+  return 111 * Math.sqrt(Math.max(0.2, Math.cos((map.lat[node] * Math.PI) / 180)));
 }
 
 export function isLandFormation(f: Formation, map: GameMap): boolean {
