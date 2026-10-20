@@ -118,15 +118,16 @@ function planAssault(p: Plan, lifts: Formation[]): Assault | undefined {
   const home = mass[world.nations[p.nation].capital];
   const ports = geography(map).ports.filter((pt) => world.control[pt.node] === p.nation && mass[pt.node] === home);
   if (!ports.length) return undefined;
-  const contested = new Set<number>();
-  for (const n of coast(map)) if (mass[n] !== home && p.enemies.has(world.control[n])) contested.add(mass[n]);
-  if (!contested.size) return undefined;
+  // A landing must open a road to something worth taking: a war aim on the same far shore.
+  const aims = p.ai.aims[p.nation] ?? [];
+  const aimsOn = new Map<number, NodeId[]>();
+  for (const o of aims) if (mass[o.node] !== home) (aimsOn.get(mass[o.node]) ?? aimsOn.set(mass[o.node], []).get(mass[o.node])!).push(o.node);
+  if (!aimsOn.size) return undefined;
 
   const own = p.index.byNation.get(p.nation) ?? [];
   let unit = 0, k = 0;
   for (const f of own) if (isGround(f)) { unit += p.index.power(f); k++; }
   unit = k ? unit / k : 1;
-  const aims = p.ai.aims[p.nation] ?? [];
   const pull = (t: NodeId) => {
     let best = 0;
     for (const o of aims) best = Math.max(best, o.value / (1 + map.distanceKm(t, o.node) / 300));
@@ -138,14 +139,15 @@ function planAssault(p: Plan, lifts: Formation[]): Assault | undefined {
     return d;
   };
 
+  const near = (a: NodeId, b: NodeId) => Math.abs(map.lat[a] - map.lat[b]) * 111 <= ASSAULT_RANGE_KM && map.distanceKm(a, b) <= ASSAULT_RANGE_KM;
   let best: Assault | undefined, bestScore = 0;
-  // A landing must open a road to something worth taking: a war aim on the same shore within reach of the beach.
-  const aimed = (n: NodeId) => aims.some((o) => mass[o.node] === mass[n] && map.distanceKm(o.node, n) <= ASSAULT_RANGE_KM);
   for (const n of coast(map)) {
-    if (!contested.has(mass[n]) || !aimed(n)) continue;
+    const targets = aimsOn.get(mass[n]);
+    if (!targets) continue;
     const holder = world.control[n];
     const lodgement = holder === p.nation;
     if (!lodgement && !p.enemies.has(holder)) continue;
+    if (!targets.some((o) => near(o, n))) continue;
     let port = ports[0], km = Infinity;
     for (const pt of ports) {
       if (Math.abs(map.lat[pt.node] - map.lat[n]) * 111 > ASSAULT_RANGE_KM) continue;
