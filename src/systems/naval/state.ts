@@ -28,6 +28,28 @@ export interface NavalState {
   /** Tick each formation last fired torpedoes or missiles: a firing submarine gives away its position ("flaming datum"). */
   lastFired: Record<FormationId, number>;
   ledger: Record<NationId, NavalLedger>;
+  /** Recent hull losses per fleet, keyed by fleetKey; read through fleetLosses. */
+  attrition: Record<string, { hulls: number; tick: number }>;
+}
+
+/**
+ * Days over which a fleet's losses fade from its commanders' reckoning. The Black Sea Fleet left
+ * the western Black Sea in late 2023 after a run of losses and had not returned by 2025 (UK MoD,
+ * ISW), so the lesson lasts months. Judgement.
+ */
+const FLEET_MEMORY_DAYS = 90;
+
+/** A fleet is a nation's naval groups sharing a home port. */
+const fleetKey = (nation: NationId, home: number) => `${nation}|${home}`;
+
+/** Hulls the fleet lost (sunk or mission-killed), faded over FLEET_MEMORY_DAYS. */
+export function fleetLosses(world: World, nation: NationId, home: number): number {
+  const a = world.slices.naval.attrition[fleetKey(nation, home)];
+  return a ? a.hulls * Math.exp(-((world.tick - a.tick) * world.dtHours) / 24 / FLEET_MEMORY_DAYS) : 0;
+}
+
+export function recordFleetLoss(world: World, f: Formation, hulls: number): void {
+  world.slices.naval.attrition[fleetKey(f.nation, f.home)] = { hulls: fleetLosses(world, f.nation, f.home) + hulls, tick: world.tick };
 }
 
 declare module '../../core/types' {

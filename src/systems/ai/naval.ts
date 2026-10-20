@@ -2,7 +2,7 @@ import type { GameMap } from '../../core/map';
 import type { Formation, FormationId, NationId, NodeId, PlatformClass, PlatformId } from '../../core/types';
 import { liftShare } from '../naval/amphibious';
 import { geography, seaNeighbour } from '../naval/geography';
-import { compose } from '../naval/state';
+import { compose, fleetLosses } from '../naval/state';
 import { dominant, isGround, issue } from './forces';
 import { enemyPowerAt, landMass } from './fronts';
 import { reachKm } from './strikes';
@@ -165,11 +165,12 @@ function planAssault(p: Plan, lifts: Formation[]): Assault | undefined {
  * Where this nation's fleet concentrates: the assault zone when invading; otherwise the sea
  * zone holding the enemy surface fleet that most threatens friendly soil (value of its hulls
  * over distance to the nearest friendly capital), so a defender's allies converge on an
- * invasion fleet; failing both, off the main land front or in home waters.
+ * invasion fleet; failing both, off the main land front or in home waters. `enemyFleet` says
+ * whether there is an enemy fleet at sea to fight.
  */
-function maritimeFocus(p: Plan, assault: Assault | undefined): NodeId {
+function maritimeFocus(p: Plan, assault: Assault | undefined): { node: NodeId; enemyFleet: boolean } {
   const { map } = p.ctx;
-  if (assault) return assault.zone;
+  if (assault) return { node: assault.zone, enemyFleet: true };
   const capitals = [...p.friends].map((n) => p.world.nations[n].capital);
   let best: NodeId | undefined, bestScore = 0;
   for (const e of p.enemies)
@@ -183,8 +184,29 @@ function maritimeFocus(p: Plan, assault: Assault | undefined): NodeId {
       const score = value / (1 + d / 500);
       if (score > bestScore) { bestScore = score; best = f.node; }
     }
-  if (best !== undefined) return nearestSea(map, best);
-  return p.sectors.length ? nearestSea(map, p.sectors[0].key) : nearestSea(map, p.world.nations[p.nation].capital);
+  if (best !== undefined) return { node: nearestSea(map, best), enemyFleet: true };
+  return { node: nearestSea(map, p.sectors.length ? p.sectors[0].key : p.world.nations[p.nation].capital), enemyFleet: false };
+}
+
+/**
+ * Share of a fleet's surface hulls lost recently (fleetLosses) at which it stops sending its
+ * groups out when there is no enemy fleet to fight: losses to shore missiles and drones buy
+ * nothing, so the fleet stays in its home waters as a fleet in being. The Black Sea Fleet did
+ * this in 2023-24 after losing about a third of its ships, operating from Novorossiysk
+ * (UK MoD, ISW). Judgement: a tenth of the fleet.
+ */
+const WITHDRAW_SHARE = 0.1;
+
+/** Home ports of this nation's fleets that have lost WITHDRAW_SHARE of their surface hulls. */
+function batteredFleets(p: Plan, groups: Formation[]): Set<NodeId> {
+  const hulls = new Map<NodeId, number>();
+  for (const g of groups) if (g.kind === 'surface_group') hulls.set(g.home, (hulls.get(g.home) ?? 0) + compose(g, p.ctx.catalog).hullCount);
+  const out = new Set<NodeId>();
+  for (const [home, n] of hulls) {
+    const lost = fleetLosses(p.world, p.nation, home);
+    if (lost > 0 && lost >= WITHDRAW_SHARE * (n + lost)) out.add(home);
+  }
+  return out;
 }
 
 /**
@@ -291,8 +313,9 @@ export function planNaval(p: Plan): void {
   if (!groups.length) return;
   const liftCapable = groups.filter((g) => g.kind === 'surface_group' && compose(g, p.ctx.catalog).troopLift > 0);
   const assault = planAssault(p, liftCapable);
-  const focus = maritimeFocus(p, assault);
+  const { node: focus, enemyFleet } = maritimeFocus(p, assault);
   const station = assault ? focus : standoff(p, focus);
+  const inPort = enemyFleet ? new Set<NodeId>() : batteredFleets(p, groups);
   const enemyChokes = chokepoints(map).filter((c) => [...c.users].some((u) => p.enemies.has(u as NationId)));
   const claimed = new Map<NodeId, number>();
 
@@ -316,6 +339,10 @@ export function planNaval(p: Plan): void {
   if (assault) runAssault(p, assault, liftCapable);
   const unescorted = [...(assault ? liftCapable.filter((g) => g.order.posture !== 'reserve') : []), ...groups.filter((g) => roles.get(g) === 'capital')];
   for (const g of groups) {
+    if (inPort.has(g.home) && roles.get(g) !== 'raider' && roles.get(g) !== 'ssbn') {
+      issue(p, g, { posture: 'patrol', target: nearestSea(map, g.home) });
+      continue;
+    }
     switch (roles.get(g)) {
       case 'ssbn':
         issue(p, g, { posture: 'patrol', target: nearestSea(map, g.home) });

@@ -3,7 +3,7 @@ import type { Formation, FormationId, Munition, MunitionId, NationId, PlatformId
 import { tracked } from './detection';
 import type { TickEnv } from './env';
 import { resolveSalvo, type SalvoDefense, type SalvoOutcome } from './salvo';
-import { effectiveHitsToKill, ledger } from './state';
+import { effectiveHitsToKill, ledger, recordFleetLoss } from './state';
 import { ANTISHIP_KINDS, CREW_LOSS_SUNK, INTERCEPTOR_KINDS, LAUNCHES_PER_HULL, SORTIES_PER_HOUR, TORPEDO_SPREAD, USV_RAID_HOURS, USV_STRIKE, USV_WAVE } from './tables';
 
 type Tracks = Map<FormationId, Set<NationId>>;
@@ -309,6 +309,8 @@ export function applyHits(env: TickEnv, target: Formation, hits: number[], by: N
   const lb = ledger(world, target.nation);
   for (const n of Object.values(losses.sunk)) lb.hullsSunk += n;
   for (const n of Object.values(losses.damaged)) lb.hullsDamaged += n;
+  const lost = Object.values(losses.sunk).reduce((a, n) => a + n, 0) + Object.values(losses.damaged).reduce((a, n) => a + n, 0);
+  if (lost) recordFleetLoss(world, target, lost);
   for (const [pid, n] of Object.entries(target.equipment)) if (n <= 0) delete target.equipment[pid as PlatformId];
   env.invalidate(target);
   ctx.emit({ type: 'battle', tick: world.tick, node: target.node, attacker: by, defender: target.nation, losses: { [target.nation]: { ...losses.sunk } }, casualties: { [target.nation]: Math.round(losses.casualties) } });

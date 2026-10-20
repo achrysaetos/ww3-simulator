@@ -30,6 +30,7 @@ export const navalWar: System = {
       tracks: {},
       lastFired: {},
       ledger: {},
+      attrition: {},
     };
   },
   step(world, ctx) {
