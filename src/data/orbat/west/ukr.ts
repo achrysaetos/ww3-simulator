@@ -187,6 +187,13 @@ export const ukr = [
   u('19th Separate Missile Brigade', 'missile', 'brigade', sector.dnipro, { tochka_u: 6, neptune_launcher: 4, truck: 60 }, { ...WAR, extraMagazine: { neptune: 30 } }),
   u('Coastal missile battalion (Neptune)', 'missile', 'battalion', sector.odesa, { neptune_launcher: 4, truck: 30 }, { ...WAR, extraMagazine: { neptune: 20 } }),
 
+  // Long-range one-way attack drones on Russian refineries, airbases and depots. Ukraine launched
+  // several hundred a month in 2025 (Russian MoD daily claims; ISW; Ukrainian General Staff), mostly
+  // FP-1/Lyutyi with older UJ-26 Bober. Launch sites x 5 launches a day at readiness 0.6 gives about
+  // 500 a month; stocks cover roughly a month at that pace (judgement call).
+  u('Unmanned Systems Forces long-range strike group (FP-1 / Lyutyi)', 'missile', 'brigade', base('Dispersed launch sites, Poltava', 49.59, 34.55), { lyutyi_launcher: 4, truck: 20 }, { ...WAR, extraMagazine: { lyutyi: 360 } }),
+  u('GUR / SBU long-range drone units (Lyutyi, UJ-26 Bober)', 'missile', 'battalion', base('Dispersed launch sites, Sumy', 50.91, 34.8), { lyutyi_launcher: 1, bober_launcher: 2, truck: 10 }, { ...WAR, extraMagazine: { lyutyi: 80, bober: 120 } }),
+
   // Air defence (Air Force anti-aircraft missile brigades)
   u('96th Anti-Aircraft Missile Brigade', 'air_defense', 'brigade', sector.kyiv, { patriot_pac3: 16, nasams: 12, iris_t_slm: 9, s300ps: 12 }, { ...WAR, extraMagazine: { pac3_mse: 48, pac2_gem_t: 24 } }),
   u('138th Anti-Aircraft Missile Brigade', 'air_defense', 'brigade', sector.dnipro, { patriot_pac3: 8, s300ps: 12, iris_t_slm: 6 }, WAR),
@@ -202,11 +209,18 @@ export const ukr = [
   u('204th Tactical Aviation Brigade', 'air_wing', 'brigade', base('Lutsk', 50.68, 25.49), { mig29: 10 }, WAR),
   u('39th Tactical Aviation Brigade', 'air_wing', 'brigade', base('Ozerne', 50.16, 28.74), { su27: 8 }, WAR),
   u('831st Tactical Aviation Brigade', 'air_wing', 'brigade', base('Myrhorod', 49.93, 33.64), { su27: 7 }, WAR),
-  u('7th Tactical Aviation Brigade', 'air_wing', 'brigade', base('Starokostiantyniv', 49.74, 27.27), { su24m: 12 }, { ...WAR, extraMagazine: { storm_shadow: 40 } }),
+  u('7th Tactical Aviation Brigade', 'air_wing', 'brigade', base('Starokostiantyniv', 49.74, 27.27), { su24m_scalp: 12 }, { ...WAR, extraMagazine: { storm_shadow: 40 } }),
   u('299th Tactical Aviation Brigade', 'air_wing', 'brigade', base('Kulbakino (dispersed)', 47.0, 32.0), { su25: 12 }, WAR),
   u('F-16 group, Air Force (dispersed western Ukraine)', 'air_wing', 'wing', base('Western Ukraine dispersal airfields', 49.5, 26.0), { f16am: 20, mirage2000_5: 6 }, WAR),
   u('Army Aviation brigades (12th, 16th, 18th)', 'air_wing', 'brigade', sector.dnipro, { mi24: 30, mi8: 60 }, WAR),
   u('Unmanned Systems Forces strike drone wing', 'air_wing', 'wing', sector.kyiv, { tb2: 12 }, WAR),
+
+  // Uncrewed surface vessels. GUR's Group 13 (Magura V5, V7 since 2025) and the SBU (Sea Baby)
+  // sank or disabled Ivanovets, Tsezar Kunikov, Sergei Kotov and others in 2023-24 with waves of
+  // 5-10 boats, and Magura V7s downed Su-30s in 2025 (Oryx; GUR and SBU statements; UK MoD).
+  // Ready inventories are not published; ~50 boats across the two services is a judgement call.
+  u('GUR Group 13 (Magura strike USVs)', 'surface_group', 'battalion', base('Odesa harbour', 46.49, 30.74), { magura_v5: 24, magura_v7: 6 }, WAR),
+  u('SBU Sea Baby USV detachment', 'surface_group', 'battalion', base('Izmail (Danube)', 45.35, 28.84), { sea_baby: 20 }, WAR),
 
   // Logistics
   u('Joint Forces logistics (aggregate)', 'logistics', 'army', sector.dnipro, { truck: 8000 }, { ...WAR, personnel: 30000 }),

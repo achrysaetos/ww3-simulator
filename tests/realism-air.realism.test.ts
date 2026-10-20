@@ -1,0 +1,136 @@
+import { beforeAll, describe, expect, it } from 'vitest';
+import { measureRun, type RunMetrics, type StrikeWeaponClass } from '../src/metrics';
+import { createSession } from '../src/scenarios';
+
+const CREWED = new Set(['fighter', 'multirole', 'attack_aircraft', 'bomber', 'stealth_bomber', 'awacs', 'tanker', 'ew_aircraft', 'maritime_patrol', 'transport_aircraft', 'attack_helo', 'transport_helo', 'asw_helo']);
+
+function run(scenario: string, days: number, seeds: number[]): RunMetrics[] {
+  return seeds.map((seed) => {
+    const s = createSession(scenario, seed);
+    return measureRun(s.engine, s.world, s.map, days);
+  });
+}
+
+const tally = (r: RunMetrics, by: string, on: string | undefined, classes: StrikeWeaponClass[]) => {
+  const src = on ? r.nations[by]?.strikesOn[on] : r.nations[by]?.strikes;
+  let fired = 0, intercepted = 0;
+  for (const c of classes) {
+    fired += src?.[c]?.fired ?? 0;
+    intercepted += src?.[c]?.intercepted ?? 0;
+  }
+  return { fired, intercepted };
+};
+const pooledRate = (runs: RunMetrics[], by: string, on: string, classes: StrikeWeaponClass[]) => {
+  const t = runs.map((r) => tally(r, by, on, classes));
+  return t.reduce((a, x) => a + x.intercepted, 0) / t.reduce((a, x) => a + x.fired, 0);
+};
+const crewedLost = (r: RunMetrics, n: string) => Object.entries(r.nations[n]?.lossesByClass ?? {}).reduce((a, [c, k]) => a + (CREWED.has(c) ? k ?? 0 : 0), 0);
+const MISSILES: StrikeWeaponClass[] = ['cruise_missile', 'ballistic_missile'];
+
+describe('ukraine-2026, 30 days', () => {
+  let runs: RunMetrics[];
+  beforeAll(() => {
+    runs = run('ukraine-2026', 30, [1, 2, 3]);
+  });
+
+  // UAF monthly tallies 2025: 2,500-6,300 Shahed/Geran-type drones a month (ISW, CSIS "Russia's Drone War" 2025).
+  it('Russia launches 3,000-7,000 long-range one-way drones a month', () => {
+    for (const r of runs) {
+      const n = tally(r, 'RUS', undefined, ['one_way_drone']).fired;
+      expect(n).toBeGreaterThanOrEqual(3000);
+      expect(n).toBeLessThanOrEqual(7000);
+    }
+  });
+
+  // UAF monthly tallies 2024-25: ~100-300 cruise and ballistic missiles a month, peaks near 400.
+  it('Russia fires 100-400 cruise and ballistic missiles a month at Ukraine', () => {
+    for (const r of runs) {
+      const n = tally(r, 'RUS', 'UKR', MISSILES).fired;
+      expect(n).toBeGreaterThanOrEqual(100);
+      expect(n).toBeLessThanOrEqual(400);
+    }
+  });
+
+  // UAF claims ~80-90 % of drones downed or lost to EW; independent counts are lower (judgment: 75-92 %).
+  it('Ukraine downs 75-92 % of the drones (pooled over seeds)', () => {
+    const rate = pooledRate(runs, 'RUS', 'UKR', ['one_way_drone']);
+    expect(rate).toBeGreaterThanOrEqual(0.75);
+    expect(rate).toBeLessThanOrEqual(0.92);
+  });
+
+  // UAF claims ~70-80 % of cruise missiles and far fewer ballistic ones (CSIS Missile Threat 2025). Judgment: 40-80 % overall, pooled.
+  it('Ukraine downs 40-80 % of the missiles (pooled over seeds)', () => {
+    const rate = pooledRate(runs, 'RUS', 'UKR', MISSILES);
+    expect(rate).toBeGreaterThanOrEqual(0.4);
+    expect(rate).toBeLessThanOrEqual(0.8);
+  });
+
+  // 2022-25: the air over the front stays contested, neither side holds it (RUSI "Preliminary Lessons", 2022-24).
+  it('neither side holds the air over the front', () => {
+    for (const r of runs) for (const n of ['RUS', 'UKR']) expect(r.nations[n]?.frontAirControl ?? 0).toBeLessThan(0.1);
+  });
+
+  // Oryx 2023-25: a few fixed-wing and helicopter losses a month per side; peaks of ~20-30 in early 2022.
+  // Judgment: the mean over seeds stays under 20 a month per side, not dozens.
+  it('each side loses a few crewed aircraft a month, not dozens', () => {
+    for (const n of ['RUS', 'UKR']) {
+      const mean = runs.reduce((a, r) => a + crewedLost(r, n), 0) / runs.length;
+      expect(mean).toBeLessThan(20);
+    }
+  });
+});
+
+describe('gulf-2027, 30 days', () => {
+  let runs: RunMetrics[];
+  beforeAll(() => {
+    runs = run('gulf-2027', 30, [1, 2]);
+  });
+
+  // April 2024: ~99 % of ~320 drones and missiles intercepted with US, UK, French and Jordanian help; October 2024: most of ~180 ballistic missiles (IDF, US DoD).
+  it('Israel and its partners intercept over 85 % of what Iran launches at Israel (pooled)', () => {
+    const rate = pooledRate(runs, 'IRN', 'ISR', [...MISSILES, 'one_way_drone']);
+    expect(rate).toBeGreaterThan(0.85);
+  });
+
+  // June 2025: THAAD fired ~100-150 rounds, about a quarter of US stocks, in 12 days; Arrow stocks ran short (WSJ, CSIS 2025).
+  it('interceptor stocks deplete measurably within the month', () => {
+    for (const r of runs) {
+      const i = r.nations.ISR!.interceptors;
+      expect(i.end).toBeLessThan(0.85 * i.start);
+    }
+  });
+
+  // Gap: the Iran order of battle has ~60 MRBM launchers and ~280 missiles, against ~2,000 and 100+ launchers in 2024 (IISS), so salvos stay in the tens.
+  it.fails('Iran fires salvos of hundreds (at least 300 ballistic missiles at Israel in 30 days)', () => {
+    for (const r of runs) expect(tally(r, 'IRN', 'ISR', ['ballistic_missile']).fired).toBeGreaterThanOrEqual(300);
+  });
+
+  // Gap: Israeli strike aircraft lack the reach (no stand-off air-launched ballistic missiles in the order of battle) and there is no front to win the air over.
+  it.fails('Israeli air strikes reach Iran (October 2024, June 2025)', () => {
+    for (const r of runs) expect(tally(r, 'ISR', 'IRN', ['air_ordnance', 'glide_bomb']).fired).toBeGreaterThan(0);
+  });
+});
+
+describe('taiwan-2027, first week', () => {
+  let runs: RunMetrics[];
+  beforeAll(() => {
+    runs = run('taiwan-2027', 7, [1, 2]);
+  });
+
+  // CSIS 2023 "The First Battle of the Next War": PLARF opens with salvos of hundreds of SRBMs and cruise missiles on Taiwanese and US/Japanese bases.
+  it('the PLA fires hundreds of missiles at Taiwan and the bases in Japan', () => {
+    for (const r of runs) {
+      expect(tally(r, 'CHN', 'TWN', MISSILES).fired).toBeGreaterThan(300);
+      expect(tally(r, 'CHN', 'JPN', MISSILES).fired).toBeGreaterThan(30);
+    }
+  });
+
+  // CSIS 2023: ~90 % of US aircraft losses were on the ground.
+  it('most US aircraft losses are on the ground', () => {
+    for (const r of runs) {
+      const usa = r.nations.USA!;
+      expect(usa.aircraftLostOnGround).toBeGreaterThan(0);
+      expect(usa.aircraftLostOnGround).toBeGreaterThanOrEqual(0.5 * crewedLost(r, 'USA'));
+    }
+  });
+});

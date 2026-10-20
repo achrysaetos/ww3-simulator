@@ -34,6 +34,11 @@ export const strikeMunitions = defineMunitions([
   { id: 'prithvi2', name: 'Prithvi-II', kind: 'srbm', producers: ['IND'], rangeKm: 350, speedMach: 5, warheadKg: 500, cepM: 25, pk: srbmPk, interceptDifficulty: 0.55, unitCostUsdM: 1, weightKg: 4600 },
   { id: 'pralay', name: 'Pralay', kind: 'srbm', producers: ['IND'], rangeKm: 500, speedMach: 6, warheadKg: 700, cepM: 10, pk: srbmPk, interceptDifficulty: 0.7, unitCostUsdM: 2, weightKg: 5000 },
   { id: 'lora', name: 'LORA', kind: 'srbm', producers: ['ISR'], rangeKm: 400, speedMach: 5, warheadKg: 440, cepM: 10, pk: srbmPk, interceptDifficulty: 0.65, unitCostUsdM: 2, weightKg: 1600 },
+  // Israeli air-launched ballistic missiles, used against Iran in October 2024 and June 2025 (IISS; Elbit,
+  // Rafael and IAI data; ranges and warheads are manufacturer figures or press estimates).
+  { id: 'rampage', name: 'Rampage ALBM', kind: 'srbm', producers: ['ISR'], rangeKm: 150, speedMach: 3, warheadKg: 150, cepM: 5, pk: srbmPk, interceptDifficulty: 0.6, unitCostUsdM: 0.5, weightKg: 570 },
+  { id: 'rocks', name: 'Rafael ROCKS ALBM', kind: 'srbm', producers: ['ISR'], rangeKm: 250, speedMach: 4, warheadKg: 200, cepM: 5, pk: { ...srbmPk, hardened: 0.35 }, interceptDifficulty: 0.65, unitCostUsdM: 1, weightKg: 1000 },
+  { id: 'air_lora', name: 'Air LORA ALBM', kind: 'srbm', producers: ['ISR'], rangeKm: 400, speedMach: 5, warheadKg: 440, cepM: 10, pk: srbmPk, interceptDifficulty: 0.65, unitCostUsdM: 2, weightKg: 1600 },
   { id: 'bora', name: 'Bora (Khan)', kind: 'srbm', producers: ['TUR'], rangeKm: 280, speedMach: 5, warheadKg: 470, cepM: 10, pk: srbmPk, interceptDifficulty: 0.6, unitCostUsdM: 1.5, weightKg: 2500 },
   { id: 'scud', name: 'Scud-B/C (R-17, Hwasong-5/6, Shahab-1/2)', kind: 'srbm', producers: ['PRK', 'IRN'], rangeKm: 500, speedMach: 5, warheadKg: 770, cepM: 700, pk: { ...srbmPk, structure: 0.4, hardened: 0.03 }, interceptDifficulty: 0.5, unitCostUsdM: 1, weightKg: 6400 },
   // Hyunmoo-4-4: conventional SLBM fired from KSS-III (first test Sept 2021).

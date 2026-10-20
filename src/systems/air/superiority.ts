@@ -44,7 +44,7 @@ export function resolveAirSuperiority(world: World, ctx: SimContext, pic: AirPic
   const contested = [...active.keys()] as NodeId[];
   for (const g of pic.groups) {
     if (g.profile.role !== 'counter_air' || g.f.order.posture !== 'defend' || g.sorties <= 0) continue;
-    const nodes = contested.filter((n) => [...active.get(n)!].some((x) => pic.atWar(x, g.f.nation)) && nodeDistance(ctx, g.f.node, n) <= g.radiusKm);
+    const nodes = contested.filter((n) => [...active.get(n)!].some((x) => pic.atWar(x, g.f.nation)) && !enemyHeld(world, pic, n, g.f.nation) && nodeDistance(ctx, g.f.node, n) <= g.radiusKm);
     nodes.forEach((n, i) => {
       const share = Math.floor(g.sorties / nodes.length) + (i < g.sorties % nodes.length ? 1 : 0);
       if (share > 0) join(n, g, share);
@@ -64,6 +64,12 @@ function fightOver(world: World, ctx: SimContext, pic: AirPicture, node: NodeId,
   const red = nations.filter((n) => pic.atWar(n, blue));
   const blueSide = nations.filter((n) => !pic.atWar(n, blue) && !red.includes(n));
   if (!red.length && !hostileTo(world, ctx, pic, node, blue)) return;
+
+  // Pilots hold outside a dense hostile SAM envelope rather than fight under it, so
+  // fighters over a front both sides defend trade few kills and neither holds the air
+  // (Ukraine 2022-25: both air forces stayed behind their own SAM umbrellas).
+  for (const [nation, flights] of byNation)
+    for (const x of flights) x.n -= ctx.rng.binomial(x.n, samDenial(world, ctx, pic, node, nation, x.g.platform.protection.stealth));
 
   const tally: LossTally = {};
   const flightsOf = (side: NationId[]) => side.flatMap((n) => byNation.get(n)!);
@@ -122,6 +128,12 @@ function airSide(ctx: SimContext, pic: AirPicture, node: NodeId, nations: Nation
 
 export function hasSupport(ctx: SimContext, pic: AirPicture, node: NodeId, nation: NationId, role: 'ew' | 'awacs'): boolean {
   return pic.groups.some((g) => g.profile.role === role && g.sorties > 0 && g.f.nation === nation && nodeDistance(ctx, g.f.node, node) <= g.radiusKm);
+}
+
+/** Defensive counter-air covers friendly and neutral airspace; going over enemy ground is an offensive sweep. */
+function enemyHeld(world: World, pic: AirPicture, node: NodeId, nation: NationId): boolean {
+  const owner = world.control[node];
+  return !!owner && pic.atWar(owner, nation);
 }
 
 /** Flying over this node means contact: enemy ground, enemy forces, or enemy SAM coverage. */

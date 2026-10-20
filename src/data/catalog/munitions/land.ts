@@ -91,9 +91,13 @@ export const landMunitions = defineMunitions([
   // ---- loitering munitions and one-way attack drones
   // Shahed-136/Geran-2: ~2,000+ km, 40-50 kg warhead; cost estimates $20-50k (Iran) to ~$80k (Alabuga).
   // Ukraine reports downing ~80-90% of Shahed-class drones in 2023-24.
-  { id: 'shahed136', name: 'Shahed-136 / Geran-2', kind: 'drone_oneway', producers: ['IRN', 'RUS'], rangeKm: 2000, speedMach: 0.15, warheadKg: 50, cepM: 10, pk: { structure: 0.5, soft: 0.6, infantry: 0.2, armor: 0.1, ship: 0.05 }, interceptDifficulty: 0.15, unitCostUsdM: 0.05, weightKg: 200 },
+  // No ship kill chance: GPS/INS guidance flies to fixed coordinates and cannot follow a hull under way
+  // (its anti-ship record is moored merchant ships in Odesa and Danube ports, 2023-24).
+  { id: 'shahed136', name: 'Shahed-136 / Geran-2', kind: 'drone_oneway', producers: ['IRN', 'RUS'], rangeKm: 2000, speedMach: 0.15, warheadKg: 50, cepM: 10, pk: { structure: 0.5, soft: 0.6, infantry: 0.2, armor: 0.1 }, interceptDifficulty: 0.15, unitCostUsdM: 0.05, weightKg: 200 },
   { id: 'shahed238', name: 'Shahed-238 / Geran-3 (jet)', kind: 'drone_oneway', producers: ['IRN', 'RUS'], rangeKm: 1500, speedMach: 0.45, warheadKg: 50, cepM: 10, pk: { structure: 0.5, soft: 0.6, infantry: 0.2, armor: 0.1 }, interceptDifficulty: 0.3, unitCostUsdM: 0.2, weightKg: 380 },
   { id: 'lyutyi', name: 'FP-1 / Lyutyi long-range strike drone', kind: 'drone_oneway', producers: ['UKR'], rangeKm: 1500, speedMach: 0.15, warheadKg: 75, cepM: 10, pk: { structure: 0.5, soft: 0.6, infantry: 0.2, armor: 0.1 }, interceptDifficulty: 0.15, unitCostUsdM: 0.2, weightKg: 300 },
+  // UJ-26 Bober: Ukraine's earlier propeller long-range drone, ~800-1,000 km with a ~20 kg warhead (Ukrainian MoD/Ukroboronprom statements).
+  { id: 'bober', name: 'UJ-26 Bober long-range strike drone', kind: 'drone_oneway', producers: ['UKR'], rangeKm: 900, speedMach: 0.12, warheadKg: 20, cepM: 10, pk: { structure: 0.35, soft: 0.5, infantry: 0.15, armor: 0.05 }, interceptDifficulty: 0.15, unitCostUsdM: 0.1, weightKg: 150 },
   { id: 'lancet3', name: 'ZALA Lancet-3', kind: 'loitering', producers: ['RUS'], rangeKm: 70, speedMach: 0.25, warheadKg: 3, cepM: 2, pk: { armor: 0.3, soft: 0.6, infantry: 0.2, structure: 0.1 }, interceptDifficulty: 0.25, unitCostUsdM: 0.035, weightKg: 12 },
   { id: 'switchblade600', name: 'Switchblade 600', kind: 'loitering', producers: ['USA'], rangeKm: 40, speedMach: 0.15, warheadKg: 6, cepM: 1, pk: { armor: 0.55, soft: 0.75, infantry: 0.3, structure: 0.15 }, interceptDifficulty: 0.25, unitCostUsdM: 0.12, weightKg: 15 },
   { id: 'switchblade300', name: 'Switchblade 300 Block 20', kind: 'loitering', producers: ['USA'], rangeKm: 10, speedMach: 0.13, warheadKg: 0.5, cepM: 1, pk: { infantry: 0.4, soft: 0.5, armor: 0.02 }, interceptDifficulty: 0.25, unitCostUsdM: 0.06, weightKg: 2.5 },

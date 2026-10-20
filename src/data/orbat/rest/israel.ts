@@ -24,7 +24,7 @@ export const israel = [
   u('missile', 'battalion', 'Precision Strike (LORA, Predator Hawk)', base('Central Israel', 31.85, 34.9), { lora_launcher: 8 }),
 
   // ---- Air Force: F-35I 39, F-15I 25, F-15A-D ~58, F-16I 98, F-16C/D ~80.
-  u('air_wing', 'wing', 'Nevatim AB (140, 116, 117 Sqn)', base('Nevatim', 31.21, 35.01), { f35i: 39, kc707: 7 }),
+  u('air_wing', 'wing', 'Nevatim AB (140, 116, 117 Sqn)', base('Nevatim', 31.21, 35.01), { f35i: 39, kc707: 7, kc130h: 3, kc46a: 2 }, { source: 'IISS Military Balance 2025 (7 KC-707, 3 KC-130H tankers); first 2 of 4 KC-46A due 2026 (Boeing, Israeli MoD)' }),
   u('air_wing', 'wing', 'Hatzerim AB (69, 107 Sqn)', base('Hatzerim', 31.23, 34.66), { f15i: 25, f16i: 25 }, { extraMagazine: { nuclear_gravity_bomb: 30 }, source: NUKE }),
   u('air_wing', 'wing', 'Tel Nof AB (106, 133 Sqn)', base('Tel Nof', 31.84, 34.82), { f15c: 58, ch53d: 20 }),
   u('air_wing', 'wing', 'Ramon AB (119, 201, 253 Sqn)', base('Ramon', 30.78, 34.67), { f16i: 73, ah64d: 30 }),

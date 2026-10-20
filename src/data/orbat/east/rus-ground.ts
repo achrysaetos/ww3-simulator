@@ -183,10 +183,11 @@ const artillery: OrbatEntry[] = [
   unit(RUS, '1st Guards Flamethrower Regiment (RChBZ)', 'artillery', 'brigade', POKROVSK(0.35), { tos1a: 12, tos2: 6, infantry_squad: 8, truck: 60 }, deployed),
 ];
 
-// Iskander-M brigade: 3 battalions x 4 TELs (IISS MB 2025). Reloads are an estimate:
-// Ukrainian intelligence put 9M723 output near 60 a month in 2025.
+// Iskander-M brigade: 3 battalions x 4 TELs (IISS MB 2025), each TEL firing 9M723 or 9M728. Reloads are
+// an estimate: Ukrainian intelligence put 9M723 output near 60 a month in 2025; the 9M728 stock is the
+// two cruise rounds kept per TEL (24 a brigade).
 const iskander = (name: string, base: Base): OrbatEntry =>
-  unit(RUS, name, 'missile', 'brigade', base, { iskander_m_tel: 12, truck: 60 }, { readiness: 0.75, experience: 0.7, extraMagazine: { '9m723': 24, '9m728': 12 } });
+  unit(RUS, name, 'missile', 'brigade', base, { iskander_mk_tel: 12, truck: 60 }, { readiness: 0.75, experience: 0.7, extraMagazine: { '9m723': 24 } });
 const missiles: OrbatEntry[] = [
   iskander('26th Missile Brigade', at('Luga', 58.73, 29.85)),
   iskander('152nd Guards Missile Brigade', at('Chernyakhovsk', 54.63, 21.81)),

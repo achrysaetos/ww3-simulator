@@ -1,9 +1,11 @@
 import { relation } from '../../core/engine';
 import type { GameMap } from '../../core/map';
-import type { Formation, FormationId, FormationKind, Munition, MunitionId, NationId, NodeId, PlatformId, TargetClass } from '../../core/types';
+import type { Formation, FormationId, FormationKind, Munition, MunitionId, NationId, NodeId, Order, PlatformId, TargetClass } from '../../core/types';
+import { isOverseas } from '../../data/territories';
 import { HOSTILE_OPINION } from '../diplomacy/escalation';
 import { rung } from '../diplomacy/wars';
-import { isGround } from './forces';
+import { dailyRounds, effectPk } from '../air';
+import { isGround, issue } from './forces';
 import type { Plan } from './types';
 
 export interface StrikeTarget {
@@ -18,11 +20,13 @@ export interface StrikeTarget {
  * Target values follow the order of the opening air campaign in 1991 Iraq
  * (Gulf War Air Power Survey) and the lessons of 2022 Ukraine: suppress air
  * defences first, then air bases and long-range fires, then the logistics
- * that sustain the front, then forces in contact.
+ * that sustain the front, then forces in contact. Air bases are struck for the
+ * aircraft on them: CSIS's 2023 Taiwan wargames had most US aircraft losses on
+ * the ground to PLARF missile salvos on the ramps.
  */
 const VALUE_BY_KIND: Partial<Record<FormationKind, { value: number; cls: TargetClass }>> = {
   air_defense: { value: 5, cls: 'soft' },
-  air_wing: { value: 4, cls: 'structure' },
+  air_wing: { value: 4, cls: 'aircraft' },
   missile: { value: 3.5, cls: 'soft' },
   surface_group: { value: 3.5, cls: 'ship' },
   logistics: { value: 3, cls: 'soft' },
@@ -34,15 +38,18 @@ const CAPITAL = { value: 2.5, cls: 'structure' as TargetClass };
 const DEEP_STRIKE_RISK = 0.7;
 
 /**
- * Whether striking cells of `owner`'s homeland outside the battle area is
- * politically allowed. Deep strikes on a nuclear-armed enemy wait until the
- * dyad has reached strategic conventional war (cf. the 2024 US decision to let
- * Ukraine hit Russian territory near Kharkiv but not deeper).
+ * Whether striking cells of `owner`'s metropolitan homeland outside the battle area is
+ * politically allowed. A nuclear power weighs deep strikes on another nuclear
+ * power's homeland against escalation and waits until the dyad has reached
+ * strategic conventional war (cf. the 2024 US decision to let Ukraine use US
+ * weapons near Kharkiv but not deeper). A non-nuclear belligerent has no such
+ * ladder to climb and strikes deep from the start: Ukraine's drone campaign on
+ * Russian refineries and airbases from 2023, Iran's salvos on Israel in 2024.
  */
 function deepStrikeAllowed(p: Plan, owner: NationId): boolean {
   if (!p.enemies.has(owner)) return relation(p.world, p.nation, owner).opinion <= HOSTILE_OPINION;
   if (p.world.nations[owner].nuclear.warheads <= 0) return true;
-  if (p.profile.riskTolerance >= DEEP_STRIKE_RISK) return true;
+  if (p.world.nations[p.nation].nuclear.warheads <= 0 || p.profile.riskTolerance >= DEEP_STRIKE_RISK) return true;
   return rung(relation(p.world, p.nation, owner).escalation) >= rung('strategic_conventional');
 }
 
@@ -120,6 +127,8 @@ export function strikeTargets(p: Plan, battleArea: Set<number>): TargetGrid {
   const allowed = (t: StrikeTarget) => {
     if (map.isSea(t.node) || battleArea.has(t.node)) return true;
     const owner = map.owner[t.node];
+    // An enemy's overseas territory is theatre, not homeland: Guam's bases are struck alongside Okinawa's.
+    if (p.enemies.has(owner) && isOverseas(map, t.node)) return true;
     let ok = deep.get(owner);
     if (ok === undefined) deep.set(owner, (ok = deepStrikeAllowed(p, owner)));
     return ok && (p.enemies.has(owner) || nearEnemyCapital(p, t.node));
@@ -127,21 +136,255 @@ export function strikeTargets(p: Plan, battleArea: Set<number>): TargetGrid {
   return new TargetGrid(out.filter(allowed).sort((a, b) => b.value - a.value || a.node - b.node), map);
 }
 
-/** Conventional munitions a formation has in its magazine. */
+/**
+ * Conventional munitions in a formation's magazine that one of its platforms can
+ * launch (an ORBAT's extra rounds for a launcher the formation lacks are dead stock).
+ */
 export function arsenal(p: Plan, f: Formation): Munition[] {
   const out: Munition[] = [];
   for (const [id, n] of Object.entries(f.magazine)) {
     const m = n > 0 ? p.ctx.catalog.munitions.get(id as MunitionId) : undefined;
-    if (m && !m.yieldKt) out.push(m);
+    if (m && !m.yieldKt && launchable(p, f, m.id)) out.push(m);
   }
   return out;
+}
+
+function launchable(p: Plan, f: Formation, m: MunitionId): boolean {
+  for (const [id, n] of Object.entries(f.equipment)) if (n > 0 && p.ctx.catalog.platform(id as PlatformId).loadout.some((l) => l.munition === m)) return true;
+  return false;
+}
+
+/**
+ * Precision weapons above this unit cost are rationed; drones, glide kits, bombs
+ * and rockets are fired as fast as launchers and sorties allow.
+ */
+const RATIONED_COST_USD_M = 0.3;
+/**
+ * Days a nation spreads its precision-munition stocks over, on top of new
+ * production. Against an enemy across a land front (a war of attrition), Russia's 2023-25 launches
+ * tracked production plus a slow draw on reserves (Ukrainian GUR stock estimates vs
+ * monthly launch tallies imply roughly a year held back). Against an enemy with no
+ * shared front the war is a stand-off exchange decided by stocks and launcher attrition, and stocks
+ * go fast: Iran fired ~550 ballistic missiles, a quarter or more of its force, in
+ * the 12 days of June 2025. Both are judgments, not doctrine figures.
+ */
+const ATTRITION_HORIZON_DAYS = 365;
+const STANDOFF_HORIZON_DAYS = 30;
+/**
+ * Rationed weapons go in massed salvos every few days, starting the day the war
+ * does, to saturate defenses rather than trickle into them: Russia's combined
+ * missile strikes on Ukraine came every 4-10 days in 2024-25; Iran's 2024 attacks
+ * were single massed salvos (judgment).
+ */
+const SALVO_EVERY_DAYS = 3;
+
+/**
+ * A nation's daily firing budget per rationed munition: production plus stock
+ * over the horizon. Planners propose strikes with the weapons that could do them,
+ * cheapest per kill first; `settle` lets each proposal fire its first weapon whose
+ * draw comes up, at probability budget / (what all proposals carrying it could
+ * fire), and the rest hold on 'defend'.
+ */
+export class FireBudget {
+  private readonly proposals: { f: Formation; options: Munition[]; t: StrikeTarget; order: Omit<Order, 'issuedTick'> }[] = [];
+
+  constructor(private readonly p: Plan) {}
+
+  /** Strike now if the cheapest weapon for it is not rationed, else queue it for `settle`. */
+  propose(f: Formation, options: Munition[], t: StrikeTarget, order: Omit<Order, 'issuedTick'>): void {
+    if (!options.length || options[0].unitCostUsdM < RATIONED_COST_USD_M) return issue(this.p, f, order);
+    this.proposals.push({ f, options, t, order });
+  }
+
+  settle(): void {
+    const { world, nation, ctx } = this.p;
+    const capacity = new Map<MunitionId, number>();
+    for (const x of this.proposals) for (const m of x.options) capacity.set(m.id, (capacity.get(m.id) ?? 0) + dailyRounds(x.f, m.id, ctx.catalog));
+    const front = new Set<NationId>();
+    for (const sec of this.p.sectors) for (const n of sec.enemyNodes) front.add(world.control[n]);
+    const salvo = this.salvoDay() ? SALVO_EVERY_DAYS : 0;
+    const share = (m: MunitionId, horizon: number) => {
+      const cap = capacity.get(m) ?? 0;
+      let stock = world.nations[nation].stockpile[m] ?? 0;
+      for (const f of this.p.index.byNation.get(nation) ?? []) if (f.kind === 'air_wing' || f.kind === 'missile') stock += f.magazine[m] ?? 0;
+      const produced = (world.slices.economy?.nations[nation]?.lines[m]?.capacityPerMonth ?? 0) / 30;
+      return cap > 0 ? Math.min(1, (salvo * (produced + stock / horizon)) / cap) : 0;
+    };
+    for (const x of this.proposals) {
+      const horizon = front.has(world.control[x.t.node]) ? ATTRITION_HORIZON_DAYS : STANDOFF_HORIZON_DAYS;
+      const m = x.options.find((m) => ctx.rng.chance(share(m.id, horizon)));
+      if (m) issue(this.p, x.f, { ...x.order, munition: m.id });
+      else {
+        x.t.assigned--;
+        issue(this.p, x.f, { posture: 'defend' });
+      }
+    }
+    this.proposals.length = 0;
+  }
+
+  private salvoDay(): boolean {
+    const { world, nation, enemies } = this.p;
+    let since = world.tick;
+    for (const e of enemies) since = Math.min(since, relation(world, nation, e).warSince ?? since);
+    return Math.floor(((world.tick - since) * world.dtHours) / 24) % SALVO_EVERY_DAYS === 0;
+  }
+}
+
+/** Weapons in `stock` that can kill a `cls` target, cheapest per expected kill first. */
+export function strikeOptions(stock: readonly Munition[], cls: TargetClass): Munition[] {
+  const perKill = (m: Munition) => m.unitCostUsdM / effectPk(m, cls);
+  return stock.filter((m) => effectPk(m, cls) > 0).sort((a, b) => perKill(a) - perKill(b));
+}
+
+const INTERCEPTOR_KINDS: ReadonlySet<Munition['kind']> = new Set(['sam', 'abm', 'shorad_missile']);
+/**
+ * How far a strike sortie will fly into a known SAM envelope before releasing.
+ * Russian and Ukrainian strike aviation in 2023-25 released glide bombs and rockets
+ * at or just inside the edge of known coverage, not over it (judgment).
+ */
+const TOLERATED_DEPTH_KM = 15;
+const ROUTE_SAMPLE_KM = 50;
+/**
+ * Below this visibility (a stealth airframe) a package flies over the enemy's rear
+ * without first winning the air there, as B-2s and F-35Is did over Iran in 2025.
+ */
+const PENETRATOR_VISIBILITY = 0.1;
+/**
+ * Air bases are the first thing a defender's short- and medium-range SAMs cover
+ * (Ukraine's Starokostiantyniv and Myrhorod, Patriot at Kadena), whether or not the
+ * order of battle lists a battery there, so planners treat each as ringed (judgment).
+ */
+const AIRBASE_DEFENSE_KM = 60;
+
+/** Enemy SAM envelopes, for keeping strike aircraft out of coverage they cannot outrange. */
+/** Longest interceptor range in a formation's magazine, memoised per tick: every enemy's planner asks. */
+const reachMemo = new WeakMap<Formation, { tick: number; km: number }>();
+
+function interceptorReach(p: Plan, f: Formation): number {
+  const hit = reachMemo.get(f);
+  if (hit?.tick === p.world.tick) return hit.km;
+  let km = 0;
+  for (const [id, n] of Object.entries(f.magazine)) {
+    const m = n >= 1 ? p.ctx.catalog.munitions.get(id as MunitionId) : undefined;
+    if (m && INTERCEPTOR_KINDS.has(m.kind)) km = Math.max(km, m.rangeKm);
+  }
+  reachMemo.set(f, { tick: p.world.tick, km });
+  return km;
+}
+
+export class SamCover {
+  /** Widest envelope per node; several batteries at one site cover no more ground than the longest-ranged. */
+  private readonly reach = new Map<NodeId, number>();
+  /** Sites sorted by latitude, so a query scans only the band an envelope can reach. */
+  private sams: { node: NodeId; km: number; lat: number }[] = [];
+  private maxKm = 0;
+  constructor(private readonly p: Plan, private readonly battleArea: Set<number>) {
+    for (const e of p.enemies)
+      for (const f of p.index.byNation.get(e) ?? []) {
+        if (f.kind === 'air_wing') {
+          this.cover(f.node, AIRBASE_DEFENSE_KM);
+          continue;
+        }
+        if (f.kind !== 'air_defense' && f.kind !== 'surface_group') continue;
+        const km = interceptorReach(p, f);
+        if (km > 0) this.cover(f.node, km);
+      }
+    const { map } = p.ctx;
+    this.sams = [...this.reach].map(([node, km]) => ({ node, km, lat: map.lat[node] })).sort((a, b) => a.lat - b.lat);
+    for (const s of this.sams) this.maxKm = Math.max(this.maxKm, s.km);
+  }
+
+  /** Whether some site's envelope, scaled by `visibility` and shrunk by `marginKm`, reaches `at`. */
+  private reaches(at: NodeId, visibility: number, marginKm: number): boolean {
+    const { map } = this.p.ctx;
+    const lat = map.lat[at], band = (this.maxKm * visibility - marginKm) / 111;
+    if (band <= 0) return false;
+    let lo = 0, hi = this.sams.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (this.sams[mid].lat < lat - band) lo = mid + 1;
+      else hi = mid;
+    }
+    for (let i = lo; i < this.sams.length && this.sams[i].lat <= lat + band; i++) {
+      const s = this.sams[i];
+      const need = s.km * visibility - marginKm;
+      if (need > 0 && withinKm(map, s.node, at, need)) return true;
+    }
+    return false;
+  }
+
+  private cover(node: NodeId, km: number): void {
+    this.reach.set(node, Math.max(km, this.reach.get(node) ?? 0));
+  }
+
+  /**
+   * Whether an aircraft of `visibility` (1 = conventional; stealth shrinks the
+   * range at which a SAM can engage it) flying from `from` with a weapon reaching
+   * `standoffKm` can hit `node` without flying deeper than tolerated into an
+   * envelope, either on the way to the release point (straight line) or at it
+   * (SAMs taken to sit behind the target). Nor does a conventional package cross
+   * the enemy's rear, behind the battle area, where it does not hold the air: short-range
+   * air defenses and fighters there are not in the SAM list but kill as surely. This
+   * keeps both air forces in Ukraine launching from their own side of the front, as
+   * they have since 2022.
+   */
+  clear(from: NodeId, node: NodeId, standoffKm: number, visibility = 1): boolean {
+    if (this.covered(node, standoffKm, visibility)) return false;
+    const key = `${from}:${node}:${standoffKm}:${visibility}`;
+    let ok = this.routes.get(key);
+    if (ok === undefined) this.routes.set(key, (ok = this.route(from, node, standoffKm, visibility)));
+    return ok;
+  }
+
+  private readonly routes = new Map<string, boolean>();
+
+  private route(from: NodeId, node: NodeId, standoffKm: number, visibility: number): boolean {
+    const { map } = this.p.ctx;
+    const dist = map.distanceKm(from, node);
+    const leg = dist - standoffKm;
+    if (leg <= 0) return true;
+    const lat0 = map.lat[from], lon0 = map.lon[from];
+    const dLon = ((((map.lon[node] - lon0) % 360) + 540) % 360) - 180;
+    for (let km = ROUTE_SAMPLE_KM; km <= leg; km += ROUTE_SAMPLE_KM) {
+      const t = km / dist;
+      const at = map.nodeAt(lat0 + (map.lat[node] - lat0) * t, lon0 + dLon * t);
+      if (this.inside(at, visibility)) return false;
+    }
+    return true;
+  }
+
+  private readonly depth = new Map<string, boolean>();
+  private readonly release = new Map<string, boolean>();
+
+  private covered(node: NodeId, standoffKm: number, visibility: number): boolean {
+    const key = `${node}:${standoffKm}:${visibility}`;
+    let hit = this.release.get(key);
+    if (hit === undefined) {
+      hit = this.reaches(node, visibility, standoffKm + TOLERATED_DEPTH_KM);
+      this.release.set(key, hit);
+    }
+    return hit;
+  }
+
+  private inside(at: NodeId, visibility: number): boolean {
+    const key = `${at}:${visibility}`;
+    let hit = this.depth.get(key);
+    if (hit === undefined) {
+      const { map } = this.p.ctx;
+      const { world, enemies, nation } = this.p;
+      const rear = !map.isSea(at) && enemies.has(world.control[at]) && !this.battleArea.has(at) && world.theater.airControl[at]?.nation !== nation;
+      hit = (rear && visibility >= PENETRATOR_VISIBILITY) || this.reaches(at, visibility, TOLERATED_DEPTH_KM);
+      this.depth.set(key, hit);
+    }
+    return hit;
+  }
 }
 
 /** The munition with the best kill probability against `cls` that reaches `km`. */
 export function bestMunition(munitions: readonly Munition[], cls: TargetClass, km: number): MunitionId | undefined {
   let best: MunitionId | undefined, bestPk = 0;
   for (const m of munitions) {
-    const pk = m.rangeKm >= km ? (m.pk[cls] ?? 0) : 0;
+    const pk = m.rangeKm >= km ? effectPk(m, cls) : 0;
     if (pk > bestPk) { bestPk = pk; best = m.id; }
   }
   return best;

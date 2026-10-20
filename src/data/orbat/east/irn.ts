@@ -49,19 +49,25 @@ const ground: OrbatEntry[] = [
   div('Quds Base (IRGC Ground Force)', at('Zahedan IRGC', 29.45, 60.9), IRGC_DIV, IRGC),
 ];
 
-// IRGC Aerospace Force missile bases. Launchers are post-June-2025 survivors (estimate).
+// IRGC Aerospace Force missile bases. Pre-June-2025 estimates were roughly 2,000-3,000 ballistic
+// missiles and ~400 launchers (IISS Military Balance 2025; CSIS Missile Threat; IDF statements);
+// Israel reported destroying or disabling about two thirds of the launchers and Iran fired ~550
+// missiles. By 2027 Iran is assumed to have rebuilt to ~200 launchers (~130 MRBM, ~70 SRBM) and
+// ~2,000 ballistic missiles (~1,100 MRBM). Each type sits on its own TEL; split across bases is an
+// estimate (Yazd and the western bases were the main 2024-25 launch areas).
 const IRGC_ASF = { readiness: 0.5, experience: 0.55 };
 const missileBase = (name: string, base: Base, tels: Kit, reloads: Kit): OrbatEntry =>
   unit(IRN, name, 'missile', 'brigade', base, { ...tels, truck: 60 }, { ...IRGC_ASF, extraMagazine: reloads });
 const missiles: OrbatEntry[] = [
-  missileBase('Imam Ali Missile Base', at('Khorramabad missile base', 33.4, 48.3), { shahab_3_tel: 12, kheibar_shekan_tel: 6 }, { ghadr_110: 60, kheibar_shekan: 30 }),
-  missileBase('Kermanshah Missile Base', at('Panj Pelleh, Kermanshah', 34.4, 47.0), { shahab_3_tel: 6, fateh_110_tel: 10 }, { emad: 30, fateh_110: 80 }),
-  missileBase('Tabriz Missile Base', at('Tabriz missile base', 38.0, 46.4), { fateh_110_tel: 12, kheibar_shekan_tel: 4 }, { zolfaghar: 60, kheibar_shekan: 20 }),
-  missileBase('Shiraz Missile Base', at('Shiraz missile base', 29.65, 52.4), { kheibar_shekan_tel: 8, fateh_110_tel: 8 }, { kheibar_shekan: 40, fattah_1: 20, fateh_110: 60 }),
-  missileBase('Isfahan Missile Base', at('Isfahan missile base', 32.75, 51.85), { shahab_3_tel: 8, fateh_110_tel: 8 }, { emad: 40, fateh_110: 60 }),
-  missileBase('Haji Abad Missile Base', at('Haji Abad', 28.3, 55.9), { sejjil_tel: 6, khorramshahr_tel: 4, hoveyzeh_tel: 6 }, { sejjil: 24, khorramshahr: 12, hoveyzeh: 40 }),
-  missileBase('Semnan Missile Base', at('Semnan', 35.24, 53.92), { sejjil_tel: 4, khorramshahr_tel: 4 }, { sejjil: 16, khorramshahr: 12 }),
-  missileBase('Hormozgan Coastal Missile Brigade', at('Bandar Abbas coastal', 27.2, 56.1), { fateh_110_tel: 12, noor_asm_launcher: 30 }, { khalij_fars: 60 }),
+  missileBase('Imam Ali Missile Base', at('Khorramabad missile base', 33.4, 48.3), { shahab_3_tel: 12, kheibar_shekan_tel: 10 }, { ghadr_110: 100, kheibar_shekan: 90 }),
+  missileBase('Kermanshah Missile Base', at('Panj Pelleh, Kermanshah', 34.4, 47.0), { emad_tel: 12, fateh_110_tel: 12 }, { emad: 100, fateh_110: 120 }),
+  missileBase('Tabriz Missile Base', at('Tabriz missile base', 38.0, 46.4), { zolfaghar_tel: 14, kheibar_shekan_tel: 10 }, { zolfaghar: 120, kheibar_shekan: 80 }),
+  missileBase('Shiraz Missile Base', at('Shiraz missile base', 29.65, 52.4), { kheibar_shekan_tel: 8, fattah_tel: 10, fateh_110_tel: 10 }, { kheibar_shekan: 70, fattah_1: 60, fateh_110: 100 }),
+  missileBase('Isfahan Missile Base', at('Isfahan missile base', 32.75, 51.85), { shahab_3_tel: 10, emad_tel: 8, fateh_110_tel: 8 }, { ghadr_110: 90, emad: 60, fateh_110: 100 }),
+  missileBase('Yazd Missile Base', at('Yazd missile base', 31.9, 54.3), { shahab_3_tel: 8, emad_tel: 5, kheibar_shekan_tel: 7, fattah_tel: 8, zolfaghar_tel: 10 }, { ghadr_110: 50, emad: 40, kheibar_shekan: 50, fattah_1: 50, zolfaghar: 120 }),
+  missileBase('Haji Abad Missile Base', at('Haji Abad', 28.3, 55.9), { sejjil_tel: 6, khorramshahr_tel: 5, hoveyzeh_tel: 6 }, { sejjil: 50, khorramshahr: 40, hoveyzeh: 40 }),
+  missileBase('Semnan Missile Base', at('Semnan', 35.24, 53.92), { sejjil_tel: 6, khorramshahr_tel: 5 }, { sejjil: 40, khorramshahr: 30 }),
+  missileBase('Hormozgan Coastal Missile Brigade', at('Bandar Abbas coastal', 27.2, 56.1), { khalij_fars_tel: 12, fateh_110_tel: 6, noor_asm_launcher: 30 }, { khalij_fars: 100, fateh_110: 60 }),
 ];
 
 const drones: OrbatEntry[] = [
