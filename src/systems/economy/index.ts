@@ -1,10 +1,10 @@
 import type { SimContext, System } from '../../core/engine';
-import { relationMut } from '../../core/engine';
+import { atWar, relationMut } from '../../core/engine';
 import type { GameMap } from '../../core/map';
 import type { ItemId, MunitionId, Nation, NationId, PlatformId, World } from '../../core/types';
 import {
-  CATEGORIES, DEFAULT_SEABORNE_TRADE_SHARE, MIL_FUEL_TONS_PER_USD_M, SEABORNE_TRADE_SHARE, OIL_CONSUMPTION_MT, OIL_TONS_PER_PPP_USD_M, RATION_TONS_PER_DAY, RESOURCES, RESOURCE_SPECS, SHIPBUILDING_GT_PER_YEAR, SHIPYARD_WARSHIP_SHARE,
-  itemSpec, type ItemCategory, type Resource,
+  AID_FLOWS, CATEGORIES, DEFAULT_SEABORNE_TRADE_SHARE, ITEMS, MIL_FUEL_TONS_PER_USD_M, SEABORNE_TRADE_SHARE, OIL_CONSUMPTION_MT, OIL_TONS_PER_PPP_USD_M, RATION_TONS_PER_DAY, RESOURCES, RESOURCE_SPECS, SHIPBUILDING_GT_PER_YEAR, SHIPYARD_WARSHIP_SHARE,
+  itemSpec, type AidFlow, type ItemCategory, type Resource,
 } from '../../data/industry';
 import { newLine, newNationEconomy, stocksOf, type LineState, type NationEconomy } from './state';
 
@@ -335,6 +335,34 @@ function stepNation(world: World, ctx: SimContext, s: Scan, n: Nation, e: Nation
   n.reserves += graduates;
 }
 
+export const aidKey = (f: AidFlow) => `${f.donor}>${f.recipient}:${f.item}`;
+
+/** Ships each arms pipeline's monthly quota from the donor's stocks while the recipient fights a war the donor is not fighting against it. */
+function shipAid(world: World, dtMonths: number): void {
+  const state = world.slices.economy;
+  for (const flow of AID_FLOWS) {
+    const donor = world.nations[flow.donor as NationId], recipient = world.nations[flow.recipient as NationId];
+    if (!donor || !recipient || recipient.status !== 'war' || donor.status === 'capitulated' || donor.status === 'collapsed') continue;
+    if (atWar(world, donor.id, recipient.id)) continue;
+    const a = (state.aid[aidKey(flow)] ??= { carry: 0, delivered: 0 });
+    const due = (flow.perYear / 12) * dtMonths + a.carry;
+    const spec = ITEMS[flow.item];
+    const sink = spec.sink;
+    const have = sink.kind === 'bulk_ammo' ? Math.max(0, donor.bulk.ammo) / sink.tonsPerUnit : (donor.stockpile[spec.id] ?? 0);
+    const units = Math.min(Math.floor(due), Math.floor(have));
+    a.carry = Math.min(due - units, 1);
+    if (units <= 0) continue;
+    a.delivered += units;
+    if (sink.kind === 'bulk_ammo') {
+      donor.bulk.ammo = Math.max(0, donor.bulk.ammo - units * sink.tonsPerUnit);
+      recipient.bulk.ammo += units * sink.tonsPerUnit;
+    } else {
+      donor.stockpile[spec.id] = (donor.stockpile[spec.id] ?? 0) - units;
+      recipient.stockpile[spec.id] = (recipient.stockpile[spec.id] ?? 0) + units;
+    }
+  }
+}
+
 function report(world: World, ctx: SimContext): void {
   const state = world.slices.economy;
   if ((world.tick + 1 - state.lastReportTick) * world.dtHours < REPORT_HOURS) return;
@@ -375,7 +403,7 @@ export const economy: System = {
   commands: ['set_mobilization', 'produce', 'sanction'],
 
   init(world, ctx) {
-    world.slices.economy = { nations: {}, lastReportTick: world.tick };
+    world.slices.economy = { nations: {}, lastReportTick: world.tick, aid: {} };
     const integrity = industrialIntegrity(world, ctx.map);
     for (const n of Object.values(world.nations)) {
       const e = newNationEconomy(n);
@@ -406,6 +434,7 @@ export const economy: System = {
       const n = world.nations[id];
       if (n && n.status !== 'collapsed') stepNation(world, ctx, s, n, e, dtMonths);
     }
+    shipAid(world, dtMonths);
     report(world, ctx);
   },
 };

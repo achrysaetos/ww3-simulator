@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { ItemId, MunitionId, PlatformId } from '../src/core/types';
 import { createWorld } from '../src/core/world';
 import { loadCatalog } from '../src/data/catalog';
-import { ITEMS, LINES, initialStockpiles } from '../src/data/industry';
+import { AID_FLOWS, ITEMS, LINES, initialStockpiles } from '../src/data/industry';
 import { loadMap } from '../src/data/load';
 import { allOrbat } from '../src/data/orbat';
 import { ALIASES } from '../src/data/orbat/aliases';
@@ -37,6 +37,11 @@ describe('industry against the catalog and the orders of battle', () => {
         const key = `${nation}:${spec.id}`;
         if (spec.sink.kind === 'stockpile' && !fielded.has(key) && !NOT_FIELDED.has(key)) orphan.push(key);
       }
+    expect(orphan).toEqual([]);
+  });
+
+  it('ships aid only in items the recipient fields', () => {
+    const orphan = AID_FLOWS.filter((f) => ITEMS[f.item].sink.kind === 'stockpile' && !fielded.has(`${f.recipient}:${ITEMS[f.item].id}`)).map((f) => `${f.donor}>${f.recipient}:${f.item}`);
     expect(orphan).toEqual([]);
   });
 

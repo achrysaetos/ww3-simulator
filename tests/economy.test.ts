@@ -163,6 +163,34 @@ describe('economy: blockade by geography', () => {
   });
 });
 
+describe('economy: military aid', () => {
+  it('ships donor stocks to a nation at war, and stops when the donor fights the recipient or the war ends', () => {
+    const t = dailyWorld();
+    const UKR = id.nation('UKR'), PRK = id.nation('PRK');
+    const ukr = t.world.nations[UKR], us = t.world.nations[USA];
+    us.stockpile[id.munition('pac3_mse')] = 1_000;
+    us.bulk.ammo = 100_000;
+    t.days(30);
+    expect(ukr.stockpile[id.munition('pac3_mse')]).toBeUndefined();
+
+    t.war('RUS', 'UKR');
+    t.world.nations[PRK].bulk.ammo = 480_000;
+    const ammo0 = ukr.bulk.ammo, rus0 = t.world.nations[RUS].bulk.ammo;
+    t.days(360);
+    // ~100 PAC-3 a year from the US; ~2.5M North Korean shells a year (~150 kt) to Russia.
+    expect(ukr.stockpile[id.munition('pac3_mse')]).toBeGreaterThan(90);
+    expect(ukr.stockpile[id.munition('pac3_mse')]).toBeLessThan(110);
+    expect(ukr.bulk.ammo - ammo0).toBeGreaterThan(30_000);
+    expect(t.world.nations[RUS].bulk.ammo - rus0).toBeGreaterThan(100_000);
+    expect(t.world.slices.economy.aid['PRK>RUS:shell_152'].delivered).toBeGreaterThan(2_200_000);
+
+    const before = ukr.stockpile[id.munition('pac3_mse')];
+    t.war('USA', 'UKR');
+    t.days(60);
+    expect(ukr.stockpile[id.munition('pac3_mse')]).toBe(before);
+  });
+});
+
 describe('economy: sanctions', () => {
   const bloc = ['USA', 'JPN', 'KOR', 'TWN', 'DEU', 'NLD', 'GBR', 'FRA'];
 

@@ -52,9 +52,18 @@ export interface NationEconomy {
   fuelDelivered: number;
 }
 
+export interface AidState {
+  /** Fraction of a unit due but not yet shipped. */
+  carry: number;
+  /** Units shipped since the run began. */
+  delivered: number;
+}
+
 export interface EconomyState {
   nations: Record<NationId, NationEconomy>;
   lastReportTick: number;
+  /** Arms pipelines, keyed by aidKey(flow). */
+  aid: Record<string, AidState>;
 }
 
 declare module '../../core/types' {
