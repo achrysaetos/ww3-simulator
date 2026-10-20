@@ -29,7 +29,11 @@ export const alliances: Alliance[] = [
   {
     id: 'EU', name: 'European Union', members: EU, obligation: 'collective_defense', triggers: ['attack_on_territory'],
     // Art. 42(7) TEU obliges "aid and assistance by all the means in their power" but defers to NATO and to neutrals' policies.
-    commitment: 0.45, source: 'Treaty on European Union Art. 42(7); invoked once (France, Nov 2015)',
+    commitment: 0.45,
+    // The Irish clause: Art. 42(7) "shall not prejudice the specific character" of neutral members' policy,
+    // so the neutrals are covered without being bound to fight for others.
+    protectedOnly: ids('AUT CYP IRL MLT'),
+    source: 'Treaty on European Union Art. 42(7); invoked once (France, Nov 2015)',
   },
   {
     id: 'CSTO', name: 'Collective Security Treaty Organization', members: ids('RUS BLR KAZ KGZ TJK'),
