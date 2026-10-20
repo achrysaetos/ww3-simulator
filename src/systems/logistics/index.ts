@@ -4,7 +4,7 @@ import type { Formation, FormationId, MunitionId, NationId, NodeId, PlatformId, 
 import { Controllers } from './network';
 import { refreshNetworks, snapshotInputs, type InputSnapshot, type SupplyNetwork } from './refresh';
 import {
-  FOOD_TONS_PER_PERSON_DAY, IDLE_FUEL_HOURS_PER_DAY, INFRA_REPAIR_PER_DAY, MAX_REFILL_FRACTION_PER_DAY, NODE_TONS_PER_DAY,
+  FOOD_TONS_PER_PERSON_DAY, IDLE_FUEL_HOURS_PER_DAY, BEACH_CAPACITY, INFRA_REPAIR_PER_DAY, MAX_REFILL_FRACTION_PER_DAY, NODE_TONS_PER_DAY,
   REARM_PER_DAY, REARMS_IN_PORT_ONLY, SEALIFT_CLASSES, RECONSTITUTE_DAYS, RECONSTITUTE_MIN_STRENGTH, RECONSTITUTED_KINDS, REGENERATED_CLASSES,
   REPAIR_FRACTION_PER_DAY, REPLACE_FRACTION_PER_DAY, RESERVE_REPLACE_MULTIPLIER, SUPPLY_CLASSES, type SupplyClass,
 } from './tables';
@@ -126,13 +126,16 @@ function repairInfrastructure(world: World, ctx: SimContext, dtDays: number): vo
  * Baseline consumption, then resupply. Each formation asks for its deficit, capped by
  * what the chain can push in a tick and scaled by the supply factor at its node. A
  * cell's throughput is shared by everyone in it, and each nation's bulk stocks are
- * shared pro rata when they cannot cover all requests.
+ * shared pro rata when they cannot cover all requests. Forces ashore on an enemy
+ * coast also share one beach for the whole nation, BEACH_CAPACITY of a full cell
+ * scaled by surviving sealift, and their repair and replacement shrink with it.
  */
 function sustain(world: World, ctx: SimContext, s: LogisticsState, forces: Formation[], dtDays: number): void {
   const n = forces.length;
   const factor = new Float64Array(n);
   const want = new Float64Array(n * 3); // fuel, ammo, food per formation
   const nodeTons = new Map<number, number>(), nodeFactor = new Map<number, number>();
+  const ashore = new Uint8Array(n), beachTons = new Map<NationId, number>();
   // Hoisted: dev loaders (vitest, tsx) compile imported bindings to getters, which dominates this loop.
   const refill = MAX_REFILL_FRACTION_PER_DAY * dtDays, idleHours = IDLE_FUEL_HOURS_PER_DAY, food = FOOD_TONS_PER_PERSON_DAY * dtDays;
   const { networks, networkOf } = s;
@@ -143,6 +146,8 @@ function sustain(world: World, ctx: SimContext, s: LogisticsState, forces: Forma
     const net = networks[networkOf[f.nation]];
     const phi = (factor[i] = net ? forcesFactor(world, s, net, f.node, f.nation) : 0);
     if (phi <= 0) continue;
+    const holder = world.control[f.node];
+    ashore[i] = holder && atWar(world, f.nation, holder) ? 1 : 0;
     // Spelled out per class: keyed access by class name dominated this loop.
     const cap = f.supplyCapacity, have = f.supply, j = i * 3;
     const tons =
@@ -160,8 +165,25 @@ function sustain(world: World, ctx: SimContext, s: LogisticsState, forces: Forma
     const tons = nodeTons.get(f.node)!;
     if (tons <= 0) continue;
     const ration = Math.min(1, (NODE_TONS_PER_DAY * nodeFactor.get(f.node)! * dtDays) / tons);
+    for (let c = 0; c < 3; c++) want[i * 3 + c] *= ration;
+    if (ashore[i]) beachTons.set(f.nation, (beachTons.get(f.nation) ?? 0) + want[i * 3] + want[i * 3 + 1] + want[i * 3 + 2]);
+  }
+  const beachRation = new Map<NationId, number>();
+  for (const [id, tons] of beachTons) {
+    const lift = s.lift[id]!;
+    if (tons <= 0) continue;
+    beachRation.set(id, Math.min(1, (NODE_TONS_PER_DAY * BEACH_CAPACITY * (lift.now / lift.most) * dtDays) / tons));
+  }
+  for (let i = 0; i < n; i++) {
+    if (factor[i] <= 0) continue;
+    const f = forces[i];
+    if (ashore[i]) {
+      const r = beachRation.get(f.nation) ?? 1;
+      factor[i] *= r;
+      for (let c = 0; c < 3; c++) want[i * 3 + c] *= r;
+    }
     const req = nationWant.get(f.nation) ?? nationWant.set(f.nation, [0, 0, 0]).get(f.nation)!;
-    for (let c = 0; c < 3; c++) req[c] += want[i * 3 + c] *= ration;
+    for (let c = 0; c < 3; c++) req[c] += want[i * 3 + c];
   }
 
   const share = new Map<NationId, number[]>();

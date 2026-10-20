@@ -5,6 +5,7 @@ import { loadMap } from '../src/data/load';
 
 const MAP = loadMap();
 import { logistics, supplyFactor } from '../src/systems/logistics';
+import { BEACH_CAPACITY, NODE_TONS_PER_DAY } from '../src/systems/logistics/tables';
 
 const PLENTY = { fuel: 1e7, ammo: 1e7, food: 1e7 };
 const DAY = 4; // ticks at the default 6 h
@@ -100,6 +101,24 @@ describe('logistics', () => {
     for (const n of t.map.nodesWithin(zone, 600)) if (t.map.isSea(n)) t.world.theater.seaControl[n] = { nation: id.nation('TWN'), level: 1 };
     t.engine.run(t.world, 2 * DAY);
     expect(supplyFactor(t.world, beach, chn)).toBe(0);
+  });
+
+  it('lands no more over the beach than one beach can take, however many lodgements a nation holds', () => {
+    const t = setup();
+    t.war('CHN', 'TWN');
+    const cells = [t.nodeAt(23.5, 120.5), t.nodeAt(25, 121.5)];
+    expect(new Set(cells.map((n) => t.world.control[n]))).toEqual(new Set([id.nation('TWN')]));
+    const zone = [...t.map.neighbors(cells[0])].find((n) => t.map.isSea(n))!;
+    t.add({ nation: id.nation('CHN'), name: 'landing ships', kind: 'surface_group', echelon: 'squadron', node: zone, equipment: { [id.platform('t_lst')]: 10 } });
+    const ashore = cells.flatMap((n) => Array.from({ length: 100 }, () => t.brigade('CHN', n)));
+    t.engine.step(t.world);
+    for (const n of cells) expect(supplyFactor(t.world, n, id.nation('CHN'))).toBeGreaterThan(0);
+    for (const f of ashore) t.drain(f, 0);
+    t.engine.step(t.world);
+    const landed = ashore.reduce((a, f) => a + f.supply.fuel + f.supply.ammo + f.supply.food, 0);
+    const beach = (NODE_TONS_PER_DAY * BEACH_CAPACITY * t.world.dtHours) / 24;
+    expect(landed).toBeGreaterThan(0.9 * beach);
+    expect(landed).toBeLessThanOrEqual(beach * 1.001);
   });
 
   it('cuts an expeditionary force when the enemy takes the sea lanes', () => {
