@@ -1,9 +1,15 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { Engine } from '../src/core/engine';
 import { addFormation } from '../src/core/forces';
 import type { NationId, NodeId, SimEvent } from '../src/core/types';
 import { initialStockpiles } from '../src/data/industry';
 import { economicStress, economy } from '../src/systems/economy';
-import { id, testWorld } from '../src/testkit';
+import { createWorld } from '../src/core/world';
+import { loadMap } from '../src/data/load';
+import { id, testCatalog, testWorld } from '../src/testkit';
+
+// Several cases step the whole map daily for a simulated year; under a loaded machine they pass 5 s.
+vi.setConfig({ testTimeout: 30_000 });
 
 const USA = id.nation('USA'), RUS = id.nation('RUS'), JPN = id.nation('JPN'), DEU = id.nation('DEU');
 
@@ -93,19 +99,44 @@ describe('economy: industrial damage', () => {
     expect(after / before).toBeCloseTo(1 - share, 1);
     expect(after).toBeLessThan(before * 0.95);
   });
+
+  it('counts only territory lost after the start: baseline GDP already excludes what was occupied before', () => {
+    const map = loadMap();
+    const world = createWorld(map);
+    const UKR = id.nation('UKR');
+    const east = map.nodesOf(UKR).sort((a, b) => map.lon[b] - map.lon[a]);
+    const occupied = east.slice(0, Math.round(east.length * 0.2));
+    for (const n of occupied) world.control[n] = RUS;
+    const engine = new Engine(map, testCatalog(), [economy]);
+    engine.init(world);
+    engine.run(world, 40);
+    expect(world.slices.economy.nations[UKR].gdpIndex).toBeGreaterThan(0.99);
+
+    const next = east.slice(occupied.length, occupied.length + Math.round(east.length * 0.2));
+    const lost = next.reduce((s, n) => s + map.popShare[n], 0) / map.nodesOf(UKR).filter((n) => !occupied.includes(n)).reduce((s, n) => s + map.popShare[n], 0);
+    for (const n of next) world.control[n] = RUS;
+    engine.run(world, 4);
+    expect(world.slices.economy.nations[UKR].integrity).toBeCloseTo(1 - lost, 2);
+  });
 });
 
 describe('economy: blockade', () => {
-  it('starves import-dependent Japan of energy once its stocks run out, but barely touches the US', () => {
+  it('starves import-dependent Japan of energy in steps as LNG, coal and then oil stocks run out, but barely touches the US', () => {
     const t = dailyWorld();
     t.world.theater.tradeBlocked[JPN] = 0.8;
     t.world.theater.tradeBlocked[USA] = 0.8;
-    t.days(60);
-    // Strategic oil stocks (~4 months of net imports, est.) carry Japan through the first weeks.
+    t.days(7);
     expect(t.world.slices.economy.nations[JPN].supply.energy).toBe(1);
-    expect(t.shortages(JPN)).not.toContain('energy');
 
-    t.days(240);
+    // LNG (~3 weeks) and coal (~1 month) are gone; ~230 days of strategic oil still cover oil's share.
+    t.days(53);
+    const mid = t.world.slices.economy.nations[JPN].supply.energy;
+    expect(mid).toBeLessThan(0.8);
+    expect(mid).toBeGreaterThan(0.5);
+    expect(t.shortages(JPN)).toContain('energy');
+
+    // The oil reserve covers its share of a 70% shortfall for ~11 months.
+    t.days(340);
     const jp = t.world.slices.economy.nations[JPN], us = t.world.slices.economy.nations[USA];
     expect(t.shortages(JPN)).toEqual(expect.arrayContaining(['energy', 'food']));
     expect(jp.supply.energy).toBeLessThan(0.4);
@@ -117,6 +148,64 @@ describe('economy: blockade', () => {
     expect(us.supply.energy).toBe(1);
     expect(us.gdpIndex).toBeGreaterThan(0.9);
     expect(economicStress(t.world, USA)).toBeLessThan(0.1);
+  });
+});
+
+describe('economy: blockade by geography', () => {
+  it('cuts an island nation off far more than one trading over land', () => {
+    const t = dailyWorld();
+    t.world.theater.tradeBlocked[JPN] = 0.8;
+    t.world.theater.tradeBlocked[DEU] = 0.8;
+    t.days(2);
+    const jp = t.world.slices.economy.nations[JPN].tradeLoss, de = t.world.slices.economy.nations[DEU].tradeLoss;
+    expect(jp).toBeGreaterThan(0.75);
+    expect(de).toBeLessThan(0.5 * jp);
+  });
+});
+
+describe('economy: energy price', () => {
+  it('a Hormuz closure roughly doubles the world energy price, costing importers output and exporters none', () => {
+    const t = dailyWorld();
+    t.days(2);
+    expect(t.world.slices.economy.energyPrice).toBe(1);
+    for (const g of ['SAU', 'ARE', 'IRQ', 'KWT', 'QAT', 'IRN']) t.world.theater.tradeBlocked[id.nation(g)] = 0.9;
+    t.days(10);
+    const price = t.world.slices.economy.energyPrice;
+    // EIA/IEA closure scenarios: USD 150-200/bbl from ~USD 75.
+    expect(price).toBeGreaterThan(1.6);
+    expect(price).toBeLessThan(3);
+    const jp = t.world.slices.economy.nations[JPN];
+    expect(jp.supply.energy).toBe(1);
+    expect(jp.gdpIndex).toBeLessThan(0.99);
+    expect(t.world.slices.economy.nations[USA].gdpIndex).toBe(1);
+  });
+});
+
+describe('economy: military aid', () => {
+  it('ships donor stocks to a nation at war, and stops when the donor fights the recipient or the war ends', () => {
+    const t = dailyWorld();
+    const UKR = id.nation('UKR'), PRK = id.nation('PRK');
+    const ukr = t.world.nations[UKR], us = t.world.nations[USA];
+    us.stockpile[id.munition('pac3_mse')] = 1_000;
+    us.bulk.ammo = 100_000;
+    t.days(30);
+    expect(ukr.stockpile[id.munition('pac3_mse')]).toBeUndefined();
+
+    t.war('RUS', 'UKR');
+    t.world.nations[PRK].bulk.ammo = 480_000;
+    const ammo0 = ukr.bulk.ammo, rus0 = t.world.nations[RUS].bulk.ammo;
+    t.days(360);
+    // ~100 PAC-3 a year from the US; ~2.5M North Korean shells a year (~150 kt) to Russia.
+    expect(ukr.stockpile[id.munition('pac3_mse')]).toBeGreaterThan(90);
+    expect(ukr.stockpile[id.munition('pac3_mse')]).toBeLessThan(110);
+    expect(ukr.bulk.ammo - ammo0).toBeGreaterThan(30_000);
+    expect(t.world.nations[RUS].bulk.ammo - rus0).toBeGreaterThan(100_000);
+    expect(t.world.slices.economy.aid['PRK>RUS:shell_152'].delivered).toBeGreaterThan(2_200_000);
+
+    const before = ukr.stockpile[id.munition('pac3_mse')];
+    t.war('USA', 'UKR');
+    t.days(60);
+    expect(ukr.stockpile[id.munition('pac3_mse')]).toBe(before);
   });
 });
 
@@ -149,6 +238,27 @@ describe('economy: sanctions', () => {
     for (const s of bloc) t.world.pending.push({ type: 'sanction', nation: id.nation(s), target: RUS, on: false });
     t.days(2);
     expect(t.world.slices.economy.nations[RUS].supply.semiconductors).toBe(1);
+  });
+});
+
+describe('economy: military fuel', () => {
+  it('keeps an oil producer at war fuelled beyond its peacetime budget, without overfilling depots in peace', () => {
+    const t = dailyWorld();
+    t.world.pending.push({ type: 'set_mobilization', nation: RUS, level: 0.35 });
+    const rus = t.world.nations[RUS], de = t.world.nations[DEU];
+    // Russian forces in ukraine-2026 draw ~16-18k t/day; the defence budget buys ~4k t/day of it.
+    rus.bulk.fuel = 327_000;
+    let short = 0;
+    for (let d = 0; d < 120; d++) {
+      rus.bulk.fuel -= 17_000;
+      if (rus.bulk.fuel < 0) short++;
+      t.days(1);
+    }
+    expect(short).toBe(0);
+    expect(rus.bulk.fuel).toBeGreaterThan(100_000);
+
+    const depot = 6 * ((de.stats.milexUsd ?? 0) / 1e6) * 12 / 12;
+    expect(de.bulk.fuel).toBeLessThanOrEqual(depot * 1.001);
   });
 });
 

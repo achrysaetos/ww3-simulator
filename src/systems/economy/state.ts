@@ -1,5 +1,5 @@
 import type { ItemId, Nation, NationId } from '../../core/types';
-import { CATEGORIES, GENERIC_AMMO_SURGE_MULTIPLE, GENERIC_AMMO_TONS_PER_MFG_USD_B, ITEMS, LINES, RESOURCES, RESOURCE_SPECS, type Resource } from '../../data/industry';
+import { CATEGORIES, GENERIC_AMMO_SURGE_MULTIPLE, GENERIC_AMMO_TONS_PER_MFG_USD_B, ITEMS, LINES, RESOURCES, RESOURCE_SPECS, type Resource, type Stock } from '../../data/industry';
 
 export interface LineState {
   item: ItemId;
@@ -20,12 +20,18 @@ export interface NationEconomy {
   /** Level set by `set_mobilization`; null holds `nation.mobilization` where it is. */
   mobilizationTarget: number | null;
   lines: Record<ItemId, LineState>;
-  /** Months of national stocks left per resource. */
-  buffers: Record<Resource, number>;
+  /** Months of national stocks left per resource, one entry per stock in `stocksOf`. */
+  buffers: Record<Resource, number[]>;
   /** Share of need actually available this tick after drawing on stocks, 0..1. */
   supply: Record<Resource, number>;
-  /** Share of the nation's population-weighted industry that is intact and still held, 0..1. */
+  /**
+   * Population-weighted industry intact and held, relative to the scenario start. The
+   * baseline GDP in stats already excludes what was occupied or ruined before the start
+   * (Ukraine's 2024 GDP is net of the occupied east), so only later change counts.
+   */
   integrity: number;
+  /** Absolute intact-and-held share at the scenario start, 0..1. */
+  baseIntegrity: number;
   /** Share of foreign trade lost to blockade, sanctions, and war, 0..1. */
   tradeLoss: number;
   /** Output relative to the baseline GDP in stats. */
@@ -38,11 +44,28 @@ export interface NationEconomy {
   short: Resource[];
   /** Units delivered since the last monthly production report. */
   produced: Record<ItemId, number>;
+  /** Units delivered since the run began; never reset, for measurement. */
+  delivered: Record<ItemId, number>;
+  /** People called up since the run began. */
+  recruited: number;
+  /** Bulk fuel delivered to national depots since the run began, tons. */
+  fuelDelivered: number;
+}
+
+export interface AidState {
+  /** Fraction of a unit due but not yet shipped. */
+  carry: number;
+  /** Units shipped since the run began. */
+  delivered: number;
 }
 
 export interface EconomyState {
   nations: Record<NationId, NationEconomy>;
   lastReportTick: number;
+  /** Arms pipelines, keyed by aidKey(flow). */
+  aid: Record<string, AidState>;
+  /** World energy price relative to the start, from export capacity lost to blockade and war damage. */
+  energyPrice: number;
 }
 
 declare module '../../core/types' {
@@ -53,9 +76,9 @@ declare module '../../core/types' {
 
 const perResource = (f: (r: Resource) => number) => Object.fromEntries(RESOURCES.map((r) => [r, f(r)])) as Record<Resource, number>;
 
-export function bufferMonths(nation: NationId, r: Resource): number {
+export function stocksOf(nation: NationId, r: Resource): Stock[] {
   const spec = RESOURCE_SPECS[r];
-  return spec.buffers?.[nation] ?? spec.bufferMonths;
+  return spec.tiered?.[nation] ?? [{ share: 1, months: spec.buffers?.[nation] ?? spec.bufferMonths }];
 }
 
 export function newLine(item: ItemId, baselinePerYear: number, surgePerYear: number, rampMonths: number, maxTotal?: number): LineState {
@@ -84,14 +107,18 @@ export function newNationEconomy(nation: Nation): NationEconomy {
   return {
     mobilizationTarget: null,
     lines,
-    buffers: perResource((r) => bufferMonths(nation.id, r)),
+    buffers: Object.fromEntries(RESOURCES.map((r) => [r, stocksOf(nation.id, r).map((s) => s.months)])) as Record<Resource, number[]>,
     supply: perResource(() => 1),
     integrity: 1,
+    baseIntegrity: 1,
     tradeLoss: 0,
     gdpIndex: 1,
     deficitPctGdp: 0,
     inTraining: 0,
     short: [],
     produced: {},
+    delivered: {},
+    recruited: 0,
+    fuelDelivered: 0,
   };
 }

@@ -8,6 +8,53 @@ export const STEEL_OUTPUT_MT: Record<string, number> = {
 };
 const STEEL_WORLD_MT = 1_885;
 
+/**
+ * Oil products consumed per year, Mt (Energy Institute Statistical Review 2024, 2023
+ * data, kb/d x 0.05). Nations not listed use OIL_TONS_PER_PPP_USD_M.
+ */
+export const OIL_CONSUMPTION_MT: Record<string, number> = {
+  USA: 1_010, CHN: 830, IND: 270, SAU: 200, RUS: 185, JPN: 165, KOR: 140, BRA: 160, CAN: 120, DEU: 100, IRN: 100, MEX: 90,
+  FRA: 75, GBR: 70, TWN: 50, ITA: 60, ESP: 63, TUR: 50, POL: 35, ISR: 12, UKR: 10, PRK: 1,
+};
+/** World oil use (~4.5 Gt) over world GDP at PPP (~USD 185T), tons per year per USD 1M (est.). */
+export const OIL_TONS_PER_PPP_USD_M = 25;
+
+/**
+ * Share of a nation's foreign trade that moves by sea, so a naval blockade
+ * (`theater.tradeBlocked`, a share of seaborne trade) cannot touch the rest. About 80%
+ * of world trade by volume goes by sea (UNCTAD Review of Maritime Transport 2024); the
+ * overrides are estimates from land borders, pipelines and rail links.
+ */
+export const SEABORNE_TRADE_SHARE: Record<string, number> = {
+  JPN: 0.99, TWN: 0.99, KOR: 0.99, AUS: 0.99, NZL: 0.99, PHL: 0.99, IDN: 0.97, ISR: 0.95, IND: 0.95, GBR: 0.85,
+  // Ukraine moved ~60% of 2024 exports through its Black Sea ports, the rest by rail, road and the Danube.
+  UKR: 0.6,
+  // Russia: pipelines and rail to China, Central Asia and Belarus.
+  RUS: 0.6,
+  CHN: 0.85, IRN: 0.85, SAU: 0.9,
+  // Land trade inside the EU single market and across North America.
+  USA: 0.7, CAN: 0.3, MEX: 0.3, DEU: 0.4, FRA: 0.5, POL: 0.4, ITA: 0.6, ESP: 0.6, NLD: 0.6,
+};
+export const DEFAULT_SEABORNE_TRADE_SHARE = 0.8;
+
+/** One national stock of an import stream: its share of the resource's imports and the months of those imports it holds. */
+export interface Stock {
+  share: number;
+  months: number;
+}
+
+/**
+ * Energy imports split by fuel, each with its own reserve. LNG runs out in weeks while
+ * strategic oil lasts months, so a blockade bites in steps, not at one cliff.
+ */
+const energy = (oil: [number, number], coal: [number, number], gas: [number, number]): Stock[] => [
+  { share: oil[0], months: oil[1] },
+  { share: coal[0], months: coal[1] },
+  { share: gas[0], months: gas[1] },
+];
+// IEA members hold 90 days of net oil imports; the EU gas-storage rule fills ~2-3 months of winter use.
+const iea = energy([0.55, 3], [0.1, 1], [0.35, 2.5]);
+
 export interface ResourceSpec {
   /**
    * Share of world exports (or processing) by supplier. 'other' stands for the
@@ -21,6 +68,8 @@ export interface ResourceSpec {
   /** Months of national stocks held against an import cut, and per-nation overrides. */
   bufferMonths: number;
   buffers?: Record<string, number>;
+  /** Per-nation stocks split by import stream, replacing the single buffer. Shares sum to 1. */
+  tiered?: Record<string, Stock[]>;
 }
 
 const fromRest = (shares: Record<string, number>): Record<string, number> => {
@@ -38,7 +87,24 @@ export const RESOURCE_SPECS: Record<Resource, ResourceSpec> = {
     // IEA members hold >= 90 days of net oil imports. Months below weight oil stocks
     // by oil's share of imports; LNG and coal hold only weeks (est.).
     bufferMonths: 1,
-    buffers: { JPN: 4, KOR: 3.5, TWN: 1.5, DEU: 3, FRA: 3, ITA: 3, ESP: 3, GBR: 2, POL: 3, NLD: 3, CHN: 3, IND: 1.5, USA: 3 },
+    buffers: { USA: 3 },
+    // [import share, months held] for oil, coal, gas. Import shares by fuel from the Energy Institute
+    // Statistical Review 2024 (est.); reserves as cited.
+    tiered: {
+      // METI: ~230 days of oil (state + private); LNG ~2-3 weeks; coal ~1 month.
+      JPN: energy([0.45, 7.5], [0.28, 1], [0.27, 0.6]),
+      // KNOC: ~200 days of oil; KOGAS LNG ~9 days on hand plus storage.
+      KOR: energy([0.5, 6.5], [0.27, 1], [0.23, 0.4]),
+      // Taiwan: ~90+ days of oil (Petroleum Administration Act), coal ~36 days, LNG ~11 days (CPC/Taipower).
+      TWN: energy([0.45, 3.5], [0.32, 1.2], [0.23, 0.37]),
+      // China: SPR and commercial crude ~90-120 days (est.); gas storage ~1 month.
+      CHN: energy([0.7, 3.5], [0.1, 1], [0.2, 1]),
+      // India: SPR ~9.5 days plus ~65 days of refinery and product stocks (PPAC).
+      IND: energy([0.65, 2.5], [0.25, 1], [0.1, 0.3]),
+      // UK: ~60 days of oil, almost no gas storage since Rough closed in 2017.
+      GBR: energy([0.55, 2], [0.05, 1], [0.4, 0.3]),
+      DEU: iea, FRA: iea, ITA: iea, ESP: iea, POL: iea, NLD: iea,
+    },
   },
   food: {
     market: fromRest({ USA: 0.1, BRA: 0.1, ARG: 0.04, NLD: 0.05, CAN: 0.04, AUS: 0.04, UKR: 0.03, RUS: 0.04, FRA: 0.04, IND: 0.04, THA: 0.03, IDN: 0.03 }),

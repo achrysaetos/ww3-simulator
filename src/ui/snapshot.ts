@@ -403,7 +403,7 @@ export class SnapshotEncoder {
       economy: eco
         ? {
             gdpIndex: eco.gdpIndex, deficitPctGdp: eco.deficitPctGdp, integrity: eco.integrity, tradeLoss: eco.tradeLoss, inTraining: eco.inTraining,
-            buffers: eco.buffers, supply: eco.supply, short: eco.short,
+            buffers: Object.fromEntries(Object.entries(eco.buffers).map(([r, tiers]) => [r, tiers.reduce((a, m) => a + m, 0)])), supply: eco.supply, short: eco.short,
             lines: Object.values(eco.lines).map((l) => ({ item: l.item, perMonth: l.capacityPerMonth, built: l.built })).sort((a, b) => b.perMonth - a.perMonth).slice(0, 12),
           }
         : null,
