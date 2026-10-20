@@ -174,7 +174,8 @@ function maritimeFocus(p: Plan, assault: Assault | undefined): NodeId {
   let best: NodeId | undefined, bestScore = 0;
   for (const e of p.enemies)
     for (const f of p.index.byNation.get(e) ?? []) {
-      if (f.kind !== 'surface_group') continue;
+      // Boats ashore in a port cell (shore-launched USVs) are struck from the air, not hunted at sea.
+      if (f.kind !== 'surface_group' || !map.isSea(f.node)) continue;
       let value = 0;
       for (const [pid, n] of Object.entries(f.equipment)) value += n * p.ctx.catalog.platform(pid as PlatformId).unitCostUsdM;
       let d = Infinity;
