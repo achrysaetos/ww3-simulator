@@ -3,6 +3,7 @@ import type { Formation, FormationKind, NationId, NodeId, Posture, TargetClass }
 import type { SimClient } from './client';
 import type { Palette } from './colors';
 import type { PlaceNamer } from './events';
+import type { FormationDetail } from './snapshot';
 import { Bar, Section, Stat, fmtNum } from './widgets';
 
 /** Which postures make sense for each formation kind, in button order. */
@@ -35,9 +36,11 @@ interface Props {
 }
 
 export function FormationPanel({ client, palette, places, playAs, pending, onPickPosture, onImmediate, onClose, onFocus }: Props) {
-  const f: Formation | undefined = client.state.focusFormation;
+  const detail = client.state.focusFormation;
   const [tc, setTc] = useState<TargetClass>('structure');
-  if (!f) return <div className="panel-scroll"><p className="muted">Loading formation…</p></div>;
+  if (!detail) return <div className="panel-scroll"><p className="muted">Loading formation…</p></div>;
+  const f = detail.formation;
+  const report = latestReport(client, f);
   const meta = client.meta;
   const own = f.nation === playAs;
   const nation = client.state.nations.get(f.nation);
@@ -58,6 +61,8 @@ export function FormationPanel({ client, palette, places, playAs, pending, onPic
       </div>
 
       <Section title="Situation">
+        <p className="activity" data-testid="activity">{activity(detail, (n) => places.name(n), (id) => client.state.nations.get(id)?.name ?? id)}</p>
+        {report && <p className="tt-warn small" data-testid="report">Latest report: {report}</p>}
         <div className="stat-grid">
           <Stat label="Location"><a onClick={() => onFocus(f.node)}>{places.name(f.node)}</a></Stat>
           <Stat label="Order">{f.order.posture.replace(/_/g, ' ')}{f.order.target !== undefined ? ` → ${places.name(f.order.target)}` : ''}</Stat>
@@ -75,12 +80,14 @@ export function FormationPanel({ client, palette, places, playAs, pending, onPic
       </Section>
 
       <Section title="Supply">
+        {detail.supplyFlow !== null && <Bar label="Supply line throughput here" value={detail.supplyFlow} tone="auto" />}
+        {detail.isolatedDays > 0 && <p className="tt-warn">Cut off from friendly supply for {detail.isolatedDays.toFixed(1)} days.</p>}
         <Bar label="Fuel" value={frac('fuel')} tone="auto" detail={`${fmtNum(f.supply.fuel)} / ${fmtNum(f.supplyCapacity.fuel)} t`} />
         <Bar label="Ammunition" value={frac('ammo')} tone="auto" detail={`${fmtNum(f.supply.ammo)} / ${fmtNum(f.supplyCapacity.ammo)} t`} />
         <Bar label="Food" value={frac('food')} tone="auto" detail={`${fmtNum(f.supply.food)} / ${fmtNum(f.supplyCapacity.food)} t`} />
       </Section>
 
-      <Section title="Equipment">
+      <Section title={`Equipment · ${fmtNum(Object.values(f.equipment).reduce((a, b) => a + b, 0))} platforms`}>
         <table className="tbl">
           <thead><tr><th>Platform</th><th>Class</th><th className="num">Ready</th><th className="num">Repair</th></tr></thead>
           <tbody>
@@ -94,8 +101,11 @@ export function FormationPanel({ client, palette, places, playAs, pending, onPic
             ))}
           </tbody>
         </table>
-        {magazine.length > 0 && (
-          <table className="tbl">
+      </Section>
+
+      <Section title="Magazines">
+        {magazine.length > 0 ? (
+          <table className="tbl" data-testid="magazine">
             <thead><tr><th>Munition</th><th>Kind</th><th className="num">Held</th></tr></thead>
             <tbody>
               {magazine.map(([id, v]) => (
@@ -103,7 +113,7 @@ export function FormationPanel({ client, palette, places, playAs, pending, onPic
               ))}
             </tbody>
           </table>
-        )}
+        ) : <p className="muted">No guided munitions held; fights with bulk ammunition only.</p>}
       </Section>
 
       {own && f.status !== 'destroyed' ? (
@@ -135,6 +145,44 @@ export function FormationPanel({ client, palette, places, playAs, pending, onPic
       )}
     </div>
   );
+}
+
+/** Systems report refused or failed orders as messages prefixed with the formation's name. */
+function latestReport(client: SimClient, f: Formation): string | null {
+  const prefix = `${f.name}: `;
+  for (let i = client.log.length - 1; i >= 0; i--) {
+    const e = client.log[i].event;
+    if (e.type === 'message' && e.nation === f.nation && e.text.startsWith(prefix)) return e.text.slice(prefix.length);
+  }
+  return null;
+}
+
+const DOING: Record<Posture, (target: string) => string> = {
+  reserve: () => 'Regenerating in reserve at home base',
+  defend: (t) => `Holding ${t}`,
+  attack: (t) => `Attacking toward ${t}`,
+  move: (t) => `Moving to ${t}`,
+  strike: (t) => `Striking ${t}`,
+  air_superiority: (t) => `Flying counter-air over ${t}`,
+  patrol: (t) => `Patrolling ${t}`,
+  blockade: (t) => `Blockading ${t}`,
+  escort: (t) => `Escorting near ${t}`,
+  embark: () => 'Embarking on sealift',
+};
+
+/** One line on what the unit is doing now and what is happening to it. */
+export function activity(d: FormationDetail, place: (n: NodeId) => string, nationName: (id: NationId) => string): string {
+  const f = d.formation;
+  if (f.status === 'destroyed') return 'Destroyed.';
+  if (f.status === 'embarked') return `Embarked${f.embarkedOn ? ` on ${f.embarkedOn}` : ''}, at sea.`;
+  const parts = [DOING[f.order.posture](place(f.order.target ?? f.node))];
+  if (f.order.targetClass && f.order.posture === 'strike') parts[0] += ` (${f.order.targetClass} targets)`;
+  if (f.order.path?.length) parts.push(`${f.order.path.length} cells to go`);
+  if (f.status === 'routed') parts.push('routed and falling back');
+  if (d.engaged) parts.push('in contact with the enemy');
+  if (f.order.posture === 'defend' && f.entrenchment > 0.05) parts.push(`${Math.round(f.entrenchment * 100)}% dug in`);
+  if (d.trackedBy.length) parts.push(`tracked by ${d.trackedBy.map(nationName).join(', ')}`);
+  return `${parts.join('; ')}.`;
 }
 
 export function FormationList({ client, palette, places, playAs, onSelect }: { client: SimClient; palette: Palette; places: PlaceNamer; playAs: NationId; onSelect(f: Formation['id'], node: NodeId): void }) {

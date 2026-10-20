@@ -4,7 +4,7 @@ import { App } from './App';
 import { SimClient } from './client';
 import './styles.css';
 
-const client = new SimClient(new URLSearchParams(location.search).get('scenario') ?? 'demo');
+const client = new SimClient();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
