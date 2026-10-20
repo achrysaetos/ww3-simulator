@@ -57,6 +57,10 @@ const fixedWing: PlatformSpec<Key>[] = [
   { id: 'ia58_pucara', name: 'FMA IA-58 Pucara', cls: 'attack_aircraft', crew: 2, producers: [], inService: 1975, unitCostUsdM: 3, speedKph: 430, rangeKm: 350, fuelTph: 0.35, armor: 0.2, detectionKm: 5, q: 0.3, load: { hydra70: 19, mk82: 2 } },
   { id: 'ia63_pampa', name: 'FMA IA-63 Pampa III', cls: 'attack_aircraft', producers: ['ARG'], inService: 1988, unitCostUsdM: 10, speedKph: 650, rangeKm: 350, fuelTph: 0.8, detectionKm: 5, q: 0.2, load: { mk82: 2 } },
   { id: 'pc7', name: 'Pilatus PC-7 (armed)', cls: 'attack_aircraft', producers: [], inService: 1978, unitCostUsdM: 3, speedKph: 400, rangeKm: 350, fuelTph: 0.15, armor: 0.1, detectionKm: 5, q: 0.1, load: { hydra70: 14 } },
+  // Harrier II Plus (USMC, Spanish Navy): APG-65 radar, AMRAAM-capable.
+  { id: 'av8b', name: 'AV-8B Harrier II Plus', cls: 'attack_aircraft', producers: [], inService: 1993, unitCostUsdM: 30, speedKph: 850, rangeKm: 450, fuelTph: 2.5, armor: 0.15, detectionKm: 100, q: 0.9, load: { aim120c: 2, gbu12: 4 } },
+  // Mirage 2000D RMV: two-seat strike variant without the -5's air-intercept radar.
+  { id: 'mirage2000d', name: 'Mirage 2000D RMV', cls: 'attack_aircraft', crew: 2, producers: [], inService: 1993, unitCostUsdM: 40, speedKph: 850, rangeKm: 700, fuelTph: 3, armor: 0.15, detectionKm: 60, q: 0.95, load: { gbu12: 4, mica_ng: 2 } },
 ];
 
 const support: PlatformSpec<Key>[] = [
@@ -105,6 +109,10 @@ const helicopters: PlatformSpec<Key>[] = [
   { id: 'super_lynx', name: 'Super Lynx Mk 99/300', cls: 'asw_helo', crew: 2, producers: ['GBR'], inService: 1990, unitCostUsdM: 20, speedKph: 240, rangeKm: 300, detectionKm: 25, q: 0.8, load: { mk54: 2 } },
   { id: 'sea_king', name: 'Westland Sea King Mk45', cls: 'asw_helo', crew: 4, producers: [], inService: 1975, unitCostUsdM: 10, speedKph: 200, rangeKm: 350, fuelTph: 0.6, detectionKm: 25, q: 0.6, load: { mk54: 2 } },
   { id: 's70b', name: 'S-70B Seahawk', cls: 'asw_helo', producers: ['USA'], inService: 2012, unitCostUsdM: 30, speedKph: 260, rangeKm: 400, detectionKm: 35, q: 1.0, load: { mk54: 2, hellfire: 4 } },
+  { id: 'a129', name: 'A129 Mangusta', cls: 'attack_helo', crew: 2, producers: [], inService: 1990, unitCostUsdM: 15, speedKph: 250, rangeKm: 250, fuelTph: 0.3, armor: 0.2, detectionKm: 10, q: 0.75, load: { tow2b: 8 } },
+  // Max external hook load: CH-53E 32,000 lb, CH-53K 36,000 lb (NAVAIR); CH-53K ~$120M flyaway (GAO, estimate).
+  { id: 'ch53e', name: 'CH-53E Super Stallion', cls: 'transport_helo', crew: 4, producers: [], inService: 1981, unitCostUsdM: 35, speedKph: 280, rangeKm: 500, fuelTph: 1.5, capacity: { troops: 37, cargoTons: 14.5 } },
+  { id: 'ch53k', name: 'CH-53K King Stallion', cls: 'transport_helo', crew: 4, producers: ['USA'], inService: 2022, unitCostUsdM: 120, speedKph: 290, rangeKm: 500, fuelTph: 1.6, capacity: { troops: 30, cargoTons: 16.3 } },
 ];
 
 export const platforms = [...fixedWing, ...support, ...drones, ...helicopters].map(toPlatform);

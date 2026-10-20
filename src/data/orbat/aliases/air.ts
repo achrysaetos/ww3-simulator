@@ -56,4 +56,23 @@ export const aliases: Record<string, string> = {
   as365: 'z9', hm1_pantera: 'z9', hm4_jaguar: 'h225m',
   z18: 'z8', nh90: 'nh90_tth', v22: 'mv22b',
   ch47j: 'ch47f', ch47d: 'ch47f', ch47sd: 'ch47f',
+  // Western order of battle (src/data/orbat/west).
+  fa18ef: 'f18e', fa18cd: 'f18c', cf18: 'f18c',
+  // EF-18M: Spanish Hornet MLU to C/D standard (AMRAAM, IRIS-T).
+  ef18m: 'f18c',
+  f16_blk70: 'f16v',
+  rafale_c: 'rafale', rafale_b: 'rafale', rafale_m: 'rafale',
+  tornado_ecr: 'tornado_ids',
+  mq9a: 'mq9', rq4: 'rq4b', rc135: 'rc135v', e3f: 'e3g',
+  // EC-130H carries the Compass Call mission system the EC-37B rehosts.
+  ec130h: 'ec37b',
+  // CP-140 Aurora is a P-3 airframe with S-3 Viking mission avionics.
+  cp140: 'p3c',
+  merlin: 'aw101',
+  cv22b: 'mv22b', cmv22b: 'mv22b',
+  hh60m: 'uh60m', hh60w: 'uh60m',
+  // MH-60S and UH-1Y are utility lifters within ~10% of the UH-60M's troop and cargo capacity.
+  mh60s: 'uh60m', uh1y: 'uh60m',
+  // munitions
+  agm86b_alcm: 'agm86b', asmp_a: 'asmpa',
 };

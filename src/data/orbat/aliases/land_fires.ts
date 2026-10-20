@@ -115,4 +115,35 @@ export const aliases: Record<string, string> = {
   ghadr_110: 'shahab3',
   hoveyzeh: 'soumar',
   fattah_1: 'fattah1',
+  // Western order of battle (src/data/orbat/west).
+  m777a2: 'm777',
+  m119a3: 'm119',
+  l118: 'm119',
+  m110a2: 'm110',
+  // 2S7 Pion: the 2S7M row's gun and shell; the M adds rate of fire and fire control.
+  '2s7': '2s7m',
+  m142_himars: 'himars',
+  m270a1: 'm270',
+  // MARS II and LRU are M270s rebuilt to fire GMLRS, the M270A2 row's load.
+  mars2: 'm270a2',
+  lru: 'm270a2',
+  trg300_kasirga: 't300_kasirga',
+  // WR-40 Langusta: Polish BM-21 rocket pack on a Jelcz truck.
+  wr40_langusta: 'bm21',
+  // tochka_u is also a munition id; the ORBATs use it only as equipment.
+  tochka_u: 'tochka_tel',
+  bora_launcher: 'bora_tel',
+  typhon_launcher: 'typhon',
+  gmd_interceptor_silo: 'gmd_gbi',
+  camm_launcher: 'sky_sabre',
+  nsm_coastal: 'nsm_cds',
+  neptune_launcher: 'neptune_tel',
+  stryker_atgm: 'm1134_atgm',
+  stryker_shorad: 'm_shorad',
+  skyranger: 'skynex',
+  humvee_tow: 'tow_hmmwv',
+  // munitions
+  thaad_interceptor: 'thaad_int',
+  pac2_gem_t: 'pac2_gemt',
+  prsm_inc1: 'prsm',
 };
