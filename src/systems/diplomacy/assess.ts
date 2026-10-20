@@ -1,0 +1,80 @@
+import type { GameMap } from '../../core/map';
+import { relationKey } from '../../core/engine';
+import type { NationId, World } from '../../core/types';
+import type { Assessment } from './types';
+
+/** Who is at war with whom, from one pass over relations. */
+export function enemyMap(world: World): Map<NationId, Set<NationId>> {
+  const out = new Map<NationId, Set<NationId>>();
+  for (const [k, r] of Object.entries(world.relations)) {
+    if (!r.atWar) continue;
+    const [a, b] = k.split('|') as NationId[];
+    (out.get(a) ?? out.set(a, new Set()).get(a)!).add(b);
+    (out.get(b) ?? out.set(b, new Set()).get(b)!).add(a);
+  }
+  return out;
+}
+
+const homelandCells = new WeakMap<GameMap, Map<NationId, number>>();
+
+function cellsPerNation(map: GameMap): Map<NationId, number> {
+  let m = homelandCells.get(map);
+  if (!m) {
+    m = new Map();
+    for (let n = 0; n < map.landCount; n++) m.set(map.owner[n], (m.get(map.owner[n]) ?? 0) + 1);
+    homelandCells.set(map, m);
+  }
+  return m;
+}
+
+export interface Situation {
+  nations: Record<NationId, Assessment>;
+  /** Homeland population share each warring dyad holds of the other's, summed over both directions, per relationKey. */
+  lostTo: Map<string, number>;
+}
+
+/**
+ * Territorial situation of every nation that has lost ground or is at war:
+ * one pass over land cells, plus a two-ring check around each capital at war.
+ */
+export function assess(world: World, map: GameMap, enemies: Map<NationId, Set<NationId>>): Situation {
+  const out: Record<NationId, Assessment> = {};
+  const lostTo = new Map<string, number>();
+  const get = (n: NationId) => (out[n] ??= { areaLost: 0, popLost: 0, capitalLost: false, capitalThreatened: false });
+  for (let n = 0; n < map.landCount; n++) {
+    const owner = map.owner[n];
+    if (world.control[n] === owner) continue;
+    const a = get(owner);
+    a.areaLost++;
+    a.popLost += map.popShare[n];
+    const holder = world.control[n];
+    if (enemies.get(owner)?.has(holder)) {
+      const k = relationKey(owner, holder);
+      lostTo.set(k, (lostTo.get(k) ?? 0) + map.popShare[n]);
+    }
+  }
+  const cells = cellsPerNation(map);
+  for (const [n, a] of Object.entries(out) as [NationId, Assessment][]) a.areaLost /= cells.get(n) ?? 1;
+
+  if (!enemies.size) return { nations: out, lostTo };
+  const groundAt = new Map<number, NationId[]>();
+  for (const f of Object.values(world.formations)) {
+    if (f.status !== 'active' || (f.kind !== 'maneuver' && f.kind !== 'artillery')) continue;
+    (groundAt.get(f.node) ?? groundAt.set(f.node, []).get(f.node)!).push(f.nation);
+  }
+  for (const [n, foes] of enemies) {
+    const nation = world.nations[n];
+    if (!nation) continue;
+    const a = get(n);
+    const cap = nation.capital;
+    a.capitalLost = world.control[cap] !== n;
+    const hostile = (node: number) => foes.has(world.control[node]) || (groundAt.get(node)?.some((g) => foes.has(g)) ?? false);
+    a.capitalThreatened = a.capitalLost || hostile(cap);
+    for (let k = map.adjStart[cap]; k < map.adjStart[cap + 1] && !a.capitalThreatened; k++) {
+      const m = map.adj[k];
+      if (hostile(m)) a.capitalThreatened = true;
+      for (let j = map.adjStart[m]; j < map.adjStart[m + 1] && !a.capitalThreatened; j++) if (hostile(map.adj[j])) a.capitalThreatened = true;
+    }
+  }
+  return { nations: out, lostTo };
+}
