@@ -6,17 +6,18 @@
 import { Catalog } from '../../core/catalog';
 import type { Munition, Platform } from '../../core/types';
 import { airPlatforms } from './air';
+import { extraMunitions, extraPlatforms } from './extra';
 import { landPlatforms } from './land';
-import { munitions } from './munitions';
+import { munitions as baseMunitions } from './munitions';
 import { navalPlatforms } from './naval';
 import { spacePlatforms } from './space';
 import { strategicPlatforms } from './strategic';
 import { subsurfacePlatforms } from './subsurface';
 
 export type { MunitionKey } from './munitions';
-export { munitions };
+export const munitions: Munition[] = [...baseMunitions, ...extraMunitions];
 
-export const platforms: Platform[] = [...landPlatforms, ...strategicPlatforms, ...airPlatforms, ...navalPlatforms, ...subsurfacePlatforms, ...spacePlatforms];
+export const platforms: Platform[] = [...landPlatforms, ...strategicPlatforms, ...airPlatforms, ...navalPlatforms, ...subsurfacePlatforms, ...spacePlatforms, ...extraPlatforms];
 
 let cached: Catalog | undefined;
 
