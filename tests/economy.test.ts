@@ -294,6 +294,37 @@ describe('economy: manpower', () => {
   });
 });
 
+describe('economy: draft pool', () => {
+  it("holds Ukraine's call-up to what its draft law yields at a high level, where a broad law would draft far more", () => {
+    const t = testWorld([economy]);
+    t.world.dtHours = 24;
+    const UKR = id.nation('UKR'), POL = id.nation('POL');
+    const e = t.world.slices.economy.nations;
+    for (const n of [UKR, POL]) {
+      t.world.nations[n].mobilization = 0.8;
+      t.world.pending.push({ type: 'set_mobilization', nation: n, level: 0.8 });
+    }
+    t.engine.run(t.world, 30);
+    const perMillion = (n: NationId) => e[n].recruited / (t.world.nations[n].population / 1e6);
+    // Ukrainian MoD 2024: ~25-35k a month; band as in tests/realism-economy-ukraine.
+    expect(e[UKR].recruited).toBeGreaterThanOrEqual(15_000);
+    expect(e[UKR].recruited).toBeLessThanOrEqual(45_000);
+    expect(perMillion(POL)).toBeGreaterThan(1.3 * perMillion(UKR));
+  });
+
+  it('calls up no one once the pool is spent, however high the mobilization', () => {
+    const t = testWorld([economy]);
+    t.world.dtHours = 24 * 7;
+    const POL = id.nation('POL');
+    const e = t.world.slices.economy.nations[POL];
+    e.draftPool = 10_000;
+    t.world.pending.push({ type: 'set_mobilization', nation: POL, level: 1 });
+    t.engine.run(t.world, 12);
+    expect(e.recruited).toBe(10_000);
+    expect(e.draftPool).toBe(0);
+  });
+});
+
 describe('economy: produce command', () => {
   it('holds a line to an ordered rate, and refuses items a nation has no industry for', () => {
     const t = dailyWorld();

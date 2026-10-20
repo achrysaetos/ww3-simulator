@@ -19,14 +19,22 @@ export interface Scenario {
   startDate: string;
   /** The nation a player most likely wants to command. */
   suggestedNation: string;
-  /** Mobilization levels nations already stand at when a war under way opens, rather than ramp up to. */
+  /**
+   * Mobilization levels nations already stand at when the scenario opens, rather than ramp up to:
+   * a war footing kept from an earlier war. The AI never orders less while at war.
+   */
   mobilized?: Record<string, number>;
-  /** Opening moves, queued for the first tick so the owning systems resolve them. */
+  /** Opening moves, queued for the first tick so the owning systems resolve them. `mobilize` is an order the economy ramps toward. */
   opening: (Command | { type: 'mobilize'; nations: string[]; level: number })[];
 }
 
 const war = (nation: string, target: string, reason: string): Command => ({ type: 'declare_war', nation: nation as NationId, target: target as NationId, reason });
 const mobilize = (nations: string[], level: number) => ({ type: 'mobilize' as const, nations, level });
+/**
+ * Russia at 0.33 (7.2% of GDP; SIPRI 2025: 7.1% in 2024) and Ukraine at 0.8 (34% of GDP in
+ * 2024), the frontline and existential tiers of MOBILIZATION in src/systems/ai/strategy.ts.
+ */
+const WAR_FOOTING_2025 = { RUS: 0.33, UKR: 0.8 };
 
 export const SCENARIOS: Scenario[] = [
   {
@@ -44,7 +52,7 @@ export const SCENARIOS: Scenario[] = [
     startDate: '2026-01-01T00:00:00Z',
     suggestedNation: 'UKR',
     // Both sides have been on a war footing since 2022; see MOBILIZATION in src/systems/ai/strategy.ts.
-    mobilized: { RUS: 0.33, UKR: 0.7 },
+    mobilized: WAR_FOOTING_2025,
     opening: [war('RUS', 'UKR', 'special military operation')],
   },
   {
@@ -61,6 +69,7 @@ export const SCENARIOS: Scenario[] = [
     summary: 'Russia, reconstituted after Ukraine, strikes the Baltic states to test Article 5.',
     startDate: '2027-09-01T00:00:00Z',
     suggestedNation: 'RUS',
+    mobilized: { RUS: WAR_FOOTING_2025.RUS },
     opening: [mobilize(['RUS'], 0.5), war('RUS', 'EST', 'protection of compatriots'), war('RUS', 'LVA', 'protection of compatriots'), war('RUS', 'LTU', 'Suwalki corridor')],
   },
   {
@@ -77,6 +86,8 @@ export const SCENARIOS: Scenario[] = [
     summary: 'Open war between Iran and Israel with the Strait of Hormuz in play.',
     startDate: '2027-06-01T00:00:00Z',
     suggestedNation: 'ISR',
+    // Israel has fought on several fronts since October 2023 and spent 8.8% of GDP in 2024 (SIPRI 2025): ~0.38 on the defence curve.
+    mobilized: { ISR: 0.38 },
     opening: [mobilize(['ISR'], 0.7), mobilize(['IRN'], 0.6), war('IRN', 'ISR', 'retaliation')],
   },
   {
@@ -93,6 +104,8 @@ export const SCENARIOS: Scenario[] = [
     summary: 'Coordinated offensives: China on Taiwan, Russia on the Baltics and Poland, North Korea on the South, Iran on Israel. Every alliance is tested at once.',
     startDate: '2027-10-01T00:00:00Z',
     suggestedNation: 'USA',
+    // Russia and Ukraine keep the war economies they ran in 2025, whether or not their own war goes on.
+    mobilized: WAR_FOOTING_2025,
     opening: [
       mobilize(['CHN', 'RUS', 'PRK', 'IRN'], 0.6),
       war('CHN', 'TWN', 'reunification by force'),
