@@ -19,6 +19,8 @@ export interface NationMetrics {
   /** Platforms lost (destroyed + damaged-not-repaired is not tracked; destroyed via battle and strike accounting) by class. */
   lossesByClass: Partial<Record<PlatformClass, number>>;
   lossesByDomain: Partial<Record<Domain, number>>;
+  /** Platforms knocked out in battle events (destroyed, damaged or abandoned), before repair and replacement: comparable with Oryx's visually confirmed tallies. */
+  battleLossesByClass: Partial<Record<PlatformClass, number>>;
   /** Personnel casualties from land battles. */
   casualties: number;
   missilesFired: number;
@@ -56,7 +58,7 @@ export function measureRun(engine: Engine, world: World, map: GameMap, days: num
   const per = new Map<string, NationMetrics>();
   const get = (n: string) => {
     let m = per.get(n);
-    if (!m) per.set(n, (m = { territoryDelta: 0, lossesByClass: {}, lossesByDomain: {}, casualties: 0, missilesFired: 0, missilesIntercepted: 0, formationsDestroyed: 0, warSupport: 0, mobilization: 0, civilianDeaths: 0 }));
+    if (!m) per.set(n, (m = { territoryDelta: 0, lossesByClass: {}, lossesByDomain: {}, battleLossesByClass: {}, casualties: 0, missilesFired: 0, missilesIntercepted: 0, formationsDestroyed: 0, warSupport: 0, mobilization: 0, civilianDeaths: 0 }));
     return m;
   };
   const nukes: RunMetrics['nuclearDetonations'] = [];
@@ -65,7 +67,16 @@ export function measureRun(engine: Engine, world: World, map: GameMap, days: num
   for (let i = 0; i < ticks; i++) {
     const day = (world.tick * world.dtHours) / 24;
     for (const e of engine.step(world) as SimEvent[]) {
-      if (e.type === 'battle') for (const [n, c] of Object.entries(e.casualties)) get(n).casualties += c;
+      if (e.type === 'battle') {
+        for (const [n, c] of Object.entries(e.casualties)) get(n).casualties += c;
+        for (const [n, lost] of Object.entries(e.losses)) {
+          const g = get(n).battleLossesByClass;
+          for (const [pid, k] of Object.entries(lost)) {
+            const cls = catalog.platform(pid as PlatformId).class;
+            g[cls] = (g[cls] ?? 0) + k;
+          }
+        }
+      }
       else if (e.type === 'strike') { get(e.by).missilesFired += e.fired; const victim = world.control[e.target]; if (victim) get(victim).missilesIntercepted += e.intercepted; }
       else if (e.type === 'formation_destroyed') get(e.nation).formationsDestroyed++;
       else if (e.type === 'nuclear_detonation') nukes.push({ by: e.by, yieldKt: e.yieldKt, casualties: e.casualties, day });
