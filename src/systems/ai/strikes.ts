@@ -254,26 +254,64 @@ const PENETRATOR_VISIBILITY = 0.1;
 const AIRBASE_DEFENSE_KM = 60;
 
 /** Enemy SAM envelopes, for keeping strike aircraft out of coverage they cannot outrange. */
-export class SamCover {
-  private readonly sams: { node: NodeId; km: number }[] = [];
-  private readonly battleArea: Set<number>;
+/** Longest interceptor range in a formation's magazine, memoised per tick: every enemy's planner asks. */
+const reachMemo = new WeakMap<Formation, { tick: number; km: number }>();
 
-  constructor(private readonly p: Plan) {
-    this.battleArea = battleAreaOf(p);
+function interceptorReach(p: Plan, f: Formation): number {
+  const hit = reachMemo.get(f);
+  if (hit?.tick === p.world.tick) return hit.km;
+  let km = 0;
+  for (const [id, n] of Object.entries(f.magazine)) {
+    const m = n >= 1 ? p.ctx.catalog.munitions.get(id as MunitionId) : undefined;
+    if (m && INTERCEPTOR_KINDS.has(m.kind)) km = Math.max(km, m.rangeKm);
+  }
+  reachMemo.set(f, { tick: p.world.tick, km });
+  return km;
+}
+
+export class SamCover {
+  /** Widest envelope per node; several batteries at one site cover no more ground than the longest-ranged. */
+  private readonly reach = new Map<NodeId, number>();
+  /** Sites sorted by latitude, so a query scans only the band an envelope can reach. */
+  private sams: { node: NodeId; km: number; lat: number }[] = [];
+  private maxKm = 0;
+  constructor(private readonly p: Plan, private readonly battleArea: Set<number>) {
     for (const e of p.enemies)
       for (const f of p.index.byNation.get(e) ?? []) {
         if (f.kind === 'air_wing') {
-          this.sams.push({ node: f.node, km: AIRBASE_DEFENSE_KM });
+          this.cover(f.node, AIRBASE_DEFENSE_KM);
           continue;
         }
         if (f.kind !== 'air_defense' && f.kind !== 'surface_group') continue;
-        let km = 0;
-        for (const [id, n] of Object.entries(f.magazine)) {
-          const m = n >= 1 ? p.ctx.catalog.munitions.get(id as MunitionId) : undefined;
-          if (m && INTERCEPTOR_KINDS.has(m.kind)) km = Math.max(km, m.rangeKm);
-        }
-        if (km > 0) this.sams.push({ node: f.node, km });
+        const km = interceptorReach(p, f);
+        if (km > 0) this.cover(f.node, km);
       }
+    const { map } = p.ctx;
+    this.sams = [...this.reach].map(([node, km]) => ({ node, km, lat: map.lat[node] })).sort((a, b) => a.lat - b.lat);
+    for (const s of this.sams) this.maxKm = Math.max(this.maxKm, s.km);
+  }
+
+  /** Whether some site's envelope, scaled by `visibility` and shrunk by `marginKm`, reaches `at`. */
+  private reaches(at: NodeId, visibility: number, marginKm: number): boolean {
+    const { map } = this.p.ctx;
+    const lat = map.lat[at], band = (this.maxKm * visibility - marginKm) / 111;
+    if (band <= 0) return false;
+    let lo = 0, hi = this.sams.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (this.sams[mid].lat < lat - band) lo = mid + 1;
+      else hi = mid;
+    }
+    for (let i = lo; i < this.sams.length && this.sams[i].lat <= lat + band; i++) {
+      const s = this.sams[i];
+      const need = s.km * visibility - marginKm;
+      if (need > 0 && withinKm(map, s.node, at, need)) return true;
+    }
+    return false;
+  }
+
+  private cover(node: NodeId, km: number): void {
+    this.reach.set(node, Math.max(km, this.reach.get(node) ?? 0));
   }
 
   /**
@@ -288,11 +326,17 @@ export class SamCover {
    * they have since 2022.
    */
   clear(from: NodeId, node: NodeId, standoffKm: number, visibility = 1): boolean {
+    if (this.covered(node, standoffKm, visibility)) return false;
+    const key = `${from}:${node}:${standoffKm}:${visibility}`;
+    let ok = this.routes.get(key);
+    if (ok === undefined) this.routes.set(key, (ok = this.route(from, node, standoffKm, visibility)));
+    return ok;
+  }
+
+  private readonly routes = new Map<string, boolean>();
+
+  private route(from: NodeId, node: NodeId, standoffKm: number, visibility: number): boolean {
     const { map } = this.p.ctx;
-    for (const s of this.sams) {
-      const need = s.km * visibility - standoffKm - TOLERATED_DEPTH_KM;
-      if (need > 0 && withinKm(map, s.node, node, need)) return false;
-    }
     const dist = map.distanceKm(from, node);
     const leg = dist - standoffKm;
     if (leg <= 0) return true;
@@ -307,6 +351,17 @@ export class SamCover {
   }
 
   private readonly depth = new Map<string, boolean>();
+  private readonly release = new Map<string, boolean>();
+
+  private covered(node: NodeId, standoffKm: number, visibility: number): boolean {
+    const key = `${node}:${standoffKm}:${visibility}`;
+    let hit = this.release.get(key);
+    if (hit === undefined) {
+      hit = this.reaches(node, visibility, standoffKm + TOLERATED_DEPTH_KM);
+      this.release.set(key, hit);
+    }
+    return hit;
+  }
 
   private inside(at: NodeId, visibility: number): boolean {
     const key = `${at}:${visibility}`;
@@ -315,10 +370,7 @@ export class SamCover {
       const { map } = this.p.ctx;
       const { world, enemies, nation } = this.p;
       const rear = !map.isSea(at) && enemies.has(world.control[at]) && !this.battleArea.has(at) && world.theater.airControl[at]?.nation !== nation;
-      hit = (rear && visibility >= PENETRATOR_VISIBILITY) || this.sams.some((s) => {
-        const need = s.km * visibility - TOLERATED_DEPTH_KM;
-        return need > 0 && withinKm(map, s.node, at, need);
-      });
+      hit = (rear && visibility >= PENETRATOR_VISIBILITY) || this.reaches(at, visibility, TOLERATED_DEPTH_KM);
       this.depth.set(key, hit);
     }
     return hit;
