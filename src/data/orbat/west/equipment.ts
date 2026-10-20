@@ -194,7 +194,7 @@ export const WEST_PLATFORMS = {
   fa50: 'multirole',
   mig29: 'fighter',
   su27: 'fighter',
-  su24m: 'attack_aircraft',
+  su24m_scalp: 'attack_aircraft',
   su25: 'attack_aircraft',
   l159: 'attack_aircraft',
   f4e: 'multirole',
@@ -227,6 +227,8 @@ export const WEST_PLATFORMS = {
   mq9a: 'strike_drone',
   mq9b: 'strike_drone',
   tb2: 'strike_drone',
+  lyutyi_launcher: 'loitering_munition_launcher',
+  bober_launcher: 'loitering_munition_launcher',
   akinci: 'strike_drone',
   ac130j: 'attack_aircraft',
 
@@ -371,6 +373,8 @@ export const WEST_MUNITIONS = [
   'nsm',
   'storm_shadow',
   'neptune',
+  'lyutyi',
+  'bober',
 ] as const;
 
 export type WestMunition = (typeof WEST_MUNITIONS)[number];

@@ -15,6 +15,9 @@ import type { MunitionKey } from './munitions';
 
 const tels: PlatformSpec<MunitionKey>[] = [
   { id: 'iskander_tel', name: '9P78-1 Iskander-M TEL', cls: 'tel_srbm', crew: 3, producers: ['RUS'], inService: 2006, unitCostUsdM: 10, load: { iskander_m: 2 } },
+  // Russia's own 9K720 TELs fire both the 9M723 ballistic and the 9M728 (Iskander-K) cruise round; the load
+  // lists the rounds a brigade keeps with each TEL. Export and Belarusian launchers use iskander_tel above.
+  { id: 'iskander_mk_tel', name: '9P78-1 Iskander-M/K TEL', cls: 'tel_srbm', crew: 3, producers: ['RUS'], inService: 2006, unitCostUsdM: 10, load: { iskander_m: 2, iskander_k: 2 } },
   { id: 'tochka_tel', name: '9P129 Tochka-U TEL', cls: 'tel_srbm', crew: 3, producers: [], inService: 1989, unitCostUsdM: 3, armor: 0.15, load: { tochka_u: 1 } },
   { id: 'scud_tel', name: 'MAZ-543 Scud TEL', cls: 'tel_srbm', producers: [], inService: 1965, unitCostUsdM: 2, speedKph: 35, stealth: 0.3, load: { scud: 1 } },
   { id: 'df15_tel', name: 'DF-15B TEL', cls: 'tel_srbm', producers: ['CHN'], inService: 2015, unitCostUsdM: 5, load: { df15b: 1 } },

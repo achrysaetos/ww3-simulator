@@ -26,6 +26,10 @@ const fighters: PlatformSpec<MunitionKey>[] = [
   { id: 'f15e', name: 'F-15E Strike Eagle', cls: 'multirole', crew: 2, producers: ['USA'], inService: 1988, unitCostUsdM: 40, speedKph: 950, rangeKm: 1270, fuelTph: 5, stealth: 0.08, detectionKm: 170, q: 1.15, load: { aim120c: 2, aim9x: 2, gbu31: 4 } },
   { id: 'f15c', name: 'F-15C Eagle', cls: 'fighter', producers: [], inService: 1979, unitCostUsdM: 30, speedKph: 950, rangeKm: 1200, fuelTph: 5, stealth: 0.05, detectionKm: 160, q: 1.15, load: { aim120c: 6, aim9x: 2 } },
   { id: 'f16v', name: 'F-16 Block 70/72 (F-16V)', cls: 'multirole', producers: ['USA'], inService: 2023, unitCostUsdM: 64, rangeKm: 550, detectionKm: 150, q: 1.2, load: { aim120c: 4, aim9x: 2, gbu31: 2 } },
+  // Israel's two-seat strike variants carry its air-launched ballistic missiles: ROCKS and Air LORA on the
+  // F-15I Ra'am, Rampage on the F-16I Sufa (IISS Military Balance 2025; Israeli MoD and manufacturer releases).
+  { id: 'f15i', name: "F-15I Ra'am", cls: 'multirole', crew: 2, producers: [], inService: 1998, unitCostUsdM: 45, speedKph: 950, rangeKm: 1270, fuelTph: 5, stealth: 0.08, detectionKm: 170, q: 1.15, load: { aim120c: 2, aim9x: 2, gbu31: 4, rocks: 2, air_lora: 1 } },
+  { id: 'f16i', name: 'F-16I Sufa', cls: 'multirole', crew: 2, producers: [], inService: 2004, unitCostUsdM: 45, rangeKm: 650, detectionKm: 120, q: 1.05, load: { aim120c: 2, aim9x: 2, gbu12: 2, rampage: 2 } },
   { id: 'f16c', name: 'F-16C Block 50/52', cls: 'multirole', producers: ['USA'], inService: 1994, unitCostUsdM: 35, rangeKm: 550, detectionKm: 110, q: 1.0, load: { aim120c: 2, aim9x: 2, gbu12: 2 } },
   { id: 'f16am', name: 'F-16AM/BM MLU', cls: 'multirole', producers: [], inService: 1980, unitCostUsdM: 20, rangeKm: 550, detectionKm: 100, q: 0.85, load: { aim120c: 2, aim9x: 2, gbu12: 2 } },
   { id: 'f18e', name: 'F/A-18E/F Super Hornet Block III', cls: 'multirole', producers: ['USA'], inService: 2001, unitCostUsdM: 67, rangeKm: 720, fuelTph: 4, stealth: 0.15, detectionKm: 150, q: 1.15, load: { aim120d: 4, aim9x: 2, gbu31: 2 } },
@@ -68,6 +72,8 @@ const fighters: PlatformSpec<MunitionKey>[] = [
   { id: 'a10c', name: 'A-10C Thunderbolt II', cls: 'attack_aircraft', producers: [], inService: 2007, unitCostUsdM: 19, speedKph: 560, rangeKm: 460, fuelTph: 2.5, armor: 0.6, detectionKm: 40, q: 1.2, load: { agm65: 4, gbu12: 4, aim9x: 1 } },
   { id: 'su25sm3', name: 'Su-25SM3 Frogfoot', cls: 'attack_aircraft', producers: ['RUS'], inService: 2013, unitCostUsdM: 15, speedKph: 700, rangeKm: 400, fuelTph: 2.5, armor: 0.45, detectionKm: 40, q: 1.0, load: { s8: 40, kh29: 2, r73: 2 } },
   { id: 'su25', name: 'Su-25 Frogfoot (older)', cls: 'attack_aircraft', producers: [], inService: 1981, unitCostUsdM: 8, speedKph: 700, rangeKm: 400, fuelTph: 2.5, armor: 0.4, detectionKm: 20, q: 0.8, load: { s8: 40, fab500: 4 } },
+  // Ukraine adapted its Su-24Ms to carry two SCALP-EG / Storm Shadow from May 2023 (UK MoD; Ukrainian Air Force).
+  { id: 'su24m_scalp', name: 'Su-24M (Ukrainian, Storm Shadow/SCALP-capable)', cls: 'attack_aircraft', crew: 2, producers: [], inService: 2023, unitCostUsdM: 25, speedKph: 850, rangeKm: 600, fuelTph: 5, armor: 0.15, detectionKm: 60, q: 0.9, load: { storm_shadow: 2, fab500: 4 } },
   { id: 'su24m', name: 'Su-24M/M2 Fencer', cls: 'attack_aircraft', crew: 2, producers: [], inService: 1983, unitCostUsdM: 25, speedKph: 850, rangeKm: 600, fuelTph: 5, armor: 0.15, detectionKm: 60, q: 0.9, load: { fab500: 6, kh29: 2 } },
   { id: 'emb314', name: 'A-29 Super Tucano', cls: 'attack_aircraft', producers: ['BRA', 'USA'], inService: 2003, unitCostUsdM: 15, speedKph: 450, rangeKm: 550, fuelTph: 0.25, armor: 0.25, detectionKm: 25, q: 0.45, load: { gbu12: 2, mk82: 2 } },
   { id: 'ac130j', name: 'AC-130J Ghostrider', cls: 'attack_aircraft', crew: 9, producers: ['USA'], inService: 2017, unitCostUsdM: 165, speedKph: 550, rangeKm: 1000, fuelTph: 2.5, armor: 0.1, stealth: 0, detectionKm: 30, q: 1.8, fp: { infantry: 0.5, armor: 0.3, soft: 0.6 }, load: { hellfire: 6, gbu39: 4 } },
@@ -169,6 +175,7 @@ const drones: PlatformSpec<MunitionKey>[] = [
   { id: 'switchblade_team', name: 'Switchblade 600 team', cls: 'loitering_munition_launcher', producers: ['USA'], inService: 2021, unitCostUsdM: 0.05, speedKph: 40, load: { switchblade600: 2, switchblade300: 2 } },
   { id: 'harop_launcher', name: 'Harop launcher (12 canisters)', cls: 'loitering_munition_launcher', producers: ['ISR', 'IND'], inService: 2009, unitCostUsdM: 5, load: { harop: 12 } },
   { id: 'fpv_team', name: 'FPV drone team', cls: 'loitering_munition_launcher', producers: ['UKR', 'RUS', 'CHN', 'USA', 'POL', 'TUR', 'IRN'], inService: 2023, unitCostUsdM: 0.02, speedKph: 30, stealth: 0.6, detectionKm: 10, load: { fpv: 30, fpv_fiber: 5 } },
+  { id: 'bober_launcher', name: 'Long-range strike drone launch site (UJ-26 Bober)', cls: 'loitering_munition_launcher', producers: ['UKR'], inService: 2023, unitCostUsdM: 0.1, load: { bober: 4 } },
   { id: 'lyutyi_launcher', name: 'Long-range strike drone launch site (FP-1 / Lyutyi)', cls: 'loitering_munition_launcher', producers: ['UKR'], inService: 2023, unitCostUsdM: 0.2, load: { lyutyi: 4 } },
   { id: 'kargu_team', name: 'Kargu-2 team', cls: 'loitering_munition_launcher', producers: ['TUR'], inService: 2020, unitCostUsdM: 0.05, speedKph: 40, load: { kargu2: 4 } },
 ];
