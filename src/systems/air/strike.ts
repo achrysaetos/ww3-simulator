@@ -22,10 +22,9 @@ interface Carrier { platform: Platform; n: number; reachKm: number; group?: AirG
 
 interface Package {
   f: Formation;
-  munition: Munition;
-  targetClass: TargetClass;
-  weapons: number;
-  /** Delivering aircraft that must fly into the defended area; empty for missiles and standoff. */
+  /** Absent for a pure SEAD package (ARMs only). */
+  strike?: { munition: Munition; targetClass: TargetClass; weapons: number };
+  /** Aircraft that must fly into the defended area (penetrating strikers and SEAD); empty for missiles and standoff. */
   penetrators: AirGroup[];
 }
 
@@ -87,6 +86,9 @@ function threatRingKm(world: World, ctx: SimContext, pic: AirPicture, target: No
   return ring;
 }
 
+const carriesArm = (g: AirGroup, ctx: SimContext) =>
+  g.platform.loadout.some((l) => ctx.catalog.munition(l.munition).kind === 'arm' && (g.f.magazine[l.munition] ?? 0) >= 1);
+
 function planPackage(world: World, ctx: SimContext, pic: AirPicture, f: Formation): Package | undefined {
   const target = f.order.target;
   if (target === undefined) return undefined;
@@ -96,21 +98,22 @@ function planPackage(world: World, ctx: SimContext, pic: AirPicture, f: Formatio
   const dist = nodeDistance(ctx, f.node, target);
   const ring = threatRingKm(world, ctx, pic, target, f.nation);
   const m = chooseMunition(f, carriers, tc, dist, ring, ctx);
-  if (!m) return undefined;
   let weapons = 0;
   const penetrators: AirGroup[] = [];
   for (const c of carriers) {
     // A sortie delivers the full load; a ground launch is one round (the loadout is the launcher's reload capacity).
-    const per = c.group ? loadOf(c.platform, m.id) : Math.min(1, loadOf(c.platform, m.id));
-    if (!per || c.reachKm + m.rangeKm < dist) continue;
-    weapons += c.n * per;
-    if (c.group) {
-      if (m.rangeKm < ring) penetrators.push(c.group);
-      else c.group.sorties = 0;
-    }
+    const per = !m ? 0 : c.group ? loadOf(c.platform, m.id) : Math.min(1, loadOf(c.platform, m.id));
+    const strikes = m !== undefined && per > 0 && c.reachKm + m.rangeKm >= dist;
+    if (strikes) weapons += c.n * per;
+    const g = c.group;
+    if (!g) continue;
+    const sead = ring > 0 && dist <= g.radiusKm && carriesArm(g, ctx);
+    if (sead || (strikes && m.rangeKm < ring)) penetrators.push(g);
+    else if (strikes) g.sorties = 0;
   }
-  weapons = Math.min(weapons, Math.floor(f.magazine[m.id] ?? 0));
-  return weapons > 0 ? { f, munition: m, targetClass: tc, weapons, penetrators } : undefined;
+  weapons = m ? Math.min(weapons, Math.floor(f.magazine[m.id] ?? 0)) : 0;
+  const strike = m && weapons > 0 ? { munition: m, targetClass: tc, weapons } : undefined;
+  return strike || penetrators.length ? { f, strike, penetrators } : undefined;
 }
 
 export function resolveStrikes(world: World, ctx: SimContext, pic: AirPicture, slice: AirSlice): void {
@@ -150,10 +153,10 @@ function resolveRaid(world: World, ctx: SimContext, pic: AirPicture, slice: AirS
     });
     const lost = samVsAircraft(world, ctx, pic, target, attacker, flights, 'strike', ew, tally);
     const delivered = flights.reduce((s, x, i) => s + x.n - lost[i], 0);
-    p.weapons = sent ? Math.floor((p.weapons * delivered) / sent) : 0;
+    if (p.strike) p.strike.weapons = sent ? Math.floor((p.strike.weapons * delivered) / sent) : 0;
   }
 
-  const live = pkgs.filter((p) => p.weapons > 0);
+  const live = pkgs.flatMap((p) => (p.strike && p.strike.weapons > 0 ? [{ f: p.f, ...p.strike }] : []));
   for (const p of live) p.f.magazine[p.munition.id] -= p.weapons;
   const streams: RaidStream[] = live.map((p) => ({ munition: p.munition, count: p.weapons }));
   const leaked = defendRaid(world, ctx, pic, target, attacker, streams);

@@ -139,20 +139,26 @@ describe('integrated air defense', () => {
   });
 
   it('suppression with anti-radiation missiles lets more of a cruise raid through', () => {
-    const leak = (sead: boolean) => {
-      let total = 0;
+    const run = (sead: boolean) => {
+      let leaked = 0, armsFired = 0;
       for (let seed = 1; seed <= 10; seed++) {
         const t = airWorld(seed);
         t.war('USA', 'CHN');
         const fz = t.node(...FUZHOU), tw = t.node(...TAIPEI);
         battery(t, 'CHN', fz, { x_patriot: 1 });
         launchers(t, 'USA', tw, { x_cruise_tel: 80 }, { posture: 'strike', target: fz, targetClass: 'structure' });
-        if (sead) wing(t, 'USA', tw, { x_weasel: 24 }, { posture: 'strike', target: fz, targetClass: 'soft' });
-        for (const e of t.strikes(t.tick())) if (e.munition === mid('t_cruise')) total += e.fired - e.intercepted;
+        wing(t, 'USA', tw, { x_weasel: 24 }, sead ? { posture: 'strike', target: fz, targetClass: 'soft' } : {});
+        for (const e of t.strikes(t.tick())) {
+          if (e.munition === mid('t_cruise')) leaked += e.fired - e.intercepted;
+          if (e.munition === mid('x_arm')) armsFired += e.fired;
+        }
       }
-      return total;
+      return { leaked, armsFired };
     };
-    expect(leak(true)).toBeGreaterThan(leak(false));
+    const without = run(false), withSead = run(true);
+    expect(without.armsFired).toBe(0);
+    expect(withSead.armsFired).toBeGreaterThan(0);
+    expect(withSead.leaked).toBeGreaterThan(without.leaked * 1.3 + 10);
   });
 });
 

@@ -133,8 +133,7 @@ describe('calibration', () => {
     for (let seed = 1; seed <= SEEDS; seed++) {
       const t = airWorld(seed);
       t.war('USA', 'CHN');
-      const kadena = t.node(26.3, 127.8) as number;
-      const base = t.map.isSea(kadena as never) ? t.node(33, 131) : t.node(26.3, 127.8);
+      const base = t.node(33, 131);
       const w = wing(t, 'USA', base, { t_fighter: 150 });
       launchers(t, 'CHN', t.node(26, 119.3), { x_mrbm_tel: 400 }, { posture: 'strike', target: base, targetClass: 'aircraft' });
       for (const e of t.strikes(t.tick())) hits += e.fired - e.intercepted;
