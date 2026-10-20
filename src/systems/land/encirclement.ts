@@ -1,58 +1,82 @@
 import { atWar, type SimContext } from '../../core/engine';
 import type { GameMap } from '../../core/map';
-import type { Formation, NationId, World } from '../../core/types';
-import { allied, destroyFormation, isLandFormation, landSlice } from './state';
+import type { Formation, NationId, NodeId, World } from '../../core/types';
+import { supplyFactor } from '../logistics';
+import { destroyFormation, isLandFormation, landSlice } from './state';
 import { MORALE_ISOLATED_PER_DAY, SURRENDER_GRACE_DAYS, SURRENDER_HAZARD_PER_DAY } from './tables';
 
 /**
- * Land nodes from which `nation` can draw supply: everything connected through
- * friendly-held land to a friendly capital (national depots) or a friendly-held
- * port (sea lift).
+ * Which formations of one nation are encircled: cut from supply and hemmed in by
+ * the enemy. Supply is the logistics network's own reckoning (`supplyFactor`), so a
+ * pocket is exactly what logistics refuses to refill, and an island garrison fed
+ * by sea or air is not a pocket. Verdicts are memoised per cell for one day.
  */
-export function suppliedNodes(world: World, map: GameMap, nation: NationId): Uint8Array {
-  return floodFromSources(world, map, friendsOf(world, nation));
-}
+class Encirclement {
+  private readonly pocket = new Map<NodeId, boolean>();
 
-function friendsOf(world: World, nation: NationId): Set<NationId> {
-  const friends = new Set<NationId>();
-  for (const id of Object.keys(world.nations) as NationId[]) if (allied(world, nation, id)) friends.add(id);
-  return friends;
-}
+  constructor(private readonly world: World, private readonly map: GameMap, private readonly nation: NationId) {}
 
-function floodFromSources(world: World, map: GameMap, friends: Set<NationId>): Uint8Array {
-  const seen = new Uint8Array(map.landCount);
-  const queue: number[] = [];
-  const capitals = new Set<number>();
-  for (const id of friends) capitals.add(world.nations[id].capital);
-  for (let n = 0; n < map.landCount; n++)
-    if (friends.has(world.control[n]) && (map.ports[n] > 0 || capitals.has(n))) {
-      seen[n] = 1;
-      queue.push(n);
-    }
-  for (let i = 0; i < queue.length; i++) {
-    const n = queue[i];
-    for (let k = map.adjStart[n]; k < map.adjStart[n + 1]; k++) {
-      const m = map.adj[k];
-      if (m >= map.landCount || seen[m] || !friends.has(world.control[m])) continue;
-      seen[m] = 1;
-      queue.push(m);
-    }
+  private supplied(node: NodeId): boolean {
+    return supplyFactor(this.world, node, this.nation) > 0;
   }
-  return seen;
-}
 
-/**
- * A formation is cut off when it stands on friendly ground the supply network
- * does not reach, or on enemy ground it is fighting over with no supplied cell
- * behind it. A garrison hosted by a nation outside the war draws on its host.
- */
-function cutOff(world: World, map: GameMap, f: Formation, friends: Set<NationId>, supplied: Uint8Array): boolean {
-  if (supplied[f.node]) return false;
-  const holder = world.control[f.node];
-  if (friends.has(holder)) return true;
-  if (!atWar(world, f.nation, holder)) return false;
-  for (const n of map.neighbors(f.node)) if (n < map.landCount && supplied[n]) return false;
-  return true;
+  /** Ground the nation's own supply network runs over: its own and that of bloc partners it is not fighting (logistics' networkMembers). */
+  private network(holder: NationId): boolean {
+    if (holder === this.nation) return true;
+    const a = this.world.nations[this.nation], b = this.world.nations[holder];
+    return !!b && a.blocs.some((x) => b.blocs.includes(x)) && !atWar(this.world, this.nation, holder);
+  }
+
+  cutOff(f: Formation): boolean {
+    const { world, map } = this;
+    const holder = world.control[f.node];
+    // Fighting inside an enemy cell: cut off unless it borders friendly ground that is not itself a pocket.
+    if (atWar(world, f.nation, holder)) {
+      for (const n of map.neighbors(f.node)) if (!map.isSea(n) && !atWar(world, f.nation, world.control[n]) && !this.cutOffAt(n)) return false;
+      return true;
+    }
+    return this.cutOffAt(f.node);
+  }
+
+  /**
+   * Whether non-enemy ground at `node` is cut off for the nation. A host or neutral
+   * not at war with it feeds and shelters what it hosts; its own network's ground
+   * is cut off only inside a pocket. Supply is read per cell, so a front-line cell
+   * logistics leaves dry because the enemy's troops stand in it is not by itself a pocket.
+   */
+  private cutOffAt(node: NodeId): boolean {
+    if (!this.network(this.world.control[node]) || this.supplied(node)) return false;
+    return this.inPocket(node);
+  }
+
+  /**
+   * Whether the unsupplied stretch of network ground around `start` is closed in:
+   * every way out runs into enemy-held land, and it touches the enemy somewhere. A
+   * stretch that borders supplied ground or a host's land is behind the lines, not
+   * surrounded; one bounded only by sea and no enemy is a logistics gap, not a pocket.
+   */
+  private inPocket(start: NodeId): boolean {
+    const known = this.pocket.get(start);
+    if (known !== undefined) return known;
+    const { world, map } = this;
+    const cells: NodeId[] = [start];
+    const seen = new Set(cells);
+    let open = false, enemy = false;
+    for (let i = 0; i < cells.length && !open; i++)
+      for (const n of map.neighbors(cells[i])) {
+        if (map.isSea(n) || seen.has(n)) continue;
+        const holder = world.control[n];
+        if (atWar(world, this.nation, holder)) enemy = true;
+        else if (!this.network(holder) || this.supplied(n)) open = true;
+        else {
+          seen.add(n);
+          cells.push(n);
+        }
+      }
+    const verdict = !open && enemy;
+    for (const n of seen) this.pocket.set(n, verdict);
+    return verdict;
+  }
 }
 
 /** Daily: mark formations cut off from supply, sap their morale, and let long-isolated pockets surrender. */
@@ -62,38 +86,23 @@ export function updateEncirclement(world: World, ctx: SimContext): void {
   const days = (ticksPerDay * world.dtHours) / 24;
   const isolated = landSlice(world).isolatedDays;
 
-  const byNation = new Map<NationId, Formation[]>();
-  for (const f of Object.values(world.formations)) {
-    if (!isLandFormation(f, ctx.map)) continue;
-    const list = byNation.get(f.nation);
-    if (list) list.push(f);
-    else byNation.set(f.nation, [f]);
-  }
   const belligerents = new Set<string>();
   for (const [k, r] of Object.entries(world.relations)) if (r.atWar) for (const n of k.split('|')) belligerents.add(n);
-  // Coalition partners share one supply network; flood it once per distinct friend set.
-  const networks = new Map<string, Uint8Array>();
-  for (const [nation, formations] of byNation) {
-    if (!belligerents.has(nation)) {
-      for (const f of formations) delete isolated[f.id];
+  const byNation = new Map<NationId, Encirclement>();
+  for (const f of Object.values(world.formations)) {
+    if (!isLandFormation(f, ctx.map)) continue;
+    let e = byNation.get(f.nation);
+    if (!e && belligerents.has(f.nation)) byNation.set(f.nation, (e = new Encirclement(world, ctx.map, f.nation)));
+    if (!e?.cutOff(f)) {
+      delete isolated[f.id];
       continue;
     }
-    const friends = friendsOf(world, nation);
-    const key = [...friends].sort().join(',');
-    let supplied = networks.get(key);
-    if (!supplied) networks.set(key, (supplied = floodFromSources(world, ctx.map, friends)));
-    for (const f of formations) {
-      if (!cutOff(world, ctx.map, f, friends, supplied)) {
-        delete isolated[f.id];
-        continue;
-      }
-      const d = (isolated[f.id] = (isolated[f.id] ?? 0) + days);
-      f.morale = Math.max(0, f.morale - MORALE_ISOLATED_PER_DAY * days);
-      const starving = f.supply.food <= 0 ? 2 : 1;
-      if (ctx.rng.chance(SURRENDER_HAZARD_PER_DAY * Math.max(0, d - SURRENDER_GRACE_DAYS) * (1 - f.morale) * starving * days)) {
-        ctx.emit({ type: 'message', tick: world.tick, nation: f.nation, text: `${f.name} surrendered after ${Math.round(d)} days encircled` });
-        destroyFormation(world, ctx, f);
-      }
+    const d = (isolated[f.id] = (isolated[f.id] ?? 0) + days);
+    f.morale = Math.max(0, f.morale - MORALE_ISOLATED_PER_DAY * days);
+    const starving = f.supply.food <= 0 ? 2 : 1;
+    if (ctx.rng.chance(SURRENDER_HAZARD_PER_DAY * Math.max(0, d - SURRENDER_GRACE_DAYS) * (1 - f.morale) * starving * days)) {
+      ctx.emit({ type: 'message', tick: world.tick, nation: f.nation, text: `${f.name} surrendered after ${Math.round(d)} days encircled` });
+      destroyFormation(world, ctx, f);
     }
   }
 }
