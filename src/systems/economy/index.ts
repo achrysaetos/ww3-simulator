@@ -6,7 +6,7 @@ import {
   CATEGORIES, MIL_FUEL_TONS_PER_USD_M, OIL_CONSUMPTION_MT, OIL_TONS_PER_PPP_USD_M, RATION_TONS_PER_DAY, RESOURCES, RESOURCE_SPECS, SHIPBUILDING_GT_PER_YEAR, SHIPYARD_WARSHIP_SHARE,
   itemSpec, type ItemCategory, type Resource,
 } from '../../data/industry';
-import { bufferMonths, newLine, newNationEconomy, type LineState, type NationEconomy } from './state';
+import { newLine, newNationEconomy, stocksOf, type LineState, type NationEconomy } from './state';
 
 export type { EconomyState, LineState, NationEconomy } from './state';
 
@@ -211,18 +211,21 @@ function rawAccess(world: World, s: Scan, n: Nation, r: Resource): number {
   return self + (1 - self) * imported;
 }
 
-/** National stocks cover a shortfall until they run out, then the shortfall bites. */
+/** Each national stock covers its stream's share of a shortfall until it runs out, then that share bites. */
 function drawSupply(e: NationEconomy, id: NationId, r: Resource, raw: number, dtMonths: number): number {
+  const stocks = stocksOf(id, r), left = e.buffers[r];
   const shortfall = 1 - raw;
   if (shortfall <= 1e-3) {
-    e.buffers[r] = Math.min(bufferMonths(id, r), e.buffers[r] + BUFFER_REFILL_PER_MONTH * dtMonths);
+    for (let i = 0; i < stocks.length; i++) left[i] = Math.min(stocks[i].months, left[i] + BUFFER_REFILL_PER_MONTH * dtMonths);
     return raw;
   }
-  if (e.buffers[r] > 0) {
-    e.buffers[r] = Math.max(0, e.buffers[r] - shortfall * dtMonths);
-    return 1;
+  let covered = 0;
+  for (let i = 0; i < stocks.length; i++) {
+    if (left[i] <= 0) continue;
+    covered += stocks[i].share;
+    left[i] = Math.max(0, left[i] - shortfall * dtMonths);
   }
-  return raw;
+  return raw + shortfall * covered;
 }
 
 function tradeLossOf(world: World, s: Scan, n: Nation): number {

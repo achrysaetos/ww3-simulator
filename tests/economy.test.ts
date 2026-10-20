@@ -118,16 +118,22 @@ describe('economy: industrial damage', () => {
 });
 
 describe('economy: blockade', () => {
-  it('starves import-dependent Japan of energy once its stocks run out, but barely touches the US', () => {
+  it('starves import-dependent Japan of energy in steps as LNG, coal and then oil stocks run out, but barely touches the US', () => {
     const t = dailyWorld();
     t.world.theater.tradeBlocked[JPN] = 0.8;
     t.world.theater.tradeBlocked[USA] = 0.8;
-    t.days(60);
-    // Strategic oil stocks (~4 months of net imports, est.) carry Japan through the first weeks.
+    t.days(7);
     expect(t.world.slices.economy.nations[JPN].supply.energy).toBe(1);
-    expect(t.shortages(JPN)).not.toContain('energy');
 
-    t.days(240);
+    // LNG (~3 weeks) and coal (~1 month) are gone; ~230 days of strategic oil still cover oil's share.
+    t.days(53);
+    const mid = t.world.slices.economy.nations[JPN].supply.energy;
+    expect(mid).toBeLessThan(0.8);
+    expect(mid).toBeGreaterThan(0.5);
+    expect(t.shortages(JPN)).toContain('energy');
+
+    // The oil reserve covers its share of a 70% shortfall for ~11 months.
+    t.days(340);
     const jp = t.world.slices.economy.nations[JPN], us = t.world.slices.economy.nations[USA];
     expect(t.shortages(JPN)).toEqual(expect.arrayContaining(['energy', 'food']));
     expect(jp.supply.energy).toBeLessThan(0.4);

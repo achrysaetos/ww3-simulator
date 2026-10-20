@@ -1,5 +1,5 @@
 import type { ItemId, Nation, NationId } from '../../core/types';
-import { CATEGORIES, GENERIC_AMMO_SURGE_MULTIPLE, GENERIC_AMMO_TONS_PER_MFG_USD_B, ITEMS, LINES, RESOURCES, RESOURCE_SPECS, type Resource } from '../../data/industry';
+import { CATEGORIES, GENERIC_AMMO_SURGE_MULTIPLE, GENERIC_AMMO_TONS_PER_MFG_USD_B, ITEMS, LINES, RESOURCES, RESOURCE_SPECS, type Resource, type Stock } from '../../data/industry';
 
 export interface LineState {
   item: ItemId;
@@ -20,8 +20,8 @@ export interface NationEconomy {
   /** Level set by `set_mobilization`; null holds `nation.mobilization` where it is. */
   mobilizationTarget: number | null;
   lines: Record<ItemId, LineState>;
-  /** Months of national stocks left per resource. */
-  buffers: Record<Resource, number>;
+  /** Months of national stocks left per resource, one entry per stock in `stocksOf`. */
+  buffers: Record<Resource, number[]>;
   /** Share of need actually available this tick after drawing on stocks, 0..1. */
   supply: Record<Resource, number>;
   /**
@@ -65,9 +65,9 @@ declare module '../../core/types' {
 
 const perResource = (f: (r: Resource) => number) => Object.fromEntries(RESOURCES.map((r) => [r, f(r)])) as Record<Resource, number>;
 
-export function bufferMonths(nation: NationId, r: Resource): number {
+export function stocksOf(nation: NationId, r: Resource): Stock[] {
   const spec = RESOURCE_SPECS[r];
-  return spec.buffers?.[nation] ?? spec.bufferMonths;
+  return spec.tiered?.[nation] ?? [{ share: 1, months: spec.buffers?.[nation] ?? spec.bufferMonths }];
 }
 
 export function newLine(item: ItemId, baselinePerYear: number, surgePerYear: number, rampMonths: number, maxTotal?: number): LineState {
@@ -96,7 +96,7 @@ export function newNationEconomy(nation: Nation): NationEconomy {
   return {
     mobilizationTarget: null,
     lines,
-    buffers: perResource((r) => bufferMonths(nation.id, r)),
+    buffers: Object.fromEntries(RESOURCES.map((r) => [r, stocksOf(nation.id, r).map((s) => s.months)])) as Record<Resource, number[]>,
     supply: perResource(() => 1),
     integrity: 1,
     baseIntegrity: 1,
