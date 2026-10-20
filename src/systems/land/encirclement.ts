@@ -8,8 +8,8 @@ import { MORALE_ISOLATED_PER_DAY, SURRENDER_GRACE_DAYS, SURRENDER_HAZARD_PER_DAY
 /**
  * Which formations of one nation are encircled: cut from supply and hemmed in by
  * the enemy. Supply is the logistics network's own reckoning (`supplyFactor`), so a
- * pocket is exactly what logistics refuses to refill, and an island garrison fed
- * by sea or air is not a pocket. Verdicts are memoised per cell for one day.
+ * pocket is never ground logistics still reaches, and an island garrison no enemy
+ * has landed on is not a pocket. Verdicts are memoised per cell for one day.
  */
 class Encirclement {
   private readonly pocket = new Map<NodeId, boolean>();
