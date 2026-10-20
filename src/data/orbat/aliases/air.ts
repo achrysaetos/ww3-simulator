@@ -19,8 +19,8 @@ export const aliases: Record<string, string> = {
   j15t: 'j15', j10ce: 'j10c',
   f14a: 'f14a_irn',
   f35i: 'f35a', fa18f: 'f18e', fa50ph: 'fa50',
-  kf16: 'f16c', f16i: 'f16c', f16a: 'f16am', f16e: 'f16v',
-  f15k: 'f15e', f15sg: 'f15e', f15i: 'f15e', f15sa: 'f15ex', f15qa: 'f15ex',
+  kf16: 'f16c', f16a: 'f16am', f16e: 'f16v',
+  f15k: 'f15e', f15sg: 'f15e', f15sa: 'f15ex', f15qa: 'f15ex',
   mitsubishi_f2: 'f2',
   // India's Mirage 2000H fleet is upgraded to 2000I (-5 standard); the UAE -9 is in the base row.
   mirage2000: 'mirage2000_5', mirage2000_9: 'mirage2000_5',
