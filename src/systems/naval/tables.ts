@@ -32,6 +32,7 @@ export const NAVAL_HULL_CLASSES = [
 ] as const satisfies readonly PlatformClass[];
 export type NavalHullClass = (typeof NAVAL_HULL_CLASSES)[number];
 
+// Patrol craft (missile boats, coast guard cutters) carry no hull sonar or towed array: no ASW search.
 // Endurance: USN carriers and SSNs ~90 days of stores; destroyers ~45; SSK patrols
 // 50-70 days with AIP (estimates from CRS RL32665 and manufacturer data).
 export const HULLS: Record<NavalHullClass, HullProfile> = {
@@ -41,7 +42,7 @@ export const HULLS: Record<NavalHullClass, HullProfile> = {
   destroyer: { hitsToKill: 2, asw: 0.6, surfaceSearch: 1, pointDefense: 0.4, seaControl: 1, enduranceDays: 45, signature: 1.5 },
   frigate: { hitsToKill: 1.5, asw: 1, surfaceSearch: 0.7, pointDefense: 0.35, seaControl: 0.7, enduranceDays: 40, signature: 1.2 },
   corvette: { hitsToKill: 1, asw: 0.4, surfaceSearch: 0.4, pointDefense: 0.25, seaControl: 0.3, enduranceDays: 15, signature: 0.8 },
-  patrol: { hitsToKill: 1, asw: 0.1, surfaceSearch: 0.3, pointDefense: 0.15, seaControl: 0.15, enduranceDays: 10, signature: 0.6 },
+  patrol: { hitsToKill: 1, asw: 0, surfaceSearch: 0.3, pointDefense: 0.15, seaControl: 0.15, enduranceDays: 10, signature: 0.6 },
   mine_warfare: { hitsToKill: 1, asw: 0.1, surfaceSearch: 0.2, pointDefense: 0.1, seaControl: 0.1, enduranceDays: 15, signature: 0.6 },
   replenishment: { hitsToKill: 2, asw: 0, surfaceSearch: 0.2, pointDefense: 0.2, seaControl: 0.1, enduranceDays: 60, signature: 3 },
   cargo_ship: { hitsToKill: 2, asw: 0, surfaceSearch: 0.1, pointDefense: 0, seaControl: 0, enduranceDays: 30, signature: 3 },
