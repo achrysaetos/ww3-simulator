@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { Engine } from '../src/core/engine';
 import { addFormation } from '../src/core/forces';
 import type { NationId, NodeId, SimEvent } from '../src/core/types';
@@ -7,6 +7,9 @@ import { economicStress, economy } from '../src/systems/economy';
 import { createWorld } from '../src/core/world';
 import { loadMap } from '../src/data/load';
 import { id, testCatalog, testWorld } from '../src/testkit';
+
+// Several cases step the whole map daily for a simulated year; under a loaded machine they pass 5 s.
+vi.setConfig({ testTimeout: 30_000 });
 
 const USA = id.nation('USA'), RUS = id.nation('RUS'), JPN = id.nation('JPN'), DEU = id.nation('DEU');
 
