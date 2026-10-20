@@ -87,6 +87,10 @@ const specs = defineMunitions([
   { id: 'zarb', name: 'Zarb (C-602 derivative)', kind: 'antiship_cruise', producers: ['PAK', 'CHN'], rangeKm: 280, speedMach: 0.9, warheadKg: 300, cepM: 5, pk: ashmPk(0.5), interceptDifficulty: 0.3, unitCostUsdM: 1, weightKg: 1140 },
   // Popeye Turbo SLCM: range (~1,500 km) and a nuclear role are reported but never confirmed (FAS 2022).
   { id: 'nuclear_gravity_bomb', name: 'Israeli nuclear gravity bomb', kind: 'unguided_bomb', producers: ['ISR'], rangeKm: 5, speedMach: 0.9, warheadKg: 500, yieldKt: 20, cepM: 100, pk: nuclearPk(20, 100), interceptDifficulty: 0.6, unitCostUsdM: 5, weightKg: 500 },
+  // LRHW Dark Eagle: 2,775 km range (CRS IF11991); per-round cost ~$41M (CBO 2023). Speed and warhead are estimates; the glide body is unpublished.
+  { id: 'lrhw', name: 'LRHW Dark Eagle (C-HGB)', kind: 'hgv', producers: ['USA'], rangeKm: 2775, speedMach: 8, warheadKg: 100, cepM: 5, pk: { structure: 0.8, soft: 0.6, hardened: 0.4, ship: 0.4, infantry: 0.3 }, interceptDifficulty: 0.9, unitCostUsdM: 41, weightKg: 7400 },
+  // Siper Block 1: ~100 km per Aselsan/Roketsan (2023 acceptance tests); warhead, mass and cost are estimates.
+  { id: 'siper_msl', name: 'Siper Block 1', kind: 'sam', producers: ['TUR'], rangeKm: 100, speedMach: 4, warheadKg: 50, cepM: 3, pk: { aircraft: 0.75, missile: 0.4, helicopter: 0.8 }, interceptDifficulty: 0, unitCostUsdM: 2, weightKg: 900 },
 ] as const);
 
 type Key = MunitionKey | (typeof specs)[number]['id'];
@@ -111,6 +115,8 @@ const artillery: PlatformSpec<Key>[] = [
   { id: 'g5', name: 'G5 155 mm L/45', cls: 'towed_artillery', crew: 8, producers: ['ZAF'], inService: 1983, unitCostUsdM: 1.5, q: 0.95, load: { shell_155_erfb: 30 } },
   { id: 'fh2000', name: 'FH-2000 155 mm L/52', cls: 'towed_artillery', crew: 8, producers: ['SGP'], inService: 1995, unitCostUsdM: 2, q: 1.0, load: { shell_155: 30 } },
   { id: 'atags', name: 'ATAGS 155 mm L/52', cls: 'towed_artillery', crew: 8, producers: ['IND'], inService: 2024, unitCostUsdM: 2, q: 1.05, load: { shell_155: 30 } },
+  // Stryker M1129: 120 mm RMS6L mortar firing from the hull; armor as the Stryker ICV row.
+  { id: 'stryker_mcv', name: 'Stryker M1129 Mortar Carrier (120 mm)', cls: 'sp_artillery', producers: ['USA'], inService: 2003, unitCostUsdM: 4, speedKph: 80, rangeKm: 500, fuelTph: 0.07, armor: 0.3, detectionKm: 6, q: 0.45, load: { mortar_120: 48 } },
 ];
 
 const rockets: PlatformSpec<Key>[] = [
@@ -160,6 +166,7 @@ const airDefense: PlatformSpec<Key>[] = [
   { id: 'type87_spaag', name: 'Type 87 35 mm SPAAG', cls: 'shorad', producers: [], inService: 1987, unitCostUsdM: 12, armor: 0.25, detectionKm: 15, channels: 1, q: 1.2 },
   { id: 'gdf_35mm', name: 'Oerlikon GDF 35 mm twin (Skyguard)', cls: 'shorad', crew: 6, producers: [], inService: 1963, unitCostUsdM: 2, speedKph: 30, armor: 0.05, detectionKm: 20, channels: 1, q: 0.9 },
   { id: 'green_pine_radar', name: 'EL/M-2080 Green Pine radar', cls: 'radar', crew: 10, producers: ['ISR'], inService: 2000, unitCostUsdM: 60, detectionKm: 800 },
+  { id: 'siper', name: 'Siper long-range SAM launcher', cls: 'sam_long', crew: 6, producers: ['TUR'], inService: 2024, unitCostUsdM: 50, detectionKm: 200, channels: 4, load: { siper_msl: 4 } },
 ];
 
 const missiles: PlatformSpec<Key>[] = [
@@ -187,6 +194,7 @@ const missiles: PlatformSpec<Key>[] = [
   { id: 'icbm_silo_empty', name: 'ICBM silo (unloaded)', cls: 'icbm_silo', producers: ['CHN'], inService: 2023, unitCostUsdM: 15, armor: 0.92 },
   { id: 'hf2_coastal', name: 'Hsiung Feng II coastal launcher', cls: 'coastal_asm', producers: ['TWN'], inService: 1993, unitCostUsdM: 6, load: { hf2: 4 } },
   { id: 'zarb_coastal', name: 'Zarb coastal launcher', cls: 'coastal_asm', producers: ['PAK'], inService: 2016, unitCostUsdM: 6, load: { zarb: 2 } },
+  { id: 'lrhw_launcher', name: 'LRHW Dark Eagle TEL (M983A4 + trailer)', cls: 'tel_irbm', crew: 4, producers: ['USA'], inService: 2025, unitCostUsdM: 40, load: { lrhw: 2 } },
 ];
 
 export const munitions: Munition[] = specs.map(toMunition);

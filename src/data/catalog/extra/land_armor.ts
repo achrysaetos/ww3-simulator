@@ -51,6 +51,13 @@ const tanks: PlatformSpec<Key>[] = [
   // T-80UD swaps the T-80U gas turbine for the 6TD diesel, roughly halving fuel burn; Pakistan bought 320 from Ukraine in 1997-99 (SIPRI).
   { id: 't80ud', name: 'T-80UD', cls: 'mbt', producers: [], inService: 1987, unitCostUsdM: 2.5, crew: 3, speedKph: 50, rangeKm: 560, fuelTph: 0.14, armor: 0.62, q: 0.85, load: { apfsds_125: 16, he_125: 24 } },
   { id: 't80bv', name: 'T-80BV', cls: 'mbt', producers: [], inService: 1985, unitCostUsdM: 1.5, crew: 3, speedKph: 50, rangeKm: 400, fuelTph: 0.25, armor: 0.55, q: 0.75, load: { apfsds_125: 16, he_125: 22, gun_launched_atgm: 3 } },
+  // 2A5 adds the wedge turret armor and a stabilised commander's thermal sight to the 2A4; Leopard 2PL brings Polish 2A4s to the same turret standard.
+  { id: 'leopard2a5', name: 'Leopard 2A5 / 2PL', cls: 'mbt', producers: ['DEU', 'POL'], inService: 1995, unitCostUsdM: 6, speedKph: 45, rangeKm: 450, fuelTph: 0.17, armor: 0.72, q: 1.0, load: { apfsds_120: 27, he_120: 15 } },
+  { id: 'ariete', name: 'C1 Ariete', cls: 'mbt', producers: [], inService: 1995, unitCostUsdM: 6, speedKph: 45, rangeKm: 550, fuelTph: 0.17, armor: 0.55, q: 0.8, load: { apfsds_120: 28, he_120: 14 } },
+  // TR-85: Romanian stretched T-55 hull, 100 mm gun, 830 hp; ~310 km road range. TR-85M1 Bizonul adds a thermal FCS and appliqué armor.
+  { id: 'tr85', name: 'TR-85', cls: 'mbt', producers: [], inService: 1986, unitCostUsdM: 0.5, speedKph: 40, rangeKm: 310, fuelTph: 0.12, armor: 0.3, q: 0.4, load: { apfsds_100: 41 } },
+  { id: 'tr85m1', name: 'TR-85M1 Bizonul', cls: 'mbt', producers: [], inService: 1997, unitCostUsdM: 1.5, speedKph: 40, rangeKm: 400, fuelTph: 0.12, armor: 0.38, q: 0.6, load: { apfsds_100: 41 } },
+  { id: 't55am', name: 'T-55AM (BDD appliqué armor)', cls: 'mbt', producers: [], inService: 1983, unitCostUsdM: 0.6, speedKph: 35, rangeKm: 400, fuelTph: 0.1, armor: 0.32, q: 0.45, load: { apfsds_100: 43 } },
 ];
 
 const ifvs: PlatformSpec<Key>[] = [
@@ -63,6 +70,8 @@ const ifvs: PlatformSpec<Key>[] = [
   { id: 'cm34_ifv', name: 'CM-34 Clouded Leopard 30 mm IFV', cls: 'ifv', crew: 10, producers: ['TWN'], inService: 2021, unitCostUsdM: 3, speedKph: 80, rangeKm: 800, fuelTph: 0.07, armor: 0.3, q: 0.95, capacity: { troops: 7 }, load: { round_30mm: 40 } },
   { id: 'bionix2', name: 'Bionix II', cls: 'ifv', crew: 10, producers: ['SGP'], inService: 2006, unitCostUsdM: 3, speedKph: 45, rangeKm: 415, fuelTph: 0.11, armor: 0.3, q: 0.95, capacity: { troops: 7 }, load: { round_25mm: 40 } },
   { id: 'hunter_afv', name: 'Hunter AFV', cls: 'ifv', crew: 11, producers: ['SGP'], inService: 2019, unitCostUsdM: 6, speedKph: 50, rangeKm: 500, fuelTph: 0.12, armor: 0.45, q: 1.1, capacity: { troops: 8 }, load: { round_30mm: 40, spike_lr2: 2 } },
+  // Vilkas: Lithuania's Boxer IFV with the Samson Mk II turret (30 mm, Spike LR); apc class like the patria_amv (Rosomak) row, which the catalog files wheeled 8x8s under.
+  { id: 'vilkas', name: 'Vilkas (Boxer IFV)', cls: 'apc', crew: 11, producers: ['DEU'], inService: 2019, unitCostUsdM: 7, speedKph: 80, rangeKm: 1050, fuelTph: 0.08, armor: 0.4, q: 1.0, capacity: { troops: 8 }, load: { round_30mm: 30, spike_lr2: 2 } },
 ];
 
 const carriers: PlatformSpec<Key>[] = [
@@ -93,6 +102,11 @@ const carriers: PlatformSpec<Key>[] = [
   { id: 'casspir', name: 'Casspir MRAP', cls: 'apc', crew: 14, producers: ['ZAF'], inService: 1979, unitCostUsdM: 0.3, speedKph: 80, rangeKm: 800, fuelTph: 0.04, armor: 0.15, q: 0.45, capacity: { troops: 12 } },
   { id: 'otokar_cobra', name: 'Otokar Cobra / Cobra II', cls: 'apc', crew: 9, producers: ['TUR'], inService: 1997, unitCostUsdM: 0.4, speedKph: 80, rangeKm: 700, fuelTph: 0.03, armor: 0.12, q: 0.6, capacity: { troops: 7 } },
   { id: 'nimr', name: 'NIMR Ajban 4x4 / Hafeet 6x6', cls: 'apc', crew: 8, producers: ['ARE'], inService: 2005, unitCostUsdM: 0.4, speedKph: 80, rangeKm: 700, fuelTph: 0.03, armor: 0.15, q: 0.6, capacity: { troops: 6 } },
+  // AMPV replaces the M113 family in ABCTs on a turretless Bradley hull; the ORBAT counts all five variants (GP, mortar, medical, mission command) as this row. ~$4M each, FY2024 Army budget (estimate).
+  { id: 'ampv', name: 'M1283 AMPV', cls: 'apc', crew: 8, producers: ['USA'], inService: 2023, unitCostUsdM: 4, speedKph: 45, rangeKm: 400, fuelTph: 0.12, armor: 0.4, q: 0.9, capacity: { troops: 6 } },
+  // USMC ACV-P: 3 crew + 13 Marines, swims ship-to-shore.
+  { id: 'acv', name: 'Amphibious Combat Vehicle (ACV-P)', cls: 'apc', crew: 16, producers: ['USA'], inService: 2020, unitCostUsdM: 4.5, speedKph: 80, rangeKm: 520, fuelTph: 0.07, armor: 0.3, q: 0.9, capacity: { troops: 13 } },
+  { id: 'lav6', name: 'LAV 6.0 (25 mm)', cls: 'apc', crew: 10, producers: ['CAN'], inService: 2017, unitCostUsdM: 3.5, speedKph: 80, rangeKm: 600, fuelTph: 0.07, armor: 0.3, q: 0.9, capacity: { troops: 7 }, load: { round_25mm: 40 } },
 ];
 
 const recon: PlatformSpec<Key>[] = [
@@ -108,6 +122,8 @@ const recon: PlatformSpec<Key>[] = [
   { id: 'pt76', name: 'PT-76B amphibious light tank', cls: 'recon', crew: 3, producers: [], inService: 1959, unitCostUsdM: 0.1, speedKph: 35, rangeKm: 370, fuelTph: 0.08, armor: 0.08, q: 0.8 },
   { id: 'stingray_light_tank', name: 'Stingray light tank (105 mm)', cls: 'recon', producers: [], inService: 1988, unitCostUsdM: 1.5, speedKph: 60, rangeKm: 480, fuelTph: 0.1, armor: 0.15, fp: { armor: 0.025 }, load: { apfsds_105: 32 } },
   { id: 'sabrah_light_tank', name: 'Sabrah light tank (ASCOD hull, 105 mm)', cls: 'recon', producers: ['ISR', 'ESP'], inService: 2023, unitCostUsdM: 5, speedKph: 60, rangeKm: 500, fuelTph: 0.12, armor: 0.3, fp: { armor: 0.03 }, load: { apfsds_105: 30 } },
+  { id: 'centauro', name: 'Centauro B1 (105 mm)', cls: 'recon', producers: [], inService: 1991, unitCostUsdM: 2.5, speedKph: 80, rangeKm: 800, fuelTph: 0.07, armor: 0.15, fp: { armor: 0.025 }, load: { apfsds_105: 40 } },
+  { id: 'cvrt', name: 'CVR(T) Scimitar (30 mm Rarden)', cls: 'recon', crew: 3, producers: [], inService: 1971, unitCostUsdM: 0.5, speedKph: 60, rangeKm: 450, fuelTph: 0.05, armor: 0.08, fp: { armor: 0.008 }, load: { round_30mm: 16 } },
 ];
 
 // Generic placeholder for the ORBATs' unspecified transport: a 4-6 t, 4x4/6x6 cargo truck of the Ural-4320 / KamAZ-4310 / MAN / Tata class.

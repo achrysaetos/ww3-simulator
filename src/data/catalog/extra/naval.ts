@@ -64,6 +64,11 @@ const carriersAndAmphibs: PlatformSpec<Key>[] = [
   { id: 'atlantico', name: 'NAM Atlântico (ex-HMS Ocean)', cls: 'amphibious', crew: 285, producers: [], inService: 1998, unitCostUsdM: 120, speedKph: 33, rangeKm: 15000, fuelTph: 2, detectionKm: 150, capacity: { troops: 800, aircraft: 18, vehicles: 40 } },
   { id: 'al_fulk_lpd', name: 'Al Fulk LPD (Fincantieri)', cls: 'amphibious', crew: 100, producers: ['ITA'], inService: 2024, unitCostUsdM: 400, speedKph: 37, rangeKm: 13000, fuelTph: 1.5, detectionKm: 150, capacity: { troops: 550, aircraft: 1, vehicles: 30 } },
   { id: 'kalaat_beni_abbes_lpd', name: 'Kalaat Beni Abbes LPD', cls: 'amphibious', crew: 150, producers: ['ITA'], inService: 2015, unitCostUsdM: 400, speedKph: 37, rangeKm: 13000, fuelTph: 1.5, detectionKm: 200, channels: 1, capacity: { troops: 440, aircraft: 3, vehicles: 15 }, load: { aster15: 16 } },
+  // Western order of battle (src/data/orbat/west).
+  { id: 'lsd_whidbey_island', name: 'Whidbey Island-class LSD', cls: 'amphibious', crew: 410, producers: [], inService: 1985, unitCostUsdM: 700, speedKph: 37, rangeKm: 15000, fuelTph: 2.5, detectionKm: 150, channels: 1, capacity: { troops: 402, vehicles: 30 }, load: { ram_blk2: 42, ciws_burst: 40 } },
+  // Galicia-class LPD, built to the Dutch Rotterdam design.
+  { id: 'lpd_rotterdam', name: 'Galicia / Rotterdam-class LPD', cls: 'amphibious', crew: 185, producers: [], inService: 1998, unitCostUsdM: 300, speedKph: 35, rangeKm: 11000, fuelTph: 2, detectionKm: 120, capacity: { troops: 540, aircraft: 6, vehicles: 33 }, load: { ciws_burst: 20 } },
+  { id: 'lha_trieste', name: 'Trieste LHD', cls: 'amphibious', crew: 460, producers: ['ITA'], inService: 2024, unitCostUsdM: 1300, speedKph: 46, rangeKm: 13000, fuelTph: 3, detectionKm: 300, channels: 2, capacity: { troops: 600, aircraft: 20, vehicles: 50 }, load: { aster15: 8, aster30: 8 } },
 ];
 
 const destroyers: PlatformSpec<Key>[] = [
@@ -85,6 +90,8 @@ const destroyers: PlatformSpec<Key>[] = [
   // Choe Hyon (2025): 74 VLS cells reported; the mix of Kumsong-3 and SAMs is an estimate.
   { id: 'choe_hyon', name: 'Choe Hyon-class destroyer', cls: 'destroyer', crew: 250, producers: ['PRK'], inService: 2025, unitCostUsdM: 500, detectionKm: 250, channels: 4, q: 0.8, load: { kh35: 16, buk_9m38: 32, ciws_burst: 20 } },
   { id: 'type051c', name: 'Type 051C Luzhou', cls: 'destroyer', crew: 250, producers: [], inService: 2006, unitCostUsdM: 300, detectionKm: 300, channels: 6, load: { s300_48n6e2: 48, yj83: 8, yu7: 6, ciws_burst: 30 } },
+  // Durand de la Penne: Mk 13 launcher with 40 SM-1MR, Albatros/Aspide point defence, Teseo (Otomat) Mk 2A.
+  { id: 'ddg_durand_de_la_penne', name: 'Durand de la Penne-class', cls: 'destroyer', crew: 377, producers: [], inService: 1993, unitCostUsdM: 600, detectionKm: 300, channels: 3, q: 0.9, load: { sm1mr: 40, otomat: 8, rim7_sea_sparrow: 16, mk46: 6 } },
 ];
 
 const frigates: PlatformSpec<Key>[] = [
@@ -127,6 +134,17 @@ const frigates: PlatformSpec<Key>[] = [
   { id: 'alvand', name: 'Alvand-class (Vosper Mk 5)', cls: 'frigate', crew: 135, producers: [], inService: 1971, unitCostUsdM: 50, detectionKm: 80, q: 0.55, load: { noor: 4 } },
   { id: 'neustrashimy', name: 'Neustrashimy-class (Project 11540)', cls: 'frigate', crew: 210, producers: [], inService: 1993, unitCostUsdM: 400, detectionKm: 200, channels: 4, q: 0.9, fp: { submarine: 0.07 }, load: { tor_9m338: 32, kh35: 8, type53: 6, ciws_burst: 20 } },
   { id: 'krivak', name: 'Krivak-class (Project 1135)', cls: 'frigate', crew: 190, producers: [], inService: 1970, unitCostUsdM: 150, detectionKm: 120, channels: 1, q: 0.7, load: { osa_m_9m33: 40, type53: 8 } },
+  // Karel Doorman M-class: also Portugal's Bartolomeu Dias pair and Belgium's Leopold I pair.
+  { id: 'ffg_karel_doorman', name: 'Karel Doorman-class (M-frigate)', cls: 'frigate', crew: 154, producers: [], inService: 1991, unitCostUsdM: 250, detectionKm: 180, channels: 2, q: 0.9, load: { harpoon: 8, rim7_sea_sparrow: 16, mk46: 4, ciws_burst: 20 } },
+  { id: 'ffg_elli', name: 'Elli-class (Kortenaer)', cls: 'frigate', crew: 196, producers: [], inService: 1981, unitCostUsdM: 150, detectionKm: 150, channels: 1, q: 0.8, load: { harpoon: 8, rim7_sea_sparrow: 24, mk46: 6, shell_76_naval: 80 } },
+  { id: 'ffg_wielingen', name: 'Wielingen-class (Drazki)', cls: 'frigate', crew: 160, producers: [], inService: 1976, unitCostUsdM: 80, detectionKm: 100, channels: 1, q: 0.65, load: { exocet_mm38: 4, rim7_sea_sparrow: 8 } },
+  { id: 'ffg_f123', name: 'Brandenburg-class F123', cls: 'frigate', crew: 220, producers: [], inService: 1994, unitCostUsdM: 450, detectionKm: 250, channels: 4, q: 1.0, load: { essm2: 16, ram_blk2: 42, exocet: 4, mu90: 4 } },
+  // Thaon di Revel PPA in Light+/Full fit: 16-cell Sylver A50 and Teseo Mk2/E (Otomat stands in).
+  { id: 'ffg_thaon_di_revel', name: 'Paolo Thaon di Revel-class PPA', cls: 'frigate', crew: 171, producers: ['ITA'], inService: 2022, unitCostUsdM: 500, stealth: 0.35, detectionKm: 300, channels: 6, q: 1.15, load: { aster30: 8, aster15: 8, otomat: 8 } },
+  { id: 'ffg_absalon', name: 'Absalon-class', cls: 'frigate', crew: 100, producers: [], inService: 2004, unitCostUsdM: 270, detectionKm: 200, channels: 3, q: 1.0, load: { harpoon: 16, essm2: 36, mu90: 4 } },
+  // Romania's ex-Royal Navy Type 22 Batch 2: Exocet and Sea Wolf were removed before transfer in 2004-05.
+  { id: 'ffg_type22', name: 'Type 22 Batch 2 (Regele Ferdinand)', cls: 'frigate', crew: 250, producers: [], inService: 1988, unitCostUsdM: 100, detectionKm: 120, q: 0.6, load: { shell_76_naval: 80, mk46: 6 } },
+  { id: 'ffg_marasesti', name: 'Marasesti (destroyer-frigate)', cls: 'frigate', crew: 230, producers: [], inService: 1985, unitCostUsdM: 80, detectionKm: 100, q: 0.5, load: { p15_termit: 8, shell_76_naval: 100 } },
 ];
 
 const corvettes: PlatformSpec<Key>[] = [
@@ -163,6 +181,11 @@ const corvettes: PlatformSpec<Key>[] = [
   { id: 'barroso_corvette', name: 'Barroso-class corvette', cls: 'corvette', crew: 145, producers: [], inService: 2008, unitCostUsdM: 250, detectionKm: 150, load: { exocet: 4, mk46: 6 } },
   { id: 'inhauma_corvette', name: 'Inhaúma-class corvette', cls: 'corvette', crew: 120, producers: [], inService: 1989, unitCostUsdM: 150, detectionKm: 100, q: 0.7, load: { exocet: 4, mk46: 6 } },
   { id: 'descubierta_corvette', name: 'Descubierta-class corvette', cls: 'corvette', crew: 110, producers: [], inService: 1978, unitCostUsdM: 80, detectionKm: 80, channels: 1, q: 0.65, load: { exocet_mm38: 4, rim7_sea_sparrow: 24, mk46: 6 } },
+  { id: 'corvette_k130', name: 'Braunschweig-class K130', cls: 'corvette', crew: 65, producers: ['DEU'], inService: 2008, unitCostUsdM: 300, stealth: 0.4, detectionKm: 150, channels: 2, q: 1.0, load: { rbs15: 4, ram_blk2: 42 } },
+  // Skjold: surface-effect hull, ~60 kn; held at the catalog's 100 km/h sea-speed bound.
+  { id: 'corvette_skjold', name: 'Skjold-class', cls: 'corvette', crew: 21, producers: [], inService: 2010, unitCostUsdM: 150, speedKph: 100, rangeKm: 1500, stealth: 0.7, detectionKm: 100, q: 1.0, load: { nsm: 8, mistral: 12 } },
+  // Hamina after its 2019-22 MLU: Gabriel V and Umkhonto (VL MICA NG stands in).
+  { id: 'corvette_hamina', name: 'Hamina-class', cls: 'corvette', crew: 30, producers: [], inService: 1998, unitCostUsdM: 80, speedKph: 60, rangeKm: 900, stealth: 0.5, detectionKm: 100, channels: 1, load: { gabriel5: 4, mica_ng: 8 } },
 ];
 
 const patrol: PlatformSpec<Key>[] = [
@@ -247,6 +270,7 @@ const submarines: PlatformSpec<Key>[] = [
   { id: 'salta_209', name: 'ARA Salta (Type 209/1200)', cls: 'ssk', crew: 31, producers: [], inService: 1974, unitCostUsdM: 80, stealth: 0.7, q: 0.6, load: { sut_heavyweight: 14 } },
   { id: 'santa_cruz_tr1700', name: 'Santa Cruz-class (TR-1700)', cls: 'ssk', crew: 30, producers: [], inService: 1984, unitCostUsdM: 200, stealth: 0.75, q: 0.65, load: { sut_heavyweight: 22 } },
   { id: 'heroine_209', name: 'Heroine-class (Type 209/1400MOD)', cls: 'ssk', crew: 30, producers: [], inService: 2006, unitCostUsdM: 300, stealth: 0.85, q: 0.95, load: { sut_heavyweight: 14 } },
+  { id: 'ssn_rubis', name: 'Rubis-class SSN', cls: 'ssn', crew: 70, producers: [], inService: 1983, unitCostUsdM: 600, stealth: 0.78, detectionKm: 50, q: 0.85, load: { f21: 14, exocet: 4 } },
 ];
 
 export const munitions: Munition[] = munitionSpecs.map(toMunition);

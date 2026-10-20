@@ -38,4 +38,38 @@ export const aliases: Record<string, string> = {
   leopard2sg: 'leopard2a4',
   leopard2ri: 'leopard2a4',
   piranha: 'piranha_v',
+  // Western order of battle (src/data/orbat/west): same system under another id.
+  mt_lb: 'mtlb',
+  rosomak: 'patria_amv',
+  piranha5: 'piranha_v',
+  griffon: 'vbmr_griffon',
+  stryker_rv: 'stryker_icv',
+  kirpi: 'kirpi_mrap',
+  puma_ifv: 'puma',
+  marder: 'marder1a3',
+  pizarro: 'ascod',
+  warrior_ifv: 'warrior',
+  jaguar_erbc: 'jaguar_ebrc',
+  kf41_lynx: 'lynx_kf41',
+  m80a: 'bvp_m80',
+  leopard2pl: 'leopard2a5',
+  // Western variants within ~10% of the catalog row.
+  // M2A3 has the A4's turret, sights and armor; the A4 adds only the powertrain. M3A3 is the cavalry M2A3.
+  m2a3_bradley: 'm2a4_bradley',
+  m3a3_bradley: 'm2a4_bradley',
+  m1a2_sepv2: 'm1a2_sepv3',
+  m1a1_fep: 'm1a1_sa',
+  // Leopard 2E and Strv 122 are 2A6-class guns with heavier turret armor than the 2A6 row.
+  leopard2e: 'leopard2a6',
+  strv122: 'leopard2a6',
+  // T-72M4CZ: TURMS-T thermal FCS, 1,000 hp engine and Dyna-72 ERA bring it to T-72B3 level.
+  t72m4cz: 't72b3',
+  // Freccia is Dardo's 25 mm/Spike turret on an 8x8 hull.
+  freccia: 'dardo',
+  pandur2: 'piranha_v',
+  patria_6x6: 'vbmr_griffon',
+  vamtac: 'hmmwv',
+  vbl: 'hmmwv',
+  jackal: 'hmmwv',
+  foxhound: 'jltv',
 };
