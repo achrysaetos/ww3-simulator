@@ -77,7 +77,7 @@ export function createAi(profiles: Readonly<Record<string, StrategicProfile>> = 
         if (tasking) {
           const battleArea = battleAreaOf(p);
           const targets = strikeTargets(p, battleArea);
-          planAir(p, targets, battleArea);
+          planAir(p, targets);
           planMissiles(p, targets);
           planNaval(p);
         }

@@ -304,7 +304,10 @@ export class SamCover {
   /** Sites sorted by latitude, so a query scans only the band an envelope can reach. */
   private sams: { node: NodeId; km: number; lat: number }[] = [];
   private maxKm = 0;
-  constructor(private readonly p: Plan, private readonly battleArea: Set<number>) {
+  /** Enemy-held cells touching a friendly front: the contact zone strike aviation may overfly. */
+  private readonly contact = new Set<number>();
+  constructor(private readonly p: Plan) {
+    for (const s of p.sectors) for (const n of s.enemyNodes) this.contact.add(n);
     for (const e of p.enemies)
       for (const f of p.index.byNation.get(e) ?? []) {
         if (f.kind === 'air_wing') {
@@ -349,10 +352,11 @@ export class SamCover {
    * `standoffKm` can hit `node` without flying deeper than tolerated into an
    * envelope, either on the way to the release point (straight line) or at it
    * (SAMs taken to sit behind the target). Nor does a conventional package cross
-   * the enemy's rear, behind the battle area, where it does not hold the air: short-range
-   * air defenses and fighters there are not in the SAM list but kill as surely. This
-   * keeps both air forces in Ukraine launching from their own side of the front, as
-   * they have since 2022.
+   * the enemy's rear, past the cells in contact with the front, where it does not hold the
+   * air: short-range air defenses and fighters there are not in the SAM list but kill as
+   * surely. This keeps both air forces in Ukraine launching from their own side of the
+   * front, as they have since 2022: Russian glide bombs reach 40-70 km past the line
+   * (ISW, RUSI 2024), and Russian jets do not overfly Poltava 200 km behind it.
    */
   clear(from: NodeId, node: NodeId, standoffKm: number, visibility = 1): boolean {
     if (this.covered(node, standoffKm, visibility)) return false;
@@ -398,7 +402,7 @@ export class SamCover {
     if (hit === undefined) {
       const { map } = this.p.ctx;
       const { world, enemies, nation } = this.p;
-      const rear = !map.isSea(at) && enemies.has(world.control[at]) && !this.battleArea.has(at) && world.theater.airControl[at]?.nation !== nation;
+      const rear = !map.isSea(at) && enemies.has(world.control[at]) && !this.contact.has(at) && world.theater.airControl[at]?.nation !== nation;
       hit = (rear && visibility >= PENETRATOR_VISIBILITY) || this.reaches(at, visibility, TOLERATED_DEPTH_KM);
       this.depth.set(key, hit);
     }

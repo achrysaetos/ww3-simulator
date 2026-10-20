@@ -38,7 +38,7 @@ function roleOf(p: Plan, f: Formation): AirRole | undefined {
  * over a front in reach and strike otherwise; bombers and drones strike
  * (see strikes.ts for target order); support aircraft orbit the main front.
  */
-export function planAir(p: Plan, targets: TargetGrid, battleArea: Set<number>): void {
+export function planAir(p: Plan, targets: TargetGrid): void {
   const { map } = p.ctx;
   const km = (a: number, b: number) => map.distanceKm(a as NodeId, b as NodeId);
   const wings = (p.index.byNation.get(p.nation) ?? []).filter((f) => f.kind === 'air_wing' && f.status === 'active');
@@ -50,7 +50,7 @@ export function planAir(p: Plan, targets: TargetGrid, battleArea: Set<number>): 
   };
   const cover = new Map<NodeId, number>(keys.map((k) => [k, 0]));
   const budget = new FireBudget(p);
-  const sams = new SamCover(p, battleArea);
+  const sams = new SamCover(p);
   const fighters = wings.filter((w) => roleOf(p, w) === 'fighter').length;
   // Strike packages are planned with the tanker support the nation can lay on; the
   // air system then works out each day's actual radius from tanker sorties in range.
