@@ -10,6 +10,12 @@ type Tracks = Map<FormationId, Set<NationId>>;
 
 /** Postures in which a group initiates fire; others only defend. */
 const ENGAGING = new Set(['attack', 'patrol', 'blockade', 'escort', 'defend', 'strike']);
+/**
+ * Torpedoes a hunting force puts on one detected submarine formation per tick. A track is one
+ * localized contact, a single boat, prosecuted with a pair of torpedoes; the boats it sails with
+ * are not localized by it (submarines operate dispersed; USN ASW doctrine, estimate).
+ */
+const ASW_SALVO = 2;
 /** Decoy/evasion chance for a surface ship against one torpedo (Nixie-type towed decoys; estimate). */
 const SHIP_TORPEDO_DEFENSE = 0.15;
 
@@ -45,11 +51,15 @@ export function navalCombat(env: TickEnv, tracks: Tracks): void {
     if (!env.comp(sub).submerged) continue;
     const hunters = tracks.get(sub.id);
     if (!hunters) continue;
+    let salvo = ASW_SALVO;
     for (const h of env.byNode.get(sub.node) ?? []) {
+      if (salvo <= 0) break;
       if (h === sub || !hunters.has(h.nation) || !atWar(env.world, h.nation, sub.nation)) continue;
       const w = bestMunition(env, h, 'submarine', 0, (m) => m.kind === 'torpedo');
       if (!w) continue;
-      queue(sub, h.nation, fire(env, h, sub, w, Math.min(h.magazine[w.id], 2 * env.comp(sub).hullCount), 'submarine'));
+      const n = Math.min(Math.floor(h.magazine[w.id]), salvo);
+      salvo -= n;
+      queue(sub, h.nation, fire(env, h, sub, w, n, 'submarine'));
     }
   }
 
