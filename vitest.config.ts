@@ -12,5 +12,7 @@ export default defineConfig({
     include: perf ? ['tests/**/*.perf.test.ts'] : realism ? ['tests/**/*.realism.test.ts'] : ['tests/**/*.test.ts'],
     exclude: ['**/node_modules/**', '.claude/**', 'dist/**', ...(perf || realism ? [] : separate)],
     fileParallelism: !perf,
+    // Simulation tests step the real map for weeks; a loaded machine stretches them past the 5 s default.
+    testTimeout: realism ? 600_000 : 60_000,
   },
 });
