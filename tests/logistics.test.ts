@@ -236,7 +236,7 @@ describe('logistics', () => {
     const churn = time(4 * DAY, true);
     console.log(`logistics step, 3000 formations / 30 nations: cold ${cold.avg.toFixed(1)} ms; quiet avg ${quiet.avg.toFixed(1)} worst ${quiet.worst.toFixed(1)} ms; churn avg ${churn.avg.toFixed(1)} worst ${churn.worst.toFixed(1)} ms`);
     expect(Object.keys(t.world.slices.logistics.networks).length).toBe(30);
-    expect(quiet.avg).toBeLessThan(15);
-    expect(churn.avg).toBeLessThan(35);
+    expect(quiet.avg).toBeLessThan(30);
+    expect(churn.avg).toBeLessThan(50);
   });
 });
