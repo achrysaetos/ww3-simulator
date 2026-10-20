@@ -120,7 +120,8 @@ export const MAX_DEPOTS = 12;
 
 /**
  * Networks refreshed per tick after their inputs change, oldest first; new ones
- * always compute at once. Each refresh is one graph search (about 1-3 ms). With
+ * always compute at once. Each refresh re-searches only what the changed inputs
+ * reach in one network's search, a small part of searching it afresh. With
  * up to 16 networks every change is picked up within a day of 6 h ticks;
  * formations carry three days of supply, so that lag changes little.
  */

@@ -336,6 +336,8 @@ export class NetworkSearch {
   private heapIds: Int32Array = NO_I32;
   private heapKeys: Float64Array = NO_F64;
   private heapSize = 0;
+  /** Heap entries left after the last pruning of stale ones. */
+  private heapLive = 0;
 
   constructor(
     private readonly map: GameMap,
@@ -393,6 +395,7 @@ export class NetworkSearch {
     this.heapIds = base.heapIds.slice(0, base.heapSize);
     this.heapKeys = base.heapKeys.slice(0, base.heapSize);
     this.heapSize = base.heapSize;
+    this.heapLive = base.heapLive;
     this.floor = base.floor;
     this.seeded = true;
     this.repair(inputs, nodes, resided, [...this.blocked]);
@@ -533,6 +536,11 @@ export class NetworkSearch {
   private close(w: Workspace): void {
     const { state, packStamp } = w;
     const stamp = w.stamp;
+    // Superseded entries below the floor are never popped; drop them before they pile up.
+    if (w.heap.size > 2 * this.heapLive + 256) {
+      w.heap.prune((n, key) => state[n] === QUEUED && key === valueOf(w, n));
+      this.heapLive = w.heap.size;
+    }
     const max = this.count + w.fresh.length;
     if (this.touched.length < max) {
       const size = max + (max >> 1) + 16, used = this.count;
@@ -614,11 +622,27 @@ class MaxHeap {
     keys[i] = key;
   }
   pop(): number {
-    const ids = this.ids, keys = this.keys;
-    const top = ids[0];
+    const top = this.ids[0];
     const n = --this.size;
-    const id = ids[n], key = keys[n];
-    let i = 0;
+    this.siftDown(0, this.ids[n], this.keys[n]);
+    return top;
+  }
+  /** Drops the entries `live` rejects and restores heap order. */
+  prune(live: (id: number, key: number) => boolean): void {
+    const ids = this.ids, keys = this.keys;
+    let n = 0;
+    for (let i = 0; i < this.size; i++)
+      if (live(ids[i], keys[i])) {
+        ids[n] = ids[i];
+        keys[n] = keys[i];
+        n++;
+      }
+    this.size = n;
+    for (let i = (n >> 1) - 1; i >= 0; i--) this.siftDown(i, ids[i], keys[i]);
+  }
+  /** Places (id, key) at slot `i` or below, moving larger children up. */
+  private siftDown(i: number, id: number, key: number): void {
+    const ids = this.ids, keys = this.keys, n = this.size;
     for (;;) {
       const l = 2 * i + 1, r = l + 1;
       let m = i, mk = key;
@@ -631,6 +655,5 @@ class MaxHeap {
     }
     ids[i] = id;
     keys[i] = key;
-    return top;
   }
 }
