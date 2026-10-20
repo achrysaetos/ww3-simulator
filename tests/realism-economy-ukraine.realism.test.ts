@@ -88,9 +88,7 @@ describe.each(SEEDS)('ukraine-2026 war economy, seed %i', (seed) => {
     expect(eco(seed, 'UKR').gdpIndex).toBeGreaterThanOrEqual(0.85);
   });
 
-  it.fails('[logistics] missiles Russia builds reach launcher magazines', () => {
-    // logistics/index.ts replace() refills equipment from nation.stockpile but nothing refills
-    // formation.magazine, so every produced Kh-101 stays in the national stockpile.
+  it('missiles Russia builds reach launcher magazines', () => {
     const kh = eco(seed, 'RUS').items.kh101;
     expect(kh.stockpile[1]).toBeLessThan(kh.stockpile[0] + kh.produced);
   });

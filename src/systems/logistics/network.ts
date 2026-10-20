@@ -1,7 +1,7 @@
 import type { GameMap } from '../../core/map';
 import type { NationId, World } from '../../core/types';
 import {
-  AIRLIFT_FACTOR, DECAY_HALF_KM, DEPOT_POP_SHARE, FRONTLINE_CAPACITY, FRONTLINE_COST, FULL_PORT, MAX_DEPOTS, MIN_FACTOR, MIN_RAIL_KM,
+  AIRLIFT_FACTOR, BEACH_CAPACITY, DECAY_HALF_KM, DEPOT_POP_SHARE, FRONTLINE_CAPACITY, FRONTLINE_COST, FULL_PORT, MAX_DEPOTS, MIN_FACTOR, MIN_RAIL_KM,
   PORT_HANDLING_KM, RAIL_COST_PER_KM, RAIL_CUT_INFRASTRUCTURE, SEA_COST_PER_KM, TERRAIN_ROAD_COST,
 } from './tables';
 
@@ -57,7 +57,11 @@ function staticNet(map: GameMap): StaticNet {
   const E = map.adj.length;
   const mode = new Uint8Array(E), railCost = new Float32Array(E), roadCost = new Float32Array(E);
   const portCap = new Float32Array(map.size);
-  for (let n = 0; n < map.landCount; n++) portCap[n] = Math.min(1, map.ports[n] / FULL_PORT);
+  for (let n = 0; n < map.landCount; n++) {
+    let coast = false;
+    for (let k = map.adjStart[n]; k < map.adjStart[n + 1]; k++) coast ||= map.adj[k] >= map.landCount;
+    portCap[n] = map.ports[n] > 0 ? Math.min(1, map.ports[n] / FULL_PORT) : coast ? BEACH_CAPACITY : 0;
+  }
   for (let u = 0; u < map.size; u++)
     for (let k = map.adjStart[u]; k < map.adjStart[u + 1]; k++) {
       const v = map.adj[k], km = map.adjKm[k];
@@ -409,18 +413,24 @@ export class NetworkSearch {
   }
 
   /**
-   * Factor in thousandths for forces at `node`. A cell is about 100 km across, so
-   * forces in a land cell the network cannot enter (enemy-held, or friendly with
-   * enemy troops in it) fight at its near edge and draw through the best adjacent
-   * cell it reaches.
+   * Factor in thousandths for forces at `node`. Forces inside an enemy-held cell have
+   * outrun their road and rail net and get nothing, unless they hold a lodgement on a
+   * coast with no friendly ground next to it: that is fed over the beach from the
+   * adjacent sea zone, as far as sea control lets the network reach it (Normandy,
+   * Inchon). The caller scales it by the lift left to carry it.
    */
   milliForForcesAt(inputs: SearchInputs, node: number): number {
     const own = this.milliAt(inputs, node);
     const { landCount, adjStart, adj } = this.map;
-    if (own > 0 || node >= landCount) return own;
-    let best = 0;
-    for (let k = adjStart[node]; k < adjStart[node + 1]; k++) if (adj[k] < landCount) best = Math.max(best, this.milliAt(inputs, adj[k]));
-    return best;
+    const { side } = this, cell = this.controllers.cell;
+    if (own > 0 || node >= landCount || side[cell[node]] !== ENEMY) return own;
+    let sea = 0;
+    for (let k = adjStart[node]; k < adjStart[node + 1]; k++) {
+      const v = adj[k];
+      if (v >= landCount) sea = Math.max(sea, this.milliAt(inputs, v));
+      else if (side[cell[v]] === FRIENDLY) return 0;
+    }
+    return Math.min(sea, Math.round(BEACH_CAPACITY * 1000));
   }
 
   /** Searches on until every node in `nodes` has its factor. */

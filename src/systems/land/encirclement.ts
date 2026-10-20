@@ -30,8 +30,9 @@ class Encirclement {
   cutOff(f: Formation): boolean {
     const { world, map } = this;
     const holder = world.control[f.node];
-    // Fighting inside an enemy cell: cut off unless it borders friendly ground that is not itself a pocket.
+    // Fighting inside an enemy cell: cut off unless supplied over the beach, or it borders friendly ground that is not itself a pocket.
     if (atWar(world, f.nation, holder)) {
+      if (this.supplied(f.node)) return false;
       for (const n of map.neighbors(f.node)) if (!map.isSea(n) && !atWar(world, f.nation, world.control[n]) && !this.cutOffAt(n)) return false;
       return true;
     }
