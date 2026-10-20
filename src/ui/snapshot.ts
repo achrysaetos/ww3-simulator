@@ -11,6 +11,7 @@ import { platformCount } from '../core/forces';
 import type { GameMap } from '../core/map';
 import type { Catalog } from '../core/catalog';
 import { BMD_SYSTEMS } from '../systems/strategic/tables';
+import { supplyFactor } from '../systems/logistics';
 import type {
   Command, Echelon, Formation, FormationId, FormationKind, ItemId, MunitionKind, Nation, NationId, NodeId, Posture, SimEvent, World,
 } from '../core/types';
@@ -450,9 +451,7 @@ function bmdOf(interceptors: Record<string, number>, id: NationId): Record<strin
 }
 
 function formationDetail(world: World, f: Formation): FormationDetail {
-  const logistics = world.slices.logistics;
-  const net = logistics?.networkOf[f.nation];
-  const flow = net ? logistics.networks[net]?.factor[f.node] : undefined;
+  const flow = world.slices.logistics?.networkOf[f.nation] ? supplyFactor(world, f.node, f.nation) : undefined;
   return {
     formation: f,
     supplyFlow: flow ?? null,
