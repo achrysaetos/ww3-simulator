@@ -172,14 +172,18 @@ describe('economy: grid strikes', () => {
     const t = dailyWorld();
     const UKR = id.nation('UKR');
     const cells = t.map.nodesOf(UKR);
-    for (const n of cells) t.world.theater.infrastructure[n] = 0.5;
+    const power: Record<number, number> = {};
+    (t.world.theater as { power?: Record<number, number> }).power = power;
+    for (const n of cells) power[n] = 0.5;
     t.days(2);
     const e = t.world.slices.economy.nations[UKR];
     // Half the grid gone takes about half of electricity, ~20% of final energy use.
     expect(e.supply.energy).toBeGreaterThan(0.85);
     expect(e.supply.energy).toBeLessThan(0.95);
     expect(t.world.slices.economy.nations[RUS].supply.energy).toBe(1);
-    for (const n of cells) t.world.theater.infrastructure[n] = 1;
+    // Grid damage cuts energy, not industrial integrity.
+    expect(t.world.slices.economy.nations[UKR].integrity).toBe(1);
+    for (const n of cells) delete power[n];
     t.days(1);
     expect(e.supply.energy).toBe(1);
   });

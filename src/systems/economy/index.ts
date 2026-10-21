@@ -188,19 +188,26 @@ function industrialIntegrity(world: World, map: GameMap): Map<NationId, number> 
   return out;
 }
 
-/** Population-weighted infrastructure of the home cells each nation still holds, 0..1: what strikes have left of its grid. */
+/**
+ * Grid capacity per land cell, 0..1, absent = intact. Written by air strikes on power targets
+ * (theater.power); read through this narrow view so the economy runs on worlds without it.
+ */
+const powerOf = (world: World): Record<number, number> | undefined => (world.theater as { power?: Record<number, number> }).power;
+
+/** Population-weighted grid capacity serving the home cells each nation still holds, 0..1. */
 function gridIntact(world: World, map: GameMap): Map<NationId, number> {
+  const out = new Map<NationId, number>();
+  const power = powerOf(world);
+  if (!power) return out;
   const idx = ownerIndex(map);
   const intact = new Float64Array(map.nationIds.length);
   const held = new Float64Array(map.nationIds.length);
-  const infra = world.theater.infrastructure;
   for (let n = 0; n < map.landCount; n++) {
     const i = idx[n];
     if (i < 0 || world.control[n] !== map.owner[n]) continue;
     held[i] += map.popShare[n];
-    intact[i] += map.popShare[n] * (infra[n] ?? 1);
+    intact[i] += map.popShare[n] * (power[n] ?? 1);
   }
-  const out = new Map<NationId, number>();
   map.nationIds.forEach((id, i) => out.set(id, held[i] > 0 ? intact[i] / held[i] : 1));
   return out;
 }
