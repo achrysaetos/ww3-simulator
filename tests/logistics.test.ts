@@ -5,7 +5,7 @@ import { loadMap } from '../src/data/load';
 
 const MAP = loadMap();
 import { logistics, supplyFactor } from '../src/systems/logistics';
-import { BEACH_CAPACITY, LAST_MILE_CAPACITY, NODE_TONS_PER_DAY } from '../src/systems/logistics/tables';
+import { BEACH_CAPACITY, HOST_SUPPORT, LAST_MILE_CAPACITY, NODE_TONS_PER_DAY } from '../src/systems/logistics/tables';
 
 const PLENTY = { fuel: 1e7, ammo: 1e7, food: 1e7 };
 const DAY = 4; // ticks at the default 6 h
@@ -84,6 +84,39 @@ describe('logistics', () => {
     expect(across).toBeCloseTo(LAST_MILE_CAPACITY * best, 3);
     expect(t.fill(assault, 'ammo')).toBeGreaterThan(0.31);
     expect(supplyFactor(t.world, t.map, spearhead.node, rus)).toBe(0);
+  });
+
+  it('feeds an assault along the line of contact when the enemy outnumbers it in the own cell behind it', () => {
+    const t = setup();
+    t.war('RUS', 'UKR');
+    const rus = id.nation('RUS');
+    const contested = t.nodeAt(49.5, 36.5); // Kharkiv
+    const behind = [...t.map.neighbors(contested)].filter((n) => n < t.map.landCount && t.world.control[n] === rus);
+    expect(behind.length).toBeGreaterThan(0);
+    const assault = t.brigade('RUS', contested);
+    for (const n of behind) for (let i = 0; i < 3; i++) t.brigade('UKR', n as NodeId);
+    t.drain(assault, 0.3);
+    t.engine.run(t.world, 2 * DAY);
+    const s = t.world.slices.logistics;
+    expect(behind.every((n) => s.networks[s.networkOf[rus]].occupied.includes(n))).toBe(true);
+    const fedBehind = behind.map((v) =>
+      Math.max(0, ...[...t.map.neighbors(v)].filter((w) => w < t.map.landCount && t.world.control[w] === rus && !s.networks[s.networkOf[rus]].occupied.includes(w)).map((w) => supplyFactor(t.world, t.map, w as NodeId, rus))),
+    );
+    const across = supplyFactor(t.world, t.map, contested, rus);
+    expect(across).toBeGreaterThan(0);
+    expect(across).toBeCloseTo(LAST_MILE_CAPACITY * LAST_MILE_CAPACITY * Math.max(...fedBehind), 2);
+    expect(t.fill(assault, 'ammo')).toBeGreaterThan(0.31);
+  });
+
+  it('lets a host nation supply foreign forces based on its ground in peacetime', () => {
+    const t = setup();
+    const udeid = t.nodeAt(25.12, 51.32);
+    expect(t.world.control[udeid]).toBe(id.nation('QAT'));
+    const wing = t.brigade('USA', udeid);
+    t.drain(wing, 0.3);
+    t.engine.run(t.world, 2 * DAY);
+    expect(supplyFactor(t.world, t.map, udeid, id.nation('USA'))).toBeCloseTo(HOST_SUPPORT * t.world.theater.infrastructure[udeid], 2);
+    expect(t.fill(wing, 'fuel')).toBeGreaterThan(0.31);
   });
 
   it('lets intruders cut the roads through a cell only while they outnumber its defenders', () => {
@@ -200,12 +233,13 @@ describe('logistics', () => {
     expect(t.fill(f, 'ammo')).toBeLessThan(0.36); // the open route would have refilled it past 0.5
   });
 
-  it('supplies forces abroad through allied depots and ports only when they share a bloc', () => {
+  it('supplies forces abroad through allied depots and ports only when they share a bloc, and by host support otherwise', () => {
     const t = setup();
     const lublin = t.nodeAt(51.2, 22.6);
     const f = t.brigade('USA', lublin);
     t.engine.step(t.world);
-    expect(supplyFactor(t.world, t.map, lublin, f.nation)).toBe(0);
+    // Outside a bloc only the host feeds them.
+    expect(supplyFactor(t.world, t.map, lublin, f.nation)).toBeLessThanOrEqual(HOST_SUPPORT);
 
     t.world.nations[id.nation('USA')].blocs = ['NATO'];
     t.world.nations[id.nation('POL')].blocs = ['NATO'];

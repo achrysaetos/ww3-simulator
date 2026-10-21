@@ -157,6 +157,14 @@ export const FRONTLINE_COST = 1.5;
 export const LAST_MILE_CAPACITY = 0.5;
 
 /**
+ * Supply factor a host nation gives foreign forces stationed on its ground, times the cell's
+ * infrastructure: fuel, food and transport under host-nation support agreements (NATO AJP-4.5)
+ * and local contracts, as at Al Udeid, Bahrain, Djibouti or Gyumri. Judgment: half a full cell,
+ * the same as feeding across a contact line.
+ */
+export const HOST_SUPPORT = 0.5;
+
+/**
  * Best supply an airfield can get by airlift alone. Calibration: the Stalingrad
  * airlift averaged about 100 t/day against 700 t/day needed (~15%); Demyansk
  * did better with a smaller pocket. Enemy air control scales it down.
