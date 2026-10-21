@@ -9,7 +9,7 @@ import { coBelligerents, hostileEdges, sectorsFor } from './fronts';
 import { planLand } from './land';
 import { planMissiles } from './missiles';
 import { planNaval } from './naval';
-import { planStrategy } from './strategy';
+import { planStrategy, sanctionDecisions } from './strategy';
 import { battleAreaOf, strikeTargets } from './strikes';
 import type { Plan, Sector } from './types';
 
@@ -43,6 +43,7 @@ export function createAi(profiles: Readonly<Record<string, StrategicProfile>> = 
     },
     step(world, ctx) {
       if (world.events.some((e) => FRONT_CHANGES.has(e.type))) fronts.delete(world);
+      if (world.tick % STRATEGY_EVERY === 0) world.pending.push(...sanctionDecisions(world));
       const ids = Object.keys(world.nations) as NationId[];
       const due = ids
         .map((n, i) => ({

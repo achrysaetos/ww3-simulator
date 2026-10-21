@@ -67,8 +67,12 @@ export interface EconomyState {
   lastReportTick: number;
   /** Arms pipelines, keyed by aidKey(flow). */
   aid: Record<string, AidState>;
+  /** Bulk ammunition cross-levelled between allies since the run began, tons, keyed `donor>recipient`. */
+  allied: Record<string, number>;
   /** World energy price relative to the start, from export capacity lost to blockade and war damage. */
   energyPrice: number;
+  /** Share of world energy exports lost to blockade and war damage this tick, 0..1; sets energyPrice. */
+  energyExportsLost: number;
 }
 
 declare module '../../core/types' {

@@ -1,6 +1,7 @@
 import type { Catalog } from '../core/catalog';
 import type { ItemId, MunitionId, NationId, World } from '../core/types';
-import { AID_FLOWS, ITEMS, itemSpec } from '../data/industry';
+import { AID_FLOWS, ITEMS, RESOURCES, itemSpec } from '../data/industry';
+import { stocksOf } from '../systems/economy/state';
 import { aidKey, defenseShare } from '../systems/economy';
 
 /** War-economy outcomes for one nation over a run. */
@@ -18,14 +19,18 @@ export interface EconomyMetrics {
   reserves: number;
   /** National bulk ammunition, tons: what the depots held, what industry added, what forces drew. */
   ammo: { start: number; end: number; producedTons: number; aidNetTons: number; drawnTonsPerDay: number };
-  /** Sampled every 7 days from the start. */
-  weekly: { ammoTons: number[]; fuelTons: number[]; energySupply: number[]; tradeBlocked: number[]; tradeLoss: number[]; integrity: number[]; gdpIndex: number[] };
+  /** Sampled every 7 days from the start. energyPrice and energyExportsLost are world values, the same for every nation. */
+  weekly: { ammoTons: number[]; fuelTons: number[]; energySupply: number[]; energyPrice: number[]; energyExportsLost: number[]; tradeBlocked: number[]; tradeLoss: number[]; integrity: number[]; gdpIndex: number[] };
   fuel: { start: number; end: number; deliveredTonsPerDay: number; drawnTonsPerDay: number };
+  /** Nations sanctioning this one at the end of the run. */
+  sanctionedBy: string[];
+  /** National stocks per strategic resource, months of use weighted by each stream's share: [start, end]. */
+  stockMonths: Record<string, [number, number]>;
   /** Days a supply class (logistics) or strategic resource (economy) was flagged short. */
   shortageDays: Record<string, number>;
   /** Units delivered by each production line over the run. */
   produced: Record<string, number>;
-  /** Arms shipped in and out over the run, units by `donor>recipient:item`. */
+  /** Arms shipped in and out over the run, units by `donor>recipient:item`; allied cross-levelling as tons under `donor>recipient:bulk_ammo_t`. */
   aid: Record<string, number>;
   /**
    * Items held by formations (magazines for munitions, equipment plus damaged for platforms) and in
@@ -63,6 +68,9 @@ export function economyProbe(world: World, catalog: Catalog) {
   const startHeld = itemsHeld(world);
   const start = new Map(Object.values(world.nations).map((n) => [n.id, { ...n.bulk }]));
   const aid0 = Object.fromEntries(Object.entries(world.slices.economy?.aid ?? {}).map(([k, a]) => [k, a.delivered]));
+  const allied0 = { ...world.slices.economy?.allied };
+  const stockMonths = (id: NationId) => Object.fromEntries(RESOURCES.map((r) => [r, stocksOf(id, r).reduce((a, st, i) => a + st.share * (world.slices.economy?.nations[id]?.buffers[r][i] ?? 0), 0)]));
+  const stocks0 = new Map((Object.keys(world.nations) as NationId[]).map((id) => [id, stockMonths(id)]));
   const at0 = new Map(Object.entries(world.slices.economy?.nations ?? {}).map(([id, e]) => [id, { delivered: { ...e.delivered }, recruited: e.recruited, fuelDelivered: e.fuelDelivered }]));
   const shortage = new Map<NationId, Record<string, number>>();
   const weekly = new Map<NationId, EconomyMetrics['weekly']>();
@@ -80,11 +88,13 @@ export function economyProbe(world: World, catalog: Catalog) {
       for (const [n, e] of Object.entries(world.slices.economy?.nations ?? {})) for (const r of e.short) add(n as NationId, r);
       if ((world.tick - startTick) % ticksPerWeek === 0)
         for (const n of Object.values(world.nations)) {
-          const w = weekly.get(n.id) ?? weekly.set(n.id, { ammoTons: [], fuelTons: [], energySupply: [], tradeBlocked: [], tradeLoss: [], integrity: [], gdpIndex: [] }).get(n.id)!;
+          const w = weekly.get(n.id) ?? weekly.set(n.id, { ammoTons: [], fuelTons: [], energySupply: [], energyPrice: [], energyExportsLost: [], tradeBlocked: [], tradeLoss: [], integrity: [], gdpIndex: [] }).get(n.id)!;
           const e = world.slices.economy?.nations[n.id];
           w.ammoTons.push(Math.round(n.bulk.ammo));
           w.fuelTons.push(Math.round(n.bulk.fuel));
           w.energySupply.push(Math.round((e?.supply.energy ?? 1) * 100) / 100);
+          w.energyPrice.push(Math.round((world.slices.economy?.energyPrice ?? 1) * 100) / 100);
+          w.energyExportsLost.push(Math.round((world.slices.economy?.energyExportsLost ?? 0) * 1000) / 1000);
           w.tradeBlocked.push(Math.round((world.theater.tradeBlocked[n.id] ?? 0) * 100) / 100);
           w.tradeLoss.push(Math.round((e?.tradeLoss ?? 0) * 100) / 100);
           w.integrity.push(Math.round((e?.integrity ?? 1) * 100) / 100);
@@ -115,6 +125,13 @@ export function economyProbe(world: World, catalog: Catalog) {
         aid[aidKey(f)] = k;
         aidNetTons += (f.recipient === id ? 1 : -1) * k * bulkTons(ITEMS[f.item].id);
       }
+      for (const [k, tons] of Object.entries(world.slices.economy.allied)) {
+        const [donor, recipient] = k.split('>');
+        const t = tons - (allied0[k] ?? 0);
+        if ((donor !== id && recipient !== id) || t <= 0) continue;
+        aid[`${k}:bulk_ammo_t`] = Math.round(t);
+        aidNetTons += (recipient === id ? 1 : -1) * t;
+      }
       const s = start.get(id)!;
       const fuelIn = e.fuelDelivered - before.fuelDelivered;
       const items: EconomyMetrics['items'] = {};
@@ -140,8 +157,10 @@ export function economyProbe(world: World, catalog: Catalog) {
         reserves: Math.round(n.reserves),
         ammo: { start: Math.round(s.ammo), end: Math.round(n.bulk.ammo), producedTons: Math.round(producedTons), aidNetTons: Math.round(aidNetTons), drawnTonsPerDay: Math.round((s.ammo + producedTons + aidNetTons - n.bulk.ammo) / days) },
         fuel: { start: Math.round(s.fuel), end: Math.round(n.bulk.fuel), deliveredTonsPerDay: Math.round(fuelIn / days), drawnTonsPerDay: Math.round((s.fuel + fuelIn - n.bulk.fuel) / days) },
+        sanctionedBy: Object.entries(world.relations).filter(([k, r]) => r.sanctions && !r.atWar && k.split('|').includes(id)).map(([k]) => k.split('|').find((x) => x !== id)!).sort(),
+        stockMonths: Object.fromEntries(Object.entries(stockMonths(id)).map(([r, m]) => [r, [round(stocks0.get(id)?.[r] ?? 0, 100), round(m, 100)]])),
         shortageDays: Object.fromEntries(Object.entries(shortage.get(id) ?? {}).map(([k, v]) => [k, round(v, 10)])),
-        weekly: weekly.get(id) ?? { ammoTons: [], fuelTons: [], energySupply: [], tradeBlocked: [], tradeLoss: [], integrity: [], gdpIndex: [] },
+        weekly: weekly.get(id) ?? { ammoTons: [], fuelTons: [], energySupply: [], energyPrice: [], energyExportsLost: [], tradeBlocked: [], tradeLoss: [], integrity: [], gdpIndex: [] },
         produced,
         aid,
         items,
