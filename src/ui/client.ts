@@ -1,15 +1,10 @@
 import { loadMap } from '../data/load';
 import type { Command, FormationId, NationId, SimEvent } from '../core/types';
+import { PlaceNamer, type Namer } from './events';
+import { EventFeed } from './feed';
 import {
   applySnapshot, emptyClientState, type ClientState, type FromWorker, type NationCard, type RunStats, type ScenarioCard, type SessionMeta, type ToWorker,
 } from './snapshot';
-
-export interface LoggedEvent {
-  seq: number;
-  event: SimEvent;
-}
-
-const LOG_LIMIT = 2_000;
 
 /**
  * Main-thread handle on the simulation worker. Holds the decoded mirror of the
@@ -18,6 +13,7 @@ const LOG_LIMIT = 2_000;
  */
 export class SimClient {
   readonly map = loadMap();
+  readonly places = new PlaceNamer(this.map);
   state: ClientState = emptyClientState(this.map.size);
   scenarios: ScenarioCard[] = [];
   nationCards = new Map<NationId, NationCard>();
@@ -25,12 +21,13 @@ export class SimClient {
   /** The nation the player took command of at start. */
   playing: NationId | null = null;
   starting = false;
-  log: LoggedEvent[] = [];
+  readonly feed = new EventFeed();
+  private formationNames = new Map<FormationId, string>();
+  private namesVersion = -1;
   version = 0;
   stats: RunStats = { stepMs: 0, achievedTps: 0 };
   ticksPerSec = 0;
   error: string | null = null;
-  private seq = 0;
   private readonly worker: Worker;
   private readonly listeners = new Set<() => void>();
 
@@ -62,11 +59,27 @@ export class SimClient {
         } else this.stats = msg.stats;
         applySnapshot(this.state, msg.snapshot, this.meta!.nationIds, this.nationCards);
         this.send({ type: 'ack' });
-        for (const event of msg.snapshot.events) this.log.push({ seq: this.seq++, event });
-        if (this.log.length > LOG_LIMIT) this.log.splice(0, this.log.length - LOG_LIMIT);
+        this.record(msg.snapshot.events);
         break;
     }
     this.notify();
+  }
+
+  readonly namer: Namer = {
+    nation: (id) => this.nationCards.get(id)?.name ?? id,
+    formation: (id) => this.formationNames.get(id),
+    item: (id) => this.namer.known(id) ?? id.replace(/_/g, ' '),
+    known: (id) => this.meta?.platforms[id]?.name ?? this.meta?.munitions[id]?.name,
+    place: this.places,
+  };
+
+  private record(events: readonly SimEvent[]) {
+    if (!events.length) return;
+    if (this.namesVersion !== this.state.rosterVersion) {
+      for (const f of this.state.formations) this.formationNames.set(f.entry.id, f.entry.name);
+      this.namesVersion = this.state.rosterVersion;
+    }
+    this.feed.record(events, this.namer);
   }
 
   private notify() {

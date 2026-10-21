@@ -378,7 +378,7 @@ export function applyHits(env: TickEnv, target: Formation, hits: number[], by: N
   if (lost) recordFleetLoss(world, target, lost);
   for (const [pid, n] of Object.entries(target.equipment)) if (n <= 0) delete target.equipment[pid as PlatformId];
   env.invalidate(target);
-  ctx.emit({ type: 'battle', tick: world.tick, node: target.node, attacker: by, defender: target.nation, losses: { [target.nation]: { ...losses.sunk } }, casualties: { [target.nation]: Math.round(losses.casualties) } });
+  ctx.emit({ type: 'battle', tick: world.tick, node: target.node, attacker: by, defender: target.nation, losses: { [target.nation]: { ...losses.sunk } }, casualties: { [target.nation]: Math.round(losses.casualties) }, domain: 'sea' });
   const after = env.comp(target);
   if (after.crippled && target.order.posture !== 'reserve') target.order = { posture: 'reserve', issuedTick: world.tick };
   else if (!after.hullCount && !after.crippled) destroy(env, target);

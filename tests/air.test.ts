@@ -161,7 +161,7 @@ describe('integrated air defense', () => {
     const cut = t.world.theater.power?.[kyiv] ?? 1;
     expect(cut).toBeLessThan(0.95);
     expect(t.world.theater.infrastructure[kyiv]).toBe(infra);
-    for (const f of Object.values(t.world.formations)) if (f.nation === 'RUS') f.order = { posture: 'defend' };
+    for (const f of Object.values(t.world.formations)) if (f.nation === 'RUS') f.order = { posture: 'defend', issuedTick: t.world.tick };
     t.tick(40);
     expect(t.world.theater.power?.[kyiv] ?? 1).toBeGreaterThan(cut);
   });

@@ -1,6 +1,7 @@
 import type { System } from '../../core/engine';
-import type { NationId, SimEvent, World } from '../../core/types';
+import { COMMAND_DOMAINS, type Command, type NationId, type SimEvent, type World } from '../../core/types';
 import { enemyMap } from '../diplomacy/assess';
+import { aiMayIssue, delegated } from '../orders';
 import { DEFAULT_PROFILE, type DiplomacyState, type StrategicProfile } from '../diplomacy/types';
 import { planAir } from './air';
 import { indexForces } from './forces';
@@ -27,9 +28,11 @@ const TASKING_EVERY = 4;
 const FRONT_CHANGES: ReadonlySet<SimEvent['type']> = new Set(['node_captured', 'capitulation', 'war_declared', 'peace']);
 
 /**
- * Computer opponents for every AI nation at war. Runs last in the tick and only
- * queues Commands into world.pending for the next tick; it never touches
- * formations directly. Reads diplomacy's assessment when that system is present.
+ * Computer opponents for every AI nation at war, and the delegate of every human nation
+ * at war that hands it any domain. Runs last in the tick and only queues Commands into
+ * world.pending for the next tick; it never touches formations directly. A delegate plans
+ * as the full AI would and keeps only the commands its player let it give. Reads
+ * diplomacy's assessment when that system is present.
  */
 export function createAi(profiles: Readonly<Record<string, StrategicProfile>> = {}): System {
   const fronts = new WeakMap<World, Int32Array>();
@@ -49,7 +52,7 @@ export function createAi(profiles: Readonly<Record<string, StrategicProfile>> = 
           land: (world.tick + i) % LAND_EVERY === 0,
           tasking: (world.tick + i + 1) % TASKING_EVERY === 0,
         }))
-        .filter(({ n, strategy, land, tasking }) => (strategy || land || tasking) && world.nations[n].controlledBy === 'ai' && (world.nations[n].status === 'war' || surging.has(n)));
+        .filter(({ n, strategy, land, tasking }) => (strategy || land || tasking) && (world.nations[n].status === 'war' || surging.has(n)) && COMMAND_DOMAINS.some((d) => delegated(world, n, d)));
       if (!due.length) return;
 
       const enemies = enemyMap(world);
@@ -77,9 +80,11 @@ export function createAi(profiles: Readonly<Record<string, StrategicProfile>> = 
         const foes = enemies.get(n);
         if (!foes?.size) continue;
         const friends = coBelligerents(n, enemies);
+        const human = world.nations[n].controlledBy === 'human';
+        const out: Command[] = human ? [] : world.pending;
         const p: Plan = {
           world, ctx, ai: world.slices.ai, nation: n, profile: profiles[n] ?? DEFAULT_PROFILE,
-          enemies: foes, friends, index, out: world.pending,
+          enemies: foes, friends, index, out,
           sectors: sectorsOf(friends, foes),
         };
         if (strategy) planStrategy(p);
@@ -91,6 +96,7 @@ export function createAi(profiles: Readonly<Record<string, StrategicProfile>> = 
           planMissiles(p, targets);
           planNaval(p);
         }
+        if (human) for (const c of out) if (aiMayIssue(world, c)) world.pending.push(c);
       }
     },
   };
