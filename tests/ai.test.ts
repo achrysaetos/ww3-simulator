@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { atWar, relationMut, type System } from '../src/core/engine';
-import type { Command, NationId, NodeId, SimEvent } from '../src/core/types';
+import type { Command, MunitionId, NationId, NodeId, SimEvent } from '../src/core/types';
 import { createSession } from '../src/scenarios';
 import { createAi } from '../src/systems/ai';
 import { createDiplomacy } from '../src/systems/diplomacy';
@@ -190,16 +190,20 @@ describe('strikes on a neutral host', () => {
 describe('strike wing basing', () => {
   it('long-range bombers in the continental US forward-deploy across the Pacific once at war with China, then fly strikes from there', () => {
     const s = createSession('taiwan-2027', 1);
-    const wing = Object.values(s.world.formations).find((f) => f.name === '7th Bomb Wing')!;
+    const [wing, other] = ['7th Bomb Wing', '28th Bomb Wing'].map((name) => Object.values(s.world.formations).find((f) => f.name === name)!);
     const home = wing.node;
     const perDay = 24 / s.world.dtHours;
     for (let i = 0; i < 30 * perDay && !atWar(s.world, 'USA' as NationId, 'CHN' as NationId); i++) s.engine.step(s.world);
     expect(atWar(s.world, 'USA' as NationId, 'CHN' as NationId)).toBe(true);
-    let strikesAbroad = 0;
-    s.engine.run(s.world, 10 * perDay, () => {
-      if (wing.order.posture === 'strike' && s.map.distanceKm(wing.node, home) > 8000) strikesAbroad++;
-    });
+    // Both B-1B wings move together; LRASMs are rationed, so either may be the one a salvo draws.
+    const lrasm = () => (wing.magazine['lrasm' as MunitionId] ?? 0) + (other.magazine['lrasm' as MunitionId] ?? 0);
+    let firedAbroad = 0;
+    for (let i = 0; i < 14 * perDay; i++) {
+      const before = lrasm();
+      s.engine.step(s.world);
+      if (s.map.distanceKm(wing.node, home) > 8000) firedAbroad += before - lrasm();
+    }
     expect(s.map.distanceKm(wing.node, home)).toBeGreaterThan(8000);
-    expect(strikesAbroad).toBeGreaterThan(0);
+    expect(firedAbroad).toBeGreaterThan(0);
   }, 120_000);
 });
