@@ -6,6 +6,7 @@ import { Rng } from '../src/core/rng';
 import type { Formation, Munition, MunitionId, NationId, NodeId, Platform, PlatformId } from '../src/core/types';
 import { createWorld } from '../src/core/world';
 import { loadMap } from '../src/data/load';
+import { createAi } from '../src/systems/ai';
 import { airWar } from '../src/systems/air';
 import { applyNavalOrder, CHOKEPOINTS, navalWar, resolveSalvo, strikeNavalGroup } from '../src/systems/naval';
 import { geography, nearestSea, seaNeighbour } from '../src/systems/naval/geography';
@@ -22,6 +23,7 @@ const navalMunitions: Munition[] = [
   M({ id: 'n_asbm', name: 'Anti-ship ballistic missile', kind: 'antiship_ballistic', rangeKm: 1500, speedMach: 10, warheadKg: 600, cepM: 20, pk: { ship: 0.6 }, interceptDifficulty: 0.8, unitCostUsdM: 10, weightKg: 15000 }),
   M({ id: 'n_sm3', name: 'Exo-atmospheric interceptor', kind: 'abm', rangeKm: 900, speedMach: 10, warheadKg: 0, cepM: 0, pk: { missile: 0.8 }, interceptDifficulty: 0, unitCostUsdM: 12, weightKg: 1500 }),
   M({ id: 'n_exocet', name: 'Exocet-class ASCM', kind: 'antiship_cruise', rangeKm: 70, speedMach: 0.9, warheadKg: 165, cepM: 5, pk: { ship: 1 }, interceptDifficulty: 1, unitCostUsdM: 1, weightKg: 670 }),
+  M({ id: 'n_shore_ascm', name: 'Coastal ASCM', kind: 'antiship_cruise', rangeKm: 400, speedMach: 0.9, warheadKg: 165, cepM: 5, pk: { ship: 0.8 }, interceptDifficulty: 0.5, unitCostUsdM: 1, weightKg: 670 }),
   M({ id: 'n_neptune', name: 'Neptune-class ASCM', kind: 'antiship_cruise', rangeKm: 280, speedMach: 0.8, warheadKg: 150, cepM: 5, pk: { ship: 1 }, interceptDifficulty: 1, unitCostUsdM: 1, weightKg: 870 }),
   M({ id: 'n_mine', name: 'Influence mine', kind: 'mine', rangeKm: 0, speedMach: 0, warheadKg: 500, cepM: 0, pk: { ship: 0.5, submarine: 0.3 }, interceptDifficulty: 1, unitCostUsdM: 0.1, weightKg: 1000 }),
 ];
@@ -301,6 +303,20 @@ describe('submarine warfare', () => {
     };
     expect(sank('t_ssn')).toBeGreaterThan(0);
     expect(sank('n_ssk')).toBe(0);
+  });
+
+  it('a boat that attacks tells its victims a submarine works that zone, while one that lies quiet stays unknown', () => {
+    const t = navalWorld(5);
+    const at = t.nodeAt(20, 125), quietAt = t.nodeAt(30, 140);
+    t.war('USA', 'CHN');
+    const boat = t.add({ nation: USA, name: 'SSN', kind: 'submarine', echelon: 'squadron', node: at, equipment: t.eq({ t_ssn: 1 }) });
+    const quiet = t.add({ nation: USA, name: 'Quiet SSN', kind: 'submarine', echelon: 'squadron', node: quietAt, equipment: t.eq({ t_ssn: 1 }) });
+    boat.order = { posture: 'patrol', issuedTick: 0 };
+    quiet.order = { posture: 'patrol', issuedTick: 0 };
+    t.add({ nation: CHN, name: 'LHD', kind: 'surface_group', node: at, equipment: t.eq({ n_lhd: 1 }) });
+    t.engine.step(t.world);
+    expect(t.world.slices.naval.tracks[boat.id]).toContain(CHN);
+    expect(t.world.slices.naval.tracks[quiet.id] ?? []).not.toContain(CHN);
   });
 
   it('an SSN ambush sinks an unescorted amphibious ship and the submarine survives', () => {
@@ -688,3 +704,40 @@ describe('naval movement and lift', () => {
   });
 });
 
+
+describe('naval AI against mines and submarines', () => {
+  const orders = (t: ReturnType<typeof navalWorld>, f: Formation, days: number) => {
+    const out: { posture: string; target?: NodeId }[] = [];
+    t.engine.run(t.world, (days * 24) / t.world.dtHours, (w) => {
+      for (const c of w.pending) if (c.type === 'order' && c.formation === f.id) out.push({ posture: c.order.posture, target: c.order.target });
+    });
+    return out;
+  };
+
+  it("sends sweepers to an enemy minefield, but not while the enemy's shore missiles reach it", () => {
+    const sweep = (battery: boolean) => {
+      const t = navalWorld(42, [navalWar, createAi()]);
+      t.war('USA', 'CHN');
+      const field = t.nodeAt(25, 123);
+      t.world.slices.naval.mines[field] = { [CHN]: 100 };
+      const mcm = t.add({ nation: USA, name: 'MCM', kind: 'surface_group', node: t.portOf('JPN', 26.2, 127.7), equipment: t.eq({ n_mcm: 4 }) });
+      if (battery) {
+        const site = t.nodeAt(25, 121.5);
+        const b = t.add({ nation: CHN, name: 'Battery', kind: 'missile', echelon: 'battalion', node: site, equipment: t.eq({ t_inf: 2 }) });
+        b.magazine = { n_shore_ascm: 24 } as Formation['magazine'];
+      }
+      return orders(t, mcm, 2).some((o) => o.target === field);
+    };
+    expect(sweep(false)).toBe(true);
+    expect(sweep(true)).toBe(false);
+  });
+
+  it('sends an attack submarine to hunt an enemy boat known to be working a sea zone', () => {
+    const t = navalWorld(42, [navalWar, createAi()]);
+    t.war('USA', 'CHN');
+    const zone = t.nodeAt(20, 135);
+    t.add({ nation: CHN, name: 'Boat', kind: 'submarine', echelon: 'squadron', node: zone, equipment: t.eq({ n_ssk: 1 }) });
+    const ssn = t.add({ nation: USA, name: 'SSN', kind: 'submarine', echelon: 'squadron', node: t.nodeAt(15, 145), equipment: t.eq({ t_ssn: 1 }) });
+    expect(orders(t, ssn, 1).some((o) => o.target === zone)).toBe(true);
+  });
+});

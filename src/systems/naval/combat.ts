@@ -73,6 +73,10 @@ export function navalCombat(env: TickEnv, tracks: Tracks): void {
     const sprint = c.hulls.every((h) => NUCLEAR_ATTACK.has(h.platform.class));
     const target = pickTarget(env, tracks, f, (t) => (sprint || t.node === f.node) && !env.comp(t).submerged);
     if (!target) continue;
+    // Whether or not the boat is caught, its victims now know a submarine works this zone (intel 'naval' source),
+    // which tells their hunters where to search; it is not a firing track.
+    const known = (env.world.slices.naval.tracks[f.id] ??= []);
+    if (!known.includes(target.nation)) known.push(target.nation);
     for (let attacks = Math.max(1, Math.round(c.hullCount / SUB_REATTACK_TICKS)); attacks > 0; attacks--) {
       const torp = bestMunition(env, f, 'ship', 0, (m) => m.kind === 'torpedo');
       if (!torp) break;
