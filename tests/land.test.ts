@@ -31,6 +31,12 @@ function setup(seed = 1, systems: System[] = [landMovement, landCombat]) {
   return { ...t, events, order, days };
 }
 
+const fortify = (s: ReturnType<typeof setup>) => (s.world.slices.land.fortified[PLAIN_UKR] = 1);
+/** Ten times both sides at the same odds: enough platforms to man a whole 1-degree cell's front. */
+const man = (_s: unknown, ...fs: Formation[]) => {
+  for (const f of fs) for (const pid of Object.keys(f.equipment) as PlatformId[]) f.equipment[pid] *= 10;
+};
+
 function assault(opts: { ratio: number; defNode: NodeId; attNode: NodeId; entrench: number; seed?: number; days: number; before?: (s: ReturnType<typeof setup>, att: Formation, def: Formation) => void }) {
   const s = setup(opts.seed);
   const def = s.add({ nation: UKR, name: 'def', kind: 'maneuver', echelon: 'brigade', node: opts.defNode, equipment: brigade(1), entrenchment: opts.entrench });
@@ -54,8 +60,8 @@ describe('land combat', () => {
     }
   });
 
-  it('a 4:1 attacker wins the exchange and starts across the cell but does not carry it in a week', () => {
-    const r = assault({ ratio: 4, defNode: PLAIN_UKR, attNode: PLAIN_RUS, entrench: 0.4, days: 6 });
+  it('a 4:1 attacker wins the exchange against a line manned across the cell and starts across it but does not carry it in a week', () => {
+    const r = assault({ ratio: 4, defNode: PLAIN_UKR, attNode: PLAIN_RUS, entrench: 0.4, days: 6, before: man });
     expect(r.world.control[PLAIN_UKR]).toBe(UKR);
     expect(r.att.node).toBe(PLAIN_UKR);
     expect(r.world.slices.land.contest[PLAIN_UKR]).toMatchObject({ by: RUS });
@@ -293,11 +299,19 @@ describe('the front', () => {
     expect(s.world.slices.land.contest).toEqual({});
   });
 
-  it('a won battle does not take a cell: attritional assaults gain ground a few km at a time', () => {
-    const r = assault({ ratio: 3, defNode: PLAIN_UKR, attNode: PLAIN_RUS, entrench: 1, days: 10 });
+  it('a won battle does not take a fortified cell: attritional assaults gain ground a few km at a time', () => {
+    const r = assault({ ratio: 3, defNode: PLAIN_UKR, attNode: PLAIN_RUS, entrench: 1, days: 10, before: fortify });
     expect(r.world.control[PLAIN_UKR]).toBe(UKR);
     const km = r.world.slices.land.contest[PLAIN_UKR]?.km ?? 0;
     expect(km).toBeLessThan(40);
+  });
+
+  it('a 3:1 attacker bypasses one brigade holding a whole unfortified cell within days, but not a dug-in line manned across it', () => {
+    const thin = assault({ ratio: 3, defNode: PLAIN_UKR, attNode: PLAIN_RUS, entrench: 0, days: 8 });
+    expect(thin.world.control[PLAIN_UKR]).toBe(RUS);
+    const manned = assault({ ratio: 3, defNode: PLAIN_UKR, attNode: PLAIN_RUS, entrench: 1, days: 8, before: man });
+    expect(manned.world.control[PLAIN_UKR]).toBe(UKR);
+    expect(manned.world.slices.land.contest[PLAIN_UKR]?.km ?? 0).toBeLessThan(10);
   });
 
   it('an empty cell covered by an equal line next door is infiltrated a few km a day; a thin line is broken through', () => {

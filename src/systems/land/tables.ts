@@ -227,3 +227,12 @@ export const DELIBERATE_ASSAULT_RATIO = 3;
  * roughly 10 km (FM 3-90; Ukrainian brigades held 10-20 km sectors in 2024).
  */
 export const FRONTAGE_PLATFORMS = 3000;
+/** Front length FRONTAGE_PLATFORMS holds: a 1-degree cell's ~100 km. Smaller cells (islands, city-states) need proportionally fewer. */
+export const CELL_FRONT_KM = 100;
+/**
+ * Share of the gaps in a thin line that a fully dug-in defender closes with its own obstacles,
+ * mines and pre-registered fires (FM 3-90 hasty barrier plans), as against a standing fortified
+ * belt that closes them all. Judgment: half. With it a thin, dug-in NATO line in baltic-2027 gives
+ * up 2-5 cells in three weeks without collapsing, against ~1 at the old 1 km/day cap.
+ */
+export const HASTY_BARRIER = 0.5;
