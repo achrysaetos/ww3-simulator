@@ -152,6 +152,10 @@ export function FormationPanel({ client, palette, places, routes, playAs, comman
         </Section>
       )}
 
+      {own && f.kind === 'surface_group' && f.status === 'active' && (
+        <Escort client={client} f={f} place={(n) => places.name(n)} onOrder={onOrder} />
+      )}
+
       {detail.aboard.length > 0 && (
         <Section title={`Aboard · ${detail.aboard.length}`}>
           <ul className="lift-list" data-testid="aboard">{detail.aboard.map((a) => <li key={a.id}>{a.name}</li>)}</ul>
@@ -205,6 +209,35 @@ export function FormationPanel({ client, palette, places, routes, playAs, comman
       </Section>
 
     </div>
+  );
+}
+
+const ESCORT_CHOICES = 8;
+
+/** Screen another of the nation's surface groups, such as a convoy or lift group, against submarines and air attack. */
+function Escort({ client, f, place, onOrder }: { client: SimClient; f: Formation; place(n: NodeId): string; onOrder: Props['onOrder'] }) {
+  const map = client.map;
+  const groups = client.state.formations
+    .filter((g) => g.entry.nation === f.nation && g.entry.kind === 'surface_group' && g.status === 'active' && g.entry.id !== f.id)
+    .sort((a, b) => map.distanceKm(f.node, a.node) - map.distanceKm(f.node, b.node))
+    .slice(0, ESCORT_CHOICES);
+  const escorting = f.order.posture === 'escort' ? f.order.targetFormation : undefined;
+  return (
+    <Section title="Escort">
+      <p className="muted small">An escort follows the group it screens and hunts the submarines that come after it. Lift groups sail unscreened unless you give them one.</p>
+      {groups.length ? (
+        <ul className="lift-list" data-testid="escort-list">
+          {groups.map((g) => (
+            <li key={g.entry.id}>
+              <span><b>{g.entry.name}</b> <span className="muted">{place(g.node)} · {fmtNum(map.distanceKm(f.node, g.node))} km</span></span>
+              {escorting === g.entry.id
+                ? <span className="muted small">escorting</span>
+                : <button data-testid="escort-it" onClick={() => onOrder(f.id, { posture: 'escort', targetFormation: g.entry.id, target: g.node }, `${f.name} escorting ${g.entry.name}`)}>Escort</button>}
+            </li>
+          ))}
+        </ul>
+      ) : <p className="muted small">No other surface group to escort.</p>}
+    </Section>
   );
 }
 
