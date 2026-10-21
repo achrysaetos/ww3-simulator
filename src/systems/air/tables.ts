@@ -43,6 +43,15 @@ export const AIRFRAME: Partial<Record<PlatformClass, AirframeProfile>> = {
 };
 
 /** Roles whose sorties carry strike munitions to order.target. */
+/**
+ * Unit cost below which a strike weapon is attritable: drones, glide kits, bombs and rockets are
+ * fired as fast as launchers and sorties allow, and kept coming at an aim the defences stop, since
+ * each one shot down costs the defender an interceptor worth more (Russia's Shahed and decoy waves
+ * from 2023; Ukraine's Lyutyi raids on Russia). Dearer precision weapons are rationed, and stop at
+ * an aim battle damage assessment calls futile.
+ */
+export const ATTRITABLE_COST_USD_M = 0.3;
+
 export const STRIKE_ROLES: ReadonlySet<AirRole> = new Set(['counter_air', 'strike', 'bomber', 'helo']);
 /** Roles that take on tanker fuel. */
 export const RECEIVER_ROLES: ReadonlySet<AirRole> = new Set(['counter_air', 'strike', 'bomber', 'ew', 'awacs']);

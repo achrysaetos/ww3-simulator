@@ -13,7 +13,7 @@ import { takeLosses, type LossTally } from './losses';
 import { nodeDistance, type AirGroup, type AirPicture } from './picture';
 import { visibility } from './combat';
 import { emitBattle, hasSupport } from './superiority';
-import { AIRFRAME, DRONE_SITE_LAUNCHES_PER_DAY, isRoundOnRail, LAUNCHER, MOBILE_TARGETS, NON_STRIKE_KINDS, STRIKE_ROLES, TARGET_OF_CLASS, TUNING } from './tables';
+import { AIRFRAME, ATTRITABLE_COST_USD_M, DRONE_SITE_LAUNCHES_PER_DAY, isRoundOnRail, LAUNCHER, MOBILE_TARGETS, NON_STRIKE_KINDS, STRIKE_ROLES, TARGET_OF_CLASS, TUNING } from './tables';
 
 export interface AirSlice {
   /** Runway capacity per airbase node after cratering, 0..1; absent = intact. */
@@ -35,7 +35,8 @@ export interface Assessment {
  * achieved and another strike is likely to achieve it. Two raids in a row that all but vanish
  * into the defences (Taiwan's HF-2E salvos on Shanghai; Russia's piecemeal 2022 strikes before
  * it massed them) end the mission; the aim is offered again after REASSESS_DAYS, when stocks of
- * interceptors may have run down (judgment).
+ * interceptors may have run down (judgment). Raids of attritable weapons are not assessed: they
+ * are meant to draw interceptors (ATTRITABLE_COST_USD_M).
  */
 export const BDA = { futileRaids: 2, reassessDays: 3 };
 
@@ -292,7 +293,7 @@ function resolveRaid(world: World, ctx: SimContext, pic: AirPicture, slice: AirS
   live.forEach((p, i) => {
     const flightMin = nodeDistance(ctx, p.f.node, target) / (Math.max(0.05, p.munition.speedMach) * MACH_KM_PER_MIN);
     const { effects, effective } = applyEffect(world, ctx, pic, slice, target, attacker, p.munition, p.targetClass, leaked[i], tally, flightMin, p.f.order.targetFormation);
-    assess(world, slice, attacker, aimKey(target, p.f.order.targetFormation, p.targetClass), effective);
+    if (p.munition.unitCostUsdM >= ATTRITABLE_COST_USD_M) assess(world, slice, attacker, aimKey(target, p.f.order.targetFormation, p.targetClass), effective);
     ctx.emit({ type: 'strike', tick: world.tick, by: attacker, munition: p.munition.id, fired: p.weapons, intercepted: p.weapons - leaked[i], target, effects });
   });
   emitBattle(world, ctx, pic, target, attacker, tally);
@@ -318,7 +319,10 @@ function strikeShips(world: World, ctx: SimContext, pic: AirPicture, slice: AirS
     if (s) s.count += p.weapons;
     else salvos.set(key, { target, munition: p.munition, count: p.weapons });
   }
-  for (const s of salvos.values()) assess(world, slice, attacker, aimKey(node, s.target.id), !!strikeNavalGroup(world, ctx, attacker, s.munition.id, s.count, s.target.id)?.hits.length);
+  for (const s of salvos.values()) {
+    const effective = !!strikeNavalGroup(world, ctx, attacker, s.munition.id, s.count, s.target.id)?.hits.length;
+    if (s.munition.unitCostUsdM >= ATTRITABLE_COST_USD_M) assess(world, slice, attacker, aimKey(node, s.target.id), effective);
+  }
 }
 
 /** The aimed surface group if it is still at the node, else the most valuable hostile surface group there. */

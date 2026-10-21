@@ -152,6 +152,19 @@ describe('integrated air defense', () => {
     expect(raids(false).length).toBeGreaterThan(2);
   });
 
+  it('attritable drones keep coming at an aim the defences stop, drawing down its interceptors', () => {
+    const t = airWorld(5);
+    t.war('RUS', 'UKR');
+    const kyiv = t.node(...KYIV);
+    const ad = battery(t, 'UKR', kyiv, { x_shorad: 4 });
+    const stock = ad.magazine[mid('x_shorad_msl')];
+    launchers(t, 'RUS', t.node(53.9, 27.6), { x_drone_rack: 1 }, { posture: 'strike', target: kyiv, targetClass: 'structure' });
+    const s = t.strikes(t.tick(8));
+    expect(s.slice(0, 2).every((e) => e.intercepted === e.fired)).toBe(true);
+    expect(s.length).toBeGreaterThan(2);
+    expect(ad.magazine[mid('x_shorad_msl')]).toBeLessThan(stock);
+  });
+
   it('a raid on the power grid cuts the grid serving the cell and leaves its other infrastructure alone; the grid then mends', () => {
     const t = airWorld(5);
     t.war('RUS', 'UKR');

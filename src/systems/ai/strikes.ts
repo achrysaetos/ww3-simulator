@@ -4,7 +4,7 @@ import type { Formation, FormationId, FormationKind, Munition, MunitionId, Natio
 import { isOverseas } from '../../data/territories';
 import { HOSTILE_OPINION } from '../diplomacy/escalation';
 import { rung } from '../diplomacy/wars';
-import { aimKey, dailyRounds, effectPk, futileAim } from '../air';
+import { aimKey, ATTRITABLE_COST_USD_M, dailyRounds, effectPk, futileAim } from '../air';
 import { ANTISHIP_KINDS, navalPosition } from '../naval';
 import { isGround, issue } from './forces';
 import type { Plan } from './types';
@@ -200,11 +200,6 @@ function launchable(p: Plan, f: Formation, m: MunitionId): boolean {
 }
 
 /**
- * Precision weapons above this unit cost are rationed; drones, glide kits, bombs
- * and rockets are fired as fast as launchers and sorties allow.
- */
-const RATIONED_COST_USD_M = 0.3;
-/**
  * Days a nation spreads its precision-munition stocks over, on top of new
  * production. Against an enemy across a land front (a war of attrition), Russia's 2023-25 launches
  * tracked production plus a slow draw on reserves (Ukrainian GUR stock estimates vs
@@ -242,7 +237,7 @@ export class FireBudget {
    * landing (CSIS 2023: Taiwan's shore-based Harpoons were among the main killers of PLA lift).
    */
   propose(f: Formation, options: Munition[], t: StrikeTarget, order: Omit<Order, 'issuedTick'>): void {
-    if (!options.length || options[0].unitCostUsdM < RATIONED_COST_USD_M || this.landingOnFriends(t)) return issue(this.p, f, order);
+    if (!options.length || options[0].unitCostUsdM < ATTRITABLE_COST_USD_M || this.landingOnFriends(t)) return issue(this.p, f, order);
     this.proposals.push({ f, options, t, order });
   }
 
