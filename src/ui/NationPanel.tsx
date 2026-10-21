@@ -2,13 +2,16 @@ import { useMemo, useState } from 'react';
 import { COMMAND_DOMAINS, type Command, type CommandDomain, type ItemId, type NationId } from '../core/types';
 import type { SimClient } from './client';
 import type { Palette } from './colors';
-import type { MunitionGroup, NationDetail, WarEntry, WarView } from './snapshot';
+import type { EconomyView, MunitionGroup, NationDetail, WarEntry, WarView } from './snapshot';
+import type { Objective } from './briefing';
+import { ObjectiveList } from './GameFlow';
 import { Bar, Section, Stat, fmtNum, fmtUsdB } from './widgets';
 
 interface Props {
   client: SimClient;
   palette: Palette;
   playAs: NationId;
+  objectives: Objective[];
   /** Send a command; `label` is what the toast says was done. */
   onCommand(c: Command, label: string): void;
   onNuclear(): void;
@@ -39,7 +42,7 @@ const RESOURCE_LABEL: Record<string, string> = {
   energy: 'Energy', food: 'Food', semiconductors: 'Semiconductors', rare_earths: 'Rare earths', energetics: 'Explosives / propellant', steel: 'Steel',
 };
 
-export function NationPanel({ client, palette, playAs, onCommand, onNuclear }: Props) {
+export function NationPanel({ client, palette, playAs, objectives, onCommand, onNuclear }: Props) {
   const nations = client.state.nations;
   const n = nations.get(playAs);
   const d = client.state.focusNation?.id === playAs ? client.state.focusNation : undefined;
@@ -74,6 +77,10 @@ export function NationPanel({ client, palette, playAs, onCommand, onNuclear }: P
           <div className="nation-sub">{n.id} · {n.blocs.slice(0, 4).join(', ') || 'non-aligned'} · <span className={`status ${n.status}`}>{n.status}</span></div>
         </div>
       </div>
+
+      <Section title={`Objectives · ${objectives.filter((o) => o.met).length} of ${objectives.length} met`}>
+        <ObjectiveList items={objectives} />
+      </Section>
 
       <Section title="Wars">
         {d ? <Wars d={d} name={name} palette={palette} tick={client.state.tick} dtHours={client.meta?.dtHours ?? 6} /> : <p className="muted">Loading…</p>}
@@ -201,18 +208,30 @@ export function NationPanel({ client, palette, playAs, onCommand, onNuclear }: P
       </Section>
 
       <Section title="War production">
-        <Production client={client} nation={n.id} lines={eco?.lines ?? []} onCommand={onCommand} />
+        <Production client={client} nation={n.id} eco={eco} treasuryUsdB={n.treasuryUsdB} onCommand={onCommand} />
       </Section>
     </div>
   );
 }
 
 function Delegation({ d, onCommand }: { d: NationDetail; onCommand: Props['onCommand'] }) {
-  const ai = d.authority.ai;
+  // A change takes effect on the next tick; show it at once and drop the draft when the World agrees.
+  const [draft, setDraft] = useState<Partial<Record<CommandDomain, boolean>>>({});
+  const live = d.authority.ai;
+  const settled = COMMAND_DOMAINS.filter((k) => draft[k] !== undefined && draft[k] === live[k]);
+  if (settled.length) setDraft((x) => Object.fromEntries(Object.entries(x).filter(([k]) => !settled.includes(k as CommandDomain))));
+  const ai = Object.fromEntries(COMMAND_DOMAINS.map((k) => [k, draft[k] ?? live[k]])) as Record<CommandDomain, boolean>;
   const all = COMMAND_DOMAINS.every((k) => ai[k]);
   const none = COMMAND_DOMAINS.every((k) => !ai[k]);
-  const set = (domain: CommandDomain, on: boolean) => onCommand({ type: 'delegate', nation: d.id, domain, ai: on }, `${DOMAIN_LABEL[domain].name}: ${on ? 'delegated to the AI' : 'under your command'}`);
-  const setAll = (on: boolean) => COMMAND_DOMAINS.forEach((k) => ai[k] !== on && onCommand({ type: 'delegate', nation: d.id, domain: k, ai: on }, on ? 'Everything delegated to the AI' : 'You command everything yourself'));
+  const set = (domain: CommandDomain, on: boolean) => {
+    setDraft((x) => ({ ...x, [domain]: on }));
+    onCommand({ type: 'delegate', nation: d.id, domain, ai: on }, `${DOMAIN_LABEL[domain].name}: ${on ? 'delegated to the AI' : 'under your command'}`);
+  };
+  const setAll = (on: boolean) => COMMAND_DOMAINS.forEach((k) => {
+    if (ai[k] === on) return;
+    setDraft((x) => ({ ...x, [k]: on }));
+    onCommand({ type: 'delegate', nation: d.id, domain: k, ai: on }, on ? 'Everything delegated to the AI' : 'You command everything yourself');
+  });
   return (
     <div className="delegation" data-testid="delegation">
       <div className="field-label">AI delegate <span className="muted">commands what you hand it, except formations you have ordered</span></div>
@@ -220,7 +239,7 @@ function Delegation({ d, onCommand }: { d: NationDetail; onCommand: Props['onCom
         <label key={k} className="chk deleg" title={`The AI decides ${DOMAIN_LABEL[k].what}`}>
           <input type="checkbox" checked={ai[k]} onChange={(e) => set(k, e.target.checked)} data-testid={`delegate-${k}`} />
           <span>{DOMAIN_LABEL[k].name}</span>
-          <span className={`deleg-who ${ai[k] ? 'ai' : 'you'}`}>{ai[k] ? 'AI' : 'You'}</span>
+          <span className={`deleg-who ${ai[k] ? 'ai' : 'you'}`}>{ai[k] ? 'AI' : 'You'}{draft[k] !== undefined ? ' · next tick' : ''}</span>
         </label>
       ))}
       <div className="row gap">
@@ -232,7 +251,7 @@ function Delegation({ d, onCommand }: { d: NationDetail; onCommand: Props['onCom
   );
 }
 
-function Production({ client, nation, lines, onCommand }: { client: SimClient; nation: NationId; lines: { item: ItemId; perMonth: number; built: number }[]; onCommand: Props['onCommand'] }) {
+function Production({ client, nation, eco, treasuryUsdB, onCommand }: { client: SimClient; nation: NationId; eco: EconomyView | null | undefined; treasuryUsdB: number; onCommand: Props['onCommand'] }) {
   const [item, setItem] = useState('');
   const [rate, setRate] = useState(10);
   const meta = client.meta;
@@ -244,7 +263,11 @@ function Production({ client, nation, lines, onCommand }: { client: SimClient; n
     return platforms.length || munitions.length ? { platforms, munitions } : null;
   }, [meta, nation]);
   if (!options) return <p className="muted small">No domestic arms industry: this nation cannot open production lines.</p>;
-  const current = lines.find((l) => l.item === item);
+  const line = item ? eco?.capacity[item] : undefined;
+  const max = line ? Math.max(0, Math.floor(line.surge)) : undefined;
+  const ordered = max === undefined ? rate : Math.min(rate, max);
+  const unitUsdM = meta?.platforms[item]?.costUsdM ?? meta?.munitions[item]?.costUsdM ?? 0;
+  const monthlyB = (ordered * unitUsdM) / 1000;
   return (
     <div className="production" data-testid="production">
       <label className="field">
@@ -256,14 +279,27 @@ function Production({ client, nation, lines, onCommand }: { client: SimClient; n
         </select>
       </label>
       <div className="row">
-        <input type="number" min={0} step={1} value={rate} onChange={(e) => setRate(Math.max(0, +e.target.value))} className="num-input" data-testid="produce-rate" />
-        <span className="muted small">per month</span>
-        <button disabled={!item} onClick={() => onCommand({ type: 'produce', nation, item: item as ItemId, ratePerMonth: rate }, `${itemName(client, item)}: ${rate} a month ordered`)} data-testid="produce">Order</button>
+        <input type="number" min={0} max={max} step={1} value={rate} onChange={(e) => setRate(Math.max(0, Math.min(max ?? Infinity, Math.floor(+e.target.value) || 0)))} className="num-input" data-testid="produce-rate" />
+        <span className="muted small">per month{max !== undefined ? ` (max ${fmtNum(max)})` : ''}</span>
+        <button disabled={!item} onClick={() => onCommand({ type: 'produce', nation, item: item as ItemId, ratePerMonth: ordered }, `${itemName(client, item)}: ${fmtNum(ordered)} a month ordered`)} data-testid="produce">Order</button>
       </div>
-      {item && <p className="muted small">{current ? `Line running at ${fmtNum(current.perMonth)} a month; the order changes its target.` : 'A new line takes months to tool up before it reaches the ordered rate.'}</p>}
+      {item && (
+        <div className="small" data-testid="produce-info">
+          <p className="muted">
+            {fmtUsd(unitUsdM)} each; {fmtNum(ordered)} a month costs {fmtUsdB(monthlyB)} a month{treasuryUsdB > 0 && monthlyB > 0 ? `, ${monthlyB >= treasuryUsdB ? 'more than' : `${Math.max(1, Math.round((monthlyB / treasuryUsdB) * 100))}% of`} the treasury` : ''}.
+          </p>
+          <p className="muted">
+            {line
+              ? `Your line makes ${fmtNum(line.perMonth)} a month now and can surge to ${fmtNum(line.surge)}; the order raises it toward that over months.`
+              : 'No line builds this yet. A new line takes months to tool up, and its size is limited by your industry.'}
+          </p>
+        </div>
+      )}
     </div>
   );
 }
+
+const fmtUsd = (usdM: number) => (usdM >= 1000 ? fmtUsdB(usdM / 1000) : usdM >= 1 ? `$${usdM.toFixed(usdM >= 10 ? 0 : 1)}M` : `$${Math.round(usdM * 1000)}k`);
 
 function itemName(client: SimClient, id: string): string {
   return client.meta?.platforms[id]?.name ?? client.meta?.munitions[id]?.name ?? id.replace(/_/g, ' ');

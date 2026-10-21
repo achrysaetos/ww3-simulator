@@ -7,7 +7,7 @@ const MAP = loadMap();
 import { logistics, supplyFactor } from '../src/systems/logistics';
 import { airWar } from '../src/systems/air';
 import { DEFAULT_DELEGATION } from '../src/systems/orders';
-import { BEACH_CAPACITY, HOST_SUPPORT, INFRA_REPAIR_FRONT_SHARE, INFRA_REPAIR_PER_DAY, LAST_MILE_CAPACITY, NODE_TONS_PER_DAY } from '../src/systems/logistics/tables';
+import { BEACH_CAPACITY, HOST_SUPPORT, LAST_MILE_CAPACITY, NODE_TONS_PER_DAY } from '../src/systems/logistics/tables';
 
 const PLENTY = { fuel: 1e7, ammo: 1e7, food: 1e7 };
 const DAY = 4; // ticks at the default 6 h
@@ -284,15 +284,16 @@ describe('logistics', () => {
     expect(supplyFactor(t.world, t.map, poznan, id.nation('POL'))).toBeGreaterThan(bombed);
   });
 
-  it('repairs infrastructure on the front line at a fraction of the rear rate', () => {
+  it('repairs infrastructure on the front line at half the rate of the rear', () => {
     const t = setup();
     const kharkiv = t.nodeAt(50, 36.2); // borders Russian-held cells
-    const lviv = t.nodeAt(49.8, 24);
+    const kyiv = t.nodeAt(50.45, 30.5);
     t.war('UKR', 'RUS');
-    t.world.theater.infrastructure[kharkiv] = t.world.theater.infrastructure[lviv] = 0.2;
+    t.world.theater.infrastructure[kharkiv] = t.world.theater.infrastructure[kyiv] = 0.2;
     t.engine.run(t.world, 5 * DAY);
-    expect(t.world.theater.infrastructure[kharkiv]).toBeCloseTo(0.2 + 5 * INFRA_REPAIR_PER_DAY * INFRA_REPAIR_FRONT_SHARE, 6);
-    expect(t.world.theater.infrastructure[lviv]).toBeCloseTo(0.2 + 5 * INFRA_REPAIR_PER_DAY, 6);
+    const front = t.world.theater.infrastructure[kharkiv] - 0.2, rear = t.world.theater.infrastructure[kyiv] - 0.2;
+    expect(front).toBeGreaterThan(0);
+    expect(front).toBeCloseTo(rear / 2, 5);
   });
 
   it('drains national bulk stocks and reports a shortage once', () => {

@@ -44,4 +44,29 @@ describe('save and resume', () => {
     expect(() => resumeRun('{"world":{}}')).toThrow('not a ww3 save file');
     expect(() => resumeRun('{"format":"ww3-save","version":99}')).toThrow('version 99');
   });
+
+  describe('refuses a save whose world is broken', () => {
+    const good = JSON.parse(saveRun('peace-2027', createSession('peace-2027', 1).world));
+    const broken = (edit: (w: Record<string, any>) => void) => {
+      const save = structuredClone(good);
+      edit(save.world);
+      return JSON.stringify(save);
+    };
+    it.each<[string, (w: Record<string, any>) => void, string]>([
+      ['no slices', (w) => delete w.slices, 'world.slices'],
+      ['string dtHours', (w) => (w.dtHours = '6'), 'world.dtHours'],
+      ['negative tick', (w) => (w.tick = -1), 'world.tick'],
+      ['no formations', (w) => delete w.formations, 'world.formations'],
+      ['control not an array', (w) => (w.control = {}), 'world.control'],
+      ['bad start date', (w) => (w.startDate = 'soon'), 'world.startDate'],
+    ])('%s', (_, edit, message) => {
+      expect(() => resumeRun(broken(edit))).toThrow(message);
+    });
+    it('not JSON at all', () => {
+      expect(() => resumeRun('{oops')).toThrow('not valid JSON');
+    });
+    it('still accepts the unbroken save', () => {
+      expect(resumeRun(JSON.stringify(good)).world.tick).toBe(0);
+    });
+  });
 });
