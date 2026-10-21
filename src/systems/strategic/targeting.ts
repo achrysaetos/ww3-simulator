@@ -32,6 +32,8 @@ export interface NuclearLauncher {
   munition: MunitionId;
   yieldKt: number;
   reachKm: number;
+  /** Warheads of this kind on the launcher. */
+  count: number;
 }
 
 /** Every nuclear warhead `nation` holds on a live launcher, the pool `release` draws from. */
@@ -41,20 +43,25 @@ export function nuclearLaunchers(world: World, catalog: Catalog, nation: NationI
     if (f.nation !== nation || !isLive(f)) continue;
     for (const [mid, n] of Object.entries(f.magazine) as [MunitionId, number][]) {
       const m = catalog.munition(mid);
-      if (n > 0 && m.yieldKt) out.push({ node: f.node, munition: mid, yieldKt: m.yieldKt, reachKm: deliveryReachKm(catalog, f, m) });
+      if (n > 0 && m.yieldKt) out.push({ node: f.node, munition: mid, yieldKt: m.yieldKt, reachKm: deliveryReachKm(catalog, f, m), count: n });
     }
   }
   return out;
 }
 
-/** The smallest- or largest-yield warhead some launcher can put on `target`; undefined when none reaches it. */
-export function weaponFor(launchers: readonly NuclearLauncher[], map: GameMap, target: NodeId, prefer: 'smallest' | 'largest'): MunitionId | undefined {
+/** The launcher holding the smallest- or largest-yield warhead that reaches `target`; undefined when none does. */
+export function launcherFor(launchers: readonly NuclearLauncher[], map: GameMap, target: NodeId, prefer: 'smallest' | 'largest'): NuclearLauncher | undefined {
   let best: NuclearLauncher | undefined;
   for (const l of launchers) {
-    if (best && (prefer === 'smallest' ? l.yieldKt >= best.yieldKt : l.yieldKt <= best.yieldKt)) continue;
+    if (l.count <= 0 || (best && (prefer === 'smallest' ? l.yieldKt >= best.yieldKt : l.yieldKt <= best.yieldKt))) continue;
     if (map.distanceKm(l.node, target) <= l.reachKm) best = l;
   }
-  return best?.munition;
+  return best;
+}
+
+/** The smallest- or largest-yield warhead some launcher can put on `target`; undefined when none reaches it. */
+export function weaponFor(launchers: readonly NuclearLauncher[], map: GameMap, target: NodeId, prefer: 'smallest' | 'largest'): MunitionId | undefined {
+  return launcherFor(launchers, map, target, prefer)?.munition;
 }
 
 /**

@@ -2,7 +2,7 @@ import { atWar, type SimContext } from '../../core/engine';
 import type { MunitionId, NationId, NodeId, World } from '../../core/types';
 import { delegated } from '../orders';
 import { nuclearLaunchers, weaponFor } from '../strategic/targeting';
-import { CITY_POP_SHARE, STRATEGIC_YIELD_KT } from './escalation';
+import { CITY_POP_SHARE, STRATEGIC_YIELD_KT, hitBy } from './escalation';
 import type { AllianceTreaty, DiplomacyState, UmbrellaCase } from './types';
 import { declareWar, raiseEscalation } from './wars';
 
@@ -37,14 +37,6 @@ const TACTICAL_ATTACK_WEIGHT = 0.75;
 /** A tailored reply stays in the theatre of the attack (estimate: the span of Europe or Northeast Asia). */
 const THEATRE_KM = 2000;
 
-/** Nations hit by a detonation: the owner and controller of a land cell, and anyone with forces there, if at war with the attacker. */
-function hitBy(world: World, ctx: SimContext, by: NationId, node: NodeId): Set<NationId> {
-  const out = new Set<NationId>();
-  if (!ctx.map.isSea(node)) for (const n of [ctx.map.owner[node], world.control[node]]) if (n && atWar(world, by, n)) out.add(n);
-  for (const f of Object.values(world.formations)) if (f.node === node && f.nation !== by && atWar(world, by, f.nation)) out.add(f.nation);
-  return out;
-}
-
 /** Guarantors whose nuclear umbrella covers `ally` against `attacker`, with the treaty and the guarantor's reliability under it. */
 function umbrellasOver(alliances: readonly AllianceTreaty[], ally: NationId, attacker: NationId) {
   const out: { guarantor: NationId; treaty: string; reliability: number }[] = [];
@@ -66,7 +58,7 @@ export function openUmbrellaCases(world: World, ctx: SimContext, s: DiplomacySta
   for (const e of world.events) {
     if (e.type !== 'nuclear_detonation') continue;
     const strategic = e.yieldKt >= STRATEGIC_YIELD_KT || (!ctx.map.isSea(e.node) && ctx.map.popShare[e.node] >= CITY_POP_SHARE);
-    for (const ally of hitBy(world, ctx, e.by, e.node))
+    for (const ally of hitBy(world, ctx.map, e.by, e.node))
       for (const u of umbrellasOver(alliances, ally, e.by)) {
         const g = world.nations[u.guarantor];
         if (!g || g.status === 'capitulated' || g.nuclear.warheads <= 0) continue;
