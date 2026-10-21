@@ -7,6 +7,7 @@ import { delegated } from '../orders';
 import { rung } from '../diplomacy/wars';
 import { aimKey, ATTRITABLE_COST_USD_M, dailyRounds, effectPk, futileAim } from '../air';
 import { ANTISHIP_KINDS, navalPosition } from '../naval';
+import type { HqLevel } from '../c2/state';
 import { isGround, issue, sighted } from './forces';
 import type { Plan } from './types';
 
@@ -55,6 +56,13 @@ const WORTH = { min: 0.5, max: 3 };
 const FRONT_FORCES = { value: 2, cls: 'armor' as TargetClass };
 const RAIL_HUB = { value: 1.5, cls: 'structure' as TargetClass, minRailKm: 50 };
 const CAPITAL = { value: 2.5, cls: 'structure' as TargetClass };
+/**
+ * Field headquarters, struck as hardened aimpoints: Ukraine's HIMARS and Storm Shadow strikes on Russian army and
+ * corps command posts in 2022-23 killed several generals and slowed Russian command for days at a time (RUSI,
+ * "Preliminary Lessons", 2022). An army HQ outranks a front's (judgment). The national command authority sits in
+ * the capital, which CAPITAL and the escalation ladder already govern.
+ */
+const HQ_VALUE: Partial<Record<HqLevel, number>> = { army: 4, front: 3 };
 /**
  * Nations whose doctrine strikes the enemy's power grid as a campaign of its own. Russia did it
  * from October 2022: waves of Kh-101, Kalibr, Iskander and Shaheds on thermal and hydro plants and
@@ -190,6 +198,10 @@ export function strikeTargets(p: Plan, battleArea: Set<number>): TargetGrid {
         out.push({ node, at: fresh ? navalPosition(map, f) : node, cls: v.cls, value, formation: f.id, afloat: node !== f.home || (fresh && !!f.order.path?.length), assigned: 0 });
       }
     }
+  for (const hq of Object.values(p.world.slices.c2?.hqs ?? {})) {
+    const v = HQ_VALUE[hq.level];
+    if (v && hq.integrity > 0 && p.enemies.has(hq.nation)) out.push({ node: hq.node, cls: 'hardened', value: v * hq.integrity, assigned: 0 });
+  }
   for (const n of battleArea)
     if (map.railKm[n] >= RAIL_HUB.minRailKm) out.push({ node: n as NodeId, cls: RAIL_HUB.cls, value: RAIL_HUB.value * Math.min(2, map.railKm[n] / 200), assigned: 0 });
   for (const e of p.enemies) {

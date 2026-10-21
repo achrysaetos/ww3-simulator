@@ -525,6 +525,19 @@ describe('strike target value', () => {
     const aimed = commandsOver(t, 8).flatMap((c) => (c.type === 'order' && c.nation === 'UKR' && c.order.posture === 'strike' ? [c.order.target] : []));
     expect(aimed).toContain(bombers.node);
   });
+
+  // 2022-23: Ukrainian HIMARS and Storm Shadow strikes went after Russian army and corps command posts (RUSI).
+  it('strikes an enemy army headquarters within reach as a hardened aimpoint', () => {
+    const t = airWorld(42, [navalWar, createAi()]);
+    t.war('UKR', 'RUS');
+    for (const n of ['UKR', 'RUS']) t.world.nations[N(n)].status = 'war';
+    const hq = t.node(50.6, 36.6);
+    (t.world.slices as unknown as Record<string, unknown>).c2 = { hqs: { a: { id: 'a', nation: N('RUS'), level: 'army', name: '20th Army HQ', node: hq, integrity: 1 } } };
+    t.add({ nation: N('UKR'), name: 'cruise missile brigade', kind: 'missile', echelon: 'brigade', node: t.node(50.45, 30.52), equipment: { [id.platform('x_cruise_tel')]: 12 } });
+    t.world.nations[N('UKR')].stockpile[id.munition('t_cruise')] = 10_000;
+    const aimed = commandsOver(t, 8).flatMap((c) => (c.type === 'order' && c.nation === 'UKR' && c.order.posture === 'strike' ? [`${c.order.target}|${c.order.targetClass}`] : []));
+    expect(aimed).toContain(`${hq}|hardened`);
+  });
 });
 
 describe('mobilization and the home front', () => {

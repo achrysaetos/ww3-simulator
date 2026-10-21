@@ -15,6 +15,7 @@ import { visibility } from './combat';
 import { emitBattle, hasSupport } from './superiority';
 import { spaceSupport } from '../strategic/space';
 import { jammedHits } from '../c2';
+import { conditionsAt, pgmFactor } from '../weather/effects';
 import { AIRFRAME, ATTRITABLE_COST_USD_M, DRONE_SITE_LAUNCHES_PER_DAY, isRoundOnRail, LAUNCHER, MOBILE_TARGETS, NON_STRIKE_KINDS, STRIKE_ROLES, TARGET_OF_CLASS, TUNING } from './tables';
 
 export interface AirSlice {
@@ -492,7 +493,8 @@ function applyEffect(world: World, ctx: SimContext, pic: AirPicture, slice: AirS
     return { effects: [{ kind: 'grid', before, after: grid[target] }], effective: grid[target] < before };
   }
   let cratered = false;
-  let p = effectPk(m, tc) * stillThere(m, tc, flightMin) * spaceSupport(world, attacker, m, MOBILE_TARGETS.has(tc));
+  const cloud = m.kind === 'guided_bomb' ? conditionsAt(world, ctx.map, target) : undefined;
+  let p = effectPk(m, tc) * stillThere(m, tc, flightMin) * spaceSupport(world, attacker, m, MOBILE_TARGETS.has(tc)) * (cloud ? pgmFactor(cloud) : 1);
   const effects: StrikeEffect[] = [];
   if (tc === 'aircraft') {
     p = (1 - TUNING.shelteredShare) * p + TUNING.shelteredShare * (m.pk.hardened ?? 0);
