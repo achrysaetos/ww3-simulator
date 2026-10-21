@@ -7,6 +7,8 @@ import { landSlice } from '../src/systems/land';
 import { createDiplomacy } from '../src/systems/diplomacy';
 import { isrFactor, strategic } from '../src/systems/strategic';
 import { id, testWorld } from '../src/testkit';
+import { airWorld, wing } from './air.fixture';
+import { navalWar } from '../src/systems/naval';
 
 const N = id.nation;
 type T = ReturnType<typeof testWorld>;
@@ -15,7 +17,7 @@ const brigade = (t: T, nation: string, node: NodeId) =>
   t.add({ nation: N(nation), name: `${nation} armoured brigade`, kind: 'maneuver', echelon: 'brigade', node, equipment: { [id.platform('t_mbt')]: 30 } });
 
 /** Commands the AI queued after each tick, over `ticks` ticks. */
-function commandsOver(t: T, ticks: number): Command[] {
+function commandsOver(t: Pick<T, 'engine' | 'world'>, ticks: number): Command[] {
   const out: Command[] = [];
   t.engine.run(t.world, ticks, (w) => out.push(...w.pending));
   return out;
@@ -377,4 +379,56 @@ describe('counter-space strikes', () => {
     expect(targets.size).toBeGreaterThan(0);
     expect(targets.has(nro.id)).toBe(false);
   }, 60_000);
+});
+
+describe('air wing basing', () => {
+  it('fighters with nothing in reach deploy to a host airfield within reach of the war, one the enemy missiles do not reach', () => {
+    const t = airWorld(42, [navalWar, createAi()]);
+    t.war('USA', 'CHN');
+    for (const n of ['USA', 'CHN']) t.world.nations[N(n)].status = 'war';
+    const w = wing(t, 'USA', t.node(13.5, 144.8), { x_stealth: 24, x_tanker: 4 });
+    // A US garrison opens Japan's airfields; the brigade's MRBMs (1,700 km) reach Okinawa, Kyushu and Shikoku but not
+    // northern Honshu, which the tanked fighters still reach the brigade from.
+    t.add({ nation: N('USA'), name: 'US Army Japan', kind: 'maneuver', echelon: 'brigade', node: t.node(35.5, 139.4), equipment: { [id.platform('t_mbt')]: 10 } });
+    const shanghai = t.node(31.2, 121.0);
+    t.add({ nation: N('CHN'), name: 'PLARF brigade', kind: 'missile', echelon: 'brigade', node: shanghai, equipment: { [id.platform('x_mrbm_tel')]: 12 } });
+    const moves = commandsOver(t, 8).flatMap((c) => (c.type === 'order' && c.formation === w.id && c.order.posture === 'move' ? [c.order.target!] : []));
+    expect(moves.length).toBeGreaterThan(0);
+    for (const to of moves) {
+      expect(t.world.control[to]).toBe('JPN');
+      expect(t.map.distanceKm(to, shanghai)).toBeGreaterThan(1700);
+    }
+  });
+});
+
+describe('strike target value', () => {
+  // A salvo's hits fall on a group's hulls one at a time, so a flotilla of cheap patrol hulls (a China Coast Guard
+  // bureau: 210 cutters at 30-120m) is a poor target beside one destroyer however much the flotilla costs in all.
+  it('aims anti-ship salvos at a warship before a larger, costlier flotilla of cheap hulls', () => {
+    const t = airWorld(42, [navalWar, createAi()]);
+    t.war('CHN', 'TWN');
+    for (const n of ['CHN', 'TWN']) t.world.nations[N(n)].status = 'war';
+    const group = (name: string, lat: number, lon: number, equipment: Record<string, number>) =>
+      t.add({ nation: N('TWN'), name, kind: 'surface_group', echelon: 'flotilla', node: t.node(lat, lon), equipment: Object.fromEntries(Object.entries(equipment).map(([k, v]) => [id.platform(k), v])) });
+    const warship = group('destroyer', 22.6, 120.3, { t_destroyer: 1 });
+    const flotilla = group('patrol flotilla', 25.15, 121.75, { t_ferry: 50 });
+    t.add({ nation: N('CHN'), name: 'PLARF brigade', kind: 'missile', echelon: 'brigade', node: t.node(26.1, 119.3), equipment: { [id.platform('x_cruise_tel')]: 12 } });
+    t.world.nations[N('CHN')].stockpile[id.munition('t_cruise')] = 10_000;
+    const aimed = commandsOver(t, 8).flatMap((c) => (c.type === 'order' && c.nation === 'CHN' && c.order.posture === 'strike' ? [c.order.targetFormation] : []));
+    expect(aimed).toContain(warship.id);
+    expect(aimed).not.toContain(flotilla.id);
+  });
+
+  // Ukrainian drones and missiles went after the Tu-95s and Tu-22M3s at Engels (December 2022) and four bases at once
+  // in Operation Spiderweb (June 2025).
+  it('strikes heavy bombers parked within reach', () => {
+    const t = airWorld(42, [navalWar, createAi()]);
+    t.war('UKR', 'RUS');
+    for (const n of ['UKR', 'RUS']) t.world.nations[N(n)].status = 'war';
+    const bombers = t.add({ nation: N('RUS'), name: 'heavy bombers', kind: 'strategic', echelon: 'wing', node: t.node(51.48, 46.21), equipment: { [id.platform('x_bomber')]: 16 } });
+    t.add({ nation: N('UKR'), name: 'cruise missile brigade', kind: 'missile', echelon: 'brigade', node: t.node(50.45, 30.52), equipment: { [id.platform('x_cruise_tel')]: 12 } });
+    t.world.nations[N('UKR')].stockpile[id.munition('t_cruise')] = 10_000;
+    const aimed = commandsOver(t, 8).flatMap((c) => (c.type === 'order' && c.nation === 'UKR' && c.order.posture === 'strike' ? [c.order.target] : []));
+    expect(aimed).toContain(bombers.node);
+  });
 });

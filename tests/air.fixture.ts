@@ -4,7 +4,7 @@
  * Shahed-type drone, SHORAD, ARM, PAC-3/Arrow-type ABMs).
  */
 import { Catalog } from '../src/core/catalog';
-import { Engine, relationMut } from '../src/core/engine';
+import { Engine, relationMut, type System } from '../src/core/engine';
 import { addFormation, type FormationSpec } from '../src/core/forces';
 import type { Formation, Munition, MunitionId, NationId, NodeId, Platform, PlatformId, SimEvent, World } from '../src/core/types';
 import { createWorld } from '../src/core/world';
@@ -61,10 +61,10 @@ export const nation = (s: string) => s as NationId;
 export const pid = (s: string) => s as PlatformId;
 export { mid };
 
-export function airWorld(seed = 42) {
+export function airWorld(seed = 42, systems: System[] = [airWar]) {
   const map = loadMap();
   const catalog = new Catalog([...testPlatforms, ...airPlatforms], [...testMunitions, ...airMunitions]);
-  const engine = new Engine(map, catalog, [airWar]);
+  const engine = new Engine(map, catalog, systems);
   const world: World = createWorld(map, { seed });
   engine.init(world);
   const add = (spec: FormationSpec) => addFormation(world, catalog, spec);

@@ -37,17 +37,19 @@ const VALUE_BY_KIND: Partial<Record<FormationKind, { value: number; cls: TargetC
   logistics: { value: 3, cls: 'soft' },
 };
 /**
- * A naval group or an air wing is worth what it carries: a US carrier strike group with its air wing
- * runs about USD 20bn, a Taiwanese frigate flotilla about 3bn, a patrol-boat squadron a few hundred
- * million; a US F-35 wing at Kadena about 5bn, a Taiwanese F-16 wing about 1.5bn. Troops and
- * vehicles embarked on a ship count with it: a ro-ro ferry full of a PLA brigade is worth the
- * brigade. CSIS's 2023 Taiwan wargames had PLARF and PLAN salvos go after US carriers, Aegis
- * escorts and the ramps at Kadena and Guam, sinking 2 carriers and 7-20 major surface combatants per
- * iteration, with most US aircraft lost on the ground. The value grows with the square root of the
- * cost against a reference formation, held within WORTH (judgment), so a carrier group outranks an
- * air defence site but not every other target together.
+ * A naval group or an air wing is worth what a salvo on it destroys. Hits on a group fall on its hulls one
+ * at a time, so a group is worth its cost per hull, with the troops and vehicles embarked counted on the
+ * hulls carrying them: a US carrier strike group runs about USD 4-5bn a hull with its air wing, a Taiwanese
+ * frigate about 500m, a China Coast Guard cutter 30-120m (210 hulls in a bureau make it costly in all but
+ * cheap to hit), and a ro-ro ferry full of a PLA brigade is worth the brigade. Aircraft on a ramp die in
+ * proportion to how many are parked, so an air wing is worth its whole cost: a US F-35 wing at Kadena about
+ * 5bn, a Taiwanese F-16 wing about 1.5bn. CSIS's 2023 Taiwan wargames had PLARF and PLAN salvos go after US
+ * carriers, Aegis escorts and the ramps at Kadena and Guam, sinking 2 carriers and 7-20 major surface
+ * combatants per iteration, with most US aircraft lost on the ground. The value grows with the square root
+ * of the cost against a reference (a destroyer, a mid-sized wing), held within WORTH (judgment), so a carrier
+ * group outranks an air defence site but not every other target together.
  */
-const WORTH_REF_USD_M: Partial<Record<FormationKind, number>> = { surface_group: 3000, air_wing: 2000 };
+const WORTH_REF_USD_M: Partial<Record<FormationKind, number>> = { surface_group: 1000, air_wing: 2000 };
 const WORTH = { min: 0.5, max: 3 };
 const FRONT_FORCES = { value: 2, cls: 'armor' as TargetClass };
 const RAIL_HUB = { value: 1.5, cls: 'structure' as TargetClass, minRailKm: 50 };
@@ -64,10 +66,24 @@ const GRID = { value: 5, cls: 'power' as TargetClass, cities: 12 };
 /** Leadership willing to risk deep strikes on a nuclear power's homeland before the ladder sanctions them. */
 const DEEP_STRIKE_RISK = 0.7;
 
+/**
+ * A strategic formation flying aircraft is a bomber regiment on its ramp, struck like any air wing: Ukrainian drones
+ * hit Tu-95s and Tu-22M3s at Engels and Olenya (December 2022, Operation Spiderweb in June 2025). Silos, mobile ICBMs
+ * and SSBNs stay off the conventional target list.
+ */
+const isBomberForce = (p: Plan, f: Formation) =>
+  f.kind === 'strategic' && Object.keys(f.equipment).some((id) => p.ctx.catalog.platform(id as PlatformId).domain === 'air');
+
 function costUsdM(p: Plan, f: Formation): number {
   let usd = 0;
   for (const [id, n] of Object.entries(f.equipment)) usd += n * p.ctx.catalog.platform(id as PlatformId).unitCostUsdM;
   return usd;
+}
+
+function hulls(p: Plan, f: Formation): number {
+  let n = 0;
+  for (const [id, k] of Object.entries(f.equipment)) if (p.ctx.catalog.platform(id as PlatformId).domain === 'sea') n += k;
+  return n;
 }
 
 /** Each enemy ship's embarked cargo, by cost. */
@@ -155,13 +171,15 @@ export function strikeTargets(p: Plan, battleArea: Set<number>): TargetGrid {
   const out: StrikeTarget[] = [];
   const cargo = cargoUsdM(p);
   const worth = (f: Formation) => {
-    const ref = WORTH_REF_USD_M[f.kind];
-    return ref ? Math.min(WORTH.max, Math.max(WORTH.min, Math.sqrt((costUsdM(p, f) + (cargo.get(f.id) ?? 0)) / ref))) : 1;
+    const ref = WORTH_REF_USD_M[isBomberForce(p, f) ? 'air_wing' : f.kind];
+    if (!ref) return 1;
+    const usd = (costUsdM(p, f) + (cargo.get(f.id) ?? 0)) / (f.kind === 'surface_group' ? Math.max(1, hulls(p, f)) : 1);
+    return Math.min(WORTH.max, Math.max(WORTH.min, Math.sqrt(usd / ref)));
   };
   // Aimed where intelligence last fixed each formation, worth less as the fix goes stale.
   for (const e of p.enemies)
     for (const { f, node, confidence } of sighted(p, e)) {
-      const v = VALUE_BY_KIND[f.kind] ?? (isGround(f) && battleArea.has(node) ? FRONT_FORCES : undefined);
+      const v = VALUE_BY_KIND[f.kind] ?? (isBomberForce(p, f) ? VALUE_BY_KIND.air_wing : isGround(f) && battleArea.has(node) ? FRONT_FORCES : undefined);
       if (!v) continue;
       const value = v.value * worth(f) * confidence;
       if (f.kind !== 'surface_group') out.push({ node, cls: v.cls, value, formation: f.id, assigned: 0 });

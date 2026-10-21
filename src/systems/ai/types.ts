@@ -28,6 +28,8 @@ export interface AiState {
   deployments: Record<FormationId, NodeId>;
   /** Tick of each nation's last airborne operation. */
   airborne: Record<NationId, number>;
+  /** Air wings sent to a war, and the airfield each is bound for. */
+  airBases?: Record<FormationId, NodeId>;
 }
 
 declare module '../../core/types' {

@@ -3,7 +3,8 @@ import { atWar, relationMut } from '../src/core/engine';
 import { Rng } from '../src/core/rng';
 import type { Formation, NodeId, SimEvent } from '../src/core/types';
 import { createSession } from '../src/scenarios';
-import { applyAirOrder, combatRadiusKm, interceptSalvo, resolveAirBattle } from '../src/systems/air';
+import { airWar, applyAirOrder, combatRadiusKm, interceptSalvo, resolveAirBattle } from '../src/systems/air';
+import { logistics } from '../src/systems/logistics';
 import { airWorld, battery, launchers, mid, nation, pid, wing } from './air.fixture';
 
 const USA = nation('USA'), RUS = nation('RUS'), UKR = nation('UKR');
@@ -168,6 +169,15 @@ describe('integrated air defense', () => {
     expect(ad.magazine[mid('x_shorad_msl')]).toBeLessThan(stock);
   });
 
+  it('attritable drones that neither hit anything nor draw interceptors stop after two futile days', () => {
+    const t = airWorld(5);
+    t.war('RUS', 'UKR');
+    // Aimed at forces that are not there, with no battery at the cell: what gets through finds nothing.
+    launchers(t, 'RUS', t.node(53.9, 27.6), { x_drone_rack: 1 }, { posture: 'strike', target: t.node(...KYIV), targetClass: 'soft' });
+    const s = t.strikes(t.tick(16));
+    expect(new Set(s.map((e) => Math.floor((e.tick * t.world.dtHours) / 24))).size).toBe(2);
+  });
+
   it('a raid on the power grid cuts the grid serving the cell and leaves its other infrastructure alone; the grid then mends', () => {
     const t = airWorld(5);
     t.war('RUS', 'UKR');
@@ -289,6 +299,18 @@ describe('strikes', () => {
     expect(t.world.slices.air.runway[tw]).toBeLessThan(1);
   });
 
+  // December 2022 and June 2025: Ukrainian drones damaged Tu-95s and Tu-22M3s parked at Engels and Olenya; nuclear-capable
+  // bombers on a ramp are as exposed as any other aircraft.
+  it('missile strikes on a strategic bomber base destroy the parked bombers', () => {
+    const t = airWorld();
+    t.war('UKR', 'RUS');
+    const engels = t.node(51.48, 46.21);
+    const bombers = t.add({ nation: RUS, name: 'heavy bombers', kind: 'strategic', echelon: 'wing', node: engels, equipment: { [pid('x_bomber')]: 30 } });
+    launchers(t, 'UKR', t.node(49.5, 40), { t_tel: 200 }, { posture: 'strike', target: engels, targetClass: 'aircraft' });
+    t.tick();
+    expect(count(bombers)).toBeLessThan(30);
+  });
+
   it('the same salvo kills a larger share of a packed ramp than of a few dispersed aircraft', () => {
     const lostShare = (n: number) => {
       let lost = 0;
@@ -363,5 +385,21 @@ describe('coastal batteries on defend', () => {
     expect(t.map.distanceKm(coast, shore)).toBeLessThan(250);
     t.tick();
     expect(battery.order.targetFormation).not.toBe(group.id);
+  });
+});
+
+describe('rearming', () => {
+  it('reloads an air-defence battery over open supply lines and not one cut off in a pocket', () => {
+    const t = airWorld(5, [logistics, airWar]);
+    for (const n of Object.values(t.world.nations)) n.bulk = { fuel: 1e7, ammo: 1e7, food: 1e7 };
+    const pocket = t.node(49.5, 33.5);
+    for (const n of t.map.neighbors(pocket)) t.world.control[n] = nation('RUS');
+    t.war('UKR', 'RUS');
+    t.world.nations[nation('UKR')].stockpile[mid('x_pac3')] = 1000;
+    const [open, cut] = [t.node(50.45, 30.52), pocket].map((at) => battery(t, 'UKR', at, { x_patriot: 2 }));
+    for (const f of [open, cut]) f.magazine[mid('x_pac3')] = 0;
+    t.tick(8);
+    expect(open.magazine[mid('x_pac3')]).toBeGreaterThan(0);
+    expect(cut.magazine[mid('x_pac3')]).toBe(0);
   });
 });

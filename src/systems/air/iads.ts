@@ -108,10 +108,11 @@ export function overflightKm(world: World, ctx: SimContext, pic: AirPicture, fro
  * Layered defense of `node` against one attacker's weapons arriving this tick.
  * Slow threats are engaged first: drones arrive with the missiles and soak up
  * channels and interceptors, the tactic Russia used against Ukraine from 2022.
- * Returns the number that leak, per stream.
+ * Returns, per stream, the number that leak and what the interceptors fired at it cost.
  */
-export function defendRaid(world: World, ctx: SimContext, pic: AirPicture, node: NodeId, attacker: NationId, streams: RaidStream[]): number[] {
+export function defendRaid(world: World, ctx: SimContext, pic: AirPicture, node: NodeId, attacker: NationId, streams: RaidStream[]): { leaked: number[]; drawnUsdM: number[] } {
   const leaked = streams.map((s) => s.count);
+  const drawnUsdM = streams.map(() => 0);
   const order = streams.map((_, i) => i).sort((a, b) => streams[a].munition.speedMach - streams[b].munition.speedMach);
   const sams = hostileDefenders(world, ctx, pic, node, attacker);
   const fighters = interceptorFighters(world, ctx, pic, node, attacker);
@@ -130,15 +131,19 @@ export function defendRaid(world: World, ctx: SimContext, pic: AirPicture, node:
         const r = interceptSalvo({ ...threat, count: leaked[i] }, { channels: g.interceptLeft, interceptors: g.f.magazine[aam.id] ?? 0, pk: pkAgainst(aam, cat), rangeKm: aam.rangeKm }, ctx.rng);
         g.interceptLeft -= r.channelsUsed;
         g.f.magazine[aam.id] -= r.interceptorsUsed;
+        drawnUsdM[i] += r.interceptorsUsed * aam.unitCostUsdM;
         leaked[i] = r.leaked;
       }
     const maxCost = Math.max(TUNING.interceptorCostFloorUsdM, TUNING.interceptorCostRatio * m.unitCostUsdM);
     for (const { d, shot } of layers(ctx, sams, node, cat, m.interceptDifficulty, maxCost)) {
       if (!leaked[i]) break;
-      if (d.channels > 0 && d.f.magazine[shot.m.id] >= 1) leaked[i] = engage(ctx, d, shot, cat, { ...threat, count: leaked[i] });
+      if (d.channels <= 0 || d.f.magazine[shot.m.id] < 1) continue;
+      const before = d.f.magazine[shot.m.id];
+      leaked[i] = engage(ctx, d, shot, cat, { ...threat, count: leaked[i] });
+      drawnUsdM[i] += (before - d.f.magazine[shot.m.id]) * shot.m.unitCostUsdM;
     }
   }
-  return leaked;
+  return { leaked, drawnUsdM };
 }
 
 export function threatCategory(m: Munition): ThreatCategory | null {

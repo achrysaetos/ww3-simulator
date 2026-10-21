@@ -4,6 +4,7 @@
  * world.theater.airControl, which is rebuilt every tick from that tick's fighting.
  */
 import type { SimContext, System } from '../../core/engine';
+import type { Catalog } from '../../core/catalog';
 import type { Command, Formation, FormationKind, MunitionId, PlatformId, Posture, World } from '../../core/types';
 import { navalPosition } from '../naval';
 import { combatRadiusKm } from './combat';
@@ -33,6 +34,18 @@ const POSTURES: Partial<Record<FormationKind, ReadonlySet<Posture>>> = {
 
 /** Ferry range with drop tanks, roughly 2.5x combat radius (manufacturer ferry vs radius figures, F-16/Su-27). */
 export const FERRY_FACTOR = 2.5;
+
+/**
+ * How far a wing flies in one leg when it rebases: its shortest-legged type's ferry range, stretched by tankers
+ * the way they stretch a raid (TUNING.maxTankerExtension) when its nation flies any. USAF Coronet moves cross the
+ * Pacific in legs of 4,000-6,000 km (CONUS-Hawaii-Guam-Japan) behind KC-135s and KC-46s.
+ */
+export function ferryKm(world: World, catalog: Catalog, f: Formation): number {
+  const own = Math.min(...Object.keys(f.equipment).map((pid) => catalog.platform(pid as PlatformId).mobility.rangeKm)) * FERRY_FACTOR;
+  const tanked = Object.values(world.formations).some((w) => w.nation === f.nation && w.kind === 'air_wing' && w.status === 'active'
+    && Object.entries(w.equipment).some(([pid, n]) => n > 0 && catalog.platform(pid as PlatformId).class === 'tanker'));
+  return tanked ? own * (1 + TUNING.maxTankerExtension) : own;
+}
 
 export const airWar: System = {
   id: 'air',
@@ -105,7 +118,7 @@ export function applyAirOrder(world: World, cmd: Command, ctx: SimContext): bool
   }
 
   if (order.posture === 'move' && f.kind === 'air_wing') {
-    const ferry = Math.min(...Object.keys(f.equipment).map((pid) => ctx.catalog.platform(pid as PlatformId).mobility.rangeKm)) * FERRY_FACTOR;
+    const ferry = ferryKm(world, ctx.catalog, f);
     const dist = ctx.map.distanceKm(f.node, target!);
     if (dist > ferry) return refuse(`base is ${Math.round(dist)} km away, beyond ferry range`);
     if (ctx.map.isSea(target!)) return refuse('no airfield at sea');

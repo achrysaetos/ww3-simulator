@@ -5,6 +5,7 @@
  */
 import type { SimContext } from '../../core/engine';
 import type { Formation, FormationKind, ItemId, MunitionId, Nation, PlatformId, World } from '../../core/types';
+import { supplyFactor } from '../logistics';
 import { BULK_AMMO_KINDS, isRoundOnRail, REARM_SHARE_PER_DAY } from './tables';
 
 const REARMED: ReadonlySet<FormationKind> = new Set(['air_wing', 'missile', 'air_defense']);
@@ -14,10 +15,15 @@ export function rearm(world: World, ctx: SimContext): void {
   for (const f of Object.values(world.formations)) {
     if (f.status !== 'active' || !REARMED.has(f.kind)) continue;
     const nation = world.nations[f.nation];
+    let phi: number | undefined;
     for (const [mid, full, item] of fullLoad(f, ctx)) {
       const deficit = full - (f.magazine[mid] ?? 0);
       if (deficit < 1) continue;
-      const want = Math.min(Math.floor(deficit), Math.ceil(full * share));
+      // Reloads come up the supply lines: a battery in a pocket or on a blockaded island fires what it holds.
+      // A nation with no supply network yet (peace, or a world without logistics) draws freely.
+      phi ??= world.slices.logistics?.networkOf[f.nation] ? supplyFactor(world, ctx.map, f.node, f.nation) : 1;
+      const want = Math.min(Math.floor(deficit), Math.ceil(full * share * phi));
+      if (want <= 0) continue;
       const got = draw(nation, ctx, mid, item, want);
       if (got > 0) f.magazine[mid] = (f.magazine[mid] ?? 0) + got;
     }
