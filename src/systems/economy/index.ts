@@ -455,7 +455,7 @@ function shipAid(world: World, dtMonths: number): void {
   for (const flow of AID_FLOWS) {
     const donor = world.nations[flow.donor as NationId], recipient = world.nations[flow.recipient as NationId];
     if (!donor || !recipient || recipient.status !== 'war' || donor.status === 'capitulated' || donor.status === 'collapsed') continue;
-    if (atWar(world, donor.id, recipient.id)) continue;
+    if (atWar(world, donor.id, recipient.id) || world.slices.politics?.nations[donor.id]?.aid?.continues === false) continue;
     const a = (state.aid[aidKey(flow)] ??= { carry: 0, delivered: 0 });
     const due = (flow.perYear / 12) * dtMonths + a.carry;
     const spec = ITEMS[flow.item];

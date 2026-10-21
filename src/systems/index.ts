@@ -4,6 +4,8 @@ import { alliances, strategicProfile } from '../data/nations';
 import type { Alliance, StrategicProfile as NationStrategy } from '../data/nations';
 import { createAi } from './ai';
 import { airWar, applyAirOrder } from './air';
+import { civil } from './civil';
+import { politics } from './politics';
 import { createDiplomacy } from './diplomacy';
 import { shiftOdds } from './diplomacy/wars';
 import type { AllianceTreaty, StrategicProfile, TreatyMember } from './diplomacy/types';
@@ -95,6 +97,8 @@ export const SYSTEMS: System[] = [
   landCombat,
   logistics,
   economy,
+  civil,
+  politics,
   createDiplomacy({ alliances: warTreaties(alliances, strategicProfile), profiles: decision }),
   intel,
   createAi(decision),

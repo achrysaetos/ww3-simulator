@@ -6,7 +6,7 @@
  * control map is sent only when some node changed hands. With the full world
  * (~2,500 formations, 193 nations) a tick costs about 25 KB plus events.
  */
-import { enemiesOf } from '../core/engine';
+import { currentDate, enemiesOf } from '../core/engine';
 import { platformCount } from '../core/forces';
 import type { GameMap } from '../core/map';
 import type { Catalog } from '../core/catalog';
@@ -15,6 +15,9 @@ import { supplyFactor } from '../systems/logistics';
 import { geography } from '../systems/naval/geography';
 import { isNavalFormation, liftDemand } from '../systems/naval/state';
 import { authority } from '../systems/orders';
+import { hostedBy } from '../systems/civil/state';
+import type { ElectionResult, OpinionDrivers } from '../systems/politics/state';
+import { ELECTIONS } from '../data/politics/elections';
 import type {
   Command, CommandDomain, Echelon, Formation, FormationId, FormationKind, ItemId, MunitionKind, Nation, NationId, NodeId, PlatformId, Posture, SimEvent, World,
 } from '../core/types';
@@ -169,6 +172,31 @@ export interface EconomyView {
   lines: { item: ItemId; perMonth: number; ordered: number | null; built: number }[];
 }
 
+/** Civilians and domestic politics. */
+export interface HomeFrontView {
+  /** Its people displaced inside the country and sheltering abroad. */
+  idps: number;
+  refugees: number;
+  /** Refugees from other nations it shelters. */
+  sheltering: number;
+  civiliansKilled: number;
+  civiliansInjured: number;
+  /** Its people living under enemy occupation. */
+  underOccupation: number;
+  /** Partisan sabotage acts against it as an occupier. */
+  sabotage: number;
+  /** Shift domestic politics adds to war support, and its parts. */
+  supportShift: number;
+  drivers: OpinionDrivers | null;
+  mobilizationTolerance: number | null;
+  stability: number | null;
+  protesting: boolean;
+  /** Arms aid it gives: whether a package is funded, and the backing for it. */
+  aid: { support: number; continues: boolean } | null;
+  nextElection: { date: string; kind: string } | null;
+  lastElection: ElectionResult | null;
+}
+
 /** A treaty call waiting on a human nation's answer. */
 export interface TreatyCall {
   war: string;
@@ -199,6 +227,7 @@ export interface NationDetail {
   formations: number;
   personnel: number;
   economy: EconomyView | null;
+  homeFront: HomeFrontView;
   munitions: MunitionStock[];
   wars: WarView[];
   nuclear: {
@@ -467,6 +496,7 @@ export class SnapshotEncoder {
             lines: productionLines(Object.values(eco.lines)),
           }
         : null,
+      homeFront: homeFront(world, id),
       munitions: [...groups.values()].filter((g) => g.warehoused || g.loaded || g.perMonth),
       wars: this.warViews(world, id),
       nuclear: {
@@ -504,6 +534,30 @@ export class SnapshotEncoder {
 }
 
 const TOP_LINES = 12;
+
+function homeFront(world: World, id: NationId): HomeFrontView {
+  const c = world.slices.civil?.nations[id];
+  const p = world.slices.politics?.nations[id];
+  const now = currentDate(world).getTime();
+  const next = ELECTIONS.filter((e) => e.nation === id && Date.parse(e.date) >= now).sort((a, b) => a.date.localeCompare(b.date))[0];
+  return {
+    idps: c?.idps ?? 0,
+    refugees: c?.refugees ?? 0,
+    sheltering: world.slices.civil ? (hostedBy(world.slices.civil).get(id) ?? 0) : 0,
+    civiliansKilled: c?.killed ?? 0,
+    civiliansInjured: c?.injured ?? 0,
+    underOccupation: c?.underOccupation ?? 0,
+    sabotage: c?.sabotage ?? 0,
+    supportShift: p?.supportShift ?? 0,
+    drivers: p ? { ...p.drivers } : null,
+    mobilizationTolerance: p?.mobilizationTolerance ?? null,
+    stability: p?.stability ?? null,
+    protesting: p?.protesting ?? false,
+    aid: p?.aid ? { support: p.aid.support, continues: p.aid.continues } : null,
+    nextElection: next ? { date: next.date, kind: next.kind } : null,
+    lastElection: p?.elections.at(-1) ?? null,
+  };
+}
 
 function productionLines(lines: readonly { item: ItemId; capacityPerMonth: number; orderPerMonth: number | null; built: number }[]): EconomyView['lines'] {
   const view = lines.map((l) => ({ item: l.item, perMonth: l.capacityPerMonth, ordered: l.orderPerMonth, built: l.built })).sort((a, b) => b.perMonth - a.perMonth);
