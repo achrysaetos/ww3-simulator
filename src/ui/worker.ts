@@ -28,7 +28,8 @@ const cards: ScenarioCard[] = SCENARIOS.map((s) => {
   const belligerents = new Set<NationId>();
   for (const m of s.opening) if (m.type === 'declare_war') belligerents.add(m.nation);
   for (const m of s.opening) if (m.type === 'declare_war') belligerents.add(m.target);
-  return { id: s.id, name: s.name, summary: s.summary, startDate: s.startDate, suggestedNation: s.suggestedNation as NationId, belligerents: [...belligerents] };
+  const wars = s.opening.flatMap((m): [NationId, NationId][] => (m.type === 'declare_war' ? [[m.nation, m.target]] : []));
+  return { id: s.id, name: s.name, summary: s.summary, startDate: s.startDate, suggestedNation: s.suggestedNation as NationId, belligerents: [...belligerents], wars };
 });
 post({ type: 'hello', scenarios: cards, nations: nationCards(loadMap(), profiles) });
 
