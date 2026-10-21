@@ -158,7 +158,11 @@ const total = (r: Record<string, number>) => Object.values(r).reduce((a, b) => a
 const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
 
 const pct = (x: number) => `${Math.round(x * 100)}%`;
-const level = (what: string, x: { before: number; after: number }) => `${what} cut from ${pct(x.before)} to ${pct(x.after)}`;
+/** A level cut, with a decimal when whole percents would read as no change (BA-14). */
+const level = (what: string, x: { before: number; after: number }) => {
+  const at = (v: number) => (pct(x.before) === pct(x.after) ? `${(v * 100).toFixed(1)}%` : pct(v));
+  return `${what} cut from ${at(x.before)} to ${at(x.after)}`;
+};
 
 function strikeEffect(x: StrikeEffect, n: Namer): string {
   switch (x.kind) {
