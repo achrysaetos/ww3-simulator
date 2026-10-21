@@ -379,7 +379,7 @@ export function FormationList({ client, palette, places, playAs, commandOf, onSe
   const held = mine.filter((f) => commandOf(f.entry.id, f.entry.kind) === 'player').length;
   const color = palette.of(playAs).css;
   const q = query.trim().toLowerCase();
-  const shown = q ? mine.filter((f) => f.entry.name.toLowerCase().includes(q) || places.name(f.node).toLowerCase().includes(q) || f.posture.replace(/_/g, ' ').includes(q)) : mine;
+  const shown = q ? mine.filter((f) => f.entry.name.toLowerCase().includes(q) || places.name(f.node).toLowerCase().includes(q) || (f.posture ?? '').replace(/_/g, ' ').includes(q)) : mine;
   return (
     <div className="panel-scroll">
       <Section title={`Order of battle · ${mine.length}`} right={held > 0 ? <button className="small-btn" onClick={onReleaseAll} data-testid="release-all">Hand {held} to AI</button> : undefined}>
@@ -400,7 +400,7 @@ export function FormationList({ client, palette, places, playAs, commandOf, onSe
                     id={f.entry.id}
                     name={f.entry.name}
                     color={color}
-                    posture={f.posture.replace(/_/g, ' ')}
+                    posture={(f.posture ?? '').replace(/_/g, ' ')}
                     place={places.name(f.node)}
                     strength={Math.round(f.strength * 100)}
                     command={commandOf(f.entry.id, f.entry.kind)}
