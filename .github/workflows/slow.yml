@@ -1,0 +1,47 @@
+# Wall-clock budgets and whole-scenario realism bands: too slow or too noisy for every push.
+name: perf and realism
+
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+jobs:
+  perf:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run perf
+
+  # One job per realism file, found by glob, so a new file joins the matrix without editing this workflow.
+  realism-files:
+    runs-on: ubuntu-latest
+    outputs:
+      files: ${{ steps.list.outputs.files }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: list
+        run: echo "files=$(ls tests/*.realism.test.ts | jq -R . | jq -cs .)" >> "$GITHUB_OUTPUT"
+
+  realism:
+    needs: realism-files
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        file: ${{ fromJson(needs.realism-files.outputs.files) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: REALISM=1 npx vitest run ${{ matrix.file }}
