@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { atWar } from '../src/core/engine';
-import type { NationId } from '../src/core/types';
+import type { NationId, NodeId } from '../src/core/types';
 import { createSession } from '../src/scenarios';
 import { geography } from '../src/systems/naval/geography';
 import { recordFleetLoss } from '../src/systems/naval/state';
@@ -61,6 +61,26 @@ describe('coastal defence against a landing', () => {
     // The 120 HF-3s reach the lift where it stages, 300-400 km out; HF-2s (160 km) only once it closes the beach.
     expect(start - rounds()).toBeGreaterThanOrEqual(100);
   }, 120_000);
+});
+
+describe('naval AI standoff', () => {
+  it('US surface groups take station and blockade outside the reach of Chinese shore missiles, not in the strait', () => {
+    const s = createSession('taiwan-2027', 2);
+    const shore = s.map.nodesOf('CHN' as NationId).filter((n) => [...s.map.neighbors(n)].some((m) => s.map.isSea(m)));
+    const clearance = (z: NodeId) => Math.min(...shore.map((n) => s.map.distanceKm(n, z)));
+    const perDay = 24 / s.world.dtHours;
+    const close = new Set<string>();
+    for (let i = 0; i < 25 * perDay; i++) {
+      s.engine.step(s.world);
+      for (const f of Object.values(s.world.formations)) {
+        const t = f.order.target;
+        if (f.nation !== 'USA' || f.kind !== 'surface_group' || f.status !== 'active' || (f.order.posture !== 'patrol' && f.order.posture !== 'blockade') || t === undefined) continue;
+        if (clearance(t) < 300) close.add(`${f.name} ${f.order.posture} ${Math.round(clearance(t))} km`);
+      }
+    }
+    expect(atWar(s.world, 'USA' as NationId, 'CHN' as NationId)).toBe(true);
+    expect([...close]).toEqual([]);
+  }, 180_000);
 });
 
 describe('naval AI fleet readiness', () => {

@@ -217,38 +217,60 @@ function batteredFleets(p: Plan, groups: Formation[]): Set<NodeId> {
 }
 
 /**
- * Where carriers hold station when the focus lies off an enemy coast: sea zones up to two
- * zones (~300-600 km) from the focus, farthest from enemy-held shore first, outside the
- * densest land-based missile and fighter coverage. CSIS 2023 kept US carriers east of Taiwan
- * and still lost two in the base case; the carriers fought by aircraft, not in the strait.
- * Capital groups pair off, one pair to a zone, as in the USN's dual-carrier operations in the
- * Philippine and South China Seas in 2020-24, rather than stacking every carrier in one zone
- * whose escorts would then pool every interceptor against each salvo (judgment).
+ * Distance from hostile-held shore below which a surface group does not take station unless it
+ * covers its own landing: the reach of shore-based anti-ship cruise missiles and of the strike
+ * aircraft over the enemy's own coast. China's YJ-62 coastal batteries reach about 400 km and
+ * its JH-7A and J-16 carry YJ-83K and YJ-12 out from the coast; CSIS 2023 kept US surface groups
+ * east of Taiwan, out of the strait, and still lost 7-20 of them. The figure is judgment.
  */
-function standoffZones(p: Plan, focus: NodeId): NodeId[] {
+const SURFACE_STANDOFF_KM = 400;
+
+/** Distance from each sea zone to the nearest coast cell held by an enemy of the planning nation; Infinity with none. */
+function shoreClearance(p: Plan): (z: NodeId) => number {
   const { map } = p.ctx;
   const hostileShore = coast(map).filter((n) => p.enemies.has(p.world.control[n]));
-  if (!hostileShore.length) return [focus];
-  const clearance = (z: NodeId) => {
-    let d = Infinity;
-    for (const n of hostileShore) if (Math.abs(map.lat[n] - map.lat[z]) * 111 < d) d = Math.min(d, map.distanceKm(n, z));
+  const memo = new Map<NodeId, number>();
+  return (z) => {
+    let d = memo.get(z);
+    if (d === undefined) {
+      d = Infinity;
+      for (const n of hostileShore) if (Math.abs(map.lat[n] - map.lat[z]) * 111 < d) d = Math.min(d, map.distanceKm(n, z));
+      memo.set(z, d);
+    }
     return d;
   };
-  const zones: { z: NodeId; d: number }[] = [{ z: focus, d: clearance(focus) }];
+}
+
+/** Rings of sea zones searched around the focus for stations outside SURFACE_STANDOFF_KM (~150-300 km a ring). */
+const STATION_RINGS = 5;
+
+/**
+ * Where carriers and unassigned escorts hold station: the sea zones within STATION_RINGS of the
+ * focus that lie at least SURFACE_STANDOFF_KM from enemy-held shore, nearest the focus first;
+ * with none, the zones farthest from that shore. The carriers fight by aircraft, not in the
+ * strait. Capital groups pair off, one pair to a zone, as in the USN's dual-carrier operations in
+ * the Philippine and South China Seas in 2020-24, rather than stacking every carrier in one zone
+ * whose escorts would then pool every interceptor against each salvo (judgment).
+ */
+function standoffZones(p: Plan, focus: NodeId, clearance: (z: NodeId) => number): NodeId[] {
+  const { map } = p.ctx;
+  if (clearance(focus) >= SURFACE_STANDOFF_KM) return [focus];
+  const zones: { z: NodeId; ring: number; d: number }[] = [{ z: focus, ring: 0, d: clearance(focus) }];
   let ring: NodeId[] = [focus];
   const seen = new Set<number>(ring);
-  for (let depth = 0; depth < 2; depth++) {
+  for (let depth = 1; depth <= STATION_RINGS; depth++) {
     const next: NodeId[] = [];
     for (const z of ring)
       for (const m of map.neighbors(z)) {
         if (!map.isSea(m) || seen.has(m)) continue;
         seen.add(m);
         next.push(m);
-        zones.push({ z: m, d: clearance(m) });
+        zones.push({ z: m, ring: depth, d: clearance(m) });
       }
     ring = next;
   }
-  return zones.sort((a, b) => b.d - a.d || a.z - b.z).map((x) => x.z);
+  const clear = zones.filter((x) => x.d >= SURFACE_STANDOFF_KM).sort((a, b) => a.ring - b.ring || b.d - a.d || a.z - b.z);
+  return (clear.length ? clear : zones.sort((a, b) => b.d - a.d || a.z - b.z)).map((x) => x.z);
 }
 
 /**
@@ -258,9 +280,10 @@ function standoffZones(p: Plan, focus: NodeId): NodeId[] {
  * that stays among the massed escorts of an invasion fleet is found by area search sooner or
  * later; SSNs attack from the edges of a screen and clear the datum (judgment).
  */
-function submarineStation(map: GameMap, focus: NodeId, standoff: NodeId[]): NodeId {
-  const next = new Set<number>(map.neighbors(focus));
-  return standoff.find((z) => next.has(z)) ?? focus;
+function submarineStation(map: GameMap, focus: NodeId, clearance: (z: NodeId) => number): NodeId {
+  let best = focus, bestD = -1;
+  for (const z of map.neighbors(focus)) if (map.isSea(z) && (clearance(z) > bestD || (clearance(z) === bestD && z < best))) { best = z; bestD = clearance(z); }
+  return best;
 }
 
 /**
@@ -345,8 +368,9 @@ export function planNaval(p: Plan): void {
   const liftCapable = groups.filter((g) => g.kind === 'surface_group' && compose(g, p.ctx.catalog).troopLift > 0);
   const assault = planAssault(p, liftCapable);
   const { node: focus, enemyFleet } = maritimeFocus(p, assault);
-  const stations = assault ? [focus] : standoffZones(p, focus);
-  const subStation = enemyFleet && !assault ? submarineStation(map, focus, stations) : focus;
+  const clearance = shoreClearance(p);
+  const stations = assault ? [focus] : standoffZones(p, focus, clearance);
+  const subStation = enemyFleet && !assault ? submarineStation(map, focus, clearance) : focus;
   let capitals = 0;
   const inPort = enemyFleet ? new Set<NodeId>() : batteredFleets(p, groups);
   // A belligerent may not fight in neutral waters, so it blockades only passages a party to the war borders (San Remo Manual 1994, paras 14-16).
@@ -365,7 +389,9 @@ export function planNaval(p: Plan): void {
     let best: NodeId | undefined, bestScore = Infinity;
     for (const c of enemyChokes) {
       const d = km(f.node, c.node);
-      if (d > range || !sails(f, c.node)) continue;
+      // Surface groups do not hold another state's strait under the enemy's shore missiles; submarines
+      // can, and a shore state fights in its own strait under its own shore defences (Iran at Hormuz).
+      if (d > range || !sails(f, c.node) || (f.kind === 'surface_group' && !c.shores.has(p.nation) && clearance(c.node) < SURFACE_STANDOFF_KM)) continue;
       const score = d * (1 + (claimed.get(c.node) ?? 0));
       if (score < bestScore) { bestScore = score; best = c.node; }
     }
@@ -418,7 +444,7 @@ export function planNaval(p: Plan): void {
         if (ward) {
           unescorted.splice(unescorted.indexOf(ward), 1);
           issue(p, g, { posture: 'escort', targetFormation: ward.id });
-        } else if (!blockade(g)) patrol(g, focus);
+        } else if (!blockade(g)) patrol(g, assault ? focus : stations[0]);
         break;
       }
     }

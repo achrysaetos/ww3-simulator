@@ -197,12 +197,12 @@ describe('strike wing basing', () => {
     for (let i = 0; i < 30 * perDay && !atWar(s.world, 'USA' as NationId, 'CHN' as NationId); i++) s.engine.step(s.world);
     expect(atWar(s.world, 'USA' as NationId, 'CHN' as NationId)).toBe(true);
     // Both B-1B wings move together; LRASMs are rationed, so either may be the one a salvo draws.
-    const lrasm = () => (wing.magazine['lrasm' as MunitionId] ?? 0) + (other.magazine['lrasm' as MunitionId] ?? 0);
+    // Counted from strike events: a magazine refilled in the same tick hides the shots.
     let firedAbroad = 0;
     for (let i = 0; i < 14 * perDay; i++) {
-      const before = lrasm();
-      s.engine.step(s.world);
-      if (s.map.distanceKm(wing.node, home) > 8000) firedAbroad += before - lrasm();
+      const events = s.engine.step(s.world);
+      if (s.map.distanceKm(wing.node, home) > 8000 && s.map.distanceKm(other.node, home) > 8000)
+        for (const e of events) if (e.type === 'strike' && e.by === 'USA' && e.munition === 'lrasm') firedAbroad += e.fired;
     }
     expect(s.map.distanceKm(wing.node, home)).toBeGreaterThan(8000);
     expect(firedAbroad).toBeGreaterThan(0);
