@@ -43,6 +43,23 @@ describe('naval AI pre-war surge', () => {
   }, 120_000);
 });
 
+describe('coastal defence against a landing', () => {
+  it("Taiwan's coastal missile brigade fires on the PLA lift off its beaches instead of holding its rounds for a later salvo", () => {
+    const s = createSession('taiwan-2027', 1);
+    const battery = Object.values(s.world.formations).find((f) => f.name.startsWith('Coastal Defense Command'))!;
+    const rounds = () => Object.values(battery.magazine).reduce((a, n) => a + n, 0);
+    const start = rounds();
+    let atLift = 0;
+    for (let i = 0; i < (10 * 24) / s.world.dtHours; i++) {
+      s.engine.step(s.world);
+      const t = battery.order.targetFormation ? s.world.formations[battery.order.targetFormation] : undefined;
+      if (battery.order.posture === 'strike' && t?.nation === 'CHN' && t.kind === 'surface_group') atLift++;
+    }
+    expect(atLift).toBeGreaterThan(0);
+    expect(start - rounds()).toBeGreaterThanOrEqual(60);
+  }, 120_000);
+});
+
 describe('naval AI fleet in being', () => {
   const blackSeaFleet = (s: ReturnType<typeof createSession>) =>
     Object.values(s.world.formations).filter((f) => f.nation === 'RUS' && f.status === 'active' && (f.kind === 'surface_group' || f.kind === 'submarine') && f.name.startsWith('Black Sea Fleet'));

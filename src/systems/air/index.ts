@@ -5,6 +5,7 @@
  */
 import type { SimContext, System } from '../../core/engine';
 import type { Command, Formation, FormationKind, MunitionId, PlatformId, Posture, World } from '../../core/types';
+import { navalPosition } from '../naval';
 import { combatRadiusKm } from './combat';
 import { buildPicture } from './picture';
 import { rearm } from './rearm';
@@ -88,7 +89,8 @@ export function applyAirOrder(world: World, cmd: Command, ctx: SimContext): bool
 
   if (target !== undefined && (order.posture === 'strike' || order.posture === 'air_superiority')) {
     const reach = maxReachKm(f, order.posture === 'strike', ctx);
-    const dist = ctx.map.distanceKm(f.node, target);
+    const ship = order.targetFormation ? world.formations[order.targetFormation] : undefined;
+    const dist = ctx.map.distanceKm(f.node, ship?.node === target ? navalPosition(ctx.map, ship) : target);
     if (dist > reach) return refuse(`target is ${Math.round(dist)} km away, beyond reach of ${Math.round(reach)} km`);
   }
 

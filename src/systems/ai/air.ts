@@ -87,7 +87,7 @@ export function planAir(p: Plan, targets: TargetGrid): void {
     const t = pickTarget(targets.near(w.node, stock.reduce((best, m) => Math.max(best, reach(m)), radius)), canHit);
     if (!t) return false;
     const order = { posture: 'strike' as const, target: t.node, targetClass: t.cls, targetFormation: t.formation };
-    budget.propose(w, strikeOptions(stock, t).filter((m) => withinKm(map, w.node, t.node, reach(m))), t, order);
+    budget.propose(w, strikeOptions(stock, t).filter((m) => withinKm(map, w.node, t.at ?? t.node, reach(m))), t, order);
     return true;
   };
 

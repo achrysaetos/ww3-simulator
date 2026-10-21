@@ -7,7 +7,7 @@
 import type { Catalog } from '../../core/catalog';
 import type { SimContext } from '../../core/engine';
 import type { Formation, FormationId, Munition, MunitionId, NationId, NodeId, Platform, PlatformId, TargetClass, World } from '../../core/types';
-import { ANTISHIP_KINDS, shipValue, strikeNavalGroup } from '../naval';
+import { ANTISHIP_KINDS, navalPosition, shipValue, strikeNavalGroup } from '../naval';
 import { defendRaid, envelopeExposure, hostileDefenders, overflightKm, samVsAircraft, type RaidStream } from './iads';
 import { takeLosses, type LossTally } from './losses';
 import { nodeDistance, type AirGroup, type AirPicture } from './picture';
@@ -140,7 +140,8 @@ function planPackage(world: World, ctx: SimContext, pic: AirPicture, f: Formatio
   const carriers = carriersOf(f, pic, ctx, world);
   if (!carriers.length) return undefined;
   const tc = f.order.targetClass ?? 'structure';
-  const dist = nodeDistance(ctx, f.node, target);
+  const ship = tc === 'ship' && f.order.targetFormation ? world.formations[f.order.targetFormation] : undefined;
+  const dist = nodeDistance(ctx, f.node, ship?.node === target ? navalPosition(ctx.map, ship) : target);
   const ring = threatRingKm(world, ctx, pic, f.node, target, f.nation);
   const m = chooseMunition(f, carriers, tc, dist, ring, ctx);
   let weapons = 0;

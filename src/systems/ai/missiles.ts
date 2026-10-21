@@ -31,9 +31,9 @@ export function planMissiles(p: Plan, targets: TargetGrid): void {
     const stock = arsenal(p, f);
     if (!stock.length) continue;
     const reach = Math.max(...stock.map((m) => m.rangeKm));
-    const t = pickTarget(targets.near(f.node, reach), (t) => withinKm(map, f.node, t.node, reach) && volleyMunition(p, f, stock, t, map.distanceKm(f.node, t.node)) !== undefined);
+    const t = pickTarget(targets.near(f.node, reach), (t) => withinKm(map, f.node, t.at ?? t.node, reach) && volleyMunition(p, f, stock, t, map.distanceKm(f.node, t.at ?? t.node)) !== undefined);
     if (!t) continue;
-    const munition = volleyMunition(p, f, stock, t, map.distanceKm(f.node, t.node))!;
+    const munition = volleyMunition(p, f, stock, t, map.distanceKm(f.node, t.at ?? t.node))!;
     budget.propose(f, [p.ctx.catalog.munition(munition)], t, { posture: 'strike', target: t.node, targetClass: t.cls, targetFormation: t.formation, munition });
   }
   budget.settle();

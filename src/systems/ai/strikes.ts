@@ -5,7 +5,7 @@ import { isOverseas } from '../../data/territories';
 import { HOSTILE_OPINION } from '../diplomacy/escalation';
 import { rung } from '../diplomacy/wars';
 import { dailyRounds, effectPk } from '../air';
-import { ANTISHIP_KINDS } from '../naval';
+import { ANTISHIP_KINDS, navalPosition } from '../naval';
 import { isGround, issue } from './forces';
 import type { Plan } from './types';
 
@@ -16,6 +16,8 @@ export interface StrikeTarget {
   formation?: FormationId;
   /** A naval group away from its home port: only a weapon with a terminal seeker finds it (air strikeShips). */
   afloat?: boolean;
+  /** Where a naval target lies within its sea zone (naval navalPosition); weapon range is measured to it. */
+  at?: NodeId;
   assigned: number;
 }
 
@@ -136,7 +138,7 @@ export function strikeTargets(p: Plan, battleArea: Set<number>): TargetGrid {
       const v = VALUE_BY_KIND[f.kind] ?? (isGround(f) && battleArea.has(f.node) ? FRONT_FORCES : undefined);
       if (!v) continue;
       if (f.kind !== 'surface_group') out.push({ node: f.node, cls: v.cls, value: v.value, formation: f.id, assigned: 0 });
-      else out.push({ node: f.node, cls: v.cls, value: v.value * shipWorth(p, f), formation: f.id, afloat: f.node !== f.home || !!f.order.path?.length, assigned: 0 });
+      else out.push({ node: f.node, at: navalPosition(map, f), cls: v.cls, value: v.value * shipWorth(p, f), formation: f.id, afloat: f.node !== f.home || !!f.order.path?.length, assigned: 0 });
     }
   for (const n of battleArea)
     if (map.railKm[n] >= RAIL_HUB.minRailKm) out.push({ node: n as NodeId, cls: RAIL_HUB.cls, value: RAIL_HUB.value * Math.min(2, map.railKm[n] / 200), assigned: 0 });
@@ -211,9 +213,14 @@ export class FireBudget {
 
   constructor(private readonly p: Plan) {}
 
-  /** Strike now if the cheapest weapon for it is not rationed, else queue it for `settle`. */
+  /**
+   * Strike now if the cheapest weapon for it is not rationed or the target is an enemy landing on
+   * friendly soil, else queue it for `settle`. Coastal anti-ship batteries exist for the hours an
+   * invasion fleet lies off the beaches; holding them back for a later salvo loses them to the
+   * landing (CSIS 2023: Taiwan's shore-based Harpoons were among the main killers of PLA lift).
+   */
   propose(f: Formation, options: Munition[], t: StrikeTarget, order: Omit<Order, 'issuedTick'>): void {
-    if (!options.length || options[0].unitCostUsdM < RATIONED_COST_USD_M) return issue(this.p, f, order);
+    if (!options.length || options[0].unitCostUsdM < RATIONED_COST_USD_M || this.landingOnFriends(t)) return issue(this.p, f, order);
     this.proposals.push({ f, options, t, order });
   }
 
@@ -241,6 +248,11 @@ export class FireBudget {
       }
     }
     this.proposals.length = 0;
+  }
+
+  private landingOnFriends(t: StrikeTarget): boolean {
+    const { world, ctx, friends } = this.p;
+    return t.at !== undefined && !ctx.map.isSea(t.at) && friends.has(world.control[t.at]);
   }
 
   private salvoDay(): boolean {
