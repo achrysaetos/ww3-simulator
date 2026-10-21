@@ -77,16 +77,16 @@ export function relocate(world: World, map: GameMap, s: C2State, live: readonly 
   };
   for (const [id, list] of subs) {
     const hq = s.hqs[id];
-    const near = new Set<number>();
-    for (const f of list) {
-      near.add(f.node);
-      for (let k = map.adjStart[f.node]; k < map.adjStart[f.node + 1]; k++) near.add(map.adj[k]);
-    }
+    // Subordinates stack in few cells: weigh each cell by how many stand there.
+    const weight = new Map<number, number>();
+    for (const f of list) weight.set(f.node, (weight.get(f.node) ?? 0) + 1);
+    const near = new Set<number>(weight.keys());
+    for (const n of weight.keys()) for (let k = map.adjStart[n]; k < map.adjStart[n + 1]; k++) near.add(map.adj[k]);
     let best = -1, bestKm = Infinity;
     for (const a of near) {
       if (!rear(hq.nation, a)) continue;
       let km = 0;
-      for (const f of list) km += map.distanceKm(a as NodeId, f.node);
+      for (const [n, w] of weight) km += w * map.distanceKm(a as NodeId, n as NodeId);
       if (km < bestKm) { bestKm = km; best = a; }
     }
     if (best >= 0) hq.node = best as NodeId;

@@ -8,6 +8,7 @@ import { c2, c2FireFactor, jamAgainst, jammedHits, orderDelayHours } from '../sr
 import { landCombat, landMovement } from '../src/systems/land';
 import { platformCount } from '../src/core/forces';
 import { id, testWorld } from '../src/testkit';
+import { buildPicture } from '../src/systems/air/picture';
 
 const UKR = 'UKR' as NationId, RUS = 'RUS' as NationId, USA = 'USA' as NationId;
 
@@ -77,6 +78,50 @@ describe('ukraine-2026: Russian EW', () => {
     const jammed = raid(true), clear = raid(false);
     expect(jammed.jammed).toBeGreaterThan(0);
     expect(jammed.damage).toBeLessThan(clear.damage);
+  });
+});
+
+describe('ukraine-2026: Russian EW against sensors', () => {
+  const withoutC2 = (world: World) => {
+    const w = structuredClone(world);
+    delete (w.slices as Partial<World['slices']>).c2;
+    return { world: w, engine: new Engine(s.map, s.catalog, SYSTEMS.filter((x) => x.id !== 'c2')) };
+  };
+
+  it('blinds part of the fire-control channels of Ukrainian SAMs under Krasukha cover', () => {
+    const channels = (world: World) => {
+      const pic = buildPicture(world, s.engine.context(world), world.slices.air.runway);
+      return new Map(pic.defenders.filter((d) => d.f.nation === UKR).map((d) => [d.f.id, d.channels]));
+    };
+    const jammed = channels(s.world), clear = channels(withoutC2(s.world).world);
+    const covered = [...jammed.keys()].filter((fid) => jamAgainst(s.world, s.world.formations[fid].node, UKR).radar > 0.3);
+    expect(covered.length).toBeGreaterThan(0);
+    for (const fid of covered) expect(jammed.get(fid)!).toBeLessThan(0.97 * clear.get(fid)!);
+    const uncovered = [...jammed.keys()].filter((fid) => jamAgainst(s.world, s.world.formations[fid].node, UKR).radar === 0);
+    for (const fid of uncovered) expect(jammed.get(fid)).toBe(clear.get(fid));
+  });
+
+  it('denies Ukrainian ISR drones some of their fixes on Russian formations behind the line', () => {
+    // Russian-held cells within the drones' reach, out of sight of Ukrainian troops and under Russian jamming.
+    const watched = new Set<number>(Object.values(s.world.formations).filter((f) => f.nation === UKR && f.kind !== 'air_wing').flatMap((f) => [f.node, ...neighbours(f.node)]));
+    const hidden = (n: NodeId) => s.world.control[n] === RUS && !watched.has(n) && jamAgainst(s.world, n, UKR).radar > 0;
+    let site = launchSite, deep: NodeId[] = [];
+    for (let n = 0; n < s.map.landCount; n++) {
+      if (s.world.control[n] !== UKR) continue;
+      const cells = s.map.nodesWithin(n as NodeId, 290).filter(hidden);
+      if (cells.length > deep.length) [site, deep] = [n as NodeId, cells];
+    }
+    expect(deep.length).toBeGreaterThan(1);
+    const fixes = (run: { world: World; engine: Engine }) => {
+      addFormation(run.world, s.catalog, { nation: UKR, name: 'test ISR drone squadron', kind: 'air_wing', echelon: 'squadron', node: site, equipment: { ['rq4b' as PlatformId]: 4 } });
+      const targets = deep.flatMap((n) => [0, 1, 2, 3, 4, 5].map(() => addFormation(run.world, s.catalog, { nation: RUS, name: 'test battery', kind: 'artillery', echelon: 'battalion', node: n, equipment: { ['2s19m2' as PlatformId]: 18 }, home: s.world.nations[RUS].capital }).id));
+      run.engine.step(run.world);
+      const pic = run.world.slices.intel.pictures[UKR];
+      return targets.filter((id) => pic[id]?.source === 'airborne').length;
+    };
+    const jammed = fixes(fork(s.world)), clear = fixes(withoutC2(s.world));
+    expect(clear).toBeGreaterThan(5);
+    expect(jammed).toBeLessThan(0.85 * clear);
   });
 });
 
@@ -171,5 +216,23 @@ describe('land combat after an HQ loss', () => {
     const headless = assault(true), commanded = assault(false);
     expect(commanded).toBeGreaterThan(0);
     expect(headless).toBeLessThan(0.9 * commanded);
+  });
+});
+
+describe('c2 determinism', () => {
+  it('replays the same slice from the same seed and never draws from the shared RNG', () => {
+    const run = (systems: Parameters<typeof testWorld>[0]) => {
+      const t = testWorld(systems, 9);
+      t.war('RUS', 'UKR');
+      t.add({ nation: RUS, name: 'rus (1st CAA)', kind: 'maneuver', echelon: 'division', node: t.nodeAt(47.5, 38.5), equipment: { [id.platform('t_inf')]: 300, [id.platform('t_spg')]: 36 } });
+      t.add({ nation: UKR, name: 'ukr', kind: 'maneuver', echelon: 'brigade', node: t.nodeAt(48.5, 38.5), equipment: { [id.platform('t_inf')]: 300, [id.platform('t_spg')]: 18 } });
+      t.engine.run(t.world, 6);
+      return t.world;
+    };
+    const a = run([c2]), b = run([c2]);
+    expect(JSON.stringify(a.slices.c2)).toBe(JSON.stringify(b.slices.c2));
+    expect(JSON.parse(JSON.stringify(a.slices.c2))).toEqual(a.slices.c2);
+    expect(a.slices.c2.hqs['RUS:army:1st CAA']).toBeDefined();
+    expect(a.rngState).toBe(run([]).rngState);
   });
 });
