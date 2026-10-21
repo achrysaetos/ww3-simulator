@@ -87,8 +87,13 @@ export const strategicMunitions = defineMunitions([
   { id: 'nodong', name: 'Hwasong-7 (Nodong)', kind: 'mrbm', producers: ['PRK'], rangeKm: 1500, speedMach: 9, warheadKg: 700, yieldKt: 15, cepM: 2000, pk: nuclearPk(15, 2000), interceptDifficulty: 0.65, unitCostUsdM: 3, weightKg: 16250 },
 
   // ---- Conventional theatre ballistic and hypersonic (long range)
-  // DF-26 conventional/anti-ship variant, 1,200-1,800 kg warhead (CSIS).
-  { id: 'df26', name: 'DF-26 (conventional/anti-ship)', kind: 'irbm', producers: ['CHN'], rangeKm: 4000, speedMach: 18, warheadKg: 1500, cepM: 100, pk: { ...ballisticConv, ship: 0.4 }, interceptDifficulty: 0.85, unitCostUsdM: 15, weightKg: 20000 },
+  // DF-26 conventional land-attack round, 1,200-1,800 kg warhead (CSIS Missile Threat). DoD CMPR 2024: the
+  // DF-26 strikes ground targets conventionally or with a nuclear warhead, and naval targets conventionally.
+  { id: 'df26', name: 'DF-26 (conventional land attack)', kind: 'irbm', producers: ['CHN'], rangeKm: 4000, speedMach: 18, warheadKg: 1500, cepM: 100, pk: ballisticConv, interceptDifficulty: 0.85, unitCostUsdM: 15, weightKg: 20000 },
+  // DF-26B, the anti-ship round with a manoeuvring terminal seeker (DoD CMPR 2024: conventional strikes against
+  // naval targets out to the second island chain). Ship pk below the DF-21D's: longer flight time for the target
+  // to move and a less mature seeker (estimate).
+  { id: 'df26b', name: 'DF-26B ASBM', kind: 'antiship_ballistic', producers: ['CHN'], rangeKm: 4000, speedMach: 18, warheadKg: 1200, cepM: 20, pk: { ship: 0.4, structure: 0.6, soft: 0.5 }, interceptDifficulty: 0.85, unitCostUsdM: 15, weightKg: 20000 },
   // DF-21D ASBM, 1,500+ km; ship pk reflects terminal seeker vs a manoeuvring carrier (est).
   { id: 'df21d', name: 'DF-21D ASBM', kind: 'antiship_ballistic', producers: ['CHN'], rangeKm: 1500, speedMach: 10, warheadKg: 600, cepM: 20, pk: { ship: 0.45, structure: 0.6, soft: 0.5 }, interceptDifficulty: 0.8, unitCostUsdM: 10, weightKg: 14700 },
   { id: 'df17', name: 'DF-17 (DF-ZF HGV)', kind: 'hgv', producers: ['CHN'], rangeKm: 2000, speedMach: 8, warheadKg: 500, cepM: 10, pk: { structure: 0.8, soft: 0.7, hardened: 0.3, ship: 0.4, infantry: 0.4 }, interceptDifficulty: 0.9, unitCostUsdM: 12, weightKg: 15000 },

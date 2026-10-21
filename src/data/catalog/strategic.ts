@@ -46,7 +46,8 @@ const tels: PlatformSpec<MunitionKey>[] = [
   { id: 'ghauri_tel', name: 'Ghauri TEL', cls: 'tel_mrbm', producers: ['PAK'], inService: 2003, unitCostUsdM: 3, nuclear: true, load: { ghauri: 1 } },
   { id: 'agni_p_tel', name: 'Agni-P canister TEL', cls: 'tel_mrbm', producers: ['IND'], inService: 2023, unitCostUsdM: 6, nuclear: true, load: { agni_p: 1 } },
   { id: 'nodong_tel', name: 'Hwasong-7 (Nodong) TEL', cls: 'tel_mrbm', producers: ['PRK'], inService: 1993, unitCostUsdM: 3, nuclear: true, load: { nodong: 1 } },
-  { id: 'df26_tel', name: 'DF-26 TEL', cls: 'tel_irbm', producers: ['CHN'], inService: 2016, unitCostUsdM: 12, load: { df26: 1 } },
+  // Hot-swappable warheads (DoD CMPR 2024): a brigade fires land-attack or anti-ship rounds from the same launchers.
+  { id: 'df26_tel', name: 'DF-26 TEL', cls: 'tel_irbm', producers: ['CHN'], inService: 2016, unitCostUsdM: 12, load: { df26: 1, df26b: 1 } },
   { id: 'hwasong12_tel', name: 'Hwasong-12 TEL', cls: 'tel_irbm', producers: ['PRK'], inService: 2017, unitCostUsdM: 6, nuclear: true, load: { hwasong12: 1 } },
   { id: 'agni3_tel', name: 'Agni-III launcher', cls: 'tel_irbm', producers: ['IND'], inService: 2011, unitCostUsdM: 6, nuclear: true, load: { agni3: 1 } },
   // MZKT-79221 for Yars/Topol-M; ~3-4 mobile regiments patrol forests near bases (FAS).
