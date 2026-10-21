@@ -4,6 +4,7 @@ import type { Command, NodeId, SimEvent } from '../src/core/types';
 import { createAi } from '../src/systems/ai';
 import { landSlice } from '../src/systems/land';
 import { createDiplomacy } from '../src/systems/diplomacy';
+import { strategic } from '../src/systems/strategic';
 import { id, testWorld } from '../src/testkit';
 
 const N = id.nation;
@@ -113,18 +114,28 @@ describe('nuclear release', () => {
   const emitter = (at: number, e: (tick: number) => SimEvent): System => ({ id: 'emitter', step: (w, ctx) => { if (w.tick === at) ctx.emit(e(w.tick)); } });
 
   /** `victim` has lost its most populous cells near the capital to `enemy`, whose troops stand next to the capital. */
-  const losing = (t: T, victim: string, enemy: string, popLost: number) => {
+  const homeland = (t: T, victim: string) => {
     const cap = t.world.nations[N(victim)].capital;
-    const cells = t.map.nodesOf(N(victim)).filter((n) => n !== cap).sort((a, b) => t.map.distanceKm(a, cap) - t.map.distanceKm(b, cap));
+    return t.map.nodesOf(N(victim)).filter((n) => n !== cap).sort((a, b) => t.map.distanceKm(a, cap) - t.map.distanceKm(b, cap));
+  };
+  /** `enemy` takes `victim`'s cells nearest the capital until it holds `popLost` of the homeland's people. */
+  const take = (t: T, victim: string, enemy: string, popLost: number) => {
     let lost = 0;
-    for (const n of cells) {
+    for (const n of homeland(t, victim)) {
       if (lost >= popLost) break;
-      t.world.control[n] = N(enemy);
+      if (t.world.control[n] !== N(enemy)) t.world.control[n] = N(enemy);
       lost += t.map.popShare[n];
     }
+  };
+  const losing = (t: T, victim: string, enemy: string, popLost: number) => {
+    const cells = homeland(t, victim);
+    take(t, victim, enemy, popLost);
+    const cap = t.world.nations[N(victim)].capital;
     for (const n of [...t.map.neighbors(cap)].filter((m) => !t.map.isSea(m)).slice(0, 2)) brigade(t, enemy, n);
     t.add({ nation: N(victim), name: 'Strategic rocket division', kind: 'strategic', echelon: 'division', node: cells[cells.length - 1], equipment: { [id.platform('t_icbm')]: 10 } });
   };
+  const bold = { casualtyTolerance: 0.5, interventionism: 0.5, riskTolerance: 1, aggression: 0.5 };
+  const refusals = (events: SimEvent[]) => events.filter((e) => e.type === 'message' && e.text.startsWith('nuclear release refused'));
   const releases = (cmds: Command[], nation: string) => cmds.filter((c) => c.type === 'nuclear_release' && c.nation === nation);
 
   it('a no-first-use state facing defeat does not release until it has been struck by nuclear weapons', () => {
@@ -142,8 +153,9 @@ describe('nuclear release', () => {
     const before = commandsOver(t, 40);
     expect(t.world.slices.diplomacy.assessment[N('CHN')].capitalThreatened).toBe(true);
     expect(releases(before, 'CHN')).toEqual([]);
-    const after = commandsOver(t, 12);
-    expect(releases(after, 'CHN').length).toBeGreaterThan(0);
+    // One attack draws one answer, not a salvo every few days for the rest of the war.
+    const after = commandsOver(t, 120);
+    expect(releases(after, 'CHN')).toHaveLength(1);
   });
 
   it('an escalate-to-deescalate state releases once its doctrine threshold is crossed, and not before', () => {
@@ -159,6 +171,52 @@ describe('nuclear release', () => {
     const fired = run(0.15);
     expect(fired.length).toBeGreaterThan(0);
     expect(fired[0]).toMatchObject({ munition: 't_nuke', warheads: 1 });
+  });
+
+  it('chooses a target and warhead that one of its launchers can deliver', () => {
+    const t = testWorld([strategic, createDiplomacy(), createAi({ RUS: bold })]);
+    t.world.nations[N('RUS')].nuclear = { warheads: 1500, deployed: 1500, doctrine: 'escalate_to_deescalate' };
+    t.war('RUS', 'UKR');
+    losing(t, 'RUS', 'UKR', 0.15);
+    // The smallest warhead Russia holds sits on rockets 6,000 km from the fighting.
+    const far = t.add({ nation: N('RUS'), name: 'Pacific rocket brigade', kind: 'missile', echelon: 'brigade', node: t.nodeAt(43.1, 131.9), equipment: { [id.platform('t_tel')]: 4 } });
+    far.magazine[id.munition('t_nuke_tac')] = 4;
+
+    const events: SimEvent[] = [];
+    t.engine.run(t.world, 24, (_, e) => events.push(...e));
+    expect(refusals(events)).toEqual([]);
+    expect(events.filter((e) => e.type === 'nuclear_detonation' && e.by === 'RUS').length).toBeGreaterThan(0);
+  });
+
+  it('weighs first use once at each rung of the ladder, and again only when the war worsens', () => {
+    const t = testWorld([createDiplomacy(), createAi({ RUS: bold })]);
+    t.world.nations[N('RUS')].nuclear = { warheads: 1500, deployed: 1500, doctrine: 'escalate_to_deescalate' };
+    t.war('RUS', 'UKR');
+    losing(t, 'RUS', 'UKR', 0.06);
+    // A month at the threshold with nothing changing: one decision, whatever it was.
+    expect(releases(commandsOver(t, 120), 'RUS').length).toBeLessThanOrEqual(1);
+    take(t, 'RUS', 'UKR', 0.2);
+    expect(releases(commandsOver(t, 12), 'RUS')).toHaveLength(1);
+    expect(releases(commandsOver(t, 120), 'RUS')).toEqual([]);
+  });
+
+  it('Pakistan holds while Indian forces stand near Islamabad and uses first once a Kidwai threshold is crossed', () => {
+    const t = testWorld([createDiplomacy(), createAi({ PAK: bold })]);
+    t.world.nations[N('PAK')].nuclear = { warheads: 170, deployed: 170, doctrine: 'escalate_to_deescalate' };
+    t.war('PAK', 'IND');
+    const islamabad = t.world.nations[N('PAK')].capital;
+    const near = border(t, 'IND', 'PAK').sort((a, b) => t.map.distanceKm(a, islamabad) - t.map.distanceKm(b, islamabad));
+    for (const n of near.slice(0, 2)) brigade(t, 'IND', n);
+    const army = [0, 1, 2, 3].map(() => brigade(t, 'PAK', islamabad));
+    t.add({ nation: N('PAK'), name: 'Army Strategic Forces Command', kind: 'strategic', echelon: 'division', node: t.nodeAt(30.2, 67.0), equipment: { [id.platform('t_icbm')]: 10 } });
+
+    expect(releases(commandsOver(t, 40), 'PAK')).toEqual([]);
+    expect(t.world.slices.diplomacy.assessment[N('PAK')].capitalThreatened).toBe(true);
+    // The military threshold: most of the field army destroyed.
+    for (const f of army) f.equipment[id.platform('t_mbt')] = 9;
+    const fired = releases(commandsOver(t, 12), 'PAK');
+    expect(fired).toHaveLength(1);
+    expect(fired[0]).toMatchObject({ warheads: 1 });
   });
 });
 

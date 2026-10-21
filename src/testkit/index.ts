@@ -22,6 +22,7 @@ export const testMunitions: Munition[] = [
   M({ id: 't_asm', name: 'Test anti-ship missile', kind: 'antiship_cruise', rangeKm: 250, speedMach: 0.9, warheadKg: 220, cepM: 5, pk: { ship: 0.6 }, interceptDifficulty: 0.4, unitCostUsdM: 1.5, weightKg: 700 }),
   M({ id: 't_torpedo', name: 'Test torpedo', kind: 'torpedo', rangeKm: 50, speedMach: 0.07, warheadKg: 290, cepM: 5, pk: { ship: 0.7, submarine: 0.5 }, interceptDifficulty: 0.8, unitCostUsdM: 4, weightKg: 1700 }),
   M({ id: 't_nuke', name: 'Test ICBM warhead', kind: 'icbm', rangeKm: 12000, speedMach: 23, warheadKg: 300, yieldKt: 300, cepM: 120, pk: { structure: 1, hardened: 0.9, soft: 1, infantry: 1, armor: 0.95 }, interceptDifficulty: 0.95, unitCostUsdM: 30, weightKg: 36000 }),
+  M({ id: 't_nuke_tac', name: 'Test battlefield nuclear rocket', kind: 'srbm', rangeKm: 70, speedMach: 3, warheadKg: 100, yieldKt: 5, cepM: 50, pk: { structure: 1, hardened: 0.5, soft: 1, infantry: 1, armor: 0.9 }, interceptDifficulty: 0.6, unitCostUsdM: 5, weightKg: 1200 }),
 ];
 
 const zero = { fuelTonsPerHour: 0 };

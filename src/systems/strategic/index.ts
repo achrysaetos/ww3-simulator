@@ -19,7 +19,7 @@ export type { Burst, LaunchWarning, NuclearAlert, NuclearPosture, ReleaseRequest
 export { matedShare, type AlertDoctrine } from './alert';
 export type { LaunchOnWarningHook } from './nuclear';
 export { release, detonate, interceptSalvo } from './nuclear';
-export { targetList, type Target, type TargetKind, type TargetMode } from './targeting';
+export { nuclearLaunchers, targetList, weaponFor, type NuclearLauncher, type Target, type TargetKind, type TargetMode } from './targeting';
 export { isrFactor, cepFactor, spaceSupport } from './space';
 export { globalFoodShock, globalCoolingC } from './climate';
 export { falloutDenied } from './fallout';

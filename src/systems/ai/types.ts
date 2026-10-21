@@ -9,12 +9,20 @@ export interface Objective {
   value: number;
 }
 
+/** How far up its nuclear ladder a nation has weighed release, so it decides again only when the war worsens. */
+export interface NuclearLadder {
+  /** Highest first-use rung already weighed, whether the leadership released or held. */
+  rung: number;
+  /** Nuclear attacks on it already answered or let pass: homeland hits plus distinct attackers. */
+  answered: number;
+}
+
 export interface AiState {
   /** Platform count when the AI first saw each formation; strength is measured against it. */
   baseStrength: Record<string, number>;
   /** War aims per nation, refreshed by the strategic layer. */
   aims: Record<NationId, Objective[]>;
-  lastNuclear: Record<NationId, number>;
+  nuclear: Record<NationId, NuclearLadder>;
   lastPeaceOffer: Record<NationId, number>;
   /** Formations sent overseas by strategic deployment, and the port each is bound for. */
   deployments: Record<FormationId, NodeId>;

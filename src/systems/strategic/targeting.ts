@@ -1,7 +1,9 @@
 import type { SimContext } from '../../core/engine';
 import { platformCount } from '../../core/forces';
+import type { Catalog } from '../../core/catalog';
+import type { GameMap } from '../../core/map';
 import type { Formation, MunitionId, NationId, NodeId, PlatformId, World } from '../../core/types';
-import { deliveryReachKm } from './nuclear';
+import { deliveryReachKm, isLive } from './nuclear';
 import { POINT_TARGET } from './tables';
 
 export type TargetMode = 'counterforce' | 'countervalue';
@@ -24,21 +26,45 @@ function counterforceKind(f: Formation, ctx: Pick<SimContext, 'catalog'>): Targe
   return undefined;
 }
 
+/** One kind of nuclear warhead on one live launcher, and how far that launcher delivers it. */
+export interface NuclearLauncher {
+  node: NodeId;
+  munition: MunitionId;
+  yieldKt: number;
+  reachKm: number;
+}
+
+/** Every nuclear warhead `nation` holds on a live launcher, the pool `release` draws from. */
+export function nuclearLaunchers(world: World, catalog: Catalog, nation: NationId): NuclearLauncher[] {
+  const out: NuclearLauncher[] = [];
+  for (const f of Object.values(world.formations)) {
+    if (f.nation !== nation || !isLive(f)) continue;
+    for (const [mid, n] of Object.entries(f.magazine) as [MunitionId, number][]) {
+      const m = catalog.munition(mid);
+      if (n > 0 && m.yieldKt) out.push({ node: f.node, munition: mid, yieldKt: m.yieldKt, reachKm: deliveryReachKm(catalog, f, m) });
+    }
+  }
+  return out;
+}
+
+/** The smallest- or largest-yield warhead some launcher can put on `target`; undefined when none reaches it. */
+export function weaponFor(launchers: readonly NuclearLauncher[], map: GameMap, target: NodeId, prefer: 'smallest' | 'largest'): MunitionId | undefined {
+  let best: NuclearLauncher | undefined;
+  for (const l of launchers) {
+    if (best && (prefer === 'smallest' ? l.yieldKt >= best.yieldKt : l.yieldKt <= best.yieldKt)) continue;
+    if (map.distanceKm(l.node, target) <= l.reachKm) best = l;
+  }
+  return best?.munition;
+}
+
 /**
  * Nodes worth a warhead in `defender`, best first, limited to what `attacker` can reach with the nuclear munitions
  * in its magazines. Counterforce: nuclear forces, the capital (national command), air bases, and ships in port.
  * Countervalue: cities by population.
  */
 export function targetList(world: World, ctx: Pick<SimContext, 'map' | 'catalog'>, attacker: NationId, defender: NationId, mode: TargetMode): Target[] {
-  const reach: { node: NodeId; km: number }[] = [];
-  for (const f of Object.values(world.formations)) {
-    if (f.nation !== attacker || f.status === 'destroyed') continue;
-    for (const [mid, n] of Object.entries(f.magazine) as [MunitionId, number][]) {
-      const m = ctx.catalog.munition(mid);
-      if (n > 0 && m.yieldKt) reach.push({ node: f.node, km: deliveryReachKm(ctx.catalog, f, m) });
-    }
-  }
-  const reachable = (node: NodeId) => reach.some((r) => ctx.map.distanceKm(r.node, node) <= r.km);
+  const launchers = nuclearLaunchers(world, ctx.catalog, attacker);
+  const reachable = (node: NodeId) => weaponFor(launchers, ctx.map, node, 'smallest') !== undefined;
   const byNode = new Map<number, Target>();
   const add = (node: NodeId, kind: TargetKind, value: number) => {
     const t = byNode.get(node);

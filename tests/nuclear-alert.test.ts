@@ -20,7 +20,7 @@ function run(t: ReturnType<typeof testWorld>, ticks: number): SimEvent[] {
 describe('nuclear alerts', () => {
   const doctrine = (coreLossShare: number | null): AlertDoctrine => ({
     spec: { firstHours: 12, firstShare: 0.25, fullHours: 72 },
-    threshold: { firstUse: true, coreLossShare, forceLossShare: null, onStrategicAttack: true, onChemBio: true, coversAllies: false },
+    threshold: { firstUse: true, coreLossShare, forceLossShare: null, economicLossShare: null, onStrategicAttack: true, onChemBio: true, coversAllies: false },
   });
 
   function southAsia() {

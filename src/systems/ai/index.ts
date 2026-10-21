@@ -41,7 +41,7 @@ export function createAi(profiles: Readonly<Record<string, StrategicProfile>> = 
   return {
     id: 'ai',
     init(world) {
-      world.slices.ai = { baseStrength: {}, aims: {}, lastNuclear: {}, lastPeaceOffer: {}, deployments: {} };
+      world.slices.ai = { baseStrength: {}, aims: {}, nuclear: {}, lastPeaceOffer: {}, deployments: {} };
     },
     step(world, ctx) {
       if (world.events.some((e) => FRONT_CHANGES.has(e.type))) {
