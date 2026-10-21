@@ -50,8 +50,8 @@ function texels(map: GameMap, n: number, res: number, w: number, h: number): Rec
   };
 }
 
-/** Texels the mask is smoothed over: two box passes of radius 2 round the cell staircase into a contour. */
-const BLUR = 2;
+/** Texels the mask is smoothed over: two box passes of radius 1 round the cell staircase into a contour without swallowing a lone quarter-degree cell. */
+const BLUR = 1;
 const SMOOTH = 2 * BLUR;
 
 const expand = (r: Rect, by: number): Rect => ({

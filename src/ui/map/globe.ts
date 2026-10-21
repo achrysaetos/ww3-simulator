@@ -48,7 +48,7 @@ uniform float u_dpr;
 uniform float u_seaGrid;
 uniform vec3 u_view;
 out vec4 frag;
-const vec3 BLUE = vec3(0.25, 0.55, 0.91), RED = vec3(0.84, 0.22, 0.24), AMBER = vec3(1.0, 0.71, 0.28);
+const vec3 BLUE = vec3(0.25, 0.55, 0.91), RED = vec3(0.84, 0.22, 0.24);
 void main() {
   vec2 sp = gl_FragCoord.xy / u_dpr - u_view.yz * 0.5;
   if (v_z < 0.0 || length(sp) > u_view.x) discard;
@@ -58,13 +58,13 @@ void main() {
   vec3 c = t.rgb;
   vec2 muv = vec2((v_ll.x + 180.0) / 360.0, (90.0 - v_ll.y) / 180.0);
   vec4 m = texture(u_mask, muv);
-  float own = smoothstep(0.28, 0.55, m.r), foe = smoothstep(0.28, 0.55, m.g), occ = smoothstep(0.3, 0.6, m.b), war = smoothstep(0.3, 0.6, m.a);
-  float lum = 0.45 + 2.4 * dot(c, vec3(0.3, 0.5, 0.2));
-  c = mix(c, BLUE * 0.42 * lum, own * 0.34 * land);
-  c = mix(c, RED * 0.5 * lum, foe * 0.38 * land);
-  c = mix(c, AMBER * 0.4 * lum, war * 0.16 * land);
+  float own = smoothstep(0.15, 0.45, m.r), foe = smoothstep(0.15, 0.45, m.g), occ = smoothstep(0.15, 0.45, m.b), war = smoothstep(0.15, 0.45, m.a);
+  // Tint multiplies the relief rather than painting over it, so ridges and valleys still read through.
+  c = mix(c, c * vec3(0.78, 1.08, 1.5) + BLUE * 0.03, own * 0.85 * land);
+  c = mix(c, c * vec3(1.75, 0.78, 0.78) + RED * 0.035, foe * 0.85 * land);
+  c = mix(c, c * vec3(1.35, 1.12, 0.8), war * 0.5 * land);
   float s = fract((gl_FragCoord.x + gl_FragCoord.y) / (13.0 * u_dpr));
-  c += vec3(1.0, 0.45, 0.45) * 0.10 * (smoothstep(0.0, 0.06, s) - smoothstep(0.13, 0.2, s)) * occ * land;
+  c += vec3(1.0, 0.47, 0.47) * 0.15 * (smoothstep(0.0, 0.06, s) - smoothstep(0.13, 0.2, s)) * occ * land;
 
   // The front: where the friendly and enemy fields cross, drawn as a glowing line a fixed width on screen.
   float d = m.r - m.g, fw = max(fwidth(d), 1e-5), px = abs(d) / fw / u_dpr;

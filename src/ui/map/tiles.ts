@@ -7,7 +7,7 @@
 import { pxPerDeg, radius, unproject, type Camera, type Viewport } from '../view';
 
 export const TILE_PX = 512;
-export const MAX_Z = 7;
+export const MAX_Z = 8;
 
 export interface TileKey {
   z: number;

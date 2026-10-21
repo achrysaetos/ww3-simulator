@@ -62,7 +62,7 @@ interface Flash {
 
 const FLASH_MS: Record<Flash['kind'], number> = { battle: 1100, strike: 1300, capture: 900, nuclear: 4500 };
 /** Target on-screen size of a stacking cell, per band. */
-const CELL_PX: Record<ZoomBand, number> = { world: 64, theatre: 64, front: 34 };
+const CELL_PX: Record<ZoomBand, number> = { world: 72, theatre: 92, front: 34 };
 /** On-screen width of one map node at which its stack fans out into individual counters. */
 const FAN_PX = 70;
 const FAN_SLOT_PX = 50;
@@ -74,6 +74,14 @@ export interface HitBox extends CounterBox {
   node: NodeId;
   /** Where clicking flies to open the stack up; null when it cannot open further. */
   zoomTo: Camera | null;
+}
+
+interface Place {
+  name: string;
+  lon: number;
+  lat: number;
+  pop: number;
+  capital: boolean;
 }
 
 interface Label {
@@ -116,7 +124,9 @@ export class MapRenderer {
   private stacks: Stack[] = [];
   private stacksGrid = -1;
   private readonly labels = new Map<string, Label>();
-  private readonly cities: GameMap['cities'];
+  /** Labelled places, capitals first then by population. */
+  private places: Place[];
+  private readonly areaNames = new Map<NodeId, string | null>();
   /** Set when a tile lands or fonts load, so the owner schedules a frame. */
   onInvalidate: () => void = () => {};
 
@@ -129,7 +139,8 @@ export class MapRenderer {
     this.ctx = canvas.getContext('2d')!;
     this.mask = new ControlMask(map, nationIds);
     this.overlay = new OverlayRaster(map);
-    this.cities = [...map.cities].sort((a, b) => Number(b.capital) - Number(a.capital) || b.pop - a.pop);
+    this.places = map.cities.map((c) => ({ name: c.name, lon: c.lon, lat: c.lat, pop: c.pop, capital: c.capital }))
+      .sort((a, b) => Number(b.capital) - Number(a.capital) || b.pop - a.pop);
   }
 
   setManifest(m: Manifest) {
@@ -140,6 +151,13 @@ export class MapRenderer {
   setLights(lonLatPop: Float32Array) {
     this.globe.setLights(lonLatPop);
     this.globeDirty = true;
+  }
+
+  /** GeoNames towns (public/tiles/places.json), which name the front down to villages the engine has no city for. */
+  setPlaces(rows: readonly [string, number, number, number, number][]) {
+    this.places = rows.map(([name, lon, lat, pop, kind]) => ({ name, lon, lat, pop, capital: kind === 2 }));
+    this.areaNames.clear();
+    this.onInvalidate();
   }
 
   /** Fonts arrived: re-rasterize text. */
@@ -305,9 +323,9 @@ export class MapRenderer {
     const band = this.band;
     if (band !== 'world') this.drawContest(input);
     this.drawHover(input);
-    if (input.overlays.cities) this.drawCities();
     this.drawOrders(input);
-    this.drawFormations(input);
+    const counters = this.drawFormations(input);
+    if (input.overlays.cities) this.drawCities(counters);
     this.drawFlashes(now);
   }
 
@@ -410,12 +428,6 @@ export class MapRenderer {
         ctx.fill();
       }
       ctx.restore();
-      if (this.band !== 'front') continue;
-      ctx.setLineDash([4, 3]);
-      ctx.strokeStyle = `rgba(${color},0.7)`;
-      ctx.lineWidth = 1.2;
-      ctx.stroke(cell);
-      ctx.setLineDash([]);
     }
   }
 
@@ -452,12 +464,12 @@ export class MapRenderer {
   }
 
   /** Capitals first, then by population; a label is skipped if it would overlap one already placed. */
-  private drawCities() {
+  private drawCities(counters: readonly [number, number, number, number][]) {
     const placed: [number, number, number, number][] = [];
     const ppd = pxPerDeg(this.cam), ctx = this.ctx;
     if (ppd < 9) return;
-    const minPop = ppd < 20 ? 4e6 : ppd < 50 ? 6e5 : ppd < 130 ? 2.5e5 : ppd < 400 ? 6e4 : 0;
-    for (const c of this.cities) {
+    const minPop = ppd < 20 ? 4e6 : ppd < 50 ? 6e5 : ppd < 130 ? 2.5e5 : ppd < 260 ? 6e4 : ppd < 500 ? 1.2e4 : 0;
+    for (const c of this.places) {
       if (c.pop < minPop && !(c.capital && ppd >= 20)) continue;
       const p = project(this.cam, this.vp, c.lon, c.lat);
       if (!p) continue;
@@ -466,7 +478,9 @@ export class MapRenderer {
       const big = c.capital || c.pop > 1e6;
       const l = this.label(c.name.toUpperCase(), `600 ${big ? 13 : 11.5}px "Barlow Condensed", "Arial Narrow", sans-serif`, big ? '#eef3f9' : '#c9d5e3', 1.3);
       const box: [number, number, number, number] = [x + 3, y - l.h / 2, x + 3 + l.w, y + l.h / 2];
-      if (placed.some((b) => box[0] < b[2] && box[2] > b[0] && box[1] < b[3] && box[3] > b[1])) continue;
+      const hits = (b: readonly number[]) => box[0] < b[2] && box[2] > b[0] && box[1] < b[3] && box[3] > b[1];
+      // Big cities always get their name; smaller ones give way to labels and counters.
+      if (placed.some(hits) || (!big && counters.some(hits))) continue;
       placed.push(box);
       ctx.beginPath();
       if (c.capital) {
@@ -494,7 +508,7 @@ export class MapRenderer {
     for (const f of input.state.formations) {
       if (f.target === null || f.status === 'destroyed' || f.target === f.node) continue;
       const mine = f.entry.nation === input.playAs, sel = f.entry.id === input.selected;
-      if (!mine && !sel) continue;
+      if (!sel && (!mine || this.band !== 'front')) continue;
       const a0 = this.screenOf(f.node), a1 = this.screenOf(f.target);
       if (!a0 || !a1) continue;
       const [x0, y0] = a0, [x1, y1] = a1, len = Math.hypot(x1 - x0, y1 - y0);
@@ -528,7 +542,8 @@ export class MapRenderer {
     }
   }
 
-  private drawFormations(input: RenderInput) {
+  /** Returns the screen boxes the counters and their labels took. */
+  private drawFormations(input: RenderInput): [number, number, number, number][] {
     const placed: [number, number, number, number][] = [];
     const { ctx, cam } = this;
     const { nationIds } = input;
@@ -567,7 +582,7 @@ export class MapRenderer {
       const nodePx = 2 * this.map.halfDeg[stack.node] * ppd;
       if (side !== 'friend') this.drawUncertainty(stack, cx, cy);
       if (nodePx >= FAN_PX && stack.nodes === 1 && stack.members.length > 1) {
-        const cols = Math.max(2, Math.min(5, Math.floor(nodePx / FAN_SLOT_PX)));
+        const cols = Math.max(2, Math.min(4, Math.floor(nodePx / FAN_SLOT_PX)));
         const cap = cols * cols;
         const shown = stack.members.length > cap ? stack.members.slice(0, cap - 1) : stack.members;
         const slots = shown.length + (stack.members.length > shown.length ? 1 : 0);
@@ -606,6 +621,7 @@ export class MapRenderer {
     for (const b of this.hits) placed.push([b.x, b.y, b.x + b.w, b.y + b.h]);
     for (const l of labelled) this.stackLabel(l.stack, l.box, l.side, placed);
     if (selectedBox) this.drawSelection(selectedBox);
+    return placed;
   }
 
   /** Where an enemy contact probably is now: a dashed ring of its error radius, and its age once it is not fresh. */
@@ -635,6 +651,21 @@ export class MapRenderer {
     }
   }
 
+  /** The nearest city of 100,000 or more within about 150 km, cached per node. */
+  private areaName(node: NodeId): string | null {
+    const hit = this.areaNames.get(node);
+    if (hit !== undefined) return hit;
+    const lon = this.map.lon[node], lat = this.map.lat[node], k = Math.cos((lat * Math.PI) / 180);
+    let best: string | null = null, bestD = 1.4 ** 2;
+    for (const p of this.places) {
+      if (p.pop < 1e5) continue;
+      const d = ((p.lon - lon) * k) ** 2 + (p.lat - lat) ** 2;
+      if (d < bestD) { bestD = d; best = p.name; }
+    }
+    this.areaNames.set(node, best);
+    return best;
+  }
+
   /** A unit's short designator (the number in its name) beside its counter, as on the front mockup. */
   private designator(f: FormationView, x: number, y: number, side: Side) {
     const num = f.entry.name.match(/\d+/)?.[0];
@@ -651,7 +682,10 @@ export class MapRenderer {
     for (const f of stack.members) strength += f.strength;
     strength /= stack.members.length;
     const friend = side === 'friend';
-    const name = friend ? shortName(lead.entry.name) : `${lead.entry.nation} group`;
+    // A corps or army is named for itself; a stack of brigades is named for where it stands, as a staff would.
+    const own = lead.entry.echelon === 'corps' || lead.entry.echelon === 'army' || stack.members.length === 1;
+    const area = this.areaName(stack.node);
+    const name = friend && own ? shortName(lead.entry.name) : area ? `${area} group` : `${lead.entry.nation} group`;
     const title = this.label(name.toUpperCase(), '600 12.5px "Barlow Condensed", "Arial Narrow", sans-serif', '#e8eef6', 1.4);
     const sub = this.label(`${friend ? '' : 'est. '}${stack.members.length} units · ${Math.round(strength * 100)}%`, '400 10px "IBM Plex Mono", ui-monospace, monospace', friend ? '#8fa6c0' : '#c98f90', 0);
     const x = box.x + box.w + 4, y = box.y + box.h / 2 - title.h + 2, w = Math.max(title.w, sub.w);

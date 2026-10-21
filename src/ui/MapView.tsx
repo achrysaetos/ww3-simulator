@@ -95,6 +95,7 @@ export function MapView(props: MapViewProps) {
       if (!alive) return;
       r.setManifest(manifest);
       r.setLights(Float32Array.from(lights));
+      void fetch(`${TILES}places.json`).then((x) => x.json()).then((rows) => alive && r.setPlaces(rows));
       dirty.current = true;
     }).catch((e) => setFailed(`terrain tiles did not load (${e})`));
     void Promise.all(['600 12px "Barlow Condensed"', '500 10px "IBM Plex Mono"', '400 12px Inter'].map((f) => document.fonts.load(f))).then(() => {
