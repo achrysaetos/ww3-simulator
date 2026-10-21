@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { relationMut, type System } from '../src/core/engine';
 import type { Command, NodeId, SimEvent } from '../src/core/types';
 import { createAi } from '../src/systems/ai';
+import { landSlice } from '../src/systems/land';
 import { createDiplomacy } from '../src/systems/diplomacy';
 import { id, testWorld } from '../src/testkit';
 
@@ -227,5 +228,27 @@ describe('coalition allocation', () => {
     const posts = estonians.map((f) => last.get(f.id)?.order.target).filter((n) => n !== undefined);
     expect(posts.length).toBeGreaterThan(0);
     for (const n of posts) expect(t.map.owner[n!]).toBe(N('EST'));
+  });
+});
+
+describe('homeland defence', () => {
+  it('pulls brigades out of its own offensive to counter-attack a penetration of its soil 3:1 and screen the cells beyond', () => {
+    const t = testWorld([createAi()]);
+    t.war('RUS', 'UKR');
+    landSlice(t.world).origin = t.world.control.slice(0, t.map.landCount);
+    const lost = border(t, 'RUS', 'UKR')[0];
+    t.world.control[lost] = N('UKR');
+    brigade(t, 'UKR', lost);
+    // The whole Russian army is fighting inside Ukraine, as in summer 2024.
+    const inside = border(t, 'UKR', 'RUS')[3];
+    const army = Array.from({ length: 8 }, () => brigade(t, 'RUS', inside));
+    for (const f of army) f.order = { posture: 'attack', target: inside, issuedTick: 0 };
+
+    const last = new Map<string, Extract<Command, { type: 'order' }>>();
+    for (const c of commandsOver(t, 4)) if (c.type === 'order' && c.nation === N('RUS')) last.set(c.formation, c);
+    const counter = army.filter((f) => last.get(f.id)?.order.posture === 'attack' && last.get(f.id)?.order.target === lost);
+    expect(counter.length).toBeGreaterThanOrEqual(3);
+    const beyond = new Set([...t.map.neighbors(lost)].filter((m) => m < t.map.landCount && t.map.owner[m] === N('RUS') && t.world.control[m] === N('RUS')));
+    expect(army.some((f) => last.get(f.id)?.order.posture === 'defend' && beyond.has(last.get(f.id)!.order.target!))).toBe(true);
   });
 });
