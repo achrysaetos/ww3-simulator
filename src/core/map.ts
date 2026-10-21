@@ -100,6 +100,8 @@ export class GameMap {
   private readonly cellIndex: SquareIndex;
   private readonly seaIndex: Map<number, number>;
   private readonly seaRes: number;
+  private readonly cosLat: Float64Array;
+  private readonly nearest: NearestIndex;
 
   constructor(readonly data: WorldData) {
     const { cells, sea } = data;
@@ -141,6 +143,8 @@ export class GameMap {
       const r = Math.floor((90 - sea.lat[j]) / sea.res), c = Math.floor((sea.lon[j] + 180) / sea.res);
       this.seaIndex.set(r * seaCols + c, n);
     }
+    this.cosLat = Float64Array.from(this.lat, (v) => Math.cos(v * TO_RAD));
+    this.nearest = new NearestIndex(this.lat, this.lon, this.cosLat);
 
     const lists: number[][] = Array.from({ length: this.size }, () => []);
     const link = (a: number, b: number) => {
@@ -182,7 +186,7 @@ export class GameMap {
   }
 
   distanceKm(a: NodeId, b: NodeId): number {
-    return haversineKm(this.lat[a], this.lon[a], this.lat[b], this.lon[b]);
+    return havKm(this.lat[a], this.lon[a], this.lat[b], this.lon[b], this.cosLat[a], this.cosLat[b]);
   }
 
   /** Land cell containing the point, else the sea zone, else the nearest node. */
@@ -192,12 +196,7 @@ export class GameMap {
     const sr = Math.floor((90 - lat) / this.seaRes), sc = Math.floor((((lon + 180) % 360) + 360) % 360 / this.seaRes);
     const s = this.seaIndex.get(sr * (360 / this.seaRes) + sc);
     if (s !== undefined) return s as NodeId;
-    let best = 0, bestD = Infinity;
-    for (let n = 0; n < this.size; n++) {
-      const d = haversineKm(lat, lon, this.lat[n], this.lon[n]);
-      if (d < bestD) { bestD = d; best = n; }
-    }
-    return best as NodeId;
+    return this.nearest.nearest(lat, lon) as NodeId;
   }
 
   /** All nodes within radius of a point, by straight-line distance. */
@@ -219,9 +218,97 @@ export class GameMap {
   }
 }
 
+const TO_RAD = Math.PI / 180;
+const EARTH_KM = 6371;
+
 export function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
-  const toR = Math.PI / 180;
-  const dLat = (lat2 - lat1) * toR, dLon = (lon2 - lon1) * toR;
-  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * toR) * Math.cos(lat2 * toR) * Math.sin(dLon / 2) ** 2;
-  return 2 * 6371 * Math.asin(Math.min(1, Math.sqrt(h)));
+  return havKm(lat1, lon1, lat2, lon2, Math.cos(lat1 * TO_RAD), Math.cos(lat2 * TO_RAD));
+}
+
+function havKm(lat1: number, lon1: number, lat2: number, lon2: number, cos1: number, cos2: number): number {
+  const dLat = (lat2 - lat1) * TO_RAD, dLon = (lon2 - lon1) * TO_RAD;
+  const h = Math.sin(dLat / 2) ** 2 + cos1 * cos2 * Math.sin(dLon / 2) ** 2;
+  return 2 * EARTH_KM * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+const ROWS = 180, COLS = 360;
+const rowOf = (lat: number) => Math.min(ROWS - 1, Math.max(0, Math.floor(90 - lat)));
+const colOf = (lon: number) => ((Math.floor(lon + 180) % COLS) + COLS) % COLS;
+
+/**
+ * Nearest node to a point by haversine km, ties to the lowest id. Nodes are bucketed by the 1-degree square
+ * holding their centre; the search walks rings of squares outward until no unvisited square can hold a closer node.
+ */
+class NearestIndex {
+  private readonly start = new Int32Array(ROWS * COLS + 1);
+  private readonly nodes: Int32Array;
+  /** First and last rows holding any node, so the bounds ignore empty polar rows. */
+  private readonly minRow: number;
+  private readonly maxRow: number;
+
+  constructor(private readonly lat: Float32Array, private readonly lon: Float32Array, private readonly cosLat: Float64Array) {
+    const key = (n: number) => rowOf(lat[n]) * COLS + colOf(lon[n]);
+    for (let n = 0; n < lat.length; n++) this.start[key(n) + 1]++;
+    for (let k = 0; k < ROWS * COLS; k++) this.start[k + 1] += this.start[k];
+    const fill = this.start.slice(0, ROWS * COLS);
+    this.nodes = new Int32Array(lat.length);
+    for (let n = 0; n < lat.length; n++) this.nodes[fill[key(n)]++] = n;
+    this.minRow = rowOf(lat.reduce((a, v) => Math.max(a, v), -90));
+    this.maxRow = rowOf(lat.reduce((a, v) => Math.min(a, v), 90));
+  }
+
+  nearest(lat: number, lon: number): number {
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return this.scan(lat, lon);
+    const cosQ = Math.cos(lat * TO_RAD);
+    const qr = rowOf(lat), qc = colOf(lon);
+    const best = { n: -1, d: Infinity };
+    // A ring of radius 180 would wrap onto squares already seen; by then a plain scan is as cheap.
+    for (let r = 0; r < COLS / 2; r++) {
+      for (const row of r ? [qr - r, qr + r] : [qr]) for (let dc = -r; dc <= r; dc++) this.visit(row, qc + dc, lat, lon, cosQ, best);
+      for (let row = qr - r + 1; row < qr + r; row++) {
+        this.visit(row, qc - r, lat, lon, cosQ, best);
+        this.visit(row, qc + r, lat, lon, cosQ, best);
+      }
+      // 1 m of slack absorbs rounding in the bound so a node tied with the best is never skipped.
+      if (this.outsideKm(r, qr, qc, lat, lon, cosQ) > best.d + 1e-3) return best.n;
+    }
+    return this.scan(lat, lon);
+  }
+
+  private visit(row: number, col: number, lat: number, lon: number, cosQ: number, best: { n: number; d: number }): void {
+    if (row < 0 || row >= ROWS) return;
+    const k = row * COLS + ((col % COLS) + COLS) % COLS;
+    for (let i = this.start[k]; i < this.start[k + 1]; i++) {
+      const n = this.nodes[i];
+      const d = havKm(lat, lon, this.lat[n], this.lon[n], cosQ, this.cosLat[n]);
+      if (d < best.d || (d === best.d && n < best.n)) { best.d = d; best.n = n; }
+    }
+  }
+
+  /** Lower bound on the km from the point to any node outside the squares within r rings of (qr, qc). */
+  private outsideKm(r: number, qr: number, qc: number, lat: number, lon: number, cosQ: number): number {
+    const top = qr - r, bottom = qr + r;
+    // Great-circle distance is at least the latitude difference.
+    const north = top > this.minRow ? (90 - top - lat) * TO_RAD * EARTH_KM : Infinity;
+    const south = bottom < this.maxRow ? (lat - (89 - bottom)) * TO_RAD * EARTH_KM : Infinity;
+    // A node in the band but r+1 or more columns away is at least gap degrees of longitude away, at a latitude no
+    // nearer the pole than the band's edge: hav(d) >= cos(lat1) cos(lat2) hav(dLon).
+    const lo = Math.max(top, this.minRow), hi = Math.min(bottom, this.maxRow);
+    if (lo > hi) return Math.min(north, south);
+    const lon180 = lon - 360 * Math.floor((lon + 180) / 360);
+    const gap = Math.min(qc + r + 1 - 180 - lon180, lon180 - (qc - r - 180));
+    const edgeLat = Math.max(Math.abs(90 - lo), Math.abs(89 - hi));
+    const h = cosQ * Math.max(0, Math.cos(edgeLat * TO_RAD)) * Math.sin((gap * TO_RAD) / 2) ** 2;
+    const across = 2 * EARTH_KM * Math.asin(Math.min(1, Math.sqrt(h)));
+    return Math.min(north, south, across);
+  }
+
+  private scan(lat: number, lon: number): number {
+    let best = 0, bestD = Infinity;
+    for (let n = 0; n < this.lat.length; n++) {
+      const d = haversineKm(lat, lon, this.lat[n], this.lon[n]);
+      if (d < bestD) { bestD = d; best = n; }
+    }
+    return best;
+  }
 }

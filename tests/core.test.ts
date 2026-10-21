@@ -23,6 +23,20 @@ describe('core', () => {
     expect(sea.slice(0, -1).every((n) => map.isSea(n))).toBe(true);
   });
 
+  it('finds the same path whatever searches ran before it', () => {
+    const { map } = testWorld();
+    const landKm = (_a: number, b: number, km: number) => (map.isSea(b as never) ? Infinity : km);
+    const pairs = [[52.2, 21, 55.75, 37.6], [48.85, 2.35, 41.9, 12.5], [39.9, 116.4, 31.2, 121.5], [30, 31.2, 24.7, 46.7]].map(([a, b, c, d]) => [map.nodeAt(a, b), map.nodeAt(c, d)] as const);
+    const run = () => pairs.map(([a, b]) => findPath(map, a, b, landKm));
+    const first = run();
+    expect(first.every((p) => p && p.length > 3)).toBe(true);
+    const iceland = map.nodeAt(64.1, -21.9), berlin = map.nodeAt(52.5, 13.4);
+    expect(findPath(map, berlin, iceland, landKm)).toBeNull();
+    expect(findPath(map, berlin, map.nodeAt(40.4, -3.7), landKm, 5)).toBeNull();
+    findPath(map, berlin, map.nodeAt(35.7, 139.7), (_a, _b, km) => km * 3);
+    expect(run().reverse()).toEqual(first.reverse());
+  });
+
   it('is deterministic for a given seed', () => {
     const run = () => {
       const t = testWorld([], 7);
