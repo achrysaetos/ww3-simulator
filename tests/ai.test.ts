@@ -101,7 +101,8 @@ describe('operational AI', () => {
   });
 
   it('attacks with at least 3:1 at the point of attack when it has the forces', () => {
-    const { t, cmds } = assault(12);
+    // Estonia's border is four half-degree cells, each of which the command holds before it attacks.
+    const { t, cmds } = assault(16);
     const attacks = orders(cmds, 'RUS', 'attack');
     expect(attacks.length).toBeGreaterThan(0);
     const byTarget = new Map<number, number>();

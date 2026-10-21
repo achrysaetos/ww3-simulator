@@ -121,6 +121,8 @@ const minorAndSupport: PlatformSpec<MunitionKey>[] = [
   { id: 'bykov', name: 'Vasily Bykov (22160) patrol ship', cls: 'patrol', crew: 80, producers: ['RUS'], inService: 2018, unitCostUsdM: 100, speedKph: 40, rangeKm: 6000, fuelTph: 0.8 },
   { id: 'nsc', name: 'Legend-class National Security Cutter', cls: 'patrol', crew: 120, producers: ['USA'], inService: 2008, unitCostUsdM: 700, speedKph: 52, rangeKm: 22000, fuelTph: 1.2, detectionKm: 150 },
   { id: 'avenger_mcm', name: 'Avenger-class MCM', cls: 'mine_warfare', crew: 84, producers: [], inService: 1987, unitCostUsdM: 120 },
+  // The Independence-class LCS carrying its mine countermeasures mission package (IOC 2023), which replaced the Avengers in Bahrain.
+  { id: 'lcs_mcm', name: 'Independence-class LCS (MCM mission package)', cls: 'mine_warfare', crew: 98, producers: ['USA'], inService: 2023, unitCostUsdM: 600, speedKph: 74 },
   { id: 'alexandrit', name: 'Alexandrit (12700) MCM', cls: 'mine_warfare', crew: 44, producers: ['RUS'], inService: 2016, unitCostUsdM: 80 },
   { id: 'type082ii', name: 'Type 082II Wozang MCM', cls: 'mine_warfare', producers: ['CHN'], inService: 2005, unitCostUsdM: 60 },
   { id: 'tripartite', name: 'Tripartite-class MCM', cls: 'mine_warfare', crew: 40, producers: [], inService: 1984, unitCostUsdM: 60 },
@@ -134,6 +136,10 @@ const minorAndSupport: PlatformSpec<MunitionKey>[] = [
   { id: 'berlin_class', name: 'Berlin-class EGV', cls: 'replenishment', crew: 140, producers: ['DEU'], inService: 2001, unitCostUsdM: 300, capacity: { cargoTons: 9000 } },
   { id: 'akademik_pashin', name: 'Akademik Pashin (23130)', cls: 'replenishment', crew: 25, producers: ['RUS'], inService: 2020, unitCostUsdM: 150, capacity: { cargoTons: 9000 } },
   { id: 'lmsr', name: 'LMSR (Bob Hope/Watson-class)', cls: 'cargo_ship', crew: 30, producers: [], inService: 1998, unitCostUsdM: 300, speedKph: 44, rangeKm: 22000, fuelTph: 4, capacity: { cargoTons: 15000, vehicles: 900 } },
+  // Vehicle-only strategic sealift outside the US: the UK's Point class, the German-Danish ARK charter, Russia's
+  // Oboronlogistika ("Syrian Express") and Kaliningrad rail ferries, Japan's PFI ships. ~2,650 lane metres each
+  // (Point class), about a quarter of an LMSR's deck; 18 knots.
+  { id: 'military_roro', name: 'Strategic sealift RO-RO (Point class and peers)', cls: 'cargo_ship', crew: 20, producers: [], inService: 2003, unitCostUsdM: 80, speedKph: 33, rangeKm: 15000, fuelTph: 1.5, capacity: { cargoTons: 6000, vehicles: 200 } },
   // Chinese civilian RO-RO ferries exercise with the PLA as amphibious lift (Bohai Ferry, 2020s).
   { id: 'roro_ferry', name: 'RO-PAX / RO-RO ferry', cls: 'cargo_ship', crew: 40, producers: ['CHN', 'KOR', 'JPN', 'ITA', 'FIN', 'DEU', 'TUR'], inService: 2010, unitCostUsdM: 60, speedKph: 40, rangeKm: 8000, fuelTph: 2, capacity: { cargoTons: 5000, troops: 1000, vehicles: 300 } },
   { id: 'container_ship', name: 'Feeder container ship (~2,500 TEU)', cls: 'cargo_ship', producers: ['CHN', 'KOR', 'JPN'], inService: 2010, unitCostUsdM: 40, capacity: { cargoTons: 30000 } },

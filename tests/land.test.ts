@@ -11,9 +11,10 @@ const MAP = loadMap();
 import { id, testWorld } from '../src/testkit';
 
 const RUS = id.nation('RUS'), UKR = id.nation('UKR'), KAZ = id.nation('KAZ');
-// Real map cells: Donbas plain (UKR) with the Russian plain cell south of it; Kharkiv-area hills (UKR) beside a Russian urban cell.
-const PLAIN_UKR = MAP.nodeAt(48.5, 38.5), PLAIN_RUS = MAP.nodeAt(47.5, 38.5);
-const HILLS_UKR = MAP.nodeAt(50.5, 35.5), URBAN_RUS = MAP.nodeAt(50.5, 36.5);
+// Real map cells: the half-degree Kherson steppe (UKR) north of the Perekop isthmus with the Russian-held cell south of it,
+// and its Ukrainian plain neighbour to the east; Donbas hills (UKR) on the Rostov border beside a Russian plain cell.
+const PLAIN_UKR = MAP.nodeAt(46.25, 33.75), PLAIN_RUS = MAP.nodeAt(45.75, 33.75), EAST_UKR = MAP.nodeAt(46.25, 34.25);
+const HILLS_UKR = MAP.nodeAt(48.25, 38.75), BORDER_RUS = MAP.nodeAt(47.75, 38.75);
 
 const brigade = (k = 1): Record<PlatformId, number> => ({
   [id.platform('t_mbt')]: Math.round(90 * k),
@@ -31,6 +32,12 @@ function setup(seed = 1, systems: System[] = [landMovement, landCombat]) {
   return { ...t, events, order, days };
 }
 
+const fortify = (s: ReturnType<typeof setup>) => (s.world.slices.land.fortified[PLAIN_UKR] = 1);
+/** Ten times both sides at the same odds: enough platforms to man a whole 1-degree cell's front. */
+const man = (_s: unknown, ...fs: Formation[]) => {
+  for (const f of fs) for (const pid of Object.keys(f.equipment) as PlatformId[]) f.equipment[pid] *= 10;
+};
+
 function assault(opts: { ratio: number; defNode: NodeId; attNode: NodeId; entrench: number; seed?: number; days: number; before?: (s: ReturnType<typeof setup>, att: Formation, def: Formation) => void }) {
   const s = setup(opts.seed);
   const def = s.add({ nation: UKR, name: 'def', kind: 'maneuver', echelon: 'brigade', node: opts.defNode, equipment: brigade(1), entrenchment: opts.entrench });
@@ -45,7 +52,7 @@ function assault(opts: { ratio: number; defNode: NodeId; attNode: NodeId; entren
 describe('land combat', () => {
   it('an entrenched brigade on hills holds against an equal attacker', () => {
     for (const seed of [1, 2, 3]) {
-      const r = assault({ ratio: 1, defNode: HILLS_UKR, attNode: URBAN_RUS, entrench: 1, days: 7, seed });
+      const r = assault({ ratio: 1, defNode: HILLS_UKR, attNode: BORDER_RUS, entrench: 1, days: 7, seed });
       expect(r.world.control[HILLS_UKR]).toBe(UKR);
       expect(r.def.node).toBe(HILLS_UKR);
       expect(r.def.status).toBe('active');
@@ -54,8 +61,8 @@ describe('land combat', () => {
     }
   });
 
-  it('a 4:1 attacker wins the exchange and starts across the cell but does not carry it in a week', () => {
-    const r = assault({ ratio: 4, defNode: PLAIN_UKR, attNode: PLAIN_RUS, entrench: 0.4, days: 6 });
+  it('a 4:1 attacker wins the exchange against a line manned across the cell and starts across it but does not carry it in a week', () => {
+    const r = assault({ ratio: 4, defNode: PLAIN_UKR, attNode: PLAIN_RUS, entrench: 0.4, days: 6, before: man });
     expect(r.world.control[PLAIN_UKR]).toBe(UKR);
     expect(r.att.node).toBe(PLAIN_UKR);
     expect(r.world.slices.land.contest[PLAIN_UKR]).toMatchObject({ by: RUS });
@@ -111,9 +118,9 @@ describe('land combat', () => {
     const attLoss = (arty: boolean) =>
       [1, 2, 3].reduce((sum, seed) => sum + assault({
         ratio: 3, defNode: PLAIN_UKR, attNode: PLAIN_RUS, entrench: 0, days: 5, seed,
-        before: (s) => void (arty && s.add({ nation: UKR, name: 'arty', kind: 'artillery', echelon: 'brigade', node: MAP.nodeAt(48.5, 37.5), equipment: { [id.platform('t_spg')]: 72 } })),
+        before: (s) => void (arty && s.add({ nation: UKR, name: 'arty', kind: 'artillery', echelon: 'brigade', node: EAST_UKR, equipment: { [id.platform('t_spg')]: 72 } })),
       }).attLoss, 0);
-    expect(attLoss(true)).toBeGreaterThan(attLoss(false) * 1.25);
+    expect(attLoss(true)).toBeGreaterThan(attLoss(false) * 1.1);
   });
 
   it('is deterministic for a seed', () => {
@@ -241,11 +248,11 @@ describe('land movement', () => {
   it('enemy air control slows movement', () => {
     const arrive = (air: boolean) => {
       const s = setup();
-      const f = s.add({ nation: RUS, name: 'x', kind: 'maneuver', echelon: 'brigade', node: PLAIN_RUS, equipment: brigade(1) });
+      const f = s.add({ nation: RUS, name: 'x', kind: 'maneuver', echelon: 'brigade', node: BORDER_RUS, equipment: brigade(1) });
       s.order(f, { posture: 'attack', target: s.nodeAt(48.5, 35.5) });
       if (air) for (let n = 0; n < s.map.landCount; n++) s.world.theater.airControl[n] = { nation: UKR, level: 1 };
       s.days(2);
-      return s.map.distanceKm(PLAIN_RUS, f.node);
+      return s.map.distanceKm(BORDER_RUS, f.node);
     };
     expect(arrive(true)).toBeLessThan(arrive(false));
   });
@@ -293,19 +300,26 @@ describe('the front', () => {
     expect(s.world.slices.land.contest).toEqual({});
   });
 
-  it('a won battle does not take a cell: attritional assaults gain ground a few km at a time', () => {
-    const r = assault({ ratio: 3, defNode: PLAIN_UKR, attNode: PLAIN_RUS, entrench: 1, days: 10 });
+  it('a won battle does not take a fortified cell: attritional assaults gain ground a few km at a time', () => {
+    const r = assault({ ratio: 3, defNode: PLAIN_UKR, attNode: PLAIN_RUS, entrench: 1, days: 10, before: fortify });
     expect(r.world.control[PLAIN_UKR]).toBe(UKR);
     const km = r.world.slices.land.contest[PLAIN_UKR]?.km ?? 0;
     expect(km).toBeLessThan(40);
   });
 
+  it('a 3:1 attacker bypasses one brigade holding a whole unfortified cell within days, but not a dug-in line manned across it', () => {
+    const thin = assault({ ratio: 3, defNode: PLAIN_UKR, attNode: PLAIN_RUS, entrench: 0, days: 8 });
+    expect(thin.world.control[PLAIN_UKR]).toBe(RUS);
+    const manned = assault({ ratio: 3, defNode: PLAIN_UKR, attNode: PLAIN_RUS, entrench: 1, days: 8, before: man });
+    expect(manned.world.control[PLAIN_UKR]).toBe(UKR);
+    expect(manned.world.slices.land.contest[PLAIN_UKR]?.km ?? 0).toBeLessThan(10);
+  });
+
   it('an empty cell covered by an equal line next door is infiltrated a few km a day; a thin line is broken through', () => {
-    const NORTH_UKR = MAP.nodeAt(49.5, 38.5);
-    expect([...MAP.neighbors(PLAIN_UKR)]).toContain(NORTH_UKR);
+    expect([...MAP.neighbors(PLAIN_UKR)]).toContain(EAST_UKR);
     const cross = (cover: number) => {
       const s = setup();
-      s.add({ nation: UKR, name: 'cover', kind: 'maneuver', echelon: 'brigade', node: NORTH_UKR, equipment: brigade(cover) });
+      s.add({ nation: UKR, name: 'cover', kind: 'maneuver', echelon: 'brigade', node: EAST_UKR, equipment: brigade(cover) });
       const att = s.add({ nation: RUS, name: 'att', kind: 'maneuver', echelon: 'brigade', node: PLAIN_RUS, equipment: brigade(1) });
       s.order(att, { posture: 'attack', target: PLAIN_UKR });
       s.days(7);

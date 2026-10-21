@@ -185,3 +185,101 @@ it('maps a point outside every cell and sea zone to the nearest node by great-ci
   expect(outside.length).toBeGreaterThan(100);
   expect(outside.filter((p) => at(p) !== nearest(p))).toEqual([]);
 });
+
+describe('terrain follows relief', () => {
+  it.each([
+    ['the Central Range at Yushan', [23.47, 120.96]], ['the Central Range at Hehuan', [24.14, 121.27]], ['the Taebaek range', [37.6, 128.7]],
+    ['the Japanese Alps', [36.29, 137.65]], ['the Swiss Alps', [46.5, 8.5]], ['the Zagros', [33.5, 48.5]],
+  ] as [string, Point][])('makes %s mountain', (_, p) => {
+    expect(map.terrain[at(p)]).toBe('mountain');
+  });
+
+  it.each([
+    ['the Chianan plain', [23.38, 120.3]], ['the Hungarian plain', [47.0, 20.5]], ['Kansas', [38.5, -98.5]], ['the Netherlands', [52.6, 5.5]],
+  ] as [string, Point][])('keeps %s flat', (_, p) => {
+    expect(map.terrain[at(p)]).toBe('plain');
+  });
+
+  it('gives each land cell its mean elevation and local relief', () => {
+    const tibet = at([32.5, 88.5]), alps = at([46.5, 8.5]), netherlands = at([52.6, 5.5]);
+    expect(map.elevation[tibet]).toBeGreaterThan(4000);
+    expect(map.elevation[netherlands]).toBeLessThan(50);
+    expect(map.ruggedness[alps]).toBeGreaterThan(500);
+    expect(map.ruggedness[netherlands]).toBeLessThan(30);
+  });
+
+  it('leaves inland Taiwan off the coast', () => {
+    const main = map.nodesOf('TWN' as NationId).filter((n) => map.lon[n] > 120);
+    expect(map.isCoastal(at([23.47, 120.96]))).toBe(false);
+    expect(main.filter((n) => !map.isCoastal(n)).length).toBeGreaterThanOrEqual(10);
+  });
+});
+
+describe('fronts drawn finer than 1 degree', () => {
+  it.each([
+    ['Pokrovsk, Kramatorsk and Bakhmut', [[48.28, 37.18], [48.72, 37.56], [48.6, 38.0]]],
+    ['Seoul, Kaesong and Chuncheon', [[37.57, 126.98], [37.97, 126.55], [37.88, 127.73]]],
+    ['Zaporizhzhia and Huliaipole', [[47.84, 35.14], [47.66, 36.26]]],
+    ['Kursk and Belgorod', [[51.73, 36.19], [50.6, 36.59]]],
+    ['the two ends of the Suwalki gap', [[54.1, 22.93], [54.0, 23.6]]],
+  ] as [string, Point[]][])('gives %s each a cell', (_, points) => {
+    const cells = points.map(at);
+    expect(cells.some((n) => map.isSea(n))).toBe(false);
+    expect(new Set(cells).size).toBe(points.length);
+  });
+});
+
+describe('land inside one nation crosses water only by bridge or tunnel', () => {
+  it.each([
+    ['Sicily from Calabria', [37.6, 14.2], [38.11, 15.65]], ['Hainan from Leizhou', [19.6, 110.0], [21.27, 110.36]],
+    ['Sakhalin from the mainland', [50.9, 142.16], [49.09, 140.25]], ['Northern Ireland from Scotland', [54.6, -5.93], [55.86, -4.25]],
+    ['the North Island from the South Island', [-41.29, 174.78], [-43.53, 172.64]],
+  ] as [string, Point, Point][])('parts %s', (_, a, b) => {
+    expect(landHops(a, b)).toBe(Infinity);
+  });
+
+  it.each([['POL', 'HUN'], ['TJK', 'PAK']])('joins %s and %s only through the country between them', (a, b) => {
+    expect(landEdges(a, b)).toEqual([]);
+  });
+
+  it('lists the fixed links so their capacity can be limited', () => {
+    const tunnel = map.fixedLinks.find((l) => l.name === 'Channel Tunnel')!;
+    expect([map.owner[tunnel.a], map.owner[tunnel.b]].sort()).toEqual(['FRA', 'GBR']);
+    expect([...map.neighbors(tunnel.a)]).toContain(tunnel.b);
+  });
+});
+
+describe('ports open onto the sea', () => {
+  it.each(['EST', 'LVA', 'LTU', 'UKR', 'KOR', 'PRK', 'TWN', 'JPN', 'ISR', 'GBR', 'NOR'])('in %s', (nation) => {
+    const inland = map.nodesOf(nation as NationId).filter((n) => map.ports[n] > 0 && !map.isCoastal(n)).map(where);
+    expect(inland).toEqual([]);
+  });
+
+  it('including Tallinn, on a bay too narrow for a sea zone of its own', () => {
+    expect(map.isCoastal(at([59.44, 24.75]))).toBe(true);
+  });
+});
+
+describe('population lives where the census counts it', () => {
+  const shareIn = (nation: string, [s, n, w, e]: readonly number[]) =>
+    map.nodesOf(nation as NationId).filter((c) => map.lat[c] >= s && map.lat[c] <= n && map.lon[c] >= w && map.lon[c] <= e)
+      .reduce((t, c) => t + map.popShare[c], 0);
+
+  it.each([
+    // Statistics Korea 2020: the Seoul Capital Area holds 50.2% of South Koreans.
+    ['the Seoul Capital Area', 'KOR', [36.9, 38.3, 126.4, 127.9], 0.45, 0.55],
+    // Japan 2020 census: Tokyo, Kanagawa, Saitama and Chiba hold 29% of Japanese, all of Kanto 34%.
+    ['Tokyo and its neighbours', 'JPN', [35, 36.5, 139, 140.9], 0.29, 0.4],
+    // Taiwan 2023: Taipei, New Taipei, Keelung and Taoyuan hold 40% of Taiwanese.
+    ['northern Taiwan', 'TWN', [24.75, 25.35, 121.25, 122], 0.33, 0.45],
+  ] as const)('puts %s at its census share', (_, nation, box, lo, hi) => {
+    const share = shareIn(nation, box);
+    expect(share).toBeGreaterThan(lo);
+    expect(share).toBeLessThan(hi);
+  });
+
+  it('spreads a metro area over the cells it covers, not the one under its centre', () => {
+    // Taipei City is 11% of Taiwan and Seoul 18% of South Korea; at 1/4 degree no one cell holds a whole metro area.
+    for (const nation of ['TWN', 'KOR', 'PRK']) expect(Math.max(...map.nodesOf(nation as NationId).map((c) => map.popShare[c]))).toBeLessThan(0.2);
+  });
+});

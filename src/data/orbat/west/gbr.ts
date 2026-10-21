@@ -62,6 +62,8 @@ export const gbr = [
   u('Portsmouth Flotilla destroyers', 'surface_group', 'flotilla', portsmouth, { ddg_type45: 4 }, { readiness: 0.5, personnel: 4 * 190 }),
   u('Devonport Flotilla frigates', 'surface_group', 'flotilla', devonport, { ffg_type23: 4, merlin: 10 }, { readiness: 0.65, personnel: 4 * 185 }),
   u('Northern Waters frigates (Type 23 TAS)', 'surface_group', 'flotilla', base('HMNB Clyde, Faslane', 56.07, -4.82), { ffg_type23: 2, wildcat: 6 }, { readiness: 0.7, personnel: 2 * 185 }),
+  // Four Point-class RO-RO under the MoD's strategic sealift contract (Foreland Shipping); two sail on charter, two lie at reduced readiness.
+  u('Strategic Sealift Service (Point class)', 'surface_group', 'task_group', base('Marchwood Military Port', 50.89, -1.44), { military_roro: 4 }, { readiness: 0.6, personnel: 4 * 20 }),
   u('Royal Fleet Auxiliary tankers', 'logistics', 'task_group', base('Marchwood', 50.9, -1.44), { tide_tanker: 3 }, { readiness: 0.6, personnel: 400 }),
   u('Faslane Flotilla attack submarines', 'submarine', 'flotilla', faslane, { ssn_astute: 5, ssn_trafalgar: 1 }, { readiness: 0.6, personnel: 6 * 98 }),
   u('Continuous At-Sea Deterrent patrol (Vanguard class)', 'strategic', 'flotilla', base('North Atlantic patrol area', 58, -20), { ssbn_vanguard: 1 }, { readiness: 1, personnel: 135 }),

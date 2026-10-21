@@ -405,7 +405,8 @@ export class NetworkSearch {
    * a spearhead with no friendly ground next to it has outrun its road and rail net.
    * A lodgement on a coast with no friendly ground next to it is fed over the beach
    * from the adjacent sea zone, as far as sea control lets the network reach it
-   * (Normandy, Inchon); the caller scales that by the lift left to carry it.
+   * (Normandy, Inchon); the caller scales that by the lift left to carry it. So is one
+   * that has taken its beach cell while stronger defenders still fight in it.
    * Forces on the ground of a nation outside the network and not its enemy (a base
    * abroad, a ceasefire line) are fed like that or by the host, whichever is better.
    */
@@ -425,7 +426,7 @@ export class NetworkSearch {
     }
     const overland = Math.round(Math.max(0, land) * LAST_MILE_CAPACITY);
     if (host) return { milli: Math.max(overland, Math.round(HOST_SUPPORT * Math.max(0, inputs.infrastructure[node]) * 1000)), route: 'overland' };
-    if (land >= 0 || held === FRIENDLY) return { milli: overland, route: 'overland' };
+    if (land >= 0) return { milli: overland, route: 'overland' };
     return { milli: Math.min(sea, Math.round(BEACH_CAPACITY * 1000)), route: 'beach' };
   }
 

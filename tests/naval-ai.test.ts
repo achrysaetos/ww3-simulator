@@ -83,6 +83,29 @@ describe('naval AI standoff', () => {
   }, 180_000);
 });
 
+describe('naval AI rearming', () => {
+  it('a US group that has fired off its area-defence missiles at sea goes home to reload and is not sent back out empty', () => {
+    const s = createSession('taiwan-2027', 1);
+    const perDay = 24 / s.world.dtHours;
+    const atSea = () => Object.values(s.world.formations).find((f) => f.nation === 'USA' && f.kind === 'surface_group' && f.status === 'active' && f.node !== f.home && f.order.posture === 'patrol' && Object.keys(f.magazine).some((m) => m.startsWith('sm')));
+    let g = atSea();
+    for (let i = 0; i < 15 * perDay && !g; i++) {
+      s.engine.step(s.world);
+      g = atSea();
+    }
+    expect(g).toBeDefined();
+    const group = g!;
+    for (const m of Object.keys(group.magazine)) if (m.startsWith('sm')) group.magazine[m as keyof typeof group.magazine] = 0;
+    const away: string[] = [];
+    for (let i = 0; i < 3 * perDay; i++) {
+      s.engine.step(s.world);
+      if (group.status !== 'active') break;
+      if (group.order.posture !== 'reserve' || group.order.target !== group.home) away.push(`${group.order.posture} -> ${group.order.target}`);
+    }
+    expect(away).toEqual([]);
+  }, 180_000);
+});
+
 describe('naval AI fleet readiness', () => {
   it('carriers in a shipyard stay there when the US goes to war; a carrier between deployments sails', () => {
     const s = createSession('taiwan-2027', 2);

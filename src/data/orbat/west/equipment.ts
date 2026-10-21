@@ -321,6 +321,8 @@ export const WEST_PLATFORMS = {
   tide_tanker: 'replenishment',
   egv_berlin: 'replenishment',
   lmsr: 'cargo_ship',
+  lcs_mcm: 'mine_warfare',
+  military_roro: 'cargo_ship',
   magura_v5: 'usv',
   magura_v7: 'usv',
   sea_baby: 'usv',

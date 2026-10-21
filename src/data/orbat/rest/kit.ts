@@ -121,6 +121,7 @@ const BY_CLASS = {
     'tarlac_lpd', 'makassar_lpd', 'endurance_lpd', 'angthong_lpd', 'mistral', 'tcg_anadolu', 'bayraktar_lst', 'bahia_lpd', 'atlantico',
     'al_fulk_lpd', 'kalaat_beni_abbes_lpd',
   ],
+  cargo_ship: ['military_roro'],
   replenishment: ['mashu_aor', 'towada_aor', 'soyang_aor', 'panshih_aor', 'supply_aor'],
   ssk: [
     'taigei', 'soryu', 'oyashio', 'dosan_ahn_changho', 'son_won_il', 'chang_bogo', 'hai_lung', 'hai_shih', 'collins', 'kalvari', 'shishumar',

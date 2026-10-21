@@ -60,7 +60,7 @@ export const usaNavy = [
   // Littoral combat ships
   u('Littoral Combat Ship Squadron Two', 'surface_group', 'flotilla', mayport, { lcs_freedom: 8 }, { readiness: 0.6, personnel: 8 * 100 }),
   u('Littoral Combat Ship Squadron One', 'surface_group', 'flotilla', sanDiego, { lcs_independence: 11 }, { readiness: 0.6, personnel: 11 * 100 }),
-  u('Commander Task Force 55 (5th Fleet mine countermeasures LCS)', 'surface_group', 'flotilla', bahrain, { lcs_independence: 4 }, { readiness: 0.75, personnel: 4 * 100 }),
+  u('Commander Task Force 55 (5th Fleet mine countermeasures LCS)', 'surface_group', 'flotilla', bahrain, { lcs_mcm: 4 }, { readiness: 0.75, personnel: 4 * 100 }),
 
   // Amphibious forces (the embarked Marine units are in usa-marines.ts)
   u('Amphibious Squadron 11 (Forward Deployed, Sasebo)', 'surface_group', 'task_group', sasebo, { lha_america: 1, lpd_san_antonio: 2, lsd_whidbey_island: 1 }, { readiness: 0.85, personnel: 2800 }),

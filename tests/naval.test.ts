@@ -6,6 +6,7 @@ import { Rng } from '../src/core/rng';
 import type { Formation, Munition, MunitionId, NationId, NodeId, Platform, PlatformId } from '../src/core/types';
 import { createWorld } from '../src/core/world';
 import { loadMap } from '../src/data/load';
+import { createAi } from '../src/systems/ai';
 import { airWar } from '../src/systems/air';
 import { applyNavalOrder, CHOKEPOINTS, navalWar, resolveSalvo, strikeNavalGroup } from '../src/systems/naval';
 import { geography, nearestSea, seaNeighbour } from '../src/systems/naval/geography';
@@ -20,7 +21,9 @@ const mun = (id: string, count: number) => ({ munition: id as MunitionId, count 
 const navalMunitions: Munition[] = [
   M({ id: 'n_lwt', name: 'Lightweight ASW torpedo', kind: 'torpedo', rangeKm: 10, speedMach: 0.07, warheadKg: 45, cepM: 5, pk: { submarine: 0.5 }, interceptDifficulty: 0.8, unitCostUsdM: 1.5, weightKg: 280 }),
   M({ id: 'n_asbm', name: 'Anti-ship ballistic missile', kind: 'antiship_ballistic', rangeKm: 1500, speedMach: 10, warheadKg: 600, cepM: 20, pk: { ship: 0.6 }, interceptDifficulty: 0.8, unitCostUsdM: 10, weightKg: 15000 }),
+  M({ id: 'n_sm3', name: 'Exo-atmospheric interceptor', kind: 'abm', rangeKm: 900, speedMach: 10, warheadKg: 0, cepM: 0, pk: { missile: 0.8 }, interceptDifficulty: 0, unitCostUsdM: 12, weightKg: 1500 }),
   M({ id: 'n_exocet', name: 'Exocet-class ASCM', kind: 'antiship_cruise', rangeKm: 70, speedMach: 0.9, warheadKg: 165, cepM: 5, pk: { ship: 1 }, interceptDifficulty: 1, unitCostUsdM: 1, weightKg: 670 }),
+  M({ id: 'n_shore_ascm', name: 'Coastal ASCM', kind: 'antiship_cruise', rangeKm: 400, speedMach: 0.9, warheadKg: 165, cepM: 5, pk: { ship: 0.8 }, interceptDifficulty: 0.5, unitCostUsdM: 1, weightKg: 670 }),
   M({ id: 'n_neptune', name: 'Neptune-class ASCM', kind: 'antiship_cruise', rangeKm: 280, speedMach: 0.8, warheadKg: 150, cepM: 5, pk: { ship: 1 }, interceptDifficulty: 1, unitCostUsdM: 1, weightKg: 870 }),
   M({ id: 'n_mine', name: 'Influence mine', kind: 'mine', rangeKm: 0, speedMach: 0, warheadKg: 500, cepM: 0, pk: { ship: 0.5, submarine: 0.3 }, interceptDifficulty: 1, unitCostUsdM: 0.1, weightKg: 1000 }),
 ];
@@ -39,6 +42,7 @@ const navalPlatforms: Platform[] = [
   ship('n_usv', 'usv', { crew: 0, unitCostUsdM: 0.25, mobility: { speedKph: 40, rangeKm: 800, fuelTonsPerHour: 0 }, firepower: { ship: 0.05 } }),
   ship('n_minelayer', 'corvette', { loadout: [mun('n_mine', 60)] }),
   P({ id: 'n_ssk', name: 'Diesel submarine', class: 'ssk', domain: 'subsurface', unitCostUsdM: 500, crew: 50, mobility: { speedKph: 37, rangeKm: 1e6, fuelTonsPerHour: 0 }, protection: { armor: 0.2, stealth: 0.85 }, sensors: { detectionKm: 40 }, firepower: { ship: 0.3 }, loadout: [{ munition: 't_torpedo' as MunitionId, count: 18 }] }),
+  P({ id: 'n_midget', name: 'Midget submarine', class: 'ssk', domain: 'subsurface', unitCostUsdM: 500, crew: 7, mobility: { speedKph: 37, rangeKm: 1e6, fuelTonsPerHour: 0 }, protection: { armor: 0.2, stealth: 0.85 }, sensors: { detectionKm: 40 }, firepower: { ship: 0.3 }, loadout: [{ munition: 't_torpedo' as MunitionId, count: 2 }] }),
   P({ id: 'n_coastal', name: 'Coastal ASBM launcher', class: 'coastal_asm', domain: 'land', unitCostUsdM: 5, crew: 4, mobility: { speedKph: 60, rangeKm: 600, fuelTonsPerHour: 0.05 }, protection: { armor: 0.1, stealth: 0.35 }, sensors: { detectionKm: 0 }, firepower: {}, loadout: [mun('n_asbm', 4)] }),
   ship('n_carrier', 'carrier', { crew: 3000, mobility: { speedKph: 55, rangeKm: 1e6, fuelTonsPerHour: 0 }, engagementChannels: 4, capacity: { aircraft: 60 }, loadout: [mun('t_sam', 16)] }),
   P({ id: 'n_helo', name: 'ASW helicopter', class: 'asw_helo', domain: 'air', unitCostUsdM: 40, crew: 4, mobility: { speedKph: 250, rangeKm: 300, fuelTonsPerHour: 0.5 }, protection: { armor: 0.1, stealth: 0.1 }, sensors: { detectionKm: 50 }, firepower: {}, loadout: [mun('n_lwt', 2)] }),
@@ -146,6 +150,22 @@ describe('naval salvo combat', () => {
     expect(ballistic / 120).toBeGreaterThan(0.7);
   });
 
+  it('an SM-3 layer stops most medium-range ballistic missiles in midcourse while its rounds last, and never fires at a sea-skimmer', () => {
+    const t = navalWorld();
+    const sam = t.catalog.munition(mid('t_sam'));
+    const sm3 = t.catalog.munition(mid('n_sm3'));
+    const defense = (exo: number) => ({ channels: 10, interceptors: [{ munition: sm3, available: exo }, { munition: sam, available: 64 }], pointDefense: 0.3, capShots: 0 });
+    let layered = 0, spent = 0, skimmerSm3 = 0;
+    for (let s = 1; s <= 40; s++) {
+      layered += resolveSalvo(new Rng(s), t.catalog.munition(mid('n_asbm')), 6, defense(64), 'ship').leakers;
+      spent += resolveSalvo(new Rng(s), t.catalog.munition(mid('n_asbm')), 6, defense(2), 'ship').leakers;
+      skimmerSm3 += resolveSalvo(new Rng(s), t.catalog.munition(mid('t_asm')), 6, defense(64), 'ship').interceptorsUsed.get(mid('n_sm3')) ?? 0;
+    }
+    expect(layered / 240).toBeLessThan(0.15);
+    expect(spent / 240).toBeGreaterThan(0.5);
+    expect(skimmerSm3).toBe(0);
+  });
+
   it('spends two to three interceptors per one-way drone it kills (Red Sea 2023-24: about two per engaged threat)', () => {
     const t = navalWorld();
     const sm2: Munition = { ...t.catalog.munition(mid('t_sam')), pk: { missile: 0.7 } };
@@ -195,6 +215,22 @@ describe('naval salvo combat', () => {
     strikeNavalGroup(t.world, t.engine.context(t.world), TWN, mid('n_exocet'), 6, lift.id);
     expect(lift.status).toBe('destroyed');
     expect(troops.status).toBe('destroyed');
+  });
+
+  it('sinking a cargo ship loses the vehicles aboard but not the troops, who fly', () => {
+    const t = navalWorld();
+    const port = t.portOf('USA', 36.9, -76.3);
+    const lift = t.add({ nation: USA, name: 'RO-RO group', kind: 'surface_group', node: port, equipment: t.eq({ t_lmsr: 2 }) });
+    const troops = t.add({ nation: USA, name: 'Armored battalion', kind: 'maneuver', echelon: 'battalion', node: port, equipment: t.eq({ t_inf: 30, t_mbt: 20 }) });
+    const people = troops.personnel;
+    // As naval/sealift.ts loads a waiting formation.
+    troops.status = 'embarked';
+    troops.embarkedOn = lift.id;
+    strikeNavalGroup(t.world, t.engine.context(t.world), RUS, mid('n_exocet'), 12, lift.id);
+    expect(lift.status).toBe('destroyed');
+    expect(troops.status).toBe('active');
+    expect(troops.personnel).toBe(people);
+    expect(troops.equipment[mid('t_mbt') as unknown as PlatformId] ?? 0).toBe(0);
   });
 });
 
@@ -267,6 +303,20 @@ describe('submarine warfare', () => {
     };
     expect(sank('t_ssn')).toBeGreaterThan(0);
     expect(sank('n_ssk')).toBe(0);
+  });
+
+  it('a boat that attacks tells its victims a submarine works that zone, while one that lies quiet stays unknown', () => {
+    const t = navalWorld(5);
+    const at = t.nodeAt(20, 125), quietAt = t.nodeAt(30, 140);
+    t.war('USA', 'CHN');
+    const boat = t.add({ nation: USA, name: 'SSN', kind: 'submarine', echelon: 'squadron', node: at, equipment: t.eq({ t_ssn: 1 }) });
+    const quiet = t.add({ nation: USA, name: 'Quiet SSN', kind: 'submarine', echelon: 'squadron', node: quietAt, equipment: t.eq({ t_ssn: 1 }) });
+    boat.order = { posture: 'patrol', issuedTick: 0 };
+    quiet.order = { posture: 'patrol', issuedTick: 0 };
+    t.add({ nation: CHN, name: 'LHD', kind: 'surface_group', node: at, equipment: t.eq({ n_lhd: 1 }) });
+    t.engine.step(t.world);
+    expect(t.world.slices.naval.tracks[boat.id]).toContain(CHN);
+    expect(t.world.slices.naval.tracks[quiet.id] ?? []).not.toContain(CHN);
   });
 
   it('an SSN ambush sinks an unescorted amphibious ship and the submarine survives', () => {
@@ -350,6 +400,29 @@ describe('anti-ship strikes from shore', () => {
     expect(led(t, 'RUS')!.interceptorsFired).toBeGreaterThan(0);
     expect(fleet.magazine[mid('t_sam')]).toBeLessThan(96);
     expect(led(t, 'RUS')!.hullsSunk + led(t, 'RUS')!.hullsDamaged).toBeGreaterThan(0);
+  });
+
+  it('ballistic rounds find a group at sea only on a fresh fix: none without a contact, few on a day-old radar track', () => {
+    const hitsWith = (fix: { ageTicks: number; source: 'satellite' | 'naval' } | undefined) => {
+      let hits = 0, fired = 0;
+      for (let seed = 1; seed <= 6; seed++) {
+        const t = navalWorld(seed);
+        t.war('UKR', 'RUS');
+        const at = t.nodeAt(43, 34);
+        const fleet = t.add({ nation: RUS, name: 'Frigates', kind: 'surface_group', node: at, equipment: t.eq({ n_frigate: 3 }), magazine: {} });
+        fleet.home = t.portOf('RUS', 44.6, 33.5);
+        t.world.tick = 20;
+        t.world.slices.intel = { pictures: { [UKR]: fix ? { [fleet.id]: { node: at, tick: t.world.tick - fix.ageTicks, kind: 'surface_group', strength: 3, source: fix.source } } : {} } };
+        hits += strikeNavalGroup(t.world, t.engine.context(t.world), UKR, mid('n_asbm'), 12, fleet.id)!.hits.length;
+        fired += led(t, 'UKR')!.missilesFired;
+      }
+      expect(fired).toBe(72);
+      return hits;
+    };
+    const fresh = hitsWith({ ageTicks: 1, source: 'satellite' });
+    expect(fresh).toBeGreaterThan(10);
+    expect(hitsWith(undefined)).toBe(0);
+    expect(hitsWith({ ageTicks: 4, source: 'naval' })).toBeLessThan(fresh / 4);
   });
 });
 
@@ -438,6 +511,19 @@ describe('sea control and blockade', () => {
     expect((t.world.theater.tradeBlocked as Record<string, number>).IRN).toBeGreaterThan(0.2);
     expect((t.world.theater.tradeBlocked as Record<string, number>).QAT).toBe(0);
   });
+
+  it('a flotilla of midget submarines with two torpedoes each cuts a lane less than one diesel boat with eighteen', () => {
+    const cut = (equipment: Record<string, number>) => {
+      const t = navalWorld();
+      const at = geography(t.map).chokepoints.find((c) => c.def.name === 'Strait of Hormuz')!.nodes[0];
+      t.war('USA', 'IRN');
+      const boats = t.add({ nation: USA, name: 'Boats', kind: 'submarine', echelon: 'squadron', node: at, equipment: t.eq(equipment), magazine: {} });
+      t.order(boats, { posture: 'patrol', target: at });
+      t.engine.step(t.world);
+      return (t.world.theater.tradeBlocked as Record<string, number>).IRN;
+    };
+    expect(cut({ n_midget: 6 })).toBeLessThan(cut({ n_ssk: 1 }));
+  });
 });
 
 describe('mine warfare', () => {
@@ -513,6 +599,38 @@ describe('naval movement and lift', () => {
     expect(ssn.node).not.toBe(a);
   });
 
+  it('a ship alongside at its base draws fuel and stores from it, with no land supply line, while one on station at sea uses hers up', () => {
+    const t = navalWorld();
+    const port = t.portOf('RUS', 54.65, 19.9);
+    const sea = t.nodeAt(56, 18);
+    const alongside = t.add({ nation: RUS, name: 'Alongside', kind: 'surface_group', node: port, equipment: t.eq({ n_frigate: 2 }), magazine: {} });
+    const onStation = t.add({ nation: RUS, name: 'On station', kind: 'surface_group', node: sea, equipment: t.eq({ n_frigate: 2 }) });
+    onStation.home = port;
+    alongside.supply.food *= 0.5;
+    alongside.supply.fuel *= 0.5;
+    t.order(onStation, { posture: 'patrol', target: sea });
+    t.engine.run(t.world, Math.round((10 * 24) / t.world.dtHours));
+    expect(alongside.node).toBe(port);
+    expect(alongside.supply.food).toBeCloseTo(alongside.supplyCapacity.food);
+    expect(alongside.supply.fuel).toBeCloseTo(alongside.supplyCapacity.fuel);
+    expect(onStation.supply.food).toBeLessThan(0.8 * onStation.supplyCapacity.food);
+  });
+
+  it('a carrier in a refuelling overhaul refuses an order to sail, whoever gives it; one between deployments sails', () => {
+    const t = navalWorld();
+    const port = t.portOf('USA', 36.9, -76.3);
+    const at = t.nodeAt(35, -40);
+    const yard = t.add({ nation: USA, name: 'CVN in overhaul', kind: 'surface_group', node: port, equipment: t.eq({ n_carrier: 1 }) });
+    const ready = t.add({ nation: USA, name: 'CVN', kind: 'surface_group', node: port, equipment: t.eq({ n_carrier: 1 }) });
+    yard.readiness = 0.05;
+    ready.readiness = 0.6;
+    for (const f of [yard, ready]) t.order(f, { posture: 'patrol', target: at });
+    t.engine.run(t.world, 8);
+    expect(yard.node).toBe(port);
+    expect(yard.order.posture).not.toBe('patrol');
+    expect(ready.node).not.toBe(port);
+  });
+
   it('routes through the Suez canal between the Mediterranean and the Red Sea', () => {
     const t = navalWorld();
     const g = t.add({ nation: USA, name: 'DDG', kind: 'surface_group', node: t.nodeAt(33, 30), equipment: t.eq({ t_destroyer: 1 }), magazine: {} });
@@ -586,3 +704,40 @@ describe('naval movement and lift', () => {
   });
 });
 
+
+describe('naval AI against mines and submarines', () => {
+  const orders = (t: ReturnType<typeof navalWorld>, f: Formation, days: number) => {
+    const out: { posture: string; target?: NodeId }[] = [];
+    t.engine.run(t.world, (days * 24) / t.world.dtHours, (w) => {
+      for (const c of w.pending) if (c.type === 'order' && c.formation === f.id) out.push({ posture: c.order.posture, target: c.order.target });
+    });
+    return out;
+  };
+
+  it("sends sweepers to an enemy minefield, but not while the enemy's shore missiles reach it", () => {
+    const sweep = (battery: boolean) => {
+      const t = navalWorld(42, [navalWar, createAi()]);
+      t.war('USA', 'CHN');
+      const field = t.nodeAt(25, 123);
+      t.world.slices.naval.mines[field] = { [CHN]: 100 };
+      const mcm = t.add({ nation: USA, name: 'MCM', kind: 'surface_group', node: t.portOf('JPN', 26.2, 127.7), equipment: t.eq({ n_mcm: 4 }) });
+      if (battery) {
+        const site = t.nodeAt(25, 121.5);
+        const b = t.add({ nation: CHN, name: 'Battery', kind: 'missile', echelon: 'battalion', node: site, equipment: t.eq({ t_inf: 2 }) });
+        b.magazine = { n_shore_ascm: 24 } as Formation['magazine'];
+      }
+      return orders(t, mcm, 2).some((o) => o.target === field);
+    };
+    expect(sweep(false)).toBe(true);
+    expect(sweep(true)).toBe(false);
+  });
+
+  it('sends an attack submarine to hunt an enemy boat known to be working a sea zone', () => {
+    const t = navalWorld(42, [navalWar, createAi()]);
+    t.war('USA', 'CHN');
+    const zone = t.nodeAt(20, 135);
+    t.add({ nation: CHN, name: 'Boat', kind: 'submarine', echelon: 'squadron', node: zone, equipment: t.eq({ n_ssk: 1 }) });
+    const ssn = t.add({ nation: USA, name: 'SSN', kind: 'submarine', echelon: 'squadron', node: t.nodeAt(15, 145), equipment: t.eq({ t_ssn: 1 }) });
+    expect(orders(t, ssn, 1).some((o) => o.target === zone)).toBe(true);
+  });
+});

@@ -80,8 +80,6 @@ export const REFERENCE_WARHEAD_KG = 165;
 /** Damage multiplier by munition kind. A heavyweight torpedo breaking a keel is worth about two above-waterline hits of equal warhead (Belgrano 1982, Cheonan 2010). */
 export const KIND_DAMAGE: Partial<Record<MunitionKind, number>> = { torpedo: 2, mine: 2, antiship_ballistic: 1.3 };
 
-/** Kinds missile interceptors cannot engage; only point defense, decoys and evasion apply. */
-export const NOT_INTERCEPTABLE: ReadonlySet<MunitionKind> = new Set(['torpedo', 'mine']);
 /** Below this speed a threat is a boat or torpedo, not a missile: guns, not SAMs, engage it (Ukrainian USVs 2022-24). */
 export const MIN_INTERCEPTABLE_MACH = 0.3;
 
