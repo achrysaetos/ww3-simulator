@@ -64,16 +64,41 @@ export function saveRun(scenario: string, world: World): string {
   return JSON.stringify({ format: FORMAT, version: VERSION, scenario, world } satisfies SaveFile);
 }
 
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+
+/** Names the first thing wrong with a save's World, or null when its shape and JSON invariants hold. */
+function worldProblem(w: unknown, mapSize: number): string | null {
+  if (!isRecord(w)) return 'save has no world';
+  for (const k of ['seed', 'rngState', 'tick', 'dtHours', 'nextId'])
+    if (typeof w[k] !== 'number' || !Number.isFinite(w[k])) return `world.${k} must be a finite number, got ${JSON.stringify(w[k])}`;
+  if (!Number.isInteger(w.tick) || (w.tick as number) < 0) return `world.tick must be a whole number of at least 0, got ${w.tick}`;
+  if ((w.dtHours as number) <= 0 || 24 % (w.dtHours as number) !== 0) return `world.dtHours must divide 24, got ${w.dtHours}`;
+  if (typeof w.startDate !== 'string' || Number.isNaN(Date.parse(w.startDate))) return `world.startDate must be an ISO date, got ${JSON.stringify(w.startDate)}`;
+  for (const k of ['nations', 'formations', 'relations', 'theater', 'slices'])
+    if (!isRecord(w[k])) return `world.${k} is missing or not an object`;
+  for (const k of ['control', 'pending', 'events', 'history'])
+    if (!Array.isArray(w[k])) return `world.${k} is missing or not an array`;
+  if ((w.control as unknown[]).length !== mapSize) return `save was made on a different map (${(w.control as unknown[]).length} nodes, this build has ${mapSize})`;
+  const bad = jsonViolations(w);
+  if (bad.length) return `world is not plain JSON:\n  ${bad.join('\n  ')}`;
+  return null;
+}
+
 /** Parses a save and builds an engine around it. No system is re-initialised: the World carries every system's state. */
 export function resumeRun(text: string): ResumedSession {
-  const save = JSON.parse(text) as Partial<SaveFile>;
-  if (save.format !== FORMAT) throw new Error('not a ww3 save file');
+  let save: Partial<SaveFile>;
+  try {
+    save = JSON.parse(text) as Partial<SaveFile>;
+  } catch {
+    throw new Error('not a ww3 save file (not valid JSON)');
+  }
+  if (!isRecord(save) || save.format !== FORMAT) throw new Error('not a ww3 save file');
   if (save.version !== VERSION) throw new Error(`save format version ${save.version} is not supported; this build reads version ${VERSION}`);
   const scenario = SCENARIOS.find((s) => s.id === save.scenario);
   if (!scenario) throw new Error(`save is from unknown scenario ${save.scenario}`);
   const map = loadMap();
-  const world = save.world!;
-  if (world?.control?.length !== map.size) throw new Error(`save was made on a different map (${world?.control?.length} nodes, this build has ${map.size})`);
+  const problem = worldProblem(save.world, map.size);
+  if (problem) throw new Error(problem);
   const catalog = loadCatalog();
-  return { map, catalog, engine: new Engine(map, catalog, SYSTEMS), world, scenario };
+  return { map, catalog, engine: new Engine(map, catalog, SYSTEMS), world: save.world as World, scenario };
 }
