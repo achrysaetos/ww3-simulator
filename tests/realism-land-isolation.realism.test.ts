@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from 'vitest';
-import { atWar } from '../src/core/engine';
+import { atWar, relationMut } from '../src/core/engine';
 import type { MunitionKind, NationId, SimEvent } from '../src/core/types';
 import { createSession } from '../src/scenarios';
 
@@ -24,8 +24,12 @@ interface IsolationRun {
 const BALLISTIC: ReadonlySet<MunitionKind> = new Set(['srbm', 'mrbm', 'irbm', 'hgv']);
 const inGuam = (lat: number, lon: number) => lat >= 12 && lat <= 21 && lon >= 144 && lon <= 147;
 
-function run(scenario: string, days: number, seed: number): IsolationRun {
+function run(scenario: string, days: number, seed: number, atWarFromStart: [string, string][] = []): IsolationRun {
   const { world, map, engine, catalog } = createSession(scenario, seed);
+  for (const [a, b] of atWarFromStart) {
+    Object.assign(relationMut(world, a as NationId, b as NationId), { atWar: true, escalation: 'conventional', warSince: world.tick });
+    for (const n of [a, b]) world.nations[n as NationId].status = 'war';
+  }
   const out: IsolationRun = { surrenders: [], rounds: {}, firstGuamDay: -1, chnUsaWarDay: -1, rungs: {}, ballistic: {} };
   for (let i = 0; i < Math.round((days * 24) / world.dtHours); i++) {
     const day = (world.tick * world.dtHours) / 24;
@@ -59,7 +63,9 @@ const homeSurrenders = (r: IsolationRun, nation: string) => r.surrenders.filter(
 describe('taiwan-2027, 30 days', () => {
   let runs: IsolationRun[];
   beforeAll(() => {
-    runs = SEEDS.map((s) => run('taiwan-2027', 30, s));
+    // Pinned: CSIS's 2023 base case has the US fighting from the first day; whether and when the US enters is the
+    // diplomacy model's call, not what these bands measure.
+    runs = SEEDS.map((s) => run('taiwan-2027', 30, s, [['USA', 'CHN']]));
   }, RUN_MS);
 
   // US garrisons in Japan, Korea and Guam stand on allied or US soil that no enemy reaches on land in a Taiwan war

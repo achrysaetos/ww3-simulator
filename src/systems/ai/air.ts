@@ -116,7 +116,7 @@ export function planAir(p: Plan, targets: TargetGrid): void {
       for (const m of stock) if (pkAgainst(m, t) > 0 && withinKm(map, w.node, t.at ?? t.node, reach(m)) && sams.clear(w.node, t.node, m.rangeKm, vis)) return true;
       return hasFirepower(p, w, t.cls) && withinKm(map, w.node, t.at ?? t.node, radius) && sams.clear(w.node, t.node, 0, vis);
     };
-    const t = pickTarget(targets.near(w.node, stock.reduce((best, m) => Math.max(best, reach(m)), radius)), canHit);
+    const t = pickTarget(targets.near(w.node, stock.reduce((best, m) => Math.max(best, reach(m)), radius)), (t) => (canHit(t) ? 1 : 0));
     if (!t) return false;
     const order = { posture: 'strike' as const, target: t.node, targetClass: t.cls, targetFormation: t.formation };
     budget.propose(w, strikeOptions(stock, t).filter((m) => withinKm(map, w.node, t.at ?? t.node, reach(m))), t, order);

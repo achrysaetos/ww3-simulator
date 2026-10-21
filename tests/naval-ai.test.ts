@@ -1,9 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { atWar } from '../src/core/engine';
+import { atWar, relationMut } from '../src/core/engine';
 import type { NationId, NodeId } from '../src/core/types';
 import { createSession } from '../src/scenarios';
 import { geography } from '../src/systems/naval/geography';
 import { recordFleetLoss } from '../src/systems/naval/state';
+
+/** Puts the US at war with China from the first tick. */
+function usAtWarWithChina(s: ReturnType<typeof createSession>): void {
+  Object.assign(relationMut(s.world, 'USA' as NationId, 'CHN' as NationId), { atWar: true, escalation: 'conventional', warSince: s.world.tick });
+  for (const n of ['USA', 'CHN']) s.world.nations[n as NationId].status = 'war';
+}
 
 const run = (scenario: string, days: number) => {
   const s = createSession(scenario, 1);
@@ -66,6 +72,8 @@ describe('coastal defence against a landing', () => {
 describe('naval AI standoff', () => {
   it('US surface groups take station and blockade outside the reach of Chinese shore missiles, not in the strait', () => {
     const s = createSession('taiwan-2027', 2);
+    // Pinned: whether the US enters is the diplomacy model's call, not what this test measures.
+    usAtWarWithChina(s);
     const shore = s.map.nodesOf('CHN' as NationId).filter((n) => [...s.map.neighbors(n)].some((m) => s.map.isSea(m)));
     const clearance = (z: NodeId) => Math.min(...shore.map((n) => s.map.distanceKm(n, z)));
     const perDay = 24 / s.world.dtHours;
@@ -109,6 +117,8 @@ describe('naval AI rearming', () => {
 describe('naval AI fleet readiness', () => {
   it('carriers in a shipyard stay there when the US goes to war; a carrier between deployments sails', () => {
     const s = createSession('taiwan-2027', 2);
+    // Pinned: whether the US enters is the diplomacy model's call, not what this test measures.
+    usAtWarWithChina(s);
     const named = (prefix: string) => Object.values(s.world.formations).find((f) => f.name.startsWith(prefix))!;
     const yard = [named('USS John C. Stennis'), named('USS Ronald Reagan')];
     const ike = named('Carrier Strike Group 8');

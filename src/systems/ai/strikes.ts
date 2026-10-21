@@ -59,11 +59,12 @@ const CAPITAL = { value: 2.5, cls: 'structure' as TargetClass };
 /**
  * Field headquarters, struck as hardened aimpoints: Ukraine's HIMARS and Storm Shadow strikes on Russian army and
  * corps command posts in 2022-23 killed several generals and slowed Russian command for days at a time (RUSI,
- * "Preliminary Lessons", 2022). An army HQ outranks a front's (judgment); an HQ for garrisons far from any fighting
- * is not worth a salvo. The national command authority, and any HQ sharing its cell, sits in
- * the capital, which CAPITAL and the escalation ladder already govern.
+ * "Preliminary Lessons", 2022). A destroyed army HQ is worth more than a SAM site and outranks a front's
+ * (judgment); planners weigh that against the low kill probability of a salvo on a bunker, so the busiest rail
+ * hubs draw the first salvo and HQs the next. An HQ for garrisons far from any fighting is not worth a salvo. The national command authority, and any HQ sharing its
+ * cell, sits in the capital, which CAPITAL and the escalation ladder already govern.
  */
-const HQ_VALUE: Partial<Record<HqLevel, number>> = { army: 4, front: 3 };
+const HQ_VALUE: Partial<Record<HqLevel, number>> = { army: 6, front: 5 };
 /** How far behind the battle area a field HQ still directs a fight worth striking it for: an army's depth (judgment). */
 const HQ_REACH_KM = 150;
 /**
@@ -542,16 +543,19 @@ export function reachKm(p: Plan, f: Formation): number {
 }
 
 /**
- * The best target in reach; each claim divides a target's attraction so
- * strikes spread. `targets` is sorted by value, so the scan stops once no
- * later target could beat the best found.
+ * The target where a salvo is worth most: its value times `effect`, the shooter's kill probability
+ * against it (0 out of reach). Each claim divides a target's attraction so strikes spread. `targets`
+ * is sorted by value and effect is at most 1, so the scan stops once no later target could beat the
+ * best found.
  */
-export function pickTarget(targets: StrikeTarget[], reachable: (t: StrikeTarget) => boolean): StrikeTarget | undefined {
+export function pickTarget(targets: StrikeTarget[], effect: (t: StrikeTarget) => number): StrikeTarget | undefined {
   let best: StrikeTarget | undefined, bestScore = 0;
   for (const t of targets) {
     if (t.value <= bestScore) break;
-    const score = t.value / (1 + t.assigned);
-    if (score > bestScore && reachable(t)) { bestScore = score; best = t; }
+    const most = t.value / (1 + t.assigned);
+    if (most <= bestScore) continue;
+    const score = most * effect(t);
+    if (score > bestScore) { bestScore = score; best = t; }
   }
   if (best) best.assigned++;
   return best;
