@@ -3,6 +3,9 @@ import type { Echelon, FormationId, NationId, NodeId } from '../src/core/types';
 import { Pacer } from '../src/ui/pacer';
 import type { FormationView } from '../src/ui/snapshot';
 import { clusterStacks, gridSize, indexByNode } from '../src/ui/stacks';
+import { openingFocus } from '../src/ui/MapView';
+import { loadMap } from '../src/data/load';
+import { SCENARIOS } from '../src/scenarios';
 
 let seq = 0;
 function view(nation: string, node: number, echelon: Echelon, platforms = 100, status: FormationView['status'] = 'active'): FormationView {
@@ -105,5 +108,18 @@ describe('engine pacing', () => {
     pacer.step();
     expect(ticks()).toBe(2);
     expect(pacer.achievedTps).toBe(0);
+  });
+});
+
+describe('opening view', () => {
+  const map = loadMap();
+  const wars = (id: string) => SCENARIOS.find((s) => s.id === id)!.opening.flatMap((m): [NationId, NationId][] => (m.type === 'declare_war' ? [[m.nation, m.target]] : []));
+  const TAIPEI = [25.04, 121.56], SEOUL = [37.57, 126.98], KYIV = [50.45, 30.52], WARSAW = [52.25, 20.99], JERUSALEM = [31.78, 35.22], TOKYO = [35.68, 139.69];
+
+  it.each([
+    ['taiwan-2027', 'USA', TAIPEI], ['taiwan-2027', 'CHN', TAIPEI], ['korea-2027', 'KOR', SEOUL], ['ukraine-2026', 'UKR', KYIV],
+    ['ww3-2027', 'POL', WARSAW], ['ww3-2027', 'USA', TAIPEI], ['gulf-2027', 'IRN', JERUSALEM], ['peace-2027', 'JPN', TOKYO],
+  ])('opens %s played as %s on the capital under attack', (id, playAs, [lat, lon]) => {
+    expect(openingFocus(map, { wars: wars(id) }, playAs)).toBe(map.nodeAt(lat, lon));
   });
 });

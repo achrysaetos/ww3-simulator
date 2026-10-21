@@ -91,7 +91,7 @@ function baseCell(world: World, map: GameMap, nation: NationId, lat: number, lon
 }
 
 function kmToCell(map: GameMap, cell: NodeId, lat: number, lon: number): number {
-  const half = map.data.cells.res / 2;
+  const half = map.halfDeg[cell];
   const clamp = (x: number, c: number) => Math.min(c + half, Math.max(c - half, x));
   return haversineKm(lat, lon, clamp(lat, map.lat[cell]), clamp(lon, map.lon[cell]));
 }

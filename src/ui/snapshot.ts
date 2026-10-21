@@ -12,8 +12,11 @@ import type { GameMap } from '../core/map';
 import type { Catalog } from '../core/catalog';
 import { BMD_SYSTEMS } from '../systems/strategic/tables';
 import { supplyFactor } from '../systems/logistics';
+import { geography } from '../systems/naval/geography';
+import { isNavalFormation, liftDemand } from '../systems/naval/state';
+import { authority } from '../systems/orders';
 import type {
-  Command, Echelon, Formation, FormationId, FormationKind, ItemId, MunitionKind, Nation, NationId, NodeId, Posture, SimEvent, World,
+  Command, CommandDomain, Echelon, Formation, FormationId, FormationKind, ItemId, MunitionKind, Nation, NationId, NodeId, PlatformId, Posture, SimEvent, World,
 } from '../core/types';
 
 export const NO_NATION = 0xffff;
@@ -37,6 +40,8 @@ export interface ScenarioCard {
   suggestedNation: NationId;
   /** Nations in the opening wars, aggressors first. */
   belligerents: NationId[];
+  /** The opening wars as [aggressor, target], in declaration order. */
+  wars: [NationId, NationId][];
 }
 
 export interface NationCard {
@@ -74,8 +79,8 @@ export interface SessionMeta {
   scenario: ScenarioCard;
   /** Index order used by every nation index in snapshots. */
   nationIds: NationId[];
-  platforms: Record<string, { name: string; class: string; domain: string }>;
-  munitions: Record<string, { name: string; kind: MunitionKind; yieldKt?: number; rangeKm: number }>;
+  platforms: Record<string, { name: string; class: string; domain: string; producers: NationId[] }>;
+  munitions: Record<string, { name: string; kind: MunitionKind; yieldKt?: number; rangeKm: number; producers: NationId[] }>;
   dtHours: number;
 }
 
@@ -160,12 +165,32 @@ export interface EconomyView {
   /** Share of need met this tick per resource. */
   supply: Record<string, number>;
   short: string[];
-  /** Production lines with the highest output, per month. */
-  lines: { item: ItemId; perMonth: number; built: number }[];
+  /** Production lines with the highest output per month, then any line still ramping toward an order. */
+  lines: { item: ItemId; perMonth: number; ordered: number | null; built: number }[];
+}
+
+/** A treaty call waiting on a human nation's answer. */
+export interface TreatyCall {
+  war: string;
+  treaty: string;
+  victim: NationId;
+  aggressor: NationId;
+  dueTick: number;
+  /** A second call after an earlier refusal; refusing again ends it. */
+  reconsidered: boolean;
 }
 
 export interface NationDetail {
   id: NationId;
+  /** Which domains the AI delegate runs and which formations the player holds (a human nation). */
+  authority: { ai: Record<CommandDomain, boolean>; held: FormationId[] };
+  treatyCalls: TreatyCall[];
+  /** Open peace offers between this nation and its enemies. */
+  peaceOffers: { from: NationId; to: NationId }[];
+  /** Nations it has sanctions in force with. */
+  sanctions: NationId[];
+  /** Mobilisation level ordered and still being reached; null when none is pending. */
+  mobilizationTarget: number | null;
   bulk: Nation['bulk'];
   enemies: NationId[];
   /** Land cells currently held, and how many of them were held at start. */
@@ -197,6 +222,22 @@ export interface FormationDetail {
   engaged: boolean;
   /** Hostile nations holding a track on it (naval). */
   trackedBy: NationId[];
+  /** The sea zone its port opens onto, when it stands in a port cell; lift groups wait there to load. */
+  portZone: NodeId | null;
+  /** For ground formations: own lift groups, and whether it can board each now. */
+  lifts: LiftOption[];
+  /** For a surface group: the formations it carries. */
+  aboard: { id: FormationId; name: string }[];
+}
+
+export interface LiftOption {
+  id: FormationId;
+  name: string;
+  node: NodeId;
+  /** Share of this formation it can carry in one lift, 0..1. */
+  share: number;
+  /** The lift group is in this formation's port or just offshore of it. */
+  boardNow: boolean;
 }
 
 export interface Snapshot {
@@ -313,7 +354,7 @@ export class SnapshotEncoder {
     }
 
     if (focus.nation && world.nations[focus.nation]) snap.focusNation = this.nationDetail(world, map, focus.nation);
-    if (focus.formation && world.formations[focus.formation]) snap.focusFormation = formationDetail(world, world.formations[focus.formation]);
+    if (focus.formation && world.formations[focus.formation]) snap.focusFormation = formationDetail(world, map, this.catalog, world.formations[focus.formation]);
     return snap;
   }
 
@@ -393,8 +434,26 @@ export class SnapshotEncoder {
     }
     const strategic = world.slices.strategic;
     const space = strategic?.space[id];
+    const diplomacy = world.slices.diplomacy;
+    const auth = authority(world, id);
+    const sanctions: NationId[] = [];
+    for (const [k, r] of Object.entries(world.relations)) {
+      if (!r.sanctions) continue;
+      const [a, b] = k.split('|') as [NationId, NationId];
+      if (a === id || b === id) sanctions.push(a === id ? b : a);
+    }
     return {
       id,
+      authority: { ai: { ...auth.ai }, held: Object.keys(auth.held) as FormationId[] },
+      treatyCalls: (diplomacy?.joins ?? []).filter((j) => j.nation === id).map((j) => ({
+        war: j.war, treaty: j.treaty, victim: j.victim, aggressor: j.aggressor, dueTick: j.dueTick, reconsidered: !!j.reconsidered,
+      })),
+      peaceOffers: Object.entries(diplomacy?.offers ?? {}).flatMap(([k, from]) => {
+        const [a, b] = k.split('|') as [NationId, NationId];
+        return a === id || b === id ? [{ from, to: from === a ? b : a }] : [];
+      }),
+      sanctions,
+      mobilizationTarget: eco?.mobilizationTarget ?? null,
       bulk: n.bulk,
       enemies: enemiesOf(world, id),
       nodesHeld: held,
@@ -405,7 +464,7 @@ export class SnapshotEncoder {
         ? {
             gdpIndex: eco.gdpIndex, deficitPctGdp: eco.deficitPctGdp, integrity: eco.integrity, tradeLoss: eco.tradeLoss, inTraining: eco.inTraining,
             buffers: Object.fromEntries(Object.entries(eco.buffers).map(([r, tiers]) => [r, tiers.reduce((a, m) => a + m, 0)])), supply: eco.supply, short: eco.short,
-            lines: Object.values(eco.lines).map((l) => ({ item: l.item, perMonth: l.capacityPerMonth, built: l.built })).sort((a, b) => b.perMonth - a.perMonth).slice(0, 12),
+            lines: productionLines(Object.values(eco.lines)),
           }
         : null,
       munitions: [...groups.values()].filter((g) => g.warehoused || g.loaded || g.perMonth),
@@ -444,20 +503,51 @@ export class SnapshotEncoder {
   }
 }
 
+const TOP_LINES = 12;
+
+function productionLines(lines: readonly { item: ItemId; capacityPerMonth: number; orderPerMonth: number | null; built: number }[]): EconomyView['lines'] {
+  const view = lines.map((l) => ({ item: l.item, perMonth: l.capacityPerMonth, ordered: l.orderPerMonth, built: l.built })).sort((a, b) => b.perMonth - a.perMonth);
+  return [...view.slice(0, TOP_LINES), ...view.slice(TOP_LINES).filter((l) => l.ordered !== null && l.ordered > l.perMonth)];
+}
+
 function bmdOf(interceptors: Record<string, number>, id: NationId): Record<string, number> {
   const out: Record<string, number> = {};
   for (const sys of BMD_SYSTEMS) if (sys.owner === id) out[sys.id] = interceptors[sys.id] ?? sys.interceptors;
   return out;
 }
 
-function formationDetail(world: World, f: Formation): FormationDetail {
+const GROUND: ReadonlySet<FormationKind> = new Set(['maneuver', 'artillery', 'air_defense', 'missile', 'logistics']);
+
+function formationDetail(world: World, map: GameMap, catalog: Catalog, f: Formation): FormationDetail {
   const flow = world.slices.logistics?.networkOf[f.nation] ? supplyFactor(world, f.node, f.nation) : undefined;
+  const zone = geography(map).portZone.get(f.node);
+  const lifts: LiftOption[] = [];
+  const aboard: FormationDetail['aboard'] = [];
+  const need = GROUND.has(f.kind) ? liftDemand(f, catalog) : null;
+  for (const g of Object.values(world.formations)) {
+    if (g.embarkedOn === f.id && g.status === 'embarked') aboard.push({ id: g.id, name: g.name });
+    if (!need || g.nation !== f.nation || g.status !== 'active' || !isNavalFormation(g)) continue;
+    let troops = 0, vehicles = 0;
+    for (const [pid, n] of Object.entries(g.equipment)) {
+      const cap = catalog.platforms.get(pid as PlatformId)?.capacity;
+      troops += n * (cap?.troops ?? 0);
+      vehicles += n * (cap?.vehicles ?? 0);
+    }
+    const load = Math.max(troops ? need.troops / troops : Infinity, need.vehicles ? (vehicles ? need.vehicles / vehicles : Infinity) : 0);
+    // Below a battalion landing team's worth the engine refuses to embark (naval/orders.ts MIN_LANDING_TEAM).
+    if (load <= 10) lifts.push({ id: g.id, name: g.name, node: g.node, share: Math.min(1, 1 / load), boardNow: zone !== undefined && (g.node === f.node || g.node === zone) });
+  }
+  if (need && zone !== undefined) lifts.sort((a, b) => Number(b.boardNow) - Number(a.boardNow) || map.distanceKm(f.node, a.node) - map.distanceKm(f.node, b.node));
+  else lifts.sort((a, b) => map.distanceKm(f.node, a.node) - map.distanceKm(f.node, b.node));
   return {
     formation: f,
     supplyFlow: flow ?? null,
     isolatedDays: world.slices.land?.isolatedDays[f.id] ?? 0,
     engaged: world.slices.land?.baseline[f.id] !== undefined,
     trackedBy: world.slices.naval?.tracks[f.id] ?? [],
+    portZone: zone ?? null,
+    lifts,
+    aboard,
   };
 }
 
@@ -493,9 +583,9 @@ export function nationCards(map: GameMap, profiles: Readonly<Record<string, { bl
 
 export function sessionMeta(scenario: ScenarioCard, world: World, map: GameMap, catalog: Catalog): SessionMeta {
   const platforms: SessionMeta['platforms'] = {};
-  for (const p of catalog.platforms.values()) platforms[p.id] = { name: p.name, class: p.class, domain: p.domain };
+  for (const p of catalog.platforms.values()) platforms[p.id] = { name: p.name, class: p.class, domain: p.domain, producers: p.producers };
   const munitions: SessionMeta['munitions'] = {};
-  for (const m of catalog.munitions.values()) munitions[m.id] = { name: m.name, kind: m.kind, yieldKt: m.yieldKt, rangeKm: m.rangeKm };
+  for (const m of catalog.munitions.values()) munitions[m.id] = { name: m.name, kind: m.kind, yieldKt: m.yieldKt, rangeKm: m.rangeKm, producers: m.producers };
   return { scenario, nationIds: map.nationIds, platforms, munitions, dtHours: world.dtHours };
 }
 

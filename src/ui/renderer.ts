@@ -64,7 +64,11 @@ export class MapRenderer {
   height = 400;
   dpr = 1;
   hits: HitBox[] = [];
-  private readonly ctx: CanvasRenderingContext2D;
+  /** The visible canvas: each frame is the cached scene plus animated flashes. */
+  private readonly screen: CanvasRenderingContext2D;
+  /** Draws into `scene`: everything but the flashes, redrawn only when the picture changes. */
+  private ctx: CanvasRenderingContext2D;
+  private scene: OffscreenCanvas;
   /** Base-projection corners per node: x0,y0 .. x3,y3. */
   private corners = new Float32Array(0);
   private center = new Float32Array(0);
@@ -97,21 +101,27 @@ export class MapRenderer {
   private stacksGrid = -1;
 
   constructor(private readonly canvas: HTMLCanvasElement, readonly map: GameMap, private readonly palette: Palette) {
-    this.ctx = canvas.getContext('2d')!;
+    this.screen = canvas.getContext('2d')!;
+    this.scene = new OffscreenCanvas(canvas.width, canvas.height);
+    this.ctx = this.scene.getContext('2d')! as unknown as CanvasRenderingContext2D;
     const edges: number[] = [], ends: number[] = [];
     for (let a = 0; a < map.landCount; a++)
       for (let k = map.adjStart[a]; k < map.adjStart[a + 1]; k++) {
         const b = map.adj[k];
         if (b <= a || b >= map.landCount) continue;
+        // Cells are squares of different sizes; the frontier runs along the side two squares share.
+        const ha = map.halfDeg[a], hb = map.halfDeg[b];
         const dLat = map.lat[b] - map.lat[a], dLon = ((map.lon[b] - map.lon[a] + 540) % 360) - 180;
-        if (Math.abs(dLat) < 0.01 && Math.abs(Math.abs(dLon) - 1) < 0.01) {
-          const lon = map.lon[a] + dLon / 2;
+        const latLo = Math.max(-ha, dLat - hb), latHi = Math.min(ha, dLat + hb);
+        const lonLo = Math.max(-ha, dLon - hb), lonHi = Math.min(ha, dLon + hb);
+        if (Math.abs(Math.abs(dLon) - ha - hb) < 1e-3 && latHi - latLo > 1e-3) {
+          const lon = map.lon[a] + Math.sign(dLon) * ha;
           edges.push(a, b);
-          ends.push(lon, map.lat[a] - 0.5, lon, map.lat[a] + 0.5);
-        } else if (Math.abs(dLon) < 0.01 && Math.abs(Math.abs(dLat) - 1) < 0.01) {
-          const lat = map.lat[a] + dLat / 2;
+          ends.push(lon, map.lat[a] + latLo, lon, map.lat[a] + latHi);
+        } else if (Math.abs(Math.abs(dLat) - ha - hb) < 1e-3 && lonHi - lonLo > 1e-3) {
+          const lat = map.lat[a] + Math.sign(dLat) * ha;
           edges.push(a, b);
-          ends.push(map.lon[a] - 0.5, lat, map.lon[a] + 0.5, lat);
+          ends.push(map.lon[a] + lonLo, lat, map.lon[a] + lonHi, lat);
         }
       }
     this.orthoEdges = Int32Array.from(edges);
@@ -129,6 +139,8 @@ export class MapRenderer {
     this.dpr = dpr;
     this.canvas.width = Math.round(width * dpr);
     this.canvas.height = Math.round(height * dpr);
+    this.scene = new OffscreenCanvas(this.canvas.width, this.canvas.height);
+    this.ctx = this.scene.getContext('2d')! as unknown as CanvasRenderingContext2D;
     this.proj = baseProjection(width, height);
     this.sprites.setDpr(dpr);
     const { map, proj } = this;
@@ -138,7 +150,7 @@ export class MapRenderer {
     this.corners = new Float32Array(map.size * 8);
     this.center = new Float32Array(map.size * 2);
     for (let n = 0; n < map.size; n++) {
-      const half = n < map.landCount ? 0.5 : 1.5;
+      const half = map.halfDeg[n];
       const la = map.lat[n], lo = map.lon[n];
       const pts = [[lo - half, la + half], [lo + half, la + half], [lo + half, la - half], [lo - half, la - half]];
       pts.forEach(([x, y], i) => {
@@ -266,7 +278,21 @@ export class MapRenderer {
     return p;
   }
 
-  render(input: RenderInput, now: number) {
+  /**
+   * Draw a frame. `changed` says whether anything but the flashes moved since the last frame
+   * (a snapshot, pan, zoom, hover or selection); while only flashes animate, a frame is one
+   * blit of the cached scene plus the flashes, not 2,500 counters again.
+   */
+  render(input: RenderInput, now: number, changed = true) {
+    if (changed) this.drawScene(input);
+    const s = this.screen;
+    s.setTransform(1, 0, 0, 1, 0, 0);
+    s.drawImage(this.scene, 0, 0);
+    s.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    this.drawFlashes(s, now);
+  }
+
+  private drawScene(input: RenderInput) {
     const { ctx, t, dpr } = this;
     const { state, nationIds } = input;
     if (this.builtFor.control !== state.controlVersion || this.builtFor.wars !== state.warsKey) this.rebuildTerritory(state, nationIds);
@@ -295,7 +321,6 @@ export class MapRenderer {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     this.drawOrders(input);
     this.drawFormations(input);
-    this.drawFlashes(now);
   }
 
   /**
@@ -557,8 +582,7 @@ export class MapRenderer {
     return { x: box.x, y: Math.min(box.y, by), w: box.w + bw - 2, h: box.h + (box.y - Math.min(box.y, by)) };
   }
 
-  private drawFlashes(now: number) {
-    const { ctx } = this;
+  private drawFlashes(ctx: CanvasRenderingContext2D, now: number) {
     this.flashes = this.flashes.filter((f) => now - f.t0 < FLASH_MS[f.kind]);
     for (const f of this.flashes) {
       // rAF timestamps can precede the performance.now() stamped on the event.
