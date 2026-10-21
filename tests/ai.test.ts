@@ -460,6 +460,12 @@ describe('counter-space strikes', () => {
   it('ASAT units at war with a space power shoot down its satellites, each interceptor only within its ceiling', () => {
     const s = createSession('ww3-2027', 1);
     const gps = Object.values(s.world.formations).find((f) => f.name.startsWith('GPS constellation'))!;
+    // Pinned: whether Russia joins the war by day 9 is the diplomacy model's call, not what this test measures.
+    for (const n of ['CHN', 'RUS']) {
+      Object.assign(relationMut(s.world, N(n), N('USA')), { atWar: true, escalation: 'conventional', warSince: s.world.tick });
+      s.world.nations[N(n)].status = 'war';
+    }
+    s.world.nations[N('USA')].status = 'war';
     const kills: Record<string, number> = {};
     s.engine.run(s.world, (9 * 24) / s.world.dtHours, (_w, events) => {
       for (const e of events) {
