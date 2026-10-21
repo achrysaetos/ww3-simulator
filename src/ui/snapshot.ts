@@ -10,6 +10,8 @@ import { currentDate, enemiesOf } from '../core/engine';
 import { platformCount } from '../core/forces';
 import type { GameMap } from '../core/map';
 import type { Catalog } from '../core/catalog';
+import { greenfieldCeilingPerMonth } from '../systems/economy';
+import { NUCLEAR_ALERT } from '../data/nations';
 import { BMD_SYSTEMS } from '../systems/strategic/tables';
 import { supplyFactor } from '../systems/logistics';
 import { cellDepthKm } from '../systems/land/state';
@@ -189,6 +191,8 @@ export interface EconomyView {
   lines: { item: ItemId; perMonth: number; ordered: number | null; built: number }[];
   /** Every line's output now and the most it can surge to, per month, keyed by item. */
   capacity: Record<string, { perMonth: number; surge: number }>;
+  /** Most a new line can reach per month, for each item the nation can build but has no line for. */
+  greenfield: Record<string, number>;
 }
 
 /** Civilians and domestic politics. */
@@ -259,7 +263,20 @@ export interface NationDetail {
     satellites: number;
     /** Nuclear rounds on launchers, by weapon: where each launching formation stands and how far it reaches. */
     weapons: NuclearWeapon[];
+    alert: NuclearAlertView;
   };
+}
+
+/** Stored warheads are not on launchers until the leadership orders an alert; mating then follows the state's timeline. */
+export interface NuclearAlertView {
+  /** The nation has an alert timeline and warheads still in storage, and has not ordered one. */
+  canOrder: boolean;
+  /** Warheads in storage, not mated to launchers. */
+  stored: number;
+  /** Warheads mated to launchers (the ceiling on release). */
+  mated: number;
+  /** The standing alert: when ordered, how many of its stored warheads are mated so far. */
+  ordered: { tick: number; of: number; mated: number; reason: string } | null;
 }
 
 export interface NuclearWeapon {
@@ -565,6 +582,7 @@ export class SnapshotEncoder {
             buffers: Object.fromEntries(Object.entries(eco.buffers).map(([r, tiers]) => [r, tiers.reduce((a, m) => a + m, 0)])), supply: eco.supply, short: eco.short,
             lines: productionLines(Object.values(eco.lines)),
             capacity: Object.fromEntries(Object.values(eco.lines).map((l) => [l.item, { perMonth: l.capacityPerMonth, surge: l.surgePerMonth }])),
+            greenfield: this.greenfield(n, eco.lines),
           }
         : null,
       homeFront: homeFront(world, id),
@@ -577,8 +595,19 @@ export class SnapshotEncoder {
         bmd: bmdOf(strategic?.interceptors ?? {}, id),
         satellites: space ? Object.values(space).reduce((a, s) => a + s.alive, 0) : 0,
         weapons: [...weapons.values()],
+        alert: nuclearAlert(n, id, strategic?.alerts[id]),
       },
     };
+  }
+
+  private greenfield(n: Nation, lines: Record<string, unknown>): Record<string, number> {
+    const out: Record<string, number> = {};
+    for (const [id, e] of [...this.catalog.platforms, ...this.catalog.munitions] as [ItemId, { producers: NationId[]; unitCostUsdM: number }][]) {
+      if (lines[id] || !e.producers.includes(n.id)) continue;
+      const ceiling = greenfieldCeilingPerMonth(n, e.unitCostUsdM, id);
+      if (ceiling > 0) out[id] = ceiling;
+    }
+    return out;
   }
 
   private warViews(world: World, id: NationId): WarView[] {
@@ -603,6 +632,16 @@ export class SnapshotEncoder {
         };
       });
   }
+}
+
+function nuclearAlert(n: Nation, id: NationId, alert: { orderedTick: number; stored: number; mated: number; reason: string } | undefined): NuclearAlertView {
+  const stored = Math.max(0, n.nuclear.warheads - n.nuclear.deployed);
+  return {
+    canOrder: !alert && stored > 0 && id in NUCLEAR_ALERT,
+    stored,
+    mated: n.nuclear.deployed,
+    ordered: alert ? { tick: alert.orderedTick, of: alert.stored, mated: alert.mated, reason: alert.reason } : null,
+  };
 }
 
 const TOP_LINES = 12;

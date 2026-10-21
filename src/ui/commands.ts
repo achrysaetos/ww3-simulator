@@ -91,6 +91,8 @@ function parse(world: World, map: GameMap, catalog: Catalog, player: NationId, r
       if (!catalog.munitions.get(munition)?.yieldKt) fail(`${munition} is not a nuclear weapon`);
       return { type: 'nuclear_release', nation, target: node(raw.target, 'target'), warheads: Math.floor(num(raw.warheads, 'warheads', 1, 10_000)), munition };
     }
+    case 'nuclear_alert':
+      return { type: 'nuclear_alert', nation, reason: raw.reason === undefined ? undefined : str(raw.reason, 'reason') };
     case 'delegate':
       return { type: 'delegate', nation, domain: oneOf(raw.domain, COMMAND_DOMAINS, 'domain') as CommandDomain, ai: bool(raw.ai, 'ai') };
     case 'hold': {
