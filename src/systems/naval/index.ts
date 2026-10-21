@@ -5,11 +5,12 @@ import { landings } from './amphibious';
 import { computeSeaControl, computeTradeBlocked } from './blockade';
 import { applyHits, fire, navalCombat, targetValue } from './combat';
 import { detect } from './detection';
-import { seaNeighbour } from './geography';
+import { harbour, seaNeighbour } from './geography';
 import { reindex, tickEnv } from './env';
 import { mineWarfare } from './mines';
 import { advance } from './movement';
 import { refreshOrders } from './orders';
+import { isNavalFormation } from './state';
 import type { SalvoOutcome } from './salvo';
 import { OCEAN_SURVEILLANCE } from './tables';
 
@@ -26,7 +27,11 @@ export { ANTISHIP_KINDS } from './tables';
  */
 export const navalWar: System = {
   id: 'naval',
-  init(world) {
+  init(world, ctx) {
+    for (const f of Object.values(world.formations)) {
+      if (!isNavalFormation(f) || ctx.map.isSea(f.node) || f.node !== f.home) continue;
+      f.node = f.home = harbour(ctx.map, f.home);
+    }
     world.slices.naval = {
       mines: {},
       oceanSurveillance: Object.fromEntries(Object.keys(world.nations).map((n) => [n, OCEAN_SURVEILLANCE[n] ?? 0])),

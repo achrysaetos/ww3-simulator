@@ -82,7 +82,8 @@ export function applyAirOrder(world: World, cmd: Command, ctx: SimContext): bool
   const allowed = f && POSTURES[f.kind];
   if (!f || !allowed) return false;
   const refuse = (why: string) => {
-    ctx.emit({ type: 'message', tick: world.tick, nation: cmd.nation, text: `${f.name}: order refused, ${why}` });
+    // Only a player reads why an order was refused; an AI nation re-plans from the world as it is.
+    if (world.nations[cmd.nation]?.controlledBy === 'human') ctx.emit({ type: 'message', tick: world.tick, nation: cmd.nation, text: `${f.name}: order refused, ${why}` });
     return true;
   };
   if (f.nation !== cmd.nation) return refuse('not your formation');

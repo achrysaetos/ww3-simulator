@@ -2,7 +2,9 @@ import { atWar as isAtWar } from '../../core/engine';
 import type { GameMap } from '../../core/map';
 import type { Formation, FormationId, NationId, NodeId, PlatformClass, PlatformId } from '../../core/types';
 import { liftShare } from '../naval/amphibious';
-import { geography, seaNeighbour } from '../naval/geography';
+import { geography, sameWaters, seaNeighbour } from '../naval/geography';
+import { sailable } from '../naval/movement';
+import { boardable } from '../naval/orders';
 import { compose, fleetLosses } from '../naval/state';
 import { dominant, isGround, issue } from './forces';
 import { enemyPowerAt, landMass } from './fronts';
@@ -160,7 +162,7 @@ function planAssault(p: Plan, lifts: Formation[]): Assault | undefined {
     if (!targets.some((o) => near(o, n))) continue;
     let port = ports[0], km = Infinity;
     for (const pt of ports) {
-      if (Math.abs(map.lat[pt.node] - map.lat[n]) * 111 > ASSAULT_RANGE_KM) continue;
+      if (Math.abs(map.lat[pt.node] - map.lat[n]) * 111 > ASSAULT_RANGE_KM || !sameWaters(map, pt.node, seaNeighbour(map, n)!)) continue;
       const d = map.distanceKm(pt.node, n);
       if (d < km) { km = d; port = pt; }
     }
@@ -310,6 +312,7 @@ function runAssault(p: Plan, a: Assault, lifts: Formation[]): void {
     if (!atPort) continue;
     for (const f of pending) {
       if (load >= SAIL_LOAD) break;
+      if (!boardable(1 - load, liftShare(catalog, f, comp))) continue;
       p.out.push({ type: 'order', nation: p.nation, formation: f.id, order: { posture: 'embark', targetFormation: l.id } });
       boarding.add(f);
       load += liftShare(catalog, f, comp);
@@ -352,13 +355,17 @@ export function planNaval(p: Plan): void {
   );
   const claimed = new Map<NodeId, number>();
   const atWar = [...p.enemies].some((e) => isAtWar(p.world, p.nation, e));
+  // A fleet in a closed sea (the Caspian Flotilla, a Black Sea squadron with the Straits shut to it)
+  // fights where open water takes it; a station it cannot reach falls back to its home waters.
+  const sails = (g: Formation, n: NodeId) => sailable(p.world, map, g, n);
+  const patrol = (g: Formation, target: NodeId) => issue(p, g, { posture: 'patrol', target: sails(g, target) ? target : nearestSea(map, g.home) });
 
   const blockade = (f: Formation): boolean => {
     const range = reachKm(p, f);
     let best: NodeId | undefined, bestScore = Infinity;
     for (const c of enemyChokes) {
       const d = km(f.node, c.node);
-      if (d > range) continue;
+      if (d > range || !sails(f, c.node)) continue;
       const score = d * (1 + (claimed.get(c.node) ?? 0));
       if (score < bestScore) { bestScore = score; best = c.node; }
     }
@@ -371,7 +378,7 @@ export function planNaval(p: Plan): void {
 
   const lift = new Set(liftCapable);
   const roles = new Map(groups.map((g) => [g, roleOf(p, g, lift.has(g))]));
-  if (assault) runAssault(p, assault, liftCapable);
+  if (assault) runAssault(p, assault, liftCapable.filter((l) => sails(l, assault.port)));
   const unescorted = [...(assault ? liftCapable.filter((g) => g.order.posture !== 'reserve') : []), ...groups.filter((g) => roles.get(g) === 'capital')];
   for (const g of groups) {
     // Before entering a war only submarines deploy: quiet, they take station unseen, while surface
@@ -386,11 +393,11 @@ export function planNaval(p: Plan): void {
         issue(p, g, { posture: 'patrol', target: nearestSea(map, g.home) });
         break;
       case 'submarine':
-        if (km(g.node, focus) <= FOCUS_SUB_KM) issue(p, g, { posture: 'patrol', target: subStation });
-        else if (!blockade(g)) issue(p, g, { posture: 'patrol', target: subStation });
+        if (km(g.node, focus) <= FOCUS_SUB_KM) patrol(g, subStation);
+        else if (!blockade(g)) patrol(g, subStation);
         break;
       case 'capital':
-        issue(p, g, { posture: 'patrol', target: stations[(capitals++ >> 1) % stations.length] });
+        patrol(g, stations[(capitals++ >> 1) % stations.length]);
         break;
       // Without a landing to make, amphibious groups stay out of the missile zone in home waters.
       case 'lift':
@@ -404,12 +411,12 @@ export function planNaval(p: Plan): void {
         let ward: Formation | undefined, bestD = Infinity;
         for (const c of unescorted) {
           const d = km(g.node, c.node);
-          if (d < bestD) { bestD = d; ward = c; }
+          if (d < bestD && sails(g, c.node)) { bestD = d; ward = c; }
         }
         if (ward) {
           unescorted.splice(unescorted.indexOf(ward), 1);
           issue(p, g, { posture: 'escort', targetFormation: ward.id });
-        } else if (!blockade(g)) issue(p, g, { posture: 'patrol', target: focus });
+        } else if (!blockade(g)) patrol(g, focus);
         break;
       }
     }

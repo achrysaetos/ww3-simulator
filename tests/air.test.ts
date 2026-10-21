@@ -230,6 +230,7 @@ describe('strikes', () => {
     const kyiv = t.node(...KYIV), moscow = t.node(55.75, 37.6);
     expect(t.map.distanceKm(moscow, kyiv)).toBeGreaterThan(500);
     const far = launchers(t, 'RUS', moscow, { t_tel: 20 });
+    t.world.nations[RUS].controlledBy = 'human';
     const ctx = t.ctx();
     expect(applyAirOrder(t.world, { type: 'order', nation: RUS, formation: far.id, order: { posture: 'strike', target: kyiv, targetClass: 'structure' } }, ctx)).toBe(true);
     expect(far.order.posture).toBe('defend');

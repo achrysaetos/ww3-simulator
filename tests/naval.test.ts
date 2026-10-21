@@ -454,7 +454,11 @@ describe('mine warfare', () => {
     probe.order = { posture: 'defend', issuedTick: 0 };
     t.order(probe, { posture: 'move', target: to });
     expect(probe.order.path).toBeUndefined();
-    expect(t.world.events.some((e) => e.type === 'message' && e.text.includes('no sea route'))).toBe(true);
+    // Only a player is told why: an AI nation's refused orders stay out of every log.
+    expect(t.world.events.some((e) => e.type === 'message' && e.text.includes('no sea route'))).toBe(false);
+    t.world.nations[USA].controlledBy = 'human';
+    t.order(probe, { posture: 'move', target: to });
+    expect(t.world.events.some((e) => e.type === 'message' && e.nation === USA && e.text.includes('no sea route'))).toBe(true);
 
     const mcm = t.add({ nation: USA, name: 'MCM group', kind: 'surface_group', node: mined, equipment: t.eq({ n_mcm: 4 }), magazine: {} });
     mcm.order = { posture: 'patrol', issuedTick: 0 };
@@ -575,6 +579,7 @@ describe('naval movement and lift', () => {
     expect(team.equipment['t_inf' as never] + big.equipment['t_inf' as never]).toBe(inf);
 
     const second = t.add({ nation: CHN, name: 'Second brigade', kind: 'maneuver', echelon: 'brigade', node: port, equipment: t.eq({ t_inf: 100 }) });
+    t.world.nations[CHN].controlledBy = 'human';
     t.order(second, { posture: 'embark', targetFormation: lift.id });
     expect(second.status).toBe('active');
     expect(t.world.events.some((e) => e.type === 'message' && e.text.includes('lacks lift capacity'))).toBe(true);

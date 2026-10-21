@@ -102,3 +102,29 @@ describe('naval AI fleet in being', () => {
     expect(blackSeaFleet(battered).every((f) => f.order.target === home)).toBe(true);
   }, 120_000);
 });
+
+describe('naval AI reachable tasking', () => {
+  it('every order the naval AI gives a fleet is one the fleet can sail, from closed seas and coarsely mapped bases alike', () => {
+    const s = createSession('ww3-2027', 1);
+    const naval = new Set(['surface_group', 'submarine']);
+    let given = 0;
+    const refused: string[] = [];
+    for (let i = 0; i < (10 * 24) / s.world.dtHours; i++) {
+      const cmds = s.world.pending.filter((c) => c.type === 'order' && naval.has(s.world.formations[c.formation]?.kind) && c.order.posture !== 'embark');
+      const tick = s.world.tick;
+      s.engine.step(s.world);
+      for (const c of cmds) {
+        if (c.type !== 'order') continue;
+        const f = s.world.formations[c.formation];
+        if (f.status !== 'active') continue;
+        given++;
+        if (f.order.issuedTick !== tick) refused.push(`${f.name} ${c.order.posture} -> ${c.order.target ?? c.order.targetFormation}`);
+      }
+    }
+    expect(given).toBeGreaterThan(100);
+    expect(refused).toEqual([]);
+    const caspian = Object.values(s.world.formations).find((f) => f.name === 'Caspian Flotilla')!;
+    expect(s.map.lon[caspian.node]).toBeGreaterThan(46);
+    expect(s.map.lon[caspian.node]).toBeLessThan(55);
+  }, 120_000);
+});

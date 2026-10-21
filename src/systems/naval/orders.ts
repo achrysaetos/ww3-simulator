@@ -20,7 +20,10 @@ export function isNavalOrder(world: World, cmd: Command): cmd is OrderCommand {
 
 export function applyNavalOrder(world: World, cmd: OrderCommand, ctx: SimContext): void {
   const f = world.formations[cmd.formation];
-  const refuse = (why: string) => ctx.emit({ type: 'message', tick: world.tick, nation: cmd.nation, text: `order to ${cmd.formation} refused: ${why}` });
+  // Only a player reads why an order was refused; an AI nation re-plans from the world as it is.
+  const refuse = (why: string) => {
+    if (world.nations[cmd.nation]?.controlledBy === 'human') ctx.emit({ type: 'message', tick: world.tick, nation: cmd.nation, text: `order to ${cmd.formation} refused: ${why}` });
+  };
   if (!f || f.nation !== cmd.nation) return refuse('no such formation of yours');
   if (f.status === 'destroyed') return refuse('formation destroyed');
   const order = { ...cmd.order, issuedTick: world.tick };
@@ -34,7 +37,7 @@ export function applyNavalOrder(world: World, cmd: OrderCommand, ctx: SimContext
     if (!canBoard(env, f, lift)) return refuse('must stand in a port with the lift group in port or offshore');
     const room = 1 - liftUsed(env, lift, comp);
     const share = liftShare(ctx.catalog, f, comp);
-    if (room < MIN_LANDING_TEAM * share || room <= 0) return refuse(`${lift.name} lacks lift capacity`);
+    if (!boardable(room, share)) return refuse(`${lift.name} lacks lift capacity`);
     const boarding = share > room + 1e-9 ? detach(world, ctx, f, room / share) : f;
     boarding.status = 'embarked';
     boarding.embarkedOn = lift.id;
@@ -64,6 +67,11 @@ export function applyNavalOrder(world: World, cmd: OrderCommand, ctx: SimContext
  * (USMC MEU doctrine; PLA assault echelons in the CMPR 2024), the rest following later.
  */
 const MIN_LANDING_TEAM = 0.1;
+
+/** Whether a formation needing `share` of a lift group fits, whole or as a landing team, in the `room` left aboard. */
+export function boardable(room: number, share: number): boolean {
+  return room > 0 && room >= MIN_LANDING_TEAM * share;
+}
 
 /** Split `share` of a formation off as a landing team; the parent keeps the rest at the port. */
 function detach(world: World, ctx: SimContext, f: Formation, share: number): Formation {

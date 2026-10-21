@@ -92,6 +92,8 @@ export interface NavalGeography {
   /** Port cells (ports > 0 with a sea neighbour) and the sea zone each opens onto. */
   ports: { node: NodeId; zone: NodeId; weight: number }[];
   portZone: Map<number, NodeId>;
+  /** Connected body of water each sea zone and canal cell belongs to (-1 for other land): what seaPath can join. */
+  basin: Int32Array;
 }
 
 const cache = new WeakMap<GameMap, NavalGeography>();
@@ -115,12 +117,69 @@ function build(map: GameMap): NavalGeography {
     ports.push({ node: n as NodeId, zone, weight: map.ports[n] });
     portZone.set(n, zone);
   }
+  const canalNodes = new Set(CANALS.flatMap((c) => c.points.map(([la, lo]) => map.nodeAt(la, lo) as number)));
   return {
     chokepoints: CHOKEPOINTS.map((def) => ({ def, nodes: [...new Set(def.points.map(([la, lo]) => nearestSea(map, la, lo)))] })),
-    canalNodes: new Set(CANALS.flatMap((c) => c.points.map(([la, lo]) => map.nodeAt(la, lo) as number))),
+    canalNodes,
     ports,
     portZone,
+    basin: basins(map, canalNodes),
   };
+}
+
+function basins(map: GameMap, canalNodes: ReadonlySet<number>): Int32Array {
+  const out = new Int32Array(map.size).fill(-1);
+  const water = (n: number) => map.isSea(n as NodeId) || canalNodes.has(n);
+  let id = 0;
+  for (let s = 0; s < map.size; s++) {
+    if (out[s] !== -1 || !water(s)) continue;
+    out[s] = id;
+    const queue = [s];
+    for (let i = 0; i < queue.length; i++)
+      for (let k = map.adjStart[queue[i]]; k < map.adjStart[queue[i] + 1]; k++) {
+        const m = map.adj[k];
+        if (out[m] === -1 && water(m)) { out[m] = id; queue.push(m); }
+      }
+    id++;
+  }
+  return out;
+}
+
+/** The bodies of water a ship at `n` can sail into: its own, or for a port, those of the seas it opens onto. */
+function basinsAt(map: GameMap, geo: NavalGeography, n: NodeId): number[] {
+  if (geo.basin[n] !== -1) return [geo.basin[n]];
+  const out: number[] = [];
+  for (const m of map.neighbors(n)) if (geo.basin[m] !== -1) out.push(geo.basin[m]);
+  return out;
+}
+
+/**
+ * The cell a fleet based at `n` sails from. At 1-degree resolution some bases sit on water the
+ * map does not resolve (Kitsap-Bangor on Puget Sound, Faslane on the Clyde): those move to the
+ * nearest cell of the same owner that touches the sea, a port first. `n` itself when it touches the sea.
+ */
+export function harbour(map: GameMap, n: NodeId): NodeId {
+  const geo = geography(map);
+  if (basinsAt(map, geo, n).length) return n;
+  const seen = new Set<number>([n]);
+  let ring: NodeId[] = [n];
+  for (let depth = 0; depth < 4 && ring.length; depth++) {
+    const next: NodeId[] = [];
+    for (const a of ring)
+      for (const b of map.neighbors(a))
+        if (!map.isSea(b) && !seen.has(b) && map.owner[b] === map.owner[n]) { seen.add(b); next.push(b); }
+    const wet = next.filter((b) => basinsAt(map, geo, b).length).sort((a, b) => Number(geo.portZone.has(b)) - Number(geo.portZone.has(a)) || map.distanceKm(n, a) - map.distanceKm(n, b));
+    if (wet.length) return wet[0];
+    ring = next;
+  }
+  return n;
+}
+
+/** Whether open water joins `from` and `to` (sea zones, canals or ports), mines aside. */
+export function sameWaters(map: GameMap, from: NodeId, to: NodeId): boolean {
+  const geo = geography(map);
+  const a = basinsAt(map, geo, from);
+  return basinsAt(map, geo, to).some((b) => a.includes(b));
 }
 
 export function seaNeighbour(map: GameMap, n: NodeId): NodeId | undefined {
