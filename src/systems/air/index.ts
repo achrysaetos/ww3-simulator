@@ -95,9 +95,11 @@ export function applyAirOrder(world: World, cmd: Command, ctx: SimContext): bool
   const needsTarget = order.posture === 'strike' || order.posture === 'air_superiority' || (order.posture === 'move' && f.kind === 'air_wing');
   if (needsTarget && target === undefined) return refuse(`${order.posture} needs a target`);
 
-  if (target !== undefined && (order.posture === 'strike' || order.posture === 'air_superiority')) {
+  // A strike on a satellite formation is an ASAT engagement, resolved by orbit in the strategic system.
+  const aimed = order.targetFormation ? world.formations[order.targetFormation] : undefined;
+  if (target !== undefined && aimed?.kind !== 'space' && (order.posture === 'strike' || order.posture === 'air_superiority')) {
     const reach = maxReachKm(f, order.posture === 'strike', ctx);
-    const ship = order.targetFormation ? world.formations[order.targetFormation] : undefined;
+    const ship = aimed;
     const dist = ctx.map.distanceKm(f.node, ship?.node === target ? navalPosition(ctx.map, ship) : target);
     if (dist > reach) return refuse(`target is ${Math.round(dist)} km away, beyond reach of ${Math.round(reach)} km`);
   }

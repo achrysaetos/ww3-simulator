@@ -4,6 +4,7 @@ import type { Command, MunitionId, NationId, NodeId, SimEvent } from '../src/cor
 import { createSession } from '../src/scenarios';
 import { createAi } from '../src/systems/ai';
 import { createDiplomacy } from '../src/systems/diplomacy';
+import { isrFactor } from '../src/systems/strategic';
 import { id, testWorld } from '../src/testkit';
 
 const N = id.nation;
@@ -261,4 +262,22 @@ describe('coalition allocation', () => {
     expect(posts.length).toBeGreaterThan(0);
     for (const n of posts) expect(t.map.owner[n!]).toBe(N('EST'));
   });
+});
+
+describe('counter-space strikes', () => {
+  it('ASAT units at war with a space power shoot down its satellites, each interceptor only within its ceiling', () => {
+    const s = createSession('ww3-2027', 1);
+    const gps = Object.values(s.world.formations).find((f) => f.name.startsWith('GPS constellation'))!;
+    const kills: Record<string, number> = {};
+    s.engine.run(s.world, (9 * 24) / s.world.dtHours, (_w, events) => {
+      for (const e of events) {
+        if (e.type !== 'strike') continue;
+        for (const x of e.effects) if (x.kind === 'satellites_destroyed') kills[`${e.munition}@${e.target === gps.node ? 'gps' : 'leo'}`] = (kills[`${e.munition}@${e.target === gps.node ? 'gps' : 'leo'}`] ?? 0) + x.count;
+      }
+    });
+    expect(Object.values(kills).reduce((a, n) => a + n, 0)).toBeGreaterThan(5);
+    expect(isrFactor(s.world, N('USA'))).toBeLessThan(1);
+    // SC-19 and Nudol top out near 1,000-1,500 km; only the DN-3 climbs to GPS at 20,200 km.
+    expect(Object.keys(kills).filter((k) => k.endsWith('@gps') && !k.startsWith('dn3'))).toEqual([]);
+  }, 180_000);
 });
