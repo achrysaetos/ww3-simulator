@@ -91,8 +91,15 @@ export class Engine {
 
 // ---------------------------------------------------------------- shared helpers
 
+// Relations are read in the inner loops of movement, combat and detection; building the key string on each read cost ~4% of a ww3-2027 tick plus its garbage.
+const relationKeys = new Map<NationId, Map<NationId, string>>();
+
 export function relationKey(a: NationId, b: NationId): string {
-  return a < b ? `${a}|${b}` : `${b}|${a}`;
+  let row = relationKeys.get(a);
+  if (!row) relationKeys.set(a, (row = new Map()));
+  let key = row.get(b);
+  if (key === undefined) row.set(b, (key = a < b ? `${a}|${b}` : `${b}|${a}`));
+  return key;
 }
 
 const NEUTRAL: Relation = { opinion: 0, atWar: false, escalation: 'peace', sanctions: false };
