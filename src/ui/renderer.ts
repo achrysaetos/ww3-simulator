@@ -104,6 +104,11 @@ export class MapRenderer {
   /** Wheel zoom eases toward a target about the cursor instead of stepping. */
   private glide: { zoom: number; x: number; y: number } | null = null;
   private lastFrame = 0;
+  /** Adaptive resolution: frame interval while moving, and when the camera last moved. */
+  private moveDt = 16;
+  private motionScale = 1;
+  private lastMove = 0;
+  private drawnCam: Camera | null = null;
   private globeDirty = true;
   private tilesPending = false;
   private byNode = new Map<NodeId, FormationView[]>();
@@ -207,7 +212,7 @@ export class MapRenderer {
   }
 
   get animating() {
-    return this.flashes.length > 0 || this.fly !== null || this.glide !== null || this.tilesPending;
+    return this.flashes.length > 0 || this.fly !== null || this.glide !== null || this.tilesPending || this.globe.scale < 1;
   }
 
   screenOf(n: NodeId): [number, number] | null {
@@ -288,6 +293,7 @@ export class MapRenderer {
       this.globeDirty = true;
     }
     if (changed) this.syncSituation(input);
+    this.adaptResolution(now, dt);
     if (this.globeDirty || this.tilesPending) {
       this.globeDirty = false;
       this.tilesPending = this.globe.draw(this.cam, this.vp, { seaGrid: input.overlays.seaZones });
@@ -303,6 +309,33 @@ export class MapRenderer {
     this.drawOrders(input);
     this.drawFormations(input);
     this.drawFlashes(now);
+  }
+
+  /**
+   * Keep motion smooth where fill rate is short (integrated or software GPUs):
+   * while the camera moves and frames run long, draw the terrain at a lower
+   * resolution; one full-resolution frame follows when it stops.
+   */
+  private adaptResolution(now: number, dt: number) {
+    const moved = this.cam !== this.drawnCam;
+    this.drawnCam = this.cam;
+    const g = this.globe;
+    if (moved) {
+      // Pick up at the scale the last motion settled on, so every drag does not relearn it.
+      if (now - this.lastMove > 180) this.moveDt = 16;
+      else {
+        this.moveDt += (dt - this.moveDt) * 0.3;
+        if (this.moveDt > 24 && this.motionScale > 0.3) {
+          this.motionScale = Math.max(0.3, this.motionScale * 0.7);
+          this.moveDt = 16;
+        } else if (this.moveDt < 11 && this.motionScale < 1) this.motionScale = Math.min(1, this.motionScale / 0.7);
+      }
+      this.lastMove = now;
+      g.scale = this.motionScale;
+    } else if (g.scale < 1 && now - this.lastMove > 180) {
+      g.scale = 1;
+      this.globeDirty = true;
+    }
   }
 
   /** The cell's four corners on screen, or null if any is behind the globe. */

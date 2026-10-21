@@ -208,6 +208,7 @@ export class GlobeGL {
   private width = 1;
   private height = 1;
   private dpr = 1;
+  private resScale = 1;
   private readonly aniso: EXT_texture_filter_anisotropic | null;
   /** Called when a tile finishes loading, so the owner can schedule a frame. */
   onTile: () => void = () => {};
@@ -295,8 +296,27 @@ export class GlobeGL {
     this.width = width;
     this.height = height;
     this.dpr = dpr;
-    this.canvas.width = Math.round(width * dpr);
-    this.canvas.height = Math.round(height * dpr);
+    this.applyScale();
+  }
+
+  /**
+   * Resolution scale of the drawing buffer. Fill rate is the globe's whole
+   * cost, so on a weak GPU the owner drops it while the camera moves and
+   * restores it when the camera stops.
+   */
+  get scale() {
+    return this.resScale;
+  }
+
+  set scale(s: number) {
+    if (s === this.resScale) return;
+    this.resScale = s;
+    this.applyScale();
+  }
+
+  private applyScale() {
+    this.canvas.width = Math.max(1, Math.round(this.width * this.dpr * this.resScale));
+    this.canvas.height = Math.max(1, Math.round(this.height * this.dpr * this.resScale));
   }
 
   private request(t: TileKey) {
@@ -368,7 +388,7 @@ export class GlobeGL {
   draw(cam: Camera, vp: Viewport, opts: GlobeOptions): boolean {
     const gl = this.gl;
     this.frame++;
-    for (let i = 0; i < UPLOADS_PER_FRAME && this.ready.length; i++) {
+    for (let i = 0; i < (this.resScale < 1 ? 1 : UPLOADS_PER_FRAME) && this.ready.length; i++) {
       const r = this.ready.shift()!;
       this.upload(r.key, r.img);
     }
@@ -379,19 +399,24 @@ export class GlobeGL {
     const lat0 = (cam.lat * Math.PI) / 180;
     const camU = [(cam.lon * Math.PI) / 180, lat0, Math.sin(lat0), Math.cos(lat0)] as const;
 
-    gl.useProgram(this.bgProg.prog);
-    gl.uniform3f(this.bgProg.u.u_view, R, this.width, this.height);
-    gl.uniform1f(this.bgProg.u.u_dpr, this.dpr);
-    gl.uniform1f(this.bgProg.u.u_globe, globe);
-    gl.bindVertexArray(this.quad);
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    const dpr = this.dpr * this.resScale;
+    const plan = this.plan(cam, vp);
+    // Close in, the globe fills the screen and the tiles cover every pixel: skip the sky.
+    if (!plan.length || R * R < (this.width * this.width + this.height * this.height) / 4) {
+      gl.useProgram(this.bgProg.prog);
+      gl.uniform3f(this.bgProg.u.u_view, R, this.width, this.height);
+      gl.uniform1f(this.bgProg.u.u_dpr, dpr);
+      gl.uniform1f(this.bgProg.u.u_globe, globe);
+      gl.bindVertexArray(this.quad);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
 
     const p = this.tileProg;
     gl.useProgram(p.prog);
     gl.uniform4f(p.u.u_cam, ...camU);
     gl.uniform3f(p.u.u_view, R, this.width, this.height);
     gl.uniform1f(p.u.u_globe, globe);
-    gl.uniform1f(p.u.u_dpr, this.dpr);
+    gl.uniform1f(p.u.u_dpr, dpr);
     gl.uniform1f(p.u.u_seaGrid, opts.seaGrid ? Math.max(0, Math.min(1, (pxPerDeg(cam) - 12) / 20)) : 0);
     gl.uniform1i(p.u.u_tex, 0);
     gl.uniform1i(p.u.u_mask, 1);
@@ -402,7 +427,6 @@ export class GlobeGL {
     gl.bindTexture(gl.TEXTURE_2D, this.overlay);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindVertexArray(this.grid);
-    const plan = this.plan(cam, vp);
     const pending = this.ready.length > 0 || this.inflight.size > 0;
     for (const { tile, tex } of plan) {
       const span = spanOf(tile.z);
@@ -417,7 +441,7 @@ export class GlobeGL {
       gl.uniform4f(l.u.u_cam, ...camU);
       gl.uniform3f(l.u.u_view, R, this.width, this.height);
       gl.uniform1f(l.u.u_lights, globe);
-      gl.uniform1f(l.u.u_dpr, this.dpr);
+      gl.uniform1f(l.u.u_dpr, dpr);
       gl.enable(gl.BLEND);
       gl.blendFunc(gl.ONE, gl.ONE);
       gl.bindVertexArray(this.lights);
