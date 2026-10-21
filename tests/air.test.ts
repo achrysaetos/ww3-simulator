@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { relationMut } from '../src/core/engine';
 import { Rng } from '../src/core/rng';
 import type { Formation, NodeId } from '../src/core/types';
 import { applyAirOrder, combatRadiusKm, interceptSalvo, resolveAirBattle } from '../src/systems/air';
@@ -116,6 +117,22 @@ describe('integrated air defense', () => {
     expect(s.intercepted).toBeLessThanOrEqual(16);
     expect(ad.magazine[mid('x_pac3')]).toBe(0);
     expect(t.world.theater.infrastructure[kyiv]).toBeLessThan(1);
+  });
+
+  it('a strike order left standing after a peace fires nothing at the former enemy or its airfields', () => {
+    const t = airWorld();
+    t.war('RUS', 'UKR');
+    const kyiv = t.node(...KYIV);
+    wing(t, 'UKR', kyiv, { t_fighter: 12 });
+    const city = launchers(t, 'RUS', t.node(53.9, 27.6), { x_mrbm_tel: 20 }, { posture: 'strike', target: kyiv, targetClass: 'structure' });
+    const base = launchers(t, 'RUS', t.node(53.9, 27.6), { x_mrbm_tel: 20 }, { posture: 'strike', target: kyiv, targetClass: 'aircraft' });
+    expect(t.strikes(t.tick()).length).toBeGreaterThan(0);
+    relationMut(t.world, RUS, UKR).atWar = false;
+    const rounds = (f: Formation) => f.magazine[mid('x_mrbm')];
+    const before = [rounds(city), rounds(base)], runway = t.world.slices.air?.runway?.[kyiv];
+    expect(t.strikes(t.tick(4))).toEqual([]);
+    expect([rounds(city), rounds(base)]).toEqual(before);
+    expect(t.world.slices.air?.runway?.[kyiv]).toBe(runway);
   });
 
   it('runs interceptor stocks down until only the counter-drone belt stops drones', () => {

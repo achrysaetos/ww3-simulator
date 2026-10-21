@@ -166,7 +166,7 @@ function planPackage(world: World, ctx: SimContext, pic: AirPicture, f: Formatio
 export function resolveStrikes(world: World, ctx: SimContext, pic: AirPicture, slice: AirSlice): void {
   const raids = new Map<string, Package[]>();
   for (const f of Object.values(world.formations)) {
-    if (f.status !== 'active' || f.order.posture !== 'strike') continue;
+    if (f.status !== 'active' || f.order.posture !== 'strike' || !hostileTarget(world, pic, f)) continue;
     const p = planPackage(world, ctx, pic, f);
     if (!p) continue;
     const key = `${f.order.target}|${f.nation}`;
@@ -178,6 +178,20 @@ export function resolveStrikes(world: World, ctx: SimContext, pic: AirPicture, s
     const [t, attacker] = key.split('|');
     resolveRaid(world, ctx, pic, slice, Number(t) as NodeId, attacker as NationId, pkgs);
   }
+}
+
+/**
+ * Whether a strike order still points at a nation its formation is at war with: the formation it
+ * aims at, else whoever holds the target cell, else (at sea, or a wing on a third nation's base)
+ * any enemy formation there. An order left standing after a peace or ceasefire fires nothing.
+ */
+function hostileTarget(world: World, pic: AirPicture, f: Formation): boolean {
+  const aimed = f.order.targetFormation ? world.formations[f.order.targetFormation] : undefined;
+  if (aimed) return pic.atWar(aimed.nation, f.nation);
+  const t = f.order.target!;
+  const owner = world.control[t];
+  if (owner && pic.atWar(owner, f.nation)) return true;
+  return (pic.atNode.get(t) ?? []).some((g) => pic.atWar(g.nation, f.nation));
 }
 
 function resolveRaid(world: World, ctx: SimContext, pic: AirPicture, slice: AirSlice, target: NodeId, attacker: NationId, pkgs: Package[]) {
