@@ -1,7 +1,7 @@
 import type { GameMap } from '../../core/map';
 import type { NationId, World } from '../../core/types';
 import {
-  AIRLIFT_FACTOR, BEACH_CAPACITY, DECAY_HALF_KM, DEPOT_POP_SHARE, FRONTLINE_CAPACITY, FRONTLINE_COST, FULL_PORT, MAX_DEPOTS, MIN_FACTOR, MIN_RAIL_KM,
+  AIRLIFT_FACTOR, BEACH_CAPACITY, DECAY_HALF_KM, DEPOT_POP_SHARE, FRONTLINE_CAPACITY, FRONTLINE_COST, FULL_PORT, LAST_MILE_CAPACITY, MAX_DEPOTS, MIN_FACTOR, MIN_RAIL_KM,
   PORT_HANDLING_KM, RAIL_COST_PER_KM, RAIL_CUT_INFRASTRUCTURE, SEA_COST_PER_KM, TERRAIN_ROAD_COST,
 } from './tables';
 
@@ -105,6 +105,12 @@ function staticNet(map: GameMap): StaticNet {
   const net = { mode, railCost, roadCost, portCap, depots };
   staticCache.set(map, net);
   return net;
+}
+
+/** A factor in thousandths for forces at a node, and the route it arrives by. */
+export interface ForcesSupply {
+  milli: number;
+  route: 'network' | 'overland' | 'beach';
 }
 
 export function depotsOf(map: GameMap, nation: NationId): readonly number[] {
@@ -413,24 +419,29 @@ export class NetworkSearch {
   }
 
   /**
-   * Factor in thousandths for forces at `node`. Forces inside an enemy-held cell have
-   * outrun their road and rail net and get nothing, unless they hold a lodgement on a
-   * coast with no friendly ground next to it: that is fed over the beach from the
-   * adjacent sea zone, as far as sea control lets the network reach it (Normandy,
-   * Inchon). The caller scales it by the lift left to carry it.
+   * How forces at `node` are fed. Forces in a cell the network cannot enter (enemy-held,
+   * or their own with stronger enemy forces in it) fight at its near edge, ~100 km from
+   * the far one, and are fed across the contact line from the best adjacent cell their
+   * side holds, at LAST_MILE_CAPACITY of that cell's factor, never through a cell the
+   * enemy holds; a spearhead with no friendly ground next to it has outrun its road and rail net.
+   * A lodgement on a coast with no friendly ground next to it is fed over the beach
+   * from the adjacent sea zone, as far as sea control lets the network reach it
+   * (Normandy, Inchon); the caller scales that by the lift left to carry it.
    */
-  milliForForcesAt(inputs: SearchInputs, node: number): number {
+  forcesSupplyAt(inputs: SearchInputs, node: number): ForcesSupply {
     const own = this.milliAt(inputs, node);
     const { landCount, adjStart, adj } = this.map;
     const { side } = this, cell = this.controllers.cell;
-    if (own > 0 || node >= landCount || side[cell[node]] !== ENEMY) return own;
-    let sea = 0;
+    const held = side[cell[node]];
+    if (own > 0 || node >= landCount || !(held === ENEMY || (held === FRIENDLY && this.blocked.has(node)))) return { milli: own, route: 'network' };
+    let sea = 0, land = -1;
     for (let k = adjStart[node]; k < adjStart[node + 1]; k++) {
       const v = adj[k];
       if (v >= landCount) sea = Math.max(sea, this.milliAt(inputs, v));
-      else if (side[cell[v]] === FRIENDLY) return 0;
+      else if (side[cell[v]] === FRIENDLY) land = Math.max(land, this.milliAt(inputs, v));
     }
-    return Math.min(sea, Math.round(BEACH_CAPACITY * 1000));
+    if (land >= 0 || held === FRIENDLY) return { milli: Math.round(Math.max(0, land) * LAST_MILE_CAPACITY), route: 'overland' };
+    return { milli: Math.min(sea, Math.round(BEACH_CAPACITY * 1000)), route: 'beach' };
   }
 
   /** Searches on until every node in `nodes` has its factor. */

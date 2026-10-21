@@ -90,8 +90,10 @@ describe.each([1, 2, 3])('ukraine-2026 seed %i, 60 days', (seed) => {
 
 /**
  * RAND (Shlapak and Johnson, 2016) found Russian forces at Tallinn or Riga in 36-60 hours against
- * 2016 posture. With eFP brigades in place and Finland in NATO the 2027 defence is thicker, so the
- * judgment band is ground taken but no collapse: 1-6 Baltic cells in three weeks.
+ * 2016 posture. With eFP brigades grown to brigades, Panzerbrigade 45 in Lithuania and Finland in
+ * NATO the 2027 defence is thicker, against a Leningrad district army back in garrison by the
+ * border (RUSSIA_WEST_2027 in src/scenarios), so the judgment band is ground taken but no
+ * collapse: 1-6 Baltic cells in three weeks.
  */
 describe.each([1, 2])('baltic-2027 seed %i, 21 days', (seed) => {
   it('Russia takes 1-6 cells of the Baltic states', () => {

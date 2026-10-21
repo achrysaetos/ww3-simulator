@@ -83,6 +83,14 @@ export const FULL_PORT = 3;
 export const BEACH_CAPACITY = 0.25;
 /** Ships that carry a lodgement's supplies across the beach. */
 export const SEALIFT_CLASSES: ReadonlySet<PlatformClass> = new Set(['amphibious', 'cargo_ship']);
+/**
+ * Cargo tons per vehicle lane and per troop berth, for landing ships the catalog rates
+ * in troops and vehicles rather than tons. Fitted so a Ropucha (10 vehicles, 225 troops)
+ * comes to ~450 t and a Type 074 Yuhai (2 vehicles, 250 troops) to ~250 t, their
+ * published cargo loads (Jane's Fighting Ships). Estimate.
+ */
+export const LIFT_TONS_PER_VEHICLE = 25;
+export const LIFT_TONS_PER_TROOP = 0.75;
 
 /**
  * Road cost multiplier by terrain of the cell entered. Estimates from relative
@@ -113,6 +121,15 @@ export const DECAY_HALF_KM = 350;
 /** Throughput penalty for a friendly cell adjacent to enemy-held ground (artillery and drone interdiction of the last 20-30 km, Ukraine 2022-24). */
 export const FRONTLINE_CAPACITY = 0.5;
 export const FRONTLINE_COST = 1.5;
+/**
+ * Share of an adjacent friendly cell's factor that reaches forces fighting inside a
+ * cell the network cannot enter: the last 10-20 km under drone and artillery
+ * observation, crossed by night, on foot, by quad bike or unmanned ground vehicle
+ * (RUSI, Watling and Reynolds, "Tactical Developments During the Third Year of the
+ * Russo-Ukrainian War", 2025). Judgment; with it Russia fires 13-15k shells a day in
+ * ukraine-2026, inside the 10-20k band.
+ */
+export const LAST_MILE_CAPACITY = 0.5;
 
 /**
  * Best supply an airfield can get by airlift alone. Calibration: the Stalingrad

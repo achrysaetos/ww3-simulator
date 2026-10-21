@@ -100,9 +100,7 @@ describe.each([1, 2, 3])('ukraine-2026 seed %i, 90 days', (seed) => {
   });
 
   // Russia ~10-20k rounds a day in 2024-25, down from 40-60k in 2022; Ukraine ~2-7k (RUSI, ISW, Estonian intelligence).
-  // Fails: most Russian assault formations stand in cells Ukraine holds, which logistics cannot reach, so their guns
-  // stay dry. Supplying them through adjacent friendly ground reaches the band but breaks the ground-gain calibration.
-  it.fails('Russia fires 10-20k shells a day and Ukraine 2-7k', () => {
+  it('Russia fires 10-20k shells a day and Ukraine 2-7k', () => {
     for (const m of settled(ukraine(seed))) {
       expect(m.shells.UKR).toBeGreaterThanOrEqual(2_000);
       expect(m.shells.UKR).toBeLessThanOrEqual(7_000);

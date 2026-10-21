@@ -1,10 +1,10 @@
 import { atWar, type SimContext, type System } from '../../core/engine';
 import type { GameMap } from '../../core/map';
-import type { Formation, FormationId, MunitionId, NationId, NodeId, PlatformId, World } from '../../core/types';
+import type { Formation, FormationId, MunitionId, NationId, NodeId, Platform, PlatformId, World } from '../../core/types';
 import { Controllers } from './network';
 import { refreshNetworks, snapshotInputs, type InputSnapshot, type SupplyNetwork } from './refresh';
 import {
-  FOOD_TONS_PER_PERSON_DAY, IDLE_FUEL_HOURS_PER_DAY, BEACH_CAPACITY, INFRA_REPAIR_PER_DAY, MAX_REFILL_FRACTION_PER_DAY, NODE_TONS_PER_DAY,
+  FOOD_TONS_PER_PERSON_DAY, IDLE_FUEL_HOURS_PER_DAY, BEACH_CAPACITY, INFRA_REPAIR_PER_DAY, LIFT_TONS_PER_TROOP, LIFT_TONS_PER_VEHICLE, MAX_REFILL_FRACTION_PER_DAY, NODE_TONS_PER_DAY,
   REARM_PER_DAY, REARMS_IN_PORT_ONLY, SEALIFT_CLASSES, RECONSTITUTE_DAYS, RECONSTITUTE_MIN_STRENGTH, RECONSTITUTED_KINDS, REGENERATED_CLASSES,
   REPAIR_FRACTION_PER_DAY, REPLACE_FRACTION_PER_DAY, RESERVE_REPLACE_MULTIPLIER, SUPPLY_CLASSES, type SupplyClass,
 } from './tables';
@@ -29,7 +29,7 @@ export interface LogisticsState {
   establishment: Record<FormationId, Establishment>;
   /** Tick each destroyed formation awaiting re-forming was destroyed. */
   fallen: Record<FormationId, number>;
-  /** Sealift hulls (amphibious and cargo ships) each nation fields now, and the most it has fielded; a lodgement's beach supply scales with their ratio. */
+  /** Sealift cargo tons (amphibious and cargo ships) each nation fields now, and the most it has fielded; a lodgement's beach supply scales with their ratio. */
   lift: Record<NationId, { now: number; most: number }>;
   /** Bulk classes each nation is currently short of, so a shortage is reported once per episode. */
   short: Record<NationId, SupplyClass[]>;
@@ -46,15 +46,15 @@ export function supplyFactor(world: World, node: NodeId, nation: NationId): numb
   const s = world.slices.logistics;
   const key = s?.networkOf[nation];
   const net = key ? s.networks[key] : undefined;
-  return net ? forcesFactor(world, s, net, node, nation) : 0;
+  return net ? forcesFactor(s, net, node, nation).phi : 0;
 }
 
-function forcesFactor(world: World, s: LogisticsState, net: SupplyNetwork, node: NodeId, nation: NationId): number {
-  const phi = net.search.milliForForcesAt(s.seen, node) / 1000;
-  const holder = world.control[node];
-  if (phi <= 0 || !holder || !atWar(world, nation, holder)) return phi;
+/** Supply factor for `nation`'s forces at `node`, and whether it comes over the beach. */
+function forcesFactor(s: LogisticsState, net: SupplyNetwork, node: NodeId, nation: NationId): { phi: number; beach: boolean } {
+  const { milli, route } = net.search.forcesSupplyAt(s.seen, node);
+  if (route !== 'beach' || milli <= 0) return { phi: milli / 1000, beach: false };
   const lift = s.lift[nation];
-  return lift ? (phi * lift.now) / lift.most : 0;
+  return { phi: lift ? ((milli / 1000) * lift.now) / lift.most : 0, beach: true };
 }
 
 const initialState = (world: World, map: GameMap): LogisticsState => ({
@@ -93,8 +93,10 @@ function activeFormations(world: World, ctx: SimContext, s: LogisticsState): For
     s.establishment[f.id] ??= { equipment: sumCounts(f.equipment, f.damaged), personnel: f.personnel };
     if (f.status !== 'embarked') out.push(f);
     if (f.kind === 'surface_group')
-      for (const pid in f.equipment)
-        if (SEALIFT_CLASSES.has(ctx.catalog.platform(pid as PlatformId).class)) lift.set(f.nation, (lift.get(f.nation) ?? 0) + f.equipment[pid as PlatformId]);
+      for (const pid in f.equipment) {
+        const p = ctx.catalog.platform(pid as PlatformId);
+        if (SEALIFT_CLASSES.has(p.class)) lift.set(f.nation, (lift.get(f.nation) ?? 0) + liftTons(p) * f.equipment[pid as PlatformId]);
+      }
   }
   for (const n in s.lift) s.lift[n as NationId].now = 0;
   for (const [n, now] of lift) {
@@ -103,6 +105,11 @@ function activeFormations(world: World, ctx: SimContext, s: LogisticsState): For
     l.most = Math.max(l.most, now);
   }
   return out;
+}
+
+function liftTons(p: Platform): number {
+  const c = p.capacity;
+  return c?.cargoTons ?? (c?.vehicles ?? 0) * LIFT_TONS_PER_VEHICLE + (c?.troops ?? 0) * LIFT_TONS_PER_TROOP;
 }
 
 /** Repair crews restore cells their controller holds, except along the front where work is under fire. */
@@ -144,10 +151,10 @@ function sustain(world: World, ctx: SimContext, s: LogisticsState, forces: Forma
     const f = forces[i];
     consumeBaseline(f, ctx, idleHours[f.kind] * dtDays, food);
     const net = networks[networkOf[f.nation]];
-    const phi = (factor[i] = net ? forcesFactor(world, s, net, f.node, f.nation) : 0);
+    const supply = net ? forcesFactor(s, net, f.node, f.nation) : undefined;
+    const phi = (factor[i] = supply?.phi ?? 0);
     if (phi <= 0) continue;
-    const holder = world.control[f.node];
-    ashore[i] = holder && atWar(world, f.nation, holder) ? 1 : 0;
+    ashore[i] = supply!.beach ? 1 : 0;
     // Spelled out per class: keyed access by class name dominated this loop.
     const cap = f.supplyCapacity, have = f.supply, j = i * 3;
     const tons =

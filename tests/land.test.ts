@@ -106,7 +106,7 @@ describe('land combat', () => {
   it('artillery in an adjacent node adds to the defence', () => {
     const attLoss = (arty: boolean) =>
       [1, 2, 3].reduce((sum, seed) => sum + assault({
-        ratio: 3, defNode: PLAIN_UKR, attNode: PLAIN_RUS, entrench: 1, days: 5, seed,
+        ratio: 3, defNode: PLAIN_UKR, attNode: PLAIN_RUS, entrench: 0, days: 5, seed,
         before: (s) => void (arty && s.add({ nation: UKR, name: 'arty', kind: 'artillery', echelon: 'brigade', node: MAP.nodeAt(48.5, 36.5), equipment: { [id.platform('t_spg')]: 72 } })),
       }).attLoss, 0);
     expect(attLoss(true)).toBeGreaterThan(attLoss(false) * 1.25);
