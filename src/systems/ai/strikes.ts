@@ -281,6 +281,8 @@ const PENETRATOR_VISIBILITY = 0.1;
  * order of battle lists a battery there, so planners treat each as ringed (judgment).
  */
 const AIRBASE_DEFENSE_KM = 60;
+/** The line between two 1-degree cells in contact runs about half a cell (~55 km) from each side's cell centres. */
+const LINE_OFFSET_KM = 55;
 
 /** Enemy SAM envelopes, for keeping strike aircraft out of coverage they cannot outrange. */
 /** Longest interceptor range in a formation's magazine, memoised per tick: every enemy's planner asks. */
@@ -306,8 +308,17 @@ export class SamCover {
   private maxKm = 0;
   /** Enemy-held cells touching a friendly front: the contact zone strike aviation may overfly. */
   private readonly contact = new Set<number>();
+  /** Own front cells, and the enemies holding ground across from them. */
+  private readonly front: NodeId[] = [];
+  private readonly across = new Set<NationId>();
   constructor(private readonly p: Plan) {
-    for (const s of p.sectors) for (const n of s.enemyNodes) this.contact.add(n);
+    for (const s of p.sectors) {
+      this.front.push(...s.nodes);
+      for (const n of s.enemyNodes) {
+        this.contact.add(n);
+        this.across.add(p.world.control[n]);
+      }
+    }
     for (const e of p.enemies)
       for (const f of p.index.byNation.get(e) ?? []) {
         if (f.kind === 'air_wing') {
@@ -356,10 +367,12 @@ export class SamCover {
    * air: short-range air defenses and fighters there are not in the SAM list but kill as
    * surely. This keeps both air forces in Ukraine launching from their own side of the
    * front, as they have since 2022: Russian glide bombs reach 40-70 km past the line
-   * (ISW, RUSI 2024), and Russian jets do not overfly Poltava 200 km behind it.
+   * (ISW, RUSI 2024), and Russian jets do not overfly Poltava 200 km behind it. A target
+   * across a land front is reachable only from a release point at most TOLERATED_DEPTH_KM
+   * past the line.
    */
   clear(from: NodeId, node: NodeId, standoffKm: number, visibility = 1): boolean {
-    if (this.covered(node, standoffKm, visibility)) return false;
+    if (this.covered(node, standoffKm, visibility) || this.pastLine(node, standoffKm, visibility)) return false;
     const key = `${from}:${node}:${standoffKm}:${visibility}`;
     let ok = this.routes.get(key);
     if (ok === undefined) this.routes.set(key, (ok = this.route(from, node, standoffKm, visibility)));
@@ -367,6 +380,21 @@ export class SamCover {
   }
 
   private readonly routes = new Map<string, boolean>();
+  private readonly lineKm = new Map<number, number>();
+
+  /** A target across a land front that a conventional package reaches only by releasing deeper than tolerated past the line. */
+  private pastLine(node: NodeId, standoffKm: number, visibility: number): boolean {
+    const { map } = this.p.ctx;
+    const { world, nation } = this.p;
+    if (visibility < PENETRATOR_VISIBILITY || map.isSea(node) || !this.across.has(world.control[node]) || world.theater.airControl[node]?.nation === nation) return false;
+    let km = this.lineKm.get(node);
+    if (km === undefined) {
+      km = Infinity;
+      for (const f of this.front) km = Math.min(km, map.distanceKm(f, node));
+      this.lineKm.set(node, (km -= LINE_OFFSET_KM));
+    }
+    return km > standoffKm + TOLERATED_DEPTH_KM;
+  }
 
   private route(from: NodeId, node: NodeId, standoffKm: number, visibility: number): boolean {
     const { map } = this.p.ctx;
@@ -410,15 +438,6 @@ export class SamCover {
   }
 }
 
-/** The munition with the best kill probability against `t` that reaches `km`. */
-export function bestMunition(munitions: readonly Munition[], t: StrikeTarget, km: number): MunitionId | undefined {
-  let best: MunitionId | undefined, bestPk = 0;
-  for (const m of munitions) {
-    const pk = m.rangeKm >= km ? pkAgainst(m, t) : 0;
-    if (pk > bestPk) { bestPk = pk; best = m.id; }
-  }
-  return best;
-}
 
 /** Great-circle test with a cheap latitude-band reject first; shooters test thousands of targets. */
 export function withinKm(map: GameMap, a: NodeId, b: NodeId, km: number): boolean {
