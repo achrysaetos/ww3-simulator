@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { NationId } from '../core/types';
 import type { SimClient } from './client';
 import type { Palette } from './colors';
+import { LoadFileInput } from './GameFlow';
 import type { ScenarioCard } from './snapshot';
 import { fmtUsdB } from './widgets';
 
@@ -13,6 +14,7 @@ export function StartScreen({ client, palette }: { client: SimClient; palette: P
   const [scenarioId, setScenarioId] = useState<string | null>(null);
   const scenario: ScenarioCard | undefined = scenarios.find((s) => s.id === scenarioId) ?? scenarios[0];
   const [nation, setNation] = useState<NationId | null>(null);
+  const file = useRef<HTMLInputElement>(null);
   useEffect(() => setNation(scenario?.suggestedNation ?? null), [scenario?.id]);
 
   if (!scenario) return <div className="start"><p className="muted pad">Loading scenarios…</p></div>;
@@ -59,6 +61,15 @@ export function StartScreen({ client, palette }: { client: SimClient; palette: P
           {client.starting ? 'Building world…' : 'Take command'}
         </button>
       </div>
+      <div className="row gap start-load">
+        <span className="muted small">Or resume a saved war:</span>
+        <button disabled={!client.slot || client.starting} onClick={() => void client.load()} data-testid="start-quickload">
+          Load quick save{client.slot ? ` (${scenarios.find((s) => s.id === client.slot!.scenario)?.name ?? client.slot.scenario}, saved ${new Date(client.slot.savedAt).toLocaleString()})` : ''}
+        </button>
+        <button disabled={client.starting} onClick={() => file.current?.click()} data-testid="start-load-file">Load save file…</button>
+        <LoadFileInput client={client} inputRef={file} />
+      </div>
+      {client.notice?.tone === 'error' && <p className="tt-warn" data-testid="start-notice">{client.notice.text}</p>}
       {client.error && <p className="tt-warn pre">{client.error}</p>}
     </div>
   );

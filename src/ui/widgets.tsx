@@ -42,6 +42,7 @@ export function fmtNum(n: number): string {
 }
 
 export function fmtUsdB(b: number): string {
-  if (Math.abs(b) >= 1000) return `$${(b / 1000).toFixed(2)}T`;
-  return `$${b.toFixed(b >= 100 ? 0 : 1)}B`;
+  const a = Math.abs(b);
+  const text = a >= 1000 ? `${(a / 1000).toFixed(2)}T` : `${a.toFixed(a >= 100 ? 0 : 1)}B`;
+  return `${b < 0 && /[1-9]/.test(text) ? '-' : ''}$${text}`;
 }

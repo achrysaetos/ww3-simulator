@@ -3,13 +3,16 @@ import { COMMAND_DOMAINS, type Command, type FormationId, type FormationKind, ty
 import { DEFAULT_DELEGATION, DOMAIN_OF_KIND } from '../systems/orders';
 import type { SimClient } from './client';
 import { Palette } from './colors';
+import { briefingFor, objectives as objectivesOf, outcome as outcomeOf } from './briefing';
 import { Decisions } from './Decisions';
+import { BriefingDialog, ConfirmDialog, EndDialog, GameMenu, type Confirmation } from './GameFlow';
 import { EventLog } from './EventLog';
 import { FormationList, FormationPanel, GROUND_KINDS, type Command as CommandHolder } from './FormationPanel';
 import { MapView } from './MapView';
 import { DOMAIN_LABEL, NationPanel } from './NationPanel';
 import { NuclearDialog } from './NuclearDialog';
 import { Routes } from './routes';
+import type { LoggedEvent } from './feed';
 import { StartScreen } from './StartScreen';
 import type { Overlays } from './renderer';
 
@@ -23,12 +26,14 @@ const WATCH_TICKS = 8;
 const FORM_CONTROLS = new Set(['INPUT', 'SELECT', 'TEXTAREA', 'BUTTON']);
 
 interface Toast { text: string; tone: 'info' | 'error' }
+/** Waiting on the engine's word about something the player just did: a refused order, a landing team split off, a launch. */
+interface Watch { untilTick: number; seenSeq: number; match(row: LoggedEvent): Toast | null; timeout?: Toast }
 
 export function App({ client }: { client: SimClient }) {
   useSyncExternalStore(client.subscribe, client.getVersion);
   const palette = useMemo(() => new Palette((id) => client.nationCards.get(id as NationId)?.blocs ?? []), [client]);
   if (!client.meta || !client.playing) return <StartScreen client={client} palette={palette} />;
-  return <Command client={client} palette={palette} initialNation={client.playing} />;
+  return <Command key={client.sessionId} client={client} palette={palette} initialNation={client.playing} />;
 }
 
 function Command({ client, palette, initialNation }: { client: SimClient; palette: Palette; initialNation: NationId }) {
@@ -38,7 +43,10 @@ function Command({ client, palette, initialNation }: { client: SimClient; palett
 
   const [playAs, setPlayAs] = useState<NationId>(initialNation);
   const [selected, setSelected] = useState<FormationId | null>(null);
-  const [pending, setPending] = useState<{ posture: Posture; targetClass?: TargetClass } | null>(null);
+  const [pending, setPending] = useState<{ posture: Posture; targetClass?: TargetClass; lift?: 'air' | 'sea' } | null>(null);
+  const [confirm, setConfirm] = useState<Confirmation | null>(null);
+  const [briefingOpen, setBriefingOpen] = useState(true);
+  const [endSeen, setEndSeen] = useState<string | null>(null);
   const [nuclearPick, setNuclearPick] = useState(false);
   const [nuclearTarget, setNuclearTarget] = useState<NodeId | null>(null);
   const [tab, setTab] = useState<Tab>('forces');
@@ -46,7 +54,8 @@ function Command({ client, palette, initialNation }: { client: SimClient; palett
   const setSpeed = (s: Speed) => client.setSpeed(s);
   const [overlays, setOverlays] = useState<Overlays>({ air: true, sea: true, infra: true, fallout: true, cities: true, seaZones: true });
   const [toast, setToast] = useState<Toast | null>(null);
-  const watch = useRef<{ name: string; untilTick: number; seenSeq: number } | null>(null);
+  const watch = useRef<Watch | null>(null);
+  const lastSeq = () => client.feed.newest(new Set(), null, 1)[0]?.seq ?? -1;
 
   const nationOptions = useMemo(
     () => [...client.nationCards.values()].sort((a, b) => a.name.localeCompare(b.name)).map((n) => <option key={n.id} value={n.id}>{n.name}</option>),
@@ -71,6 +80,11 @@ function Command({ client, palette, initialNation }: { client: SimClient; palett
     return () => window.removeEventListener('keydown', onKey);
   }, [client]);
 
+  const noticeSeq = client.notice?.seq;
+  useEffect(() => {
+    if (client.notice) setToast({ text: client.notice.text, tone: client.notice.tone });
+  }, [client, noticeSeq]);
+
   useEffect(() => {
     if (!toast) return;
     const id = setTimeout(() => setToast(null), toast.tone === 'error' ? 9000 : 3500);
@@ -93,24 +107,46 @@ function Command({ client, palette, initialNation }: { client: SimClient; palett
   useEffect(() => {
     const w = watch.current;
     if (!w) return;
-    if (client.state.tick > w.untilTick) { watch.current = null; return; }
-    const rows = client.feed.rows.messages;
-    for (let i = rows.length - 1; i >= 0 && rows[i].seq > w.seenSeq; i--) {
-      const r = rows[i];
-      if (r.event.type === 'message' && r.event.nation === playAs && r.text.startsWith(w.name)) {
-        setToast({ tone: /refused|no land route|cannot/.test(r.text) ? 'error' : 'info', text: r.text });
+    for (const r of client.feed.newest(new Set(), playAs, 60).reverse()) {
+      if (r.seq <= w.seenSeq) continue;
+      const t = w.match(r);
+      if (t) {
+        setToast(t);
         watch.current = null;
         return;
       }
     }
-  }, [client, client.feed.version, playAs]);
+    if (client.state.tick > w.untilTick) {
+      if (w.timeout) setToast(w.timeout);
+      watch.current = null;
+    }
+  }, [client, client.feed.version, client.state.tick, playAs]);
 
   const choose = (id: NationId) => {
-    setPlayAs(id);
-    setSelected(null);
-    setPending(null);
-    client.playAs(id);
+    const go = () => {
+      setPlayAs(id);
+      setSelected(null);
+      setPending(null);
+      everEnemies.current = new Set();
+      setEndSeen(null);
+      client.playAs(id);
+    };
+    const me = client.state.nations.get(playAs);
+    if (me?.status !== 'war') return go();
+    setConfirm({
+      title: `Switch to ${client.namer.nation(id)}?`,
+      text: `${me.name} is at war. Your AI delegate will take over all of ${me.name}'s forces and decisions, and you will command ${client.namer.nation(id)} from now on.`,
+      yes: `Play as ${client.namer.nation(id)}`,
+      onYes: go,
+    });
   };
+
+  const quit = () => setConfirm({
+    title: 'Quit to the start screen?',
+    text: 'The war in progress ends here. Save it first from the Game menu if you want to come back to it.',
+    yes: 'Quit',
+    onYes: () => client.quit(),
+  });
 
   const selectFormation = useCallback((id: FormationId | null) => {
     setSelected(id);
@@ -131,10 +167,14 @@ function Command({ client, palette, initialNation }: { client: SimClient; palett
   /** The player's order also takes the formation from the AI delegate. */
   const sendOrder = (formation: FormationId, order: Omit<Order, 'issuedTick'>, label: string) => {
     const name = client.state.formations.find((f) => f.entry.id === formation)?.entry.name ?? 'Formation';
-    const lastSeq = client.feed.rows.messages.at(-1)?.seq ?? -1;
+    const seenSeq = lastSeq();
     client.command({ type: 'hold', nation: playAs, formations: [formation], held: true });
     client.command({ type: 'order', nation: playAs, formation, order });
-    watch.current = { name, untilTick: client.state.tick + WATCH_TICKS, seenSeq: lastSeq };
+    watch.current = {
+      untilTick: client.state.tick + WATCH_TICKS,
+      seenSeq,
+      match: (r) => (r.event.type === 'message' && r.text.startsWith(name) ? { tone: /refused|no land route|cannot|no friendly/.test(r.text) ? 'error' : 'info', text: r.text } : null),
+    };
     setToast({ tone: 'info', text: `${label}. Takes effect next tick; now under your command.` });
   };
 
@@ -146,11 +186,18 @@ function Command({ client, palette, initialNation }: { client: SimClient; palett
     }
     if (!pending || !selected) return;
     const f = client.state.formations.find((x) => x.entry.id === selected);
-    if (f && GROUND_KINDS.has(f.entry.kind) && f.status === 'active' && (pending.posture === 'move' || pending.posture === 'attack') && routes.overseas(f.node, node)) {
+    const across = !!f && GROUND_KINDS.has(f.entry.kind) && f.status === 'active' && routes.overseas(f.node, node);
+    if (across && pending.posture === 'attack') {
       setToast({
         tone: 'error',
-        text: `${f.entry.name} cannot march to ${places.name(node)}: it lies across the sea. Use Sealift in the unit panel to board a lift group at a port, then send the group to a port near ${places.name(node)}.`,
+        text: `${f!.entry.name} cannot attack ${places.name(node)} overland: it lies across the sea. Give it a Move order to deploy there by air or cargo ship, or embark it on amphibious lift to land under fire.`,
       });
+      setPending(null);
+      return;
+    }
+    if (across && pending.posture === 'move') {
+      const how = pending.lift === 'sea' ? 'by sealift' : pending.lift === 'air' ? 'by airlift' : 'by air if it can fly, otherwise by sea';
+      sendOrder(selected, { posture: 'move', target: node, ...(pending.lift ? { lift: pending.lift } : {}) }, `Deploying ${f!.entry.name} to ${places.name(node)} ${how}`);
       setPending(null);
       return;
     }
@@ -175,6 +222,36 @@ function Command({ client, palette, initialNation }: { client: SimClient; palett
   }, [targeting]);
   const delegatedNames = COMMAND_DOMAINS.filter((k) => ai[k]).map((k) => DOMAIN_LABEL[k].name);
   const keptNames = COMMAND_DOMAINS.filter((k) => !ai[k]).map((k) => DOMAIN_LABEL[k].name);
+
+  const nationIds = client.meta?.nationIds ?? [];
+  const briefing = useMemo(() => briefingFor(client.map, client.meta?.scenario.id ?? '', playAs), [client, playAs]);
+  const everEnemies = useRef(new Set<NationId>());
+  for (const e of d?.enemies ?? []) everEnemies.current.add(e);
+  const objectives = objectivesOf(client.state, nationIds, briefing, playAs, d?.enemies ?? [], everEnemies.current);
+  const ending = d ? outcomeOf(client.state, playAs, d.enemies, everEnemies.current, objectives) : null;
+  const endKey = ending ? `${ending.kind}|${ending.text}` : null;
+  useEffect(() => {
+    if (endKey && endKey !== endSeen && client.ticksPerSec) client.setSpeed(0);
+  }, [client, endKey, endSeen]);
+
+  const releaseNuclear = (c: Extract<Command, { type: 'nuclear_release' }>) => {
+    const seenSeq = lastSeq();
+    client.command(c);
+    setNuclearTarget(null);
+    watch.current = {
+      untilTick: client.state.tick + 2,
+      seenSeq,
+      match: (r) => {
+        const e = r.event;
+        if (e.type === 'message' && /^nuclear release refused/.test(e.text)) return { tone: 'error', text: r.text };
+        if (e.type === 'nuclear_detonation' && e.by === playAs) return { tone: 'info', text: `Launch confirmed. ${r.text}` };
+        if (e.type === 'strike' && e.by === playAs && e.munition === c.munition) return { tone: 'info', text: `Launch confirmed. ${r.text}` };
+        return null;
+      },
+      timeout: { tone: 'error', text: 'No launch was reported: the release order was not carried out.' },
+    };
+    setToast({ tone: 'info', text: 'Release order sent. Waiting for the launch report; advance time if paused.' });
+  };
 
   return (
     <div className="app" data-tab={tab}>
@@ -207,6 +284,7 @@ function Command({ client, palette, initialNation }: { client: SimClient; palett
           ))}
           <button onClick={() => client.step()} disabled={speed !== 0} title="Advance one tick (.)" data-testid="step">Step ▸</button>
         </div>
+        <GameMenu client={client} onBriefing={() => setBriefingOpen(true)} onQuit={quit} />
         <div className="play-as">
           <span>Playing</span>
           <select value={playAs} onChange={(e) => choose(e.target.value as NationId)} data-testid="play-as">
@@ -222,7 +300,7 @@ function Command({ client, palette, initialNation }: { client: SimClient; palett
       </nav>
 
       <aside className="left">
-        <NationPanel client={client} palette={palette} playAs={playAs} onCommand={sendCommand} onNuclear={() => { setPending(null); setNuclearPick(true); }} />
+        <NationPanel client={client} palette={palette} playAs={playAs} objectives={objectives} onCommand={sendCommand} onNuclear={() => { setPending(null); setNuclearPick(true); }} />
       </aside>
 
       <main className="center" ref={centre}>
@@ -246,12 +324,13 @@ function Command({ client, palette, initialNation }: { client: SimClient; palett
         </details>
         <div className="legend">
           <span><i className="lg-front" /> Front line</span>
+          <span><i className="lg-contest" /> Advance within a cell</span>
           <span><i className="lg-air" /> Air control</span>
           <span><i className="lg-infra" /> Infra damage</span>
           <span><i className="lg-fallout" /> Fallout</span>
         </div>
         {d && <Decisions client={client} d={d} onCommand={sendCommand} />}
-        {targeting && <div className={`target-banner ${targeting}`}>{targeting === 'nuclear' ? 'Select nuclear aim point' : `Select target: ${pending?.posture.replace(/_/g, ' ')}`} · Esc to cancel</div>}
+        {targeting && <div className={`target-banner ${targeting}`}><button className="small-btn" onClick={() => { setPending(null); setNuclearPick(false); }} data-testid="cancel-target">Cancel</button> {targeting === 'nuclear' ? 'Select nuclear aim point' : pending?.lift ? `Select destination overseas: deploy by ${pending.lift === 'air' ? 'airlift' : 'sealift'}` : `Select target: ${pending?.posture.replace(/_/g, ' ')}`} · Esc to cancel</div>}
         {toast && <div className={`toast ${toast.tone}`} data-testid="toast" role="status">{toast.text}</div>}
         {client.error && <div className="toast error">Simulation error: {client.error}</div>}
       </main>
@@ -267,7 +346,8 @@ function Command({ client, palette, initialNation }: { client: SimClient; palett
             command={commandOf(selectedView.entry.id, selectedView.entry.kind)}
             domainLabel={DOMAIN_LABEL[DOMAIN_OF_KIND[selectedView.entry.kind]].what}
             pending={pending?.posture ?? null}
-            onPickPosture={(p, targetClass) => { setNuclearPick(false); setPending(p ? { posture: p, targetClass } : null); }}
+            onPickPosture={(p, targetClass, lift) => { setNuclearPick(false); setPending(p ? { posture: p, targetClass, lift } : null); }}
+            pendingLift={pending?.lift ?? null}
             onImmediate={(p) => { sendOrder(selected, { posture: p }, `${p.replace(/_/g, ' ')} order sent`); setPending(null); }}
             onOrder={sendOrder}
             onHold={(h) => sendCommand({ type: 'hold', nation: playAs, formations: [selected], held: h }, h ? `${selectedView.entry.name} taken under your command` : `${selectedView.entry.name} handed to the AI delegate`)}
@@ -290,9 +370,16 @@ function Command({ client, palette, initialNation }: { client: SimClient; palett
           nation={playAs}
           target={nuclearTarget}
           onCancel={() => setNuclearTarget(null)}
-          onRelease={(c) => { client.command(c); setNuclearTarget(null); setToast({ tone: 'info', text: 'Emergency action message transmitted.' }); }}
+          onRelease={releaseNuclear}
         />
       )}
+      {briefingOpen && (
+        <BriefingDialog client={client} nation={playAs} briefing={briefing} objectives={objectives} delegated={delegatedNames} kept={keptNames} onClose={() => setBriefingOpen(false)} />
+      )}
+      {ending && endKey !== endSeen && !briefingOpen && (
+        <EndDialog outcome={ending} objectives={objectives} onContinue={() => setEndSeen(endKey)} onQuit={() => client.quit()} />
+      )}
+      {confirm && <ConfirmDialog c={confirm} onClose={() => setConfirm(null)} />}
     </div>
   );
 }

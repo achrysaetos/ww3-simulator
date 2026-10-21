@@ -148,6 +148,8 @@ export interface Order {
   path?: NodeId[];
   /** Restrict munition expenditure. */
   munition?: MunitionId;
+  /** For an overseas 'move': how to cross. 'sea' keeps an air-portable formation off the airlift; absent picks air when it can fly. */
+  lift?: 'air' | 'sea';
   issuedTick: number;
 }
 
