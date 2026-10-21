@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { atWar, relation, relationMut, type System } from '../src/core/engine';
 import type { NationId, NodeId, SimEvent } from '../src/core/types';
 import { createDiplomacy, type AllianceTreaty, type StrategicProfile } from '../src/systems/diplomacy';
+import { DEFAULT_DELEGATION } from '../src/systems/orders';
 import { id, testWorld } from '../src/testkit';
 
 const N = id.nation;
@@ -113,6 +114,30 @@ describe('war support', () => {
     const drop = { usa: start.usa - usa.warSupport, rus: start.rus - rus.warSupport };
     expect(drop.rus).toBeGreaterThan(0.05);
     expect(drop.usa).toBeGreaterThan(drop.rus * 2);
+  });
+});
+
+describe('peace offers', () => {
+  function offerToExhaustedHuman(strategicDelegated: boolean) {
+    const t = testWorld([createDiplomacy()]);
+    const ukr = t.world.nations[N('UKR')];
+    ukr.controlledBy = 'human';
+    t.world.slices.command = { [N('UKR')]: { ai: { ...DEFAULT_DELEGATION, strategic: strategicDelegated }, held: {}, answers: {} } };
+    t.world.pending.push({ type: 'declare_war', nation: N('RUS'), target: N('UKR') });
+    t.engine.step(t.world);
+    expect(atWar(t.world, N('RUS'), N('UKR'))).toBe(true);
+    ukr.warSupport = 0.1;
+    t.world.pending.push({ type: 'offer_peace', nation: N('RUS'), target: N('UKR') });
+    t.engine.step(t.world);
+    return atWar(t.world, N('RUS'), N('UKR'));
+  }
+
+  it('are accepted by the AI for a human nation that delegated strategic decisions', () => {
+    expect(offerToExhaustedHuman(true)).toBe(false);
+  });
+
+  it('wait for a human who kept strategic decisions', () => {
+    expect(offerToExhaustedHuman(false)).toBe(true);
   });
 });
 

@@ -1,6 +1,7 @@
 import { atWar, enemiesOf, relationKey, type SimContext } from '../../core/engine';
 import type { Government, NationId, World } from '../../core/types';
 import { DEFAULT_PROFILE, type Assessment, type DiplomacyState, type StrategicProfile, type WarRecord } from './types';
+import { delegated } from '../orders';
 import { makePeace } from './wars';
 
 /**
@@ -105,8 +106,8 @@ export function negotiatedPeace(world: World, ctx: SimContext, s: DiplomacyState
 }
 
 /**
- * An AI target accepts when its own support is low or it is losing ground;
- * a human target accepts by sending its own offer back.
+ * A target whose strategic decisions the AI makes accepts when its own support is low or it is
+ * losing ground; a human who kept strategic control accepts by sending its own offer back.
  */
 export function offerPeace(world: World, ctx: SimContext, s: DiplomacyState, from: NationId, to: NationId): void {
   if (!atWar(world, from, to)) return;
@@ -114,7 +115,7 @@ export function offerPeace(world: World, ctx: SimContext, s: DiplomacyState, fro
   const target = world.nations[to];
   const reciprocal = s.offers[k] === to;
   const losing = (s.assessment[to]?.popLost ?? 0) > (s.assessment[from]?.popLost ?? 0);
-  const accepts = reciprocal || (target.controlledBy === 'ai' && (target.warSupport < 0.4 || (losing && target.warSupport < 0.55)));
+  const accepts = reciprocal || (delegated(world, to, 'strategic') && (target.warSupport < 0.4 || (losing && target.warSupport < 0.55)));
   if (accepts) makePeace(world, ctx, s, from, to, 'negotiated: armistice on current lines');
   else {
     s.offers[k] = from;

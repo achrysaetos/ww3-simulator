@@ -1,5 +1,6 @@
 import { atWar, type SimContext } from '../../core/engine';
 import type { MunitionId, NationId, NodeId, World } from '../../core/types';
+import { delegated } from '../orders';
 import { deliveryReachKm } from '../strategic/nuclear';
 import { CITY_POP_SHARE, STRATEGIC_YIELD_KT } from './escalation';
 import type { AllianceTreaty, DiplomacyState, UmbrellaCase } from './types';
@@ -130,7 +131,7 @@ export function resolveUmbrella(world: World, ctx: SimContext, s: DiplomacyState
     const g = world.nations[c.guarantor];
     if (!g || g.status === 'capitulated' || world.nations[c.attacker]?.status === 'capitulated') continue;
     const say = (text: string) => ctx.emit({ type: 'message', tick: world.tick, nation: c.guarantor, text });
-    if (g.controlledBy === 'human') {
+    if (!delegated(world, c.guarantor, 'strategic')) {
       say(`extended deterrence: ${c.attacker}'s nuclear attack on ${c.ally} awaits your response; a nuclear release order is the tailored option`);
       continue;
     }
