@@ -259,7 +259,7 @@ export interface Relation {
 export type SimEvent =
   | { type: 'war_declared'; tick: number; by: NationId; on: NationId; reason: string }
   | { type: 'peace'; tick: number; a: NationId; b: NationId; terms: string }
-  | { type: 'battle'; tick: number; node: NodeId; attacker: NationId; defender: NationId; losses: Record<NationId, Record<PlatformId, number>>; casualties: Record<NationId, number>; winner?: NationId }
+  | { type: 'battle'; tick: number; node: NodeId; attacker: NationId; defender: NationId; losses: Record<NationId, Record<PlatformId, number>>; casualties: Record<NationId, number>; winner?: NationId; domain?: 'land' | 'sea' | 'air' }
   | { type: 'strike'; tick: number; by: NationId; munition: MunitionId; fired: number; intercepted: number; target: NodeId; damage: string }
   | { type: 'node_captured'; tick: number; node: NodeId; from: NationId; to: NationId }
   | { type: 'formation_destroyed'; tick: number; formation: FormationId; nation: NationId }
@@ -279,7 +279,20 @@ export type Command =
   | { type: 'sanction'; nation: NationId; target: NationId; on: boolean }
   | { type: 'set_mobilization'; nation: NationId; level: number }
   | { type: 'produce'; nation: NationId; item: ItemId; ratePerMonth: number }
-  | { type: 'nuclear_release'; nation: NationId; target: NodeId; warheads: number; munition: MunitionId };
+  | { type: 'nuclear_release'; nation: NationId; target: NodeId; warheads: number; munition: MunitionId }
+  /** A human nation hands a domain to its AI delegate, or takes it back. */
+  | { type: 'delegate'; nation: NationId; domain: CommandDomain; ai: boolean }
+  /** A human nation takes formations under its own command (the delegate leaves them alone) or hands them back. */
+  | { type: 'hold'; nation: NationId; formations: FormationId[]; held: boolean }
+  /** A human nation's answer to a treaty call it has been asked to honour. */
+  | { type: 'answer_treaty'; nation: NationId; war: string; treaty: string; join: boolean };
+
+/**
+ * What a human player can delegate to the AI: the forces of each domain, the home front
+ * (mobilisation and production), and strategic decisions (war, peace, treaty entry, nuclear release).
+ */
+export const COMMAND_DOMAINS = ['land', 'air', 'naval', 'homefront', 'strategic'] as const;
+export type CommandDomain = (typeof COMMAND_DOMAINS)[number];
 
 // ---------------------------------------------------------------- world
 

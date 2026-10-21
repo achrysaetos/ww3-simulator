@@ -1,5 +1,6 @@
 import { atWar, relation, relationKey, relationMut, type SimContext } from '../../core/engine';
 import { ESCALATION, type EscalationLevel, type NationId, type World } from '../../core/types';
+import { clearTreatyAnswer, delegated, treatyAnswer } from '../orders';
 import { neighbours } from './assess';
 import { DEFAULT_PROFILE, type AllianceTreaty, type Assessment, type DiplomacyState, type PendingJoin, type StrategicProfile, type War } from './types';
 
@@ -208,26 +209,34 @@ export const shiftOdds = (p: number, logit: number) => 1 / (1 + Math.exp(-(Math.
  */
 const RECONSIDER_DAYS = 7;
 
-/** Resolve treaty obligations that have come due. */
+/**
+ * Resolve treaty obligations that have come due. A human nation decides for itself: its call
+ * resolves as soon as the player answers. Unanswered at the deadline, the AI delegate decides if
+ * the player delegated strategic decisions; otherwise the call lapses as a refusal.
+ */
 export function resolveJoins(world: World, ctx: SimContext, s: DiplomacyState, alliances: readonly AllianceTreaty[], profiles: Readonly<Record<string, StrategicProfile>>): void {
-  const due = s.joins.filter((j) => j.dueTick <= world.tick);
+  const due = s.joins.filter((j) => j.dueTick <= world.tick || treatyAnswer(world, j.nation, j.war, j.treaty) !== undefined);
   if (!due.length) return;
-  s.joins = s.joins.filter((j) => j.dueTick > world.tick);
+  s.joins = s.joins.filter((j) => !due.includes(j));
   const hosted = forcesAbroad(world, ctx);
   for (const j of due) {
+    const answer = treatyAnswer(world, j.nation, j.war, j.treaty);
+    clearTreatyAnswer(world, j.nation, j.war, j.treaty);
     const war = s.wars.find((w) => w.id === j.war);
     if (!war || sideOf(war, j.victim) !== j.side || sideOf(war, j.nation) !== -1) continue;
     if (world.nations[j.victim].status === 'capitulated' || world.nations[j.nation].status === 'capitulated') continue;
     const treaty = alliances.find((t) => t.id === j.treaty)!;
-    const p = j.kind === 'ambiguous'
+    const p = () => j.kind === 'ambiguous'
       ? ambiguousResolve(world, profiles[j.nation] ?? DEFAULT_PROFILE, j)
       : shiftOdds(treaty.members[j.nation].reliability, STAKE_LOGIT * stakes(ctx, treaty, j, hosted));
-    if (ctx.rng.chance(p)) {
+    const lapsed = answer === undefined && !delegated(world, j.nation, 'strategic');
+    if (answer ?? (!lapsed && ctx.rng.chance(p()))) {
       joinSide(world, ctx, s, war, j.nation, j.side, `${j.treaty}: defence of ${j.victim}`, 'joined');
     } else {
       const r = relationMut(world, j.nation, j.victim);
       r.opinion = Math.max(-100, r.opinion - 30);
-      ctx.emit({ type: 'message', tick: world.tick, nation: j.nation, text: `${j.nation} declines to honour ${j.treaty} for ${j.victim}` });
+      const text = lapsed ? `${j.nation} let the ${j.treaty} deadline pass without answering ${j.victim}` : `${j.nation} declines to honour ${j.treaty} for ${j.victim}`;
+      ctx.emit({ type: 'message', tick: world.tick, nation: j.nation, text });
       if (!j.reconsidered) s.joins.push({ ...j, reconsidered: true, dueTick: world.tick + Math.ceil((RECONSIDER_DAYS * 24) / world.dtHours) });
     }
   }
