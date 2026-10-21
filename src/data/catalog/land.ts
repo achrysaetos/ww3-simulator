@@ -318,6 +318,12 @@ const airDefense: PlatformSpec<MunitionKey>[] = [
   { id: 'qw2_team', name: 'QW-2 / FN-6 MANPADS team', cls: 'shorad', crew: 2, producers: ['CHN'], inService: 2002, unitCostUsdM: 0.04, speedKph: 4, rangeKm: 40, fuelTph: 0, armor: 0.03, stealth: 0.6, detectionKm: 6, channels: 1, q: 0.5, load: { qw2: 3 } },
   { id: 'krasukha4', name: 'Krasukha-4 EW system', cls: 'ew', producers: ['RUS'], inService: 2014, unitCostUsdM: 15, detectionKm: 300 },
   { id: 'pole21', name: 'Pole-21 GNSS jammer', cls: 'ew', producers: ['RUS'], inService: 2016, unitCostUsdM: 1, detectionKm: 25 },
+  // R-330Zh Zhitel: GPS, Iridium/Inmarsat and GSM jammer on a Ural truck, 100-2000 MHz (Protek; McDermott, ICDS 2017). Cost estimate.
+  { id: 'zhitel', name: 'R-330Zh Zhitel jammer', cls: 'ew', producers: ['RUS'], inService: 2011, unitCostUsdM: 2, detectionKm: 25 },
+  // RB-301B Borisoglebsk-2: HF/VHF communications and drone-link jamming on MT-LB chassis (McDermott 2017). Cost estimate.
+  { id: 'borisoglebsk2', name: 'RB-301B Borisoglebsk-2 EW complex', cls: 'ew', producers: ['RUS'], inService: 2015, unitCostUsdM: 5, detectionKm: 30 },
+  // RB-341V Leer-3: three Orlan-10 drones carrying GSM jammers, 6 km each, controlled to 120 km (McDermott 2017). Cost estimate.
+  { id: 'leer3', name: 'RB-341V Leer-3 airborne EW', cls: 'ew', producers: ['RUS'], inService: 2015, unitCostUsdM: 2, detectionKm: 120 },
   { id: 'bukovel', name: 'Bukovel-AD counter-UAS EW', cls: 'ew', producers: ['UKR'], inService: 2016, unitCostUsdM: 1, detectionKm: 100 },
   { id: 'tls_bct', name: 'TLS-BCT Manpack/vehicle EW (US Army)', cls: 'ew', producers: ['USA'], inService: 2024, unitCostUsdM: 10, detectionKm: 150 },
   { id: 'jy27a', name: 'JY-27A VHF counter-stealth radar', cls: 'radar', producers: ['CHN'], inService: 2015, unitCostUsdM: 15, detectionKm: 500 },

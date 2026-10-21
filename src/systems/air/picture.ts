@@ -5,6 +5,7 @@
 import type { SimContext } from '../../core/engine';
 import type { GameMap } from '../../core/map';
 import type { Formation, FormationId, Munition, NationId, NodeId, Platform, PlatformId, World } from '../../core/types';
+import { radarFactor } from '../c2';
 import { combatRadiusKm } from './combat';
 import { AIRFRAME, OFFENSIVE_POSTURES, RECEIVER_ROLES, TUNING, type AirframeProfile } from './tables';
 
@@ -63,7 +64,7 @@ export function buildPicture(world: World, ctx: SimContext, runway: Record<numbe
 
     if (AIR_DEFENSE_KINDS.has(f.kind)) {
       const d = defenderOf(f, ctx);
-      if (d) defenders.push(d);
+      if (d) defenders.push(Object.assign(d, { channels: d.channels * radarFactor(world, f.node, f.nation) }));
     }
     if (f.kind !== 'air_wing') continue;
 
