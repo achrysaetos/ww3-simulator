@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { haversineKm } from '../src/core/map';
 import { loadMap } from '../src/data/load';
 import type { NationId, NodeId } from '../src/core/types';
 
@@ -163,4 +164,24 @@ it('finds every land cell at its own centre', () => {
   const wrong: number[] = [];
   for (let n = 0 as NodeId; n < map.landCount; n++) if (map.nodeAt(map.lat[n], map.lon[n]) !== n) wrong.push(n);
   expect(wrong).toEqual([]);
+});
+
+it('maps a point outside every cell and sea zone to the nearest node by great-circle km', () => {
+  let seed = 12345;
+  const rand = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+  const points: Point[] = [];
+  for (let i = 0; i < 1500; i++) points.push([Math.asin(2 * rand() - 1) * (180 / Math.PI), rand() * 360 - 180]);
+  for (let i = 0; i < 100; i++) points.push([90 - rand() * 3, rand() * 360 - 180], [-90 + rand() * 3, rand() * 360 - 180], [rand() * 160 - 80, 180 - rand() * 2]);
+  const inside = (n: NodeId, [lat, lon]: Point) => Math.abs(lat - map.lat[n]) <= map.halfDeg[n] && Math.abs(((lon - map.lon[n] + 540) % 360) - 180) <= map.halfDeg[n];
+  const nearest = ([lat, lon]: Point) => {
+    let best = 0, bestD = Infinity;
+    for (let n = 0; n < map.size; n++) {
+      const d = haversineKm(lat, lon, map.lat[n], map.lon[n]);
+      if (d < bestD) { bestD = d; best = n; }
+    }
+    return best;
+  };
+  const outside = points.filter((p) => !inside(at(p), p));
+  expect(outside.length).toBeGreaterThan(100);
+  expect(outside.filter((p) => at(p) !== nearest(p))).toEqual([]);
 });
