@@ -84,3 +84,33 @@ describe('manpower (LE-1, LE-8)', () => {
     expect(e['POL' as NationId].gdpIndex).toBeCloseTo(1, 3);
   }, 120_000);
 });
+
+describe('raising formations (LE-2)', () => {
+  // On main mobilised men never became new units on a player's order: no command could raise one.
+  it('peace-2027: a raise_formation order takes men and kit now and fields a brigade after training', () => {
+    const s = createSession('peace-2027', 1);
+    const { world } = s;
+    const pol = 'POL' as NationId;
+    const nation = world.nations[pol];
+    nation.controlledBy = 'human';
+    world.pending.push({ type: 'delegate', nation: pol, domain: 'homefront', ai: false });
+    runDays(s, 1);
+    const before = new Set(Object.keys(world.formations));
+    // War stocks of every platform Poland fields, as a mobilised war economy would hold.
+    for (const f of Object.values(world.formations)) if (f.nation === pol) for (const pid in f.equipment) nation.stockpile[pid as PlatformId] = 1_000;
+    const stock = Object.values(nation.stockpile).reduce((a, n) => a + n, 0);
+    nation.reserves = 20_000;
+    const brigades = Object.values(world.formations).filter((f) => f.nation === pol && f.kind === 'maneuver' && f.echelon === 'brigade');
+    const template = brigades.reduce((a, b) => (Object.keys(b.equipment).length > Object.keys(a.equipment).length ? b : a));
+    world.pending.push({ type: 'raise_formation', nation: pol, template: template.id });
+    runDays(s, 1);
+    const drawn = 20_000 - nation.reserves;
+    expect(drawn).toBeGreaterThan(2_000);
+    expect(Object.values(nation.stockpile).reduce((a, n) => a + n, 0)).toBeLessThan(stock);
+    const fresh = () => Object.values(world.formations).filter((f) => !before.has(f.id));
+    runDays(s, 85);
+    expect(fresh()).toEqual([]);
+    runDays(s, 6);
+    expect(fresh().map((f) => [f.nation, f.kind, f.personnel, f.node])).toEqual([[pol, 'maneuver', drawn, nation.capital]]);
+  }, 120_000);
+});

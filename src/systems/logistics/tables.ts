@@ -282,6 +282,14 @@ export const RECONSTITUTE_MIN_STRENGTH = 0.5;
  * and kit rather than men.
  */
 export const RAISE_EVERY_DAYS = 30;
+/**
+ * Days from the order to raise a brigade until it takes the field: forming the unit, issuing its
+ * kit and collective training. Russia's mobilised regiments of autumn 2022 went to the front after
+ * 1-2 months; Ukraine's 150th-155th mechanized brigades took about 3-6 months to stand up in 2024
+ * (ISW, RUSI); a WWII US division about a year. Judgment.
+ */
+// param: tag=estimated range=[30,180] source=ISW and RUSI on 2022-24 force generation
+export const RAISE_TRAINING_DAYS = 90;
 /** Trained reserves kept back to replace losses, as a share of the troops a nation fields (judgment: ~2 months of heavy losses). */
 export const RESERVE_BUFFER_SHARE = 0.1;
 /** Smallest establishment counted as a brigade to copy when raising one; smaller entries are battalions or cadres. */

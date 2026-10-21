@@ -434,7 +434,19 @@ describe('logistics', () => {
     expect(pol.reserves).toBeLessThanOrEqual(crew);
   });
 
-  it('raises new brigades from surplus trained reserves at war, one a month, keeping a replacement reserve back', () => {
+  it('does not re-form a destroyed tank brigade from free rifle squads and trucks when no tanks are in stock', () => {
+    const t = setup();
+    const pol = t.world.nations[id.nation('POL')];
+    const f = t.brigade('POL', t.nodeAt(52.4, 16.9));
+    t.engine.step(t.world);
+    Object.assign(f, { status: 'destroyed', equipment: {}, personnel: 0 });
+    pol.stockpile = {};
+    pol.reserves = 1_000_000;
+    t.engine.run(t.world, 120 * DAY);
+    expect(f.status).toBe('destroyed');
+  });
+
+  it('raises new brigades from surplus trained reserves at war, one a month, each taking the field after training, keeping a replacement reserve back', () => {
     const t = setup();
     const ukr = id.nation('UKR');
     const nation = t.world.nations[ukr];
@@ -445,8 +457,11 @@ describe('logistics', () => {
     nation.reserves = 4_000 * 3 + 0.1 * 4_000;
     const raised = () => Object.values(t.world.formations).filter((f) => f.nation === ukr && f !== template);
     t.engine.run(t.world, 15 * DAY);
-    expect(raised().length).toBe(1);
-    t.engine.run(t.world, 20 * DAY);
+    // The men leave the pool when the brigade starts forming; it is not in the field yet.
+    expect(raised().length).toBe(0);
+    expect(t.world.slices.logistics.raising.length).toBe(1);
+    expect(nation.reserves).toBeCloseTo(4_000 * 2 + 400, 6);
+    t.engine.run(t.world, 110 * DAY);
     // Each manned from reserves, with rifle squads only: there are no tanks in the stockpile.
     expect(raised().length).toBe(2);
     for (const f of raised()) {
@@ -459,6 +474,33 @@ describe('logistics', () => {
     t.engine.run(t.world, 60 * DAY);
     // The last 4,400 men stay as replacements: the buffer is a tenth of the 12,000 now fielded.
     expect(raised().length).toBe(2);
+    expect(t.world.slices.logistics.raising.length).toBe(0);
+  });
+
+  it('raises a brigade on a player order, modelled on a chosen formation, from reserves and stock', () => {
+    const t = setup();
+    const pol = id.nation('POL');
+    const nation = t.world.nations[pol];
+    nation.controlledBy = 'human';
+    const mbt = id.platform('t_mbt'), inf = id.platform('t_inf');
+    const template = t.brigade('POL', nation.capital, { equipment: { [inf]: 300, [mbt]: 40 }, personnel: 3_000 });
+    t.engine.step(t.world);
+    nation.reserves = 3_500;
+    nation.stockpile[mbt] = 50;
+    t.world.pending.push({ type: 'raise_formation', nation: pol, template: template.id });
+    t.engine.step(t.world);
+    expect(nation.reserves).toBe(500);
+    expect(nation.stockpile[mbt]).toBe(10);
+    const raised = () => Object.values(t.world.formations).filter((f) => f.nation === pol && f !== template);
+    t.engine.run(t.world, 80 * DAY);
+    expect(raised().length).toBe(0);
+    t.engine.run(t.world, 15 * DAY);
+    expect(raised().map((f) => [f.personnel, f.equipment[mbt], f.equipment[inf], f.node])).toEqual([[3_000, 40, 300, nation.capital]]);
+    // With the men spent, a second order is refused and takes nothing.
+    t.world.pending.push({ type: 'raise_formation', nation: pol, template: template.id });
+    t.engine.step(t.world);
+    expect(nation.stockpile[mbt]).toBe(10);
+    expect(raised().length).toBe(1);
   });
 
   it('leaves raising brigades to a human player who has not delegated the home front', () => {

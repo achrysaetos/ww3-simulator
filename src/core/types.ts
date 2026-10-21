@@ -300,6 +300,8 @@ export type Command =
   | { type: 'sanction'; nation: NationId; target: NationId; on: boolean }
   | { type: 'set_mobilization'; nation: NationId; level: number }
   | { type: 'produce'; nation: NationId; item: ItemId; ratePerMonth: number }
+  /** Form a new brigade from trained reserves and stockpiled kit, modelled on `template` (default: the lightest fielded brigade); it takes the field after training (logistics). */
+  | { type: 'raise_formation'; nation: NationId; template?: FormationId }
   | { type: 'nuclear_release'; nation: NationId; target: NodeId; warheads: number; munition: MunitionId }
   /** Order stored warheads mated to their launchers (see strategic/alert.ts). */
   | { type: 'nuclear_alert'; nation: NationId; reason?: string }
