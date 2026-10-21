@@ -90,8 +90,8 @@ export function NationPanel({ client, palette, playAs, objectives, onCommand, on
         <div className="stat-grid">
           <Stat label="GDP (pre-war)">{fmtUsdB(n.gdpUsdB)}</Stat>
           <Stat label="Output now">{eco ? `${Math.round(eco.gdpIndex * 100)}%` : '—'}</Stat>
-          <Stat label="Treasury">{fmtUsdB(n.treasuryUsdB)}</Stat>
-          <Stat label="War deficit">{eco ? `${(eco.deficitPctGdp * 100).toFixed(1)}% GDP` : '—'}</Stat>
+          <Stat label="War borrowing">{n.treasuryUsdB < -0.05 ? fmtUsdB(-n.treasuryUsdB) : n.treasuryUsdB > 0.05 ? `none, ${fmtUsdB(n.treasuryUsdB)} surplus` : 'None yet'}</Stat>
+          <Stat label="War deficit">{eco ? (eco.deficitPctGdp >= 0.0005 ? `${(eco.deficitPctGdp * 100).toFixed(1)}% GDP` : 'None') : '—'}</Stat>
           <Stat label="Trained reserves">{fmtNum(n.reserves)}</Stat>
           <Stat label="In training">{eco ? fmtNum(eco.inTraining) : '—'}</Stat>
           {d && <Stat label="Territory held">{d.nodesHeld} / {d.nodesHome} cells</Stat>}

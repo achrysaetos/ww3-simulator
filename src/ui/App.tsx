@@ -1,43 +1,70 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { COMMAND_DOMAINS, type Command, type FormationId, type FormationKind, type NationId, type NodeId, type Order, type Posture, type TargetClass } from '../core/types';
+import { COMMAND_DOMAINS, type Command, type CommandDomain, type FormationId, type FormationKind, type NationId, type NodeId, type Order, type Posture, type TargetClass } from '../core/types';
 import { DEFAULT_DELEGATION, DOMAIN_OF_KIND } from '../systems/orders';
 import type { SimClient } from './client';
 import { Palette } from './colors';
 import { briefingFor, objectives as objectivesOf, outcome as outcomeOf } from './briefing';
-import { Decisions } from './Decisions';
 import { BriefingDialog, ConfirmDialog, EndDialog, GameMenu, type Confirmation } from './GameFlow';
 import { EventLog } from './EventLog';
 import { FormationList, FormationPanel, GROUND_KINDS, postureLabel, type Command as CommandHolder } from './FormationPanel';
 import { MapView } from './MapView';
+import { TopBar, type TopBarStat } from './map/TopBar';
 import { DOMAIN_LABEL, NationPanel } from './NationPanel';
 import { NuclearDialog } from './NuclearDialog';
 import { Routes } from './routes';
 import type { LoggedEvent } from './feed';
 import { StartScreen } from './StartScreen';
 import type { Overlays } from './renderer';
+import type { Action, Card, Drawer } from './staff/advice';
+import { DailyBrief } from './staff/DailyBrief';
+import { BRIEF_CADENCES, type BriefCadence } from './staff/desk';
+import { operations } from './staff/operations';
+import { OperationsPanel } from './staff/OperationsPanel';
+import { roleOf, StaffPanel } from './staff/StaffPanel';
+import { headlines } from './staff/ticker';
+import { WarRoom } from './staff/WarRoom';
+import './staff/staff.css';
 
 const SPEEDS = [0, 1, 5, 20] as const;
-type Speed = (typeof SPEEDS)[number];
 const OVERLAY_LABELS: Record<keyof Overlays, string> = { air: 'Air control', sea: 'Sea control', infra: 'Infrastructure damage', fallout: 'Fallout', weather: 'Weather', cities: 'Cities', seaZones: 'Sea zones' };
-const TABS = [['nation', 'Nation'], ['forces', 'Forces'], ['log', 'Log']] as const;
-type Tab = (typeof TABS)[number][0];
-const FORM_CONTROLS = new Set(['INPUT', 'SELECT', 'TEXTAREA', 'BUTTON']);
+/** Air, sea and weather draw as blocky squares at theatre zoom, so they start off. */
+const DEFAULT_OVERLAYS: Overlays = { air: false, sea: false, infra: true, fallout: true, weather: false, cities: true, seaZones: false };
+const DRAWERS: { id: Drawer; label: string; key: string }[] = [
+  { id: 'forces', label: 'Forces', key: 'F' },
+  { id: 'nation', label: 'Nation', key: 'N' },
+  { id: 'log', label: 'Log', key: 'L' },
+];
+const DRAWER_TITLE: Record<Drawer, string> = { forces: 'Forces', nation: 'Nation', log: 'Event log' };
+const FORM_CONTROLS = new Set(['INPUT', 'SELECT', 'TEXTAREA']);
+const CADENCE_KEY = 'ww3.briefCadence';
+/** Postures whose target can lie far from the unit: picking one frames the map wide (BA-13). */
+const RANGED: ReadonlySet<Posture> = new Set(['strike', 'air_superiority', 'patrol', 'blockade', 'air_assault']);
 
 interface Toast { text: string; tone: 'info' | 'error' }
 /** Waiting on the engine's word about a nuclear release: the launch, or nothing. */
 interface Watch { untilTick: number; seenSeq: number; match(row: LoggedEvent): Toast | null; timeout?: Toast }
 
+function readCadence(): BriefCadence {
+  try {
+    const v = localStorage.getItem(CADENCE_KEY);
+    return BRIEF_CADENCES.includes(v as BriefCadence) ? (v as BriefCadence) : 'matters';
+  } catch {
+    return 'matters';
+  }
+}
+
 export function App({ client }: { client: SimClient }) {
   useSyncExternalStore(client.subscribe, client.getVersion);
   const palette = useMemo(() => new Palette((id) => client.nationCards.get(id as NationId)?.blocs ?? []), [client]);
-  if (!client.meta || !client.playing) return <StartScreen client={client} palette={palette} />;
+  if (!client.meta || !client.playing || !client.desk) return <StartScreen client={client} palette={palette} />;
   return <Command key={client.sessionId} client={client} palette={palette} playAs={client.playing} />;
 }
 
 function Command({ client, palette, playAs }: { client: SimClient; palette: Palette; playAs: NationId }) {
   const places = client.places;
+  const desk = client.desk!;
   const routes = useMemo(() => new Routes(client.map), [client]);
-  const focusHandle = useRef<((n: NodeId) => void) | null>(null);
+  const focusHandle = useRef<((n: NodeId, frame?: 'close' | 'wide') => void) | null>(null);
 
   const [selected, setSelected] = useState<FormationId | null>(null);
   const [pending, setPending] = useState<{ posture: Posture; targetClass?: TargetClass; lift?: 'air' | 'sea' } | null>(null);
@@ -46,32 +73,32 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
   const [endSeen, setEndSeen] = useState<string | null>(null);
   const [nuclearPick, setNuclearPick] = useState(false);
   const [nuclearTarget, setNuclearTarget] = useState<NodeId | null>(null);
-  const [tab, setTab] = useState<Tab>('forces');
-  const speed = client.ticksPerSec as Speed;
-  const setSpeed = (s: Speed) => client.setSpeed(s);
-  const [overlays, setOverlays] = useState<Overlays>({ air: true, sea: true, infra: true, fallout: true, weather: true, cities: true, seaZones: true });
+  const [drawer, setDrawer] = useState<Drawer | null>(null);
+  const [brief, setBrief] = useState<{ cards: Card[]; resume: number } | null>(null);
+  const [cadence, setCadence] = useState<BriefCadence>(readCadence);
+  const [layersOpen, setLayersOpen] = useState(false);
+  const [overlays, setOverlays] = useState<Overlays>(DEFAULT_OVERLAYS);
+  const [delegating, setDelegating] = useState<Partial<Record<CommandDomain, boolean>>>({});
   const [toast, setToast] = useState<Toast | null>(null);
   const watch = useRef<Watch | null>(null);
   const lastSeq = () => client.feed.newest(new Set(), null, 1)[0]?.seq ?? -1;
+  const speed = client.ticksPerSec;
 
   const d = client.state.focusNation?.id === playAs ? client.state.focusNation : undefined;
   const ai = d?.authority.ai ?? DEFAULT_DELEGATION;
   const heldKey = d?.authority.held.join(',') ?? '';
   const held = useMemo(() => new Set(heldKey ? heldKey.split(',') : []), [heldKey]);
-  const commandOf = (id: FormationId, kind: FormationKind): CommandHolder => (held.has(id) ? 'player' : ai[DOMAIN_OF_KIND[kind]] ? 'delegate' : 'none');
+  const commandOf = useCallback((id: FormationId, kind: FormationKind): CommandHolder => (held.has(id) ? 'player' : ai[DOMAIN_OF_KIND[kind]] ? 'delegate' : 'none'), [held, ai]);
 
   useEffect(() => client.focus(playAs, selected ?? undefined), [client, playAs, selected]);
 
+  const aiKey = COMMAND_DOMAINS.map((k) => +ai[k]).join('');
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { setPending(null); setNuclearPick(false); setNuclearTarget(null); return; }
-      if (FORM_CONTROLS.has((e.target as HTMLElement).tagName)) return;
-      if (e.key === ' ') { e.preventDefault(); client.setSpeed(client.ticksPerSec ? 0 : 1); }
-      if (e.key === '.') client.step();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [client]);
+    setDelegating((p) => {
+      const left = Object.fromEntries(Object.entries(p).filter(([k, v]) => ai[k as CommandDomain] !== v));
+      return Object.keys(left).length === Object.keys(p).length ? p : left;
+    });
+  }, [aiKey]);
 
   const noticeSeq = client.notice?.seq;
   useEffect(() => {
@@ -83,18 +110,6 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
     const id = setTimeout(() => setToast(null), toast.tone === 'error' ? 9000 : 3500);
     return () => clearTimeout(id);
   }, [toast]);
-
-  // A treaty call is the player's to answer: stop the clock when one arrives.
-  const callsKey = d?.treatyCalls.map((c) => `${c.war}|${c.treaty}|${c.reconsidered}`).join(',') ?? '';
-  const seenCalls = useRef('');
-  useEffect(() => {
-    const fresh = callsKey.split(',').some((k) => k && !seenCalls.current.split(',').includes(k));
-    seenCalls.current = callsKey;
-    if (fresh && client.ticksPerSec) {
-      client.setSpeed(0);
-      setToast({ tone: 'info', text: 'Paused: a treaty call needs your decision.' });
-    }
-  }, [client, callsKey]);
 
   useEffect(() => {
     const w = watch.current;
@@ -114,6 +129,60 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
     }
   }, [client, client.feed.version, client.state.tick, playAs]);
 
+  const nationIds = client.meta?.nationIds ?? [];
+  const briefing = useMemo(() => briefingFor(client.map, client.meta?.scenario.id ?? '', playAs), [client, playAs]);
+  const everEnemies = useRef(new Set<NationId>());
+  for (const e of d?.enemies ?? []) everEnemies.current.add(e);
+  const objectives = objectivesOf(client.state, nationIds, briefing, playAs, d?.enemies ?? [], everEnemies.current);
+  const ending = d ? outcomeOf(client.state, playAs, d.enemies, everEnemies.current, objectives) : null;
+  const endKey = ending ? `${ending.kind}|${ending.text}` : null;
+  useEffect(() => {
+    if (endKey && endKey !== endSeen && client.ticksPerSec) client.setSpeed(0);
+  }, [client, endKey, endSeen]);
+
+  const openBrief = useCallback(() => {
+    setBrief((b) => b ?? { cards: desk.decisions, resume: client.ticksPerSec });
+    desk.briefOpened();
+    client.setSpeed(0);
+  }, [client, desk]);
+  const closeBrief = useCallback(() => {
+    setBrief((b) => {
+      if (b?.resume) client.setSpeed(b.resume);
+      return null;
+    });
+  }, [client]);
+
+  // The brief opens itself when a decision needs the player (or each morning, by the player's setting).
+  useEffect(() => {
+    if (brief || briefingOpen || (endKey && endKey !== endSeen) || !client.state.date) return;
+    if (desk.briefDue(new Date(client.state.date), cadence)) openBrief();
+  }, [client.state.tick, desk.version, brief, briefingOpen, cadence]);
+
+  const toggleDrawer = useCallback((id: Drawer) => setDrawer((cur) => (cur === id ? null : id)), []);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (brief || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === 'Escape') {
+        if (pending || nuclearPick) { setPending(null); setNuclearPick(false); setNuclearTarget(null); }
+        else setDrawer(null);
+        return;
+      }
+      if (FORM_CONTROLS.has((e.target as HTMLElement).tagName)) return;
+      const k = e.key.toLowerCase();
+      if (e.key === ' ') { e.preventDefault(); client.setSpeed(client.ticksPerSec ? 0 : 1); }
+      else if (e.key === '.') client.step();
+      else if (k >= '1' && k <= '3') client.setSpeed(SPEEDS[Number(k)]);
+      else if (k === 'b') openBrief();
+      else {
+        const dr = DRAWERS.find((x) => x.key.toLowerCase() === k);
+        if (dr) toggleDrawer(dr.id);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [client, brief, pending, nuclearPick, openBrief, toggleDrawer]);
+
   const quit = () => setConfirm({
     title: 'Quit to the start screen?',
     text: 'The war in progress ends here. Save it first from the Game menu if you want to come back to it.',
@@ -124,23 +193,23 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
   const selectFormation = useCallback((id: FormationId | null) => {
     setSelected(id);
     setPending(null);
-    if (id) setTab('forces');
+    if (id) setDrawer('forces');
   }, []);
   const focusNode = useCallback((n: NodeId) => focusHandle.current?.(n), []);
   const pickFromList = useCallback((id: FormationId, node: NodeId) => {
     selectFormation(id);
-    focusNode(node);
-  }, [selectFormation, focusNode]);
+    focusHandle.current?.(node, 'wide');
+  }, [selectFormation]);
 
   const sendCommand = (c: Command, label: string) => {
     client.command(c);
-    setToast({ tone: 'info', text: `${label}. Takes effect next tick.` });
+    setToast({ tone: 'info', text: `${label}. ${client.ticksPerSec ? 'Takes effect next tick.' : 'Takes effect when the clock runs.'}` });
   };
 
   /** The engine answers next tick (client.answer): accepted, the order takes the formation from the AI delegate; refused, the delegate keeps it. */
   const sendOrder = (formation: FormationId, order: Omit<Order, 'issuedTick'>, label: string) => {
     client.command({ type: 'order', nation: playAs, formation, order });
-    setToast({ tone: 'info', text: `${label}. Awaiting acknowledgement next tick.` });
+    setToast({ tone: 'info', text: `${label}. ${client.ticksPerSec ? 'Awaiting acknowledgement next tick.' : 'Acknowledged when the clock runs.'}` });
   };
 
   const onTarget = (node: NodeId) => {
@@ -177,28 +246,52 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
     setToast({ tone: 'info', text: `${held.size} formations handed back to the AI delegate.` });
   };
 
+  const delegate = (commands: Command[]) => {
+    const want: Partial<Record<CommandDomain, boolean>> = {};
+    for (const c of commands) {
+      if (c.type !== 'delegate') continue;
+      client.command(c);
+      want[c.domain] = c.ai;
+    }
+    if (!Object.keys(want).length) return;
+    setDelegating((p) => ({ ...p, ...want }));
+    if (!client.ticksPerSec) setToast({ tone: 'info', text: 'Your staff takes the change when the clock runs.' });
+  };
+
+  const act = (card: Card, action: Action) => {
+    if (action.kind === 'show') { focusNode(action.node); closeBrief(); }
+    else if (action.kind === 'unit') { selectFormation(action.formation); focusHandle.current?.(action.node, 'wide'); }
+    else if (action.kind === 'open') setDrawer(action.drawer);
+    client.act(card, action);
+  };
+
   const date = client.state.date ? new Date(client.state.date) : null;
-  const hours = client.state.tick * (client.meta?.dtHours ?? 6);
+  const day = date && client.meta ? Math.max(0, Math.floor((date.getTime() - new Date(client.meta.scenario.startDate).getTime()) / 864e5)) : 0;
   const selectedView = selected ? client.state.formations.find((f) => f.entry.id === selected) : undefined;
   const targeting = nuclearPick ? 'nuclear' : pending ? 'order' : null;
-  const centre = useRef<HTMLElement>(null);
-  // On a phone the panel sits below the map: bring the map back into view to pick the target.
-  useEffect(() => {
-    if (targeting && matchMedia('(max-width: 760px)').matches) centre.current?.scrollIntoView({ block: 'start' });
-  }, [targeting]);
   const delegatedNames = COMMAND_DOMAINS.filter((k) => ai[k]).map((k) => DOMAIN_LABEL[k].name);
   const keptNames = COMMAND_DOMAINS.filter((k) => !ai[k]).map((k) => DOMAIN_LABEL[k].name);
+  const n = client.state.nations.get(playAs);
+  const mineIdx = nationIds.indexOf(playAs);
+  const enemiesKey = d?.enemies.join(',') ?? '';
+  const enemyIdx = useMemo(() => new Set(enemiesKey ? enemiesKey.split(',').map((e) => nationIds.indexOf(e as NationId)) : []), [enemiesKey, nationIds]);
 
-  const nationIds = client.meta?.nationIds ?? [];
-  const briefing = useMemo(() => briefingFor(client.map, client.meta?.scenario.id ?? '', playAs), [client, playAs]);
-  const everEnemies = useRef(new Set<NationId>());
-  for (const e of d?.enemies ?? []) everEnemies.current.add(e);
-  const objectives = objectivesOf(client.state, nationIds, briefing, playAs, d?.enemies ?? [], everEnemies.current);
-  const ending = d ? outcomeOf(client.state, playAs, d.enemies, everEnemies.current, objectives) : null;
-  const endKey = ending ? `${ending.kind}|${ending.text}` : null;
-  useEffect(() => {
-    if (endKey && endKey !== endSeen && client.ticksPerSec) client.setSpeed(0);
-  }, [client, endKey, endSeen]);
+  const ops = useMemo(() => operations({
+    me: playAs, map: client.map, nationIds, control: client.state.control, contest: client.state.contest, formations: client.state.formations,
+    enemies: d?.enemies ?? [], places, commandOf,
+  }), [client.state.tick, client.state.formations, commandOf, enemiesKey]);
+  const news = useMemo(() => headlines(client.feed, client.map), [client.feed.version]);
+  const front = desk.frontChange(7);
+  const atWar = (d?.enemies.length ?? 0) > 0;
+  const defcon = desk.nuclearStep === 2 ? 1 : desk.nuclearStep === 1 ? 2 : atWar ? 3 : 5;
+  const role = roleOf(ai);
+  const stats: TopBarStat[] = n ? [
+    { label: 'Front · 7d', value: front === null ? '—' : `${front > 0 ? '+' : ''}${front} cells`, tone: front === null || front === 0 ? undefined : front > 0 ? 'good' : 'bad' },
+    { label: 'War support', value: `${Math.round(n.warSupport * 100)}%`, tone: n.warSupport < 0.4 ? 'bad' : undefined },
+    { label: 'Economy', value: d?.economy ? `${Math.round(d.economy.gdpIndex * 100)}%` : '—', tone: d?.economy && d.economy.gdpIndex < 0.85 ? 'warn' : undefined },
+    { label: 'Reserves', value: n.reserves >= 1e6 ? `${(n.reserves / 1e6).toFixed(1)}M` : `${Math.round(n.reserves / 1e3)}k` },
+  ] : [];
+  const reportsSince = useMemo(() => client.feed.newest(new Set(), playAs, 400).filter((r) => r.event.tick >= client.state.tick - 24 / (client.meta?.dtHours ?? 6)).length, [brief]);
 
   const releaseNuclear = (c: Extract<Command, { type: 'nuclear_release' }>) => {
     const seenSeq = lastSeq();
@@ -219,116 +312,149 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
     setToast({ tone: 'info', text: 'Release order sent. Waiting for the launch report; advance time if paused.' });
   };
 
-  return (
-    <div className="app" data-tab={tab}>
-      <header className="topbar">
-        <div className="brand"><span className="brand-mark">◆</span> WW3 <span className="brand-sub">Strategic Command</span></div>
-        <button
-          className={`delegate-pill ${delegatedNames.length ? 'on' : 'off'}`}
-          onClick={() => setTab('nation')}
-          data-testid="delegate-pill"
-          title={`AI delegate commands: ${delegatedNames.join(', ') || 'nothing'}. You decide: ${keptNames.join(', ') || 'nothing'}. Change it under Command authority.`}
-        >
-          {delegatedNames.length === COMMAND_DOMAINS.length ? 'AI runs everything' : delegatedNames.length ? `AI delegate: ${COMMAND_DOMAINS.filter((k) => ai[k]).map((k) => SHORT[k]).join(' · ')}` : 'No AI delegate'}
-          {keptNames.length > 0 && delegatedNames.length > 0 && <span className="muted"> · you: {COMMAND_DOMAINS.filter((k) => !ai[k]).map((k) => SHORT[k]).join(' · ')}</span>}
+  const dock = (
+    <div className="ww-dock" role="toolbar" aria-label="Game">
+      <button type="button" className="ww-dock-btn" onClick={() => client.step()} disabled={speed !== 0} title="Advance six hours (.)" data-testid="step" aria-label="Step six hours">
+        <svg width="14" height="12" viewBox="0 0 14 12" aria-hidden="true"><path d="M1 1 L8 6 L1 11 Z" fill="currentColor" /><rect x="10" y="1" width="2.4" height="10" fill="currentColor" /></svg>
+      </button>
+      <i className="ww-dock-sep" aria-hidden="true" />
+      {DRAWERS.map((x) => (
+        <button key={x.id} type="button" className={`ww-dock-btn ${drawer === x.id ? 'on' : ''}`} aria-pressed={drawer === x.id} onClick={() => toggleDrawer(x.id)} data-testid={`drawer-${x.id}`}>
+          {x.label}<span className="ww-kbd">{x.key}</span>
         </button>
-        <div className="clock" data-testid="clock">
-          <div className="clock-date mono">{date ? date.toUTCString().slice(5, 22) + 'Z' : 'Initializing…'}</div>
-          <div className="clock-sub mono">D+{Math.floor(hours / 24)} · tick {client.state.tick} · {client.meta?.scenario.name}</div>
-        </div>
-        <div className="perf mono" data-testid="perf" title="Engine time for the last tick, and ticks actually completed per second against the requested speed">
-          <div>{client.stats.stepMs ? `${client.stats.stepMs.toFixed(0)} ms/tick` : '—'}</div>
-          <div className={speed && client.stats.achievedTps && client.stats.achievedTps < speed * 0.9 ? 'lagging' : ''}>
-            {speed ? `${client.stats.achievedTps.toFixed(1)} / ${speed} t/s` : 'paused'}
+      ))}
+      <button type="button" className="ww-dock-btn" onClick={openBrief} data-testid="open-brief">Brief<span className="ww-kbd">B</span>{desk.decisions.length > 0 && <i className="ww-dock-count">{desk.decisions.length}</i>}</button>
+      <div className="ww-layers">
+        <button type="button" className={`ww-dock-btn ${layersOpen ? 'on' : ''}`} aria-expanded={layersOpen} onClick={() => setLayersOpen((o) => !o)} data-testid="layers">Layers</button>
+        {layersOpen && (
+          <div className="ww-glass ww-popover" role="group" aria-label="Map layers">
+            {(Object.keys(OVERLAY_LABELS) as (keyof Overlays)[]).map((k) => (
+              <label key={k} className="ww-check"><input type="checkbox" checked={overlays[k]} onChange={(e) => setOverlays((o) => ({ ...o, [k]: e.target.checked }))} /> {OVERLAY_LABELS[k]}</label>
+            ))}
           </div>
-        </div>
-        <div className="time-ctl" role="group" aria-label="Time controls">
-          {SPEEDS.map((s) => (
-            <button key={s} className={speed === s ? 'active' : ''} onClick={() => setSpeed(s)} data-testid={`speed-${s}`} title={s ? `${s} ticks per second` : 'Pause (space)'}>
-              {s ? `${s}×` : '❚❚'}
-            </button>
-          ))}
-          <button onClick={() => client.step()} disabled={speed !== 0} title="Advance one tick (.)" data-testid="step">Step ▸</button>
-        </div>
-        <GameMenu client={client} onBriefing={() => setBriefingOpen(true)} onQuit={quit} />
-        <div className="play-as" data-testid="play-as" title="You command one nation for the whole game. Start a new game to play another.">
-          <span>Playing</span> <b>{client.namer.nation(playAs)}</b>
-        </div>
-      </header>
-
-      <nav className="tabs" role="tablist">
-        {TABS.map(([k, label]) => (
-          <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'active' : ''} onClick={() => setTab(k)} data-testid={`tab-${k}`}>{label}</button>
-        ))}
-      </nav>
-
-      <aside className="left">
-        <NationPanel client={client} palette={palette} playAs={playAs} objectives={objectives} onCommand={sendCommand} onNuclear={() => { setPending(null); setNuclearPick(true); }} />
-      </aside>
-
-      <main className="center" ref={centre}>
-        <MapView
-          client={client}
-          palette={palette}
-          places={places}
-          playAs={playAs}
-          selected={selected}
-          targeting={targeting}
-          overlays={overlays}
-          onSelectFormation={selectFormation}
-          onTarget={onTarget}
-          focusHandle={focusHandle}
-        />
-        <details className="overlay-ctl">
-          <summary>Layers</summary>
-          {(Object.keys(OVERLAY_LABELS) as (keyof Overlays)[]).map((k) => (
-            <label key={k} className="chk"><input type="checkbox" checked={overlays[k]} onChange={(e) => setOverlays((o) => ({ ...o, [k]: e.target.checked }))} /> {OVERLAY_LABELS[k]}</label>
-          ))}
-        </details>
-        <div className="legend">
-          <span><i className="lg-front" /> Front line</span>
-          <span><i className="lg-contest" /> Advance within a cell</span>
-          <span><i className="lg-air" /> Air control</span>
-          <span><i className="lg-infra" /> Infra damage</span>
-          <span><i className="lg-fallout" /> Fallout</span>
-          <span><i className="lg-mud" /> Mud</span>
-          <span><i className="lg-snow" /> Snow</span>
-          <span><i className="lg-sea" /> Rough sea</span>
-        </div>
-        {d && <Decisions client={client} d={d} onCommand={sendCommand} />}
-        {targeting && <div className={`target-banner ${targeting}`}><button className="small-btn" onClick={() => { setPending(null); setNuclearPick(false); }} data-testid="cancel-target">Cancel</button> {targeting === 'nuclear' ? 'Select nuclear aim point' : pending?.lift ? `Select destination overseas: deploy by ${pending.lift === 'air' ? 'airlift' : 'sealift'}` : `Select target: ${pending?.posture.replace(/_/g, ' ')}`} · Esc to cancel</div>}
-        {toast && <div className={`toast ${toast.tone}`} data-testid="toast" role="status">{toast.text}</div>}
-        {client.error && <div className="toast error">Simulation error: {client.error}</div>}
-      </main>
-
-      <aside className="right">
-        {selected && selectedView ? (
-          <FormationPanel
-            client={client}
-            palette={palette}
-            places={places}
-            routes={routes}
-            playAs={playAs}
-            command={commandOf(selectedView.entry.id, selectedView.entry.kind)}
-            domainLabel={DOMAIN_LABEL[DOMAIN_OF_KIND[selectedView.entry.kind]].what}
-            pending={pending?.posture ?? null}
-            onPickPosture={(p, targetClass, lift) => { setNuclearPick(false); setPending(p ? { posture: p, targetClass, lift } : null); }}
-            pendingLift={pending?.lift ?? null}
-            onImmediate={(p) => { sendOrder(selected, { posture: p }, `${p.replace(/_/g, ' ')} order sent`); setPending(null); }}
-            onOrder={sendOrder}
-            onHold={(h) => sendCommand({ type: 'hold', nation: playAs, formations: [selected], held: h }, h ? `${selectedView.entry.name} taken under your command` : `${selectedView.entry.name} handed to the AI delegate`)}
-            onClose={() => selectFormation(null)}
-            onFocus={focusNode}
-          />
-        ) : (
-          <FormationList client={client} palette={palette} places={places} playAs={playAs} commandOf={commandOf} onSelect={pickFromList} onReleaseAll={releaseAll} />
         )}
-      </aside>
+      </div>
+      <GameMenu client={client} onBriefing={() => setBriefingOpen(true)} onQuit={quit} />
+    </div>
+  );
 
-      <footer className="bottom">
-        <EventLog client={client} playAs={playAs} logVersion={client.feed.version} onFocus={focusNode} />
+  return (
+    <div className={`ww-shell ${drawer ? 'drawer-open' : ''} ${targeting ? 'targeting' : ''}`} data-testid="shell">
+      <MapView
+        client={client}
+        palette={palette}
+        places={places}
+        playAs={playAs}
+        selected={selected}
+        targeting={targeting}
+        overlays={overlays}
+        onSelectFormation={selectFormation}
+        onTarget={onTarget}
+        focusHandle={focusHandle}
+      />
+      <TopBar
+        nation={{ id: playAs, name: n?.name ?? client.namer.nation(playAs) }}
+        subtitle={`${role?.name ?? 'Supreme Commander'} · ${client.meta?.scenario.name ?? ''}`}
+        date={date}
+        day={day}
+        speed={speed}
+        speeds={SPEEDS}
+        onSpeed={(s) => client.setSpeed(s)}
+        stats={stats}
+        defcon={defcon}
+      />
+      {dock}
+
+      <div className="ww-hud-left">
+        <OperationsPanel ops={ops} inTransit={desk.inTransit.size} onShow={(node) => focusHandle.current?.(node)} onForces={() => setDrawer('forces')} />
+        <StaffPanel me={playAs} ai={ai} pending={delegating} formations={client.state.formations} onDelegate={delegate} />
+      </div>
+
+      <WarRoom cards={desk.cards} answered={desk.answered} me={playAs} paused={!speed} onAct={act} onDismiss={(k) => { desk.dismiss(k); client.touch(); }} />
+
+      {drawer && (
+        <aside className="ww-drawer ww-glass" aria-label={DRAWER_TITLE[drawer]} data-testid={`drawer-panel-${drawer}`}>
+          <header className="ww-drawer-head">
+            <span className="ww-title">{drawer === 'forces' && selectedView ? 'Unit' : DRAWER_TITLE[drawer]}</span>
+            <button type="button" className="ww-dock-btn" onClick={() => setDrawer(null)} aria-label="Close drawer, Esc">Esc</button>
+          </header>
+          <div className="ww-drawer-body">
+            {drawer === 'nation' && (
+              <NationPanel client={client} palette={palette} playAs={playAs} objectives={objectives} onCommand={sendCommand} onNuclear={() => { setPending(null); setNuclearPick(true); }} />
+            )}
+            {drawer === 'log' && <EventLog client={client} playAs={playAs} logVersion={client.feed.version} onFocus={focusNode} />}
+            {drawer === 'forces' && (selected && selectedView ? (
+              <FormationPanel
+                client={client}
+                palette={palette}
+                places={places}
+                routes={routes}
+                playAs={playAs}
+                command={commandOf(selectedView.entry.id, selectedView.entry.kind)}
+                domainLabel={DOMAIN_LABEL[DOMAIN_OF_KIND[selectedView.entry.kind]].what}
+                pending={pending?.posture ?? null}
+                onPickPosture={(p, targetClass, lift) => {
+                  setNuclearPick(false);
+                  setPending(p ? { posture: p, targetClass, lift } : null);
+                  if (p && (RANGED.has(p) || lift || selectedView.entry.kind === 'air_wing')) focusHandle.current?.(selectedView.node, 'wide');
+                }}
+                pendingLift={pending?.lift ?? null}
+                onImmediate={(p) => { sendOrder(selected, { posture: p }, `${p.replace(/_/g, ' ')} order sent`); setPending(null); }}
+                onOrder={sendOrder}
+                onHold={(h) => sendCommand({ type: 'hold', nation: playAs, formations: [selected], held: h }, h ? `${selectedView.entry.name} taken under your command` : `${selectedView.entry.name} handed to the AI delegate`)}
+                onClose={() => selectFormation(null)}
+                onFocus={focusNode}
+                inTransitHours={desk.inTransit.get(selected)}
+              />
+            ) : (
+              <FormationList client={client} palette={palette} places={places} playAs={playAs} commandOf={commandOf} onSelect={pickFromList} onReleaseAll={releaseAll} />
+            ))}
+          </div>
+        </aside>
+      )}
+
+      <footer className="ww-ticker" aria-label="News" data-testid="ticker">
+        {news.length > 0 && news[0].tick >= client.state.tick - 4 && <span className="ww-chip red">Breaking</span>}
+        {news.map((h, i) => <span key={h.seq} className={i === 0 ? 'fresh' : ''}>{i > 0 && <i className="ww-muted"> · </i>}{h.text}</span>)}
+        {!news.length && <span className="ww-muted">No news from the wider world.</span>}
       </footer>
 
+      {targeting && (
+        <div className={`ww-target-banner ww-glass ${targeting}`} data-testid="target-banner">
+          <span>{targeting === 'nuclear' ? 'Select the nuclear aim point' : pending?.lift ? `Select the destination overseas: deploy by ${pending.lift === 'air' ? 'airlift' : 'sealift'}` : `Select the target: ${pending?.posture.replace(/_/g, ' ')}`}</span>
+          <button type="button" className="ww-btn small" onClick={() => { setPending(null); setNuclearPick(false); }} data-testid="cancel-target">Cancel <span className="ww-kbd">Esc</span></button>
+        </div>
+      )}
+      {toast && <div className={`ww-toast ww-glass ${toast.tone}`} data-testid="toast" role="status">{toast.text}</div>}
+      {client.error && <div className="ww-toast ww-glass error">Simulation error: {client.error}</div>}
+
+      {brief && date && (
+        <DailyBrief
+          me={playAs}
+          date={date}
+          day={day}
+          cards={brief.cards}
+          sent={new Map(desk.answered.map((s) => [s.card.key, s]))}
+          days={desk.days}
+          world={news}
+          reports={reportsSince}
+          cadence={cadence}
+          map={client.map}
+          control={client.state.control}
+          controlVersion={client.state.controlVersion}
+          mine={mineIdx}
+          enemies={enemyIdx}
+          place={(node) => places.name(node)}
+          onCadence={(c) => {
+            setCadence(c);
+            try { localStorage.setItem(CADENCE_KEY, c); } catch { /* a private window keeps the default */ }
+          }}
+          onAct={act}
+          onShow={(node) => { closeBrief(); focusNode(node); }}
+          onLog={() => { closeBrief(); setDrawer('log'); }}
+          onClose={closeBrief}
+        />
+      )}
       {nuclearTarget !== null && (
         <NuclearDialog
           client={client}
@@ -342,12 +468,10 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
       {briefingOpen && (
         <BriefingDialog client={client} nation={playAs} briefing={briefing} objectives={objectives} delegated={delegatedNames} kept={keptNames} onClose={() => setBriefingOpen(false)} />
       )}
-      {ending && endKey !== endSeen && !briefingOpen && (
+      {ending && endKey !== endSeen && !briefingOpen && !brief && (
         <EndDialog outcome={ending} objectives={objectives} onContinue={() => setEndSeen(endKey)} onQuit={() => client.quit()} />
       )}
       {confirm && <ConfirmDialog c={confirm} onClose={() => setConfirm(null)} />}
     </div>
   );
 }
-
-const SHORT: Record<(typeof COMMAND_DOMAINS)[number], string> = { land: 'land', air: 'air', naval: 'naval', homefront: 'home front', strategic: 'strategic' };

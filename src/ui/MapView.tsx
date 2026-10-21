@@ -21,8 +21,11 @@ export interface MapViewProps {
   overlays: Overlays;
   onSelectFormation(id: FormationId | null): void;
   onTarget(node: NodeId): void;
-  /** Filled by the map so panels can fly to a node. */
-  focusHandle: { current: ((node: NodeId) => void) | null };
+  /**
+   * Filled by the map so panels can fly to a node. 'close' zooms in to at least the theatre;
+   * 'wide' zooms out to it if closer, so a target far from the unit stays on screen.
+   */
+  focusHandle: { current: ((node: NodeId, frame?: 'close' | 'wide') => void) | null };
 }
 
 const TILES = `${import.meta.env.BASE_URL}tiles/`;
@@ -81,8 +84,9 @@ export function MapView(props: MapViewProps) {
       dirty.current = true;
     };
     fit();
-    propsRef.current.focusHandle.current = (node) => {
-      r.flyTo({ lon: client.map.lon[node], lat: client.map.lat[node], zoom: Math.max(r.cam.zoom, zoomForPxPerDeg(BAND_PRESET.theatre)) });
+    propsRef.current.focusHandle.current = (node, frame = 'close') => {
+      const theatre = zoomForPxPerDeg(BAND_PRESET.theatre);
+      r.flyTo({ lon: client.map.lon[node], lat: client.map.lat[node], zoom: frame === 'wide' ? Math.min(r.cam.zoom, theatre) : Math.max(r.cam.zoom, theatre) });
     };
     const ro = new ResizeObserver(fit);
     ro.observe(canvas);
