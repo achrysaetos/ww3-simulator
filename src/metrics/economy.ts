@@ -123,7 +123,7 @@ export function economyProbe(world: World, catalog: Catalog) {
         const k = (world.slices.economy.aid[aidKey(f)]?.delivered ?? 0) - (aid0[aidKey(f)] ?? 0);
         if (k <= 0) continue;
         aid[aidKey(f)] = k;
-        aidNetTons += (f.recipient === id ? 1 : -1) * k * bulkTons(ITEMS[f.item].id);
+        aidNetTons += (f.recipient === id ? 1 : f.source === 'market' ? 0 : -1) * k * bulkTons(ITEMS[f.item].id);
       }
       for (const [k, tons] of Object.entries(world.slices.economy.allied)) {
         const [donor, recipient] = k.split('>');

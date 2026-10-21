@@ -253,6 +253,21 @@ describe('economy: military aid', () => {
     t.days(60);
     expect(ukr.stockpile[id.munition('pac3_mse')]).toBe(before);
   });
+
+  it("keeps Ukraine's 2024 ammunition inflow: home-made artillery and mortar rounds plus partners' shells", () => {
+    const t = dailyWorld();
+    const UKR = id.nation('UKR');
+    const ukr = t.world.nations[UKR];
+    t.war('RUS', 'UKR');
+    const ammo0 = ukr.bulk.ammo;
+    t.days(360);
+    // ~2.4M rounds made at home in 2024 (~55 kt) and ~2.5M+ partner rounds, 1.5M of them via the
+    // Czech initiative (~150 kt): a few hundred tons a day, against ~75 kt before either was counted.
+    const inflow = ukr.bulk.ammo - ammo0;
+    expect(inflow).toBeGreaterThan(150_000);
+    expect(inflow).toBeLessThan(260_000);
+    expect(t.world.slices.economy.aid['CZE>UKR:shell_155:market'].delivered).toBeGreaterThan(1_450_000);
+  });
 });
 
 describe('economy: sanctions', () => {

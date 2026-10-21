@@ -455,9 +455,9 @@ function stepNation(world: World, ctx: SimContext, s: Scan, n: Nation, e: Nation
   n.reserves += recallReservists(n, dtMonths);
 }
 
-export const aidKey = (f: AidFlow) => `${f.donor}>${f.recipient}:${f.item}`;
+export const aidKey = (f: AidFlow) => `${f.donor}>${f.recipient}:${f.item}${f.source === 'market' ? ':market' : ''}`;
 
-/** Ships each arms pipeline's monthly quota from the donor's stocks while the recipient fights a war the donor is not fighting against it. */
+/** Ships each arms pipeline's monthly quota, from the donor's stocks or bought abroad, while the recipient fights a war the donor is not fighting against it. */
 function shipAid(world: World, dtMonths: number): void {
   const state = world.slices.economy;
   for (const flow of AID_FLOWS) {
@@ -468,12 +468,16 @@ function shipAid(world: World, dtMonths: number): void {
     const due = (flow.perYear / 12) * dtMonths + a.carry;
     const spec = ITEMS[flow.item];
     const sink = spec.sink;
-    const have = sink.kind === 'bulk_ammo' ? Math.max(0, donor.bulk.ammo) / sink.tonsPerUnit : (donor.stockpile[spec.id] ?? 0);
+    const fromStocks = flow.source === 'stocks';
+    const have = !fromStocks ? Infinity : sink.kind === 'bulk_ammo' ? Math.max(0, donor.bulk.ammo) / sink.tonsPerUnit : (donor.stockpile[spec.id] ?? 0);
     const units = Math.min(Math.floor(due), Math.floor(have));
     a.carry = Math.min(due - units, 1);
     if (units <= 0) continue;
     a.delivered += units;
-    if (sink.kind === 'bulk_ammo') {
+    if (!fromStocks) {
+      if (sink.kind === 'bulk_ammo') recipient.bulk.ammo += units * sink.tonsPerUnit;
+      else recipient.stockpile[spec.id] = (recipient.stockpile[spec.id] ?? 0) + units;
+    } else if (sink.kind === 'bulk_ammo') {
       donor.bulk.ammo = Math.max(0, donor.bulk.ammo - units * sink.tonsPerUnit);
       recipient.bulk.ammo += units * sink.tonsPerUnit;
     } else {
