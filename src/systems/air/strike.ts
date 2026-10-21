@@ -36,9 +36,8 @@ export interface Assessment {
  * achieved and another strike is likely to achieve it. Two raids in a row that all but vanish
  * into the defences (Taiwan's HF-2E salvos on Shanghai; Russia's piecemeal 2022 strikes before
  * it massed them) end the mission; the aim is offered again after REASSESS_DAYS, when stocks of
- * interceptors may have run down (judgment). A raid of attritable weapons (ATTRITABLE_COST_USD_M)
- * that draws interceptors costing at least as much as itself counts as effective: it is meant to
- * run the defender's magazines down.
+ * interceptors may have run down (judgment). Raids of attritable weapons are not assessed: they
+ * are meant to draw interceptors (ATTRITABLE_COST_USD_M).
  */
 export const BDA = { futileRaids: 2, reassessDays: 3 };
 
@@ -343,14 +342,11 @@ function resolveRaid(world: World, ctx: SimContext, pic: AirPicture, slice: AirS
   for (const p of live) p.f.magazine[p.munition.id] -= p.weapons;
   strikeShips(world, ctx, pic, slice, target, attacker, all.filter((p) => p.targetClass === 'ship'));
   const streams: RaidStream[] = live.map((p) => ({ munition: p.munition, count: p.weapons, overflightKm: overflightKm(world, ctx, pic, p.f.node, target, attacker) }));
-  const { leaked, drawnUsdM } = defendRaid(world, ctx, pic, target, attacker, streams);
+  const leaked = defendRaid(world, ctx, pic, target, attacker, streams);
   live.forEach((p, i) => {
     const flightMin = nodeDistance(ctx, p.f.node, target) / (Math.max(0.05, p.munition.speedMach) * MACH_KM_PER_MIN);
     const { effects, effective } = applyEffect(world, ctx, pic, slice, target, attacker, p.munition, p.targetClass, leaked[i], tally, flightMin, p.f.order.targetFormation);
-    // A cheap raid that destroys nothing is still worth flying while it draws interceptors dearer than itself; one shot
-    // down by guns or a laser for a few dollars a kill (Iron Beam) is not.
-    const drew = p.munition.unitCostUsdM < ATTRITABLE_COST_USD_M && drawnUsdM[i] >= p.weapons * p.munition.unitCostUsdM;
-    assess(world, slice, attacker, aimKey(target, p.f.order.targetFormation, p.targetClass), effective || drew);
+    if (p.munition.unitCostUsdM >= ATTRITABLE_COST_USD_M) assess(world, slice, attacker, aimKey(target, p.f.order.targetFormation, p.targetClass), effective);
     ctx.emit({ type: 'strike', tick: world.tick, by: attacker, munition: p.munition.id, fired: p.weapons, intercepted: p.weapons - leaked[i], target, effects });
   });
   emitBattle(world, ctx, pic, target, attacker, tally);

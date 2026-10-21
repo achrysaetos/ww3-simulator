@@ -127,10 +127,15 @@ describe('taiwan-2027, first week', () => {
   });
 
   // CSIS 2023 "The First Battle of the Next War": PLARF opens with salvos of hundreds of SRBMs and cruise missiles on Taiwanese and US/Japanese bases.
+  // CSIS assumes the US and Japan fight from the first day. The sim draws US entry on day 6 at odds of about 0.8
+  // (diplomacy/wars.ts ambiguousResolve), with a second look a week later, and Japan comes in with it; so the Japan
+  // clause is held on the runs where Japan is at war by day 6.
   it('the PLA fires hundreds of missiles at Taiwan and the bases in Japan', () => {
+    const japanIn = (r: RunMetrics) => r.wars.some((w) => [w.a, w.b].sort().join() === 'CHN,JPN' && w.since < (7 * 24) / 6);
+    expect(runs.some(japanIn)).toBe(true);
     for (const r of runs) {
       expect(tally(r, 'CHN', 'TWN', MISSILES).fired).toBeGreaterThan(300);
-      expect(tally(r, 'CHN', 'JPN', MISSILES).fired).toBeGreaterThan(30);
+      if (japanIn(r)) expect(tally(r, 'CHN', 'JPN', MISSILES).fired).toBeGreaterThan(30);
     }
   });
 

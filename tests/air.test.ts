@@ -169,15 +169,6 @@ describe('integrated air defense', () => {
     expect(ad.magazine[mid('x_shorad_msl')]).toBeLessThan(stock);
   });
 
-  it('attritable drones that neither hit anything nor draw interceptors stop after two futile days', () => {
-    const t = airWorld(5);
-    t.war('RUS', 'UKR');
-    // Aimed at forces that are not there, with no battery at the cell: what gets through finds nothing.
-    launchers(t, 'RUS', t.node(53.9, 27.6), { x_drone_rack: 1 }, { posture: 'strike', target: t.node(...KYIV), targetClass: 'soft' });
-    const s = t.strikes(t.tick(16));
-    expect(new Set(s.map((e) => Math.floor((e.tick * t.world.dtHours) / 24))).size).toBe(2);
-  });
-
   it('a raid on the power grid cuts the grid serving the cell and leaves its other infrastructure alone; the grid then mends', () => {
     const t = airWorld(5);
     t.war('RUS', 'UKR');

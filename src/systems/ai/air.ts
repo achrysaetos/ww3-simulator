@@ -70,13 +70,14 @@ export function planAir(p: Plan, targets: TargetGrid): void {
   const cover = new Map<NodeId, number>(keys.map((k) => [k, 0]));
   const budget = new FireBudget(p);
   const sams = new SamCover(p);
-  let fields: NodeId[] | undefined;
-  const airfields = () => (fields ??= friendlyAirfields(p));
+  let fields: NodeId[] | undefined, hosted: NodeId[] | undefined;
+  const airfields = () => (fields ??= friendlyAirfields(p, false));
+  const hostFields = () => (hosted ??= friendlyAirfields(p, true));
   const fighters = wings.filter((w) => roleOf(p, w) === 'fighter').length;
   // Sweeps, strike packages and basing are planned with the tanker support the nation can lay on;
   // the air system then works out each day's actual radius from tanker sorties in range.
   const tanked = wings.some((w) => Object.entries(w.equipment).some(([id, n]) => n > 0 && p.ctx.catalog.platform(id as PlatformId).class === 'tanker')) ? 1 + TUNING.maxTankerExtension : 1;
-  const rebase = rebasing(p, wings, keys, targets, airfields, tanked);
+  const rebase = rebasing(p, wings, keys, targets, hostFields, tanked);
 
   const airSuperiority = (w: Formation, radius: number): boolean => {
     let best: NodeId | undefined, bestScore = -Infinity;
@@ -152,13 +153,15 @@ function strikersOf(p: Plan, w: Formation) {
 }
 
 /**
- * Airfields a nation's wings may use: its own and its co-belligerents', and those of any country
- * already hosting its forces (Kadena and Misawa for the US before Japan is in the war).
+ * Airfields a nation's wings may use: its own and its co-belligerents', and with `hosted` those of
+ * any country already hosting its forces (Kadena and Misawa for the US before Japan is in the war).
+ * Heavy bombers keep to the first: they forward-deploy to Guam, Diego Garcia and Darwin, bases
+ * built and agreed for them, not to any allied runway.
  */
-function friendlyAirfields(p: Plan): NodeId[] {
+function friendlyAirfields(p: Plan, hosted: boolean): NodeId[] {
   const { map } = p.ctx;
   const hosts = new Set<string>();
-  for (const f of p.index.byNation.get(p.nation) ?? []) if (f.status === 'active' && f.node < map.landCount) hosts.add(p.world.control[f.node]);
+  if (hosted) for (const f of p.index.byNation.get(p.nation) ?? []) if (f.status === 'active' && f.node < map.landCount) hosts.add(p.world.control[f.node]);
   const fields: NodeId[] = [];
   for (let n = 0; n < map.landCount; n++) {
     const holder = p.world.control[n];
