@@ -139,9 +139,12 @@ describe('taiwan-2027, first week', () => {
     }
   });
 
-  // CSIS 2023: ~90 % of US aircraft losses were on the ground.
+  // CSIS 2023: ~90 % of US aircraft losses were on the ground. Held, like the Japan clause, on the runs where the
+  // US has drawn entry by the end of the week.
   it('most US aircraft losses are on the ground', () => {
-    for (const r of runs) {
+    const usIn = runs.filter((r) => r.nations.USA !== undefined);
+    expect(usIn.length).toBeGreaterThan(0);
+    for (const r of usIn) {
       const usa = r.nations.USA!;
       expect(usa.aircraftLostOnGround).toBeGreaterThan(0);
       expect(usa.aircraftLostOnGround).toBeGreaterThanOrEqual(0.5 * crewedLost(r, 'USA'));
