@@ -324,6 +324,7 @@ function Command({ client, palette, initialNation }: { client: SimClient; palett
         </details>
         <div className="legend">
           <span><i className="lg-front" /> Front line</span>
+          <span><i className="lg-contest" /> Advance within a cell</span>
           <span><i className="lg-air" /> Air control</span>
           <span><i className="lg-infra" /> Infra damage</span>
           <span><i className="lg-fallout" /> Fallout</span>

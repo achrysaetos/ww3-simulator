@@ -83,6 +83,19 @@ describe('strategic lift choice', () => {
   });
 });
 
+describe('fronts inside a cell', () => {
+  it('sends how far an attacker has pushed across each contested cell', () => {
+    const w = testWorld();
+    const enc = new SnapshotEncoder(w.map.nationIds, w.catalog, w.map.size);
+    const kharkiv = w.nodeAt(50, 36.2);
+    w.world.slices.land = { baseline: {}, isolatedDays: {}, contest: { [kharkiv]: { by: N('RUS'), km: 1e6 } }, fortified: {}, origin: [], shellsFired: {}, airlifted: {}, airheads: {} };
+    const snap = enc.encode(w.world, w.map);
+    expect([...snap.contest]).toEqual([kharkiv, w.map.nationIds.indexOf(N('RUS')), 1]);
+    w.world.slices.land.contest[kharkiv].km = 0;
+    expect(enc.encode(w.world, w.map).contest[2]).toBe(0);
+  });
+});
+
 describe('nuclear options', () => {
   it("lists only the nation's own loaded weapons, with each launcher's position and reach", () => {
     const w = testWorld();

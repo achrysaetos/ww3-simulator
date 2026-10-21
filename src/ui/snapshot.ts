@@ -12,6 +12,7 @@ import type { GameMap } from '../core/map';
 import type { Catalog } from '../core/catalog';
 import { BMD_SYSTEMS } from '../systems/strategic/tables';
 import { supplyFactor } from '../systems/logistics';
+import { cellDepthKm } from '../systems/land/state';
 import { geography } from '../systems/naval/geography';
 import { compose } from '../systems/naval/state';
 import { liftShare } from '../systems/naval/amphibious';
@@ -309,6 +310,8 @@ export interface Snapshot {
   /** Flat (node, value) pairs for nodes with infrastructure < 1. */
   infra: Float32Array;
   fallout: Float32Array;
+  /** Flat (node, nationIndex, share) triples: cells an enemy is pushing into, and how far across it has got, 0..1. */
+  contest: Float32Array;
   focusNation?: NationDetail;
   focusFormation?: FormationDetail;
 }
@@ -361,6 +364,7 @@ export class SnapshotEncoder {
       sea: this.sparseControl(world.theater.seaControl),
       infra: sparseBelow(world.theater.infrastructure, 1),
       fallout: sparseRecord(world.theater.fallout),
+      contest: this.contested(world, map),
     };
     this.events = [];
     this.dropped = 0;
@@ -418,6 +422,19 @@ export class SnapshotEncoder {
       out[o + 6] = n.treasuryUsdB;
       out[o + 7] = n.nuclear.warheads;
       out[o + 8] = n.nuclear.deployed;
+    });
+    return out;
+  }
+
+  private contested(world: World, map: GameMap): Float32Array {
+    const rec = world.slices.land?.contest ?? {};
+    const keys = Object.keys(rec);
+    const out = new Float32Array(keys.length * 3);
+    keys.forEach((k, i) => {
+      const c = rec[+k];
+      out[i * 3] = +k;
+      out[i * 3 + 1] = this.nationIndex.get(c.by) ?? NO_NATION;
+      out[i * 3 + 2] = Math.min(1, c.km / cellDepthKm(map, +k as NodeId));
     });
     return out;
   }
@@ -700,6 +717,7 @@ export interface ClientState {
   sea: Float32Array;
   infra: Float32Array;
   fallout: Float32Array;
+  contest: Float32Array;
   focusNation?: NationDetail;
   focusFormation?: FormationDetail;
   /** Events from the latest snapshot only. */
@@ -710,7 +728,7 @@ export function emptyClientState(size: number): ClientState {
   return {
     tick: 0, date: '', control: new Uint16Array(size).fill(NO_NATION), controlVersion: 0,
     formations: [], rosterVersion: 0, nations: new Map(), wars: [], warsKey: '',
-    air: new Float32Array(0), sea: new Float32Array(0), infra: new Float32Array(0), fallout: new Float32Array(0),
+    air: new Float32Array(0), sea: new Float32Array(0), infra: new Float32Array(0), fallout: new Float32Array(0), contest: new Float32Array(0),
     latestEvents: [],
   };
 }
@@ -758,6 +776,7 @@ export function applySnapshot(state: ClientState, snap: Snapshot, nationIds: rea
   state.sea = snap.sea;
   state.infra = snap.infra;
   state.fallout = snap.fallout;
+  state.contest = snap.contest;
   state.focusNation = snap.focusNation;
   state.focusFormation = snap.focusFormation;
   state.latestEvents = snap.events;

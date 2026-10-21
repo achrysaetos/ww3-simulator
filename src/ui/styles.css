@@ -336,3 +336,4 @@ button.primary { background: #0f3a52; border-color: var(--accent); color: #fff; 
 .start-load { margin-top: 14px; align-items: center; flex-wrap: wrap; }
 .deploy-tbl td { vertical-align: middle; }
 .deploy-tbl button.active { outline: 2px solid var(--accent); }
+.legend .lg-contest { background: repeating-linear-gradient(90deg, rgba(220,90,70,0.8) 0 6px, transparent 6px 8px); border: 1px dashed #dc5a46; }

@@ -186,6 +186,15 @@ export function MapView(props: MapViewProps) {
   };
 
   const { client, places } = props;
+  const contestAt = (n: NodeId) => {
+    const v = client.state.contest;
+    for (let i = 0; i < v.length; i += 3) {
+      if (v[i] !== n) continue;
+      const by = client.state.nations.get(client.meta?.nationIds[v[i + 1]] as NationId);
+      return <div className="tt-warn" data-testid="tt-contest">Contested: {by?.name ?? 'the enemy'} has pushed {Math.round(v[i + 2] * 100)}% of the way across</div>;
+    }
+    return null;
+  };
   const hoverInfo = hover && (() => {
     const owner = client.state.control[hover.node];
     const ids = client.meta?.nationIds ?? client.map.nationIds;
@@ -198,6 +207,7 @@ export function MapView(props: MapViewProps) {
         <div className="tt-title">{places.name(hover.node)}</div>
         <div>{sea ? 'Sea zone' : `${map.terrain[hover.node]} · ${holder?.name ?? 'unclaimed'}`}</div>
         {!sea && map.owner[hover.node] !== (holder?.id ?? '') && <div className="tt-warn">Occupied (pre-war: {map.owner[hover.node]})</div>}
+        {contestAt(hover.node)}
         {here.length > 0 && (
           <ul className="tt-list">
             {here.slice(0, 6).map((f) => <li key={f.entry.id}>{f.entry.nation} · {f.entry.name}</li>)}
