@@ -54,12 +54,15 @@ export function createAi(profiles: Readonly<Record<string, StrategicProfile>> = 
       if (world.tick % STRATEGY_EVERY === 0) world.pending.push(...sanctionDecisions(world));
       const ids = Object.keys(world.nations) as NationId[];
       const surging = prewarSurges(world);
+      // A nation entering a war flies the opening strikes it planned while the decision was pending, not the next day's.
+      const entered = new Set<NationId>();
+      for (const e of world.events) if (e.type === 'war_declared') entered.add(e.by).add(e.on);
       const due = ids
         .map((n, i) => ({
           n,
           strategy: (world.tick + i) % STRATEGY_EVERY === 0,
           land: (world.tick + i) % LAND_EVERY === 0,
-          tasking: (world.tick + i + 1) % TASKING_EVERY === 0,
+          tasking: (world.tick + i + 1) % TASKING_EVERY === 0 || entered.has(n),
         }))
         .filter(({ n, strategy, land, tasking }) => (strategy || land || tasking) && (world.nations[n].status === 'war' || surging.has(n)) && COMMAND_DOMAINS.some((d) => delegated(world, n, d)));
       if (!due.length) return;

@@ -30,7 +30,8 @@ function run(scenario: string, days: number, seed: number): IsolationRun {
   for (let i = 0; i < Math.round((days * 24) / world.dtHours); i++) {
     const day = (world.tick * world.dtHours) / 24;
     for (const e of engine.step(world) as SimEvent[]) {
-      if (e.type === 'strike' && !map.isSea(e.target)) {
+      // An ASAT engagement is reported at the constellation's operations centre but lands nowhere.
+      if (e.type === 'strike' && !map.isSea(e.target) && !e.effects.some((x) => x.kind === 'satellites_destroyed')) {
         const owner = map.owner[e.target];
         const guam = inGuam(map.lat[e.target], map.lon[e.target]);
         const key = `${e.by}->${owner}:${guam ? 'guam' : 'homeland'}`;

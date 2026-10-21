@@ -61,7 +61,8 @@ export function processEvents(world: World, ctx: SimContext, s: DiplomacyState, 
   for (const e of world.events) {
     switch (e.type) {
       case 'strike': {
-        if (map.isSea(e.target)) break;
+        // An ASAT round kills satellites in orbit; nothing lands on the operations centre the constellation is placed at.
+        if (map.isSea(e.target) || e.effects.some((x) => x.kind === 'satellites_destroyed')) break;
         const victim = map.owner[e.target];
         if (!atWar(world, e.by, victim)) {
           const bystander = victim !== e.by && world.control[e.target] === victim && e.fired > e.intercepted
