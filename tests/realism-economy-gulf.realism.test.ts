@@ -1,31 +1,35 @@
 import { describe, expect, it, vi } from 'vitest';
 import { measureRun, type RunMetrics } from '../src/metrics';
 import { createSession } from '../src/scenarios';
-import { geography } from '../src/systems/naval/geography';
 
-/** Energy-shock bands for an Iran-Israel war with Hormuz in play, measured on 60 days of gulf-2027. */
+/**
+ * Energy-shock bands for an Iran-Israel war with Hormuz in play, measured on 60 days of gulf-2027.
+ * The price must follow physical disruption, not the existence of a war: each weekly sample pairs
+ * the world price with the share of world energy exports lost that week.
+ */
 vi.setConfig({ testTimeout: 900_000 });
 
 const DAYS = 60;
 const SEEDS = [1, 2];
-const runs = new Map<number, { m: RunMetrics; hormuzMines: number }>();
-const run = (seed: number) =>
-  runs.get(seed) ??
-  runs.set(seed, (() => {
-    const s = createSession('gulf-2027', seed);
-    const m = measureRun(s.engine, s.world, s.map, DAYS);
-    const zones = geography(s.map).chokepoints.find((c) => c.def.name === 'Strait of Hormuz')!.nodes;
-    const hormuzMines = zones.reduce((a, n) => a + Object.values(s.world.slices.naval.mines[n] ?? {}).reduce((x, k) => x + k, 0), 0);
-    return { m, hormuzMines };
-  })()).get(seed)!;
+const runs = new Map<number, RunMetrics>();
+const run = (seed: number) => runs.get(seed) ?? runs.set(seed, (() => { const s = createSession('gulf-2027', seed); return measureRun(s.engine, s.world, s.map, DAYS); })()).get(seed)!;
+const weeks = (seed: number) => {
+  const w = run(seed).nations.IRN.economy!.weekly;
+  return w.energyPrice.map((price, i) => ({ price, lost: w.energyExportsLost[i] }));
+};
 
 describe.each(SEEDS)('gulf-2027 energy shock, seed %i', (seed) => {
-  it('when Gulf exports are mostly cut, world energy prices rise 1.4-3.5x (EIA/IEA Hormuz scenarios: USD 120-200+/bbl from ~USD 75)', () => {
-    const { m, hormuzMines } = run(seed);
-    const iran = m.nations.IRN.economy!;
-    // Only meaningful if the run actually closed the strait: mined, or Iran's own exports cut.
-    expect(hormuzMines > 0 || Math.max(...iran.weekly.tradeBlocked) > 0.5).toBe(true);
-    expect(iran.energyPrice).toBeGreaterThanOrEqual(1.4);
-    expect(iran.energyPrice).toBeLessThanOrEqual(3.5);
+  it('with Hormuz open, a war in the Gulf lifts prices at most 30% (June 2025 Israel-Iran war: Brent +10-15%; Abqaiq 2019, ~5% of world oil offline: +15% peak)', () => {
+    const open = weeks(seed).filter((x) => x.lost < 0.05);
+    expect(open.length).toBeGreaterThan(0);
+    for (const x of open) expect(x.price).toBeLessThanOrEqual(1.3);
+  });
+
+  it('when Gulf exports are cut by half or more, prices rise 1.4-3.5x (Goldman 2025: Hormuz flows halved for a month, Brent ~USD 110 from ~70; EIA/IEA full closure +50-150%)', () => {
+    // Hormuz carries ~20% of world oil and LNG (EIA 2023), so half of it is ~10% of world energy exports.
+    for (const x of weeks(seed).filter((w) => w.lost >= 0.1)) {
+      expect(x.price).toBeGreaterThanOrEqual(1.4);
+      expect(x.price).toBeLessThanOrEqual(3.5);
+    }
   });
 });

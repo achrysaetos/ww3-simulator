@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { feature, mesh } from 'topojson-client';
 import type { GeometryCollection, Topology } from 'topojson-specification';
-import type { FormationId, NodeId } from '../core/types';
+import type { GameMap } from '../core/map';
+import type { FormationId, NationId, NodeId } from '../core/types';
 import type { SimClient } from './client';
 import type { Palette } from './colors';
 import { MapRenderer, type Overlays } from './renderer';
-import { NO_NATION } from './snapshot';
+import { NO_NATION, type ScenarioCard } from './snapshot';
 import { centerOn, pickNode, zoomAt, type ViewTransform } from './view';
 import type { PlaceNamer } from './events';
 
@@ -21,6 +22,18 @@ export interface MapViewProps {
   onTarget(node: NodeId): void;
   /** Filled by the map so panels can fly to a node. */
   focusHandle: { current: ((node: NodeId) => void) | null };
+}
+
+/**
+ * Where the map opens: the capital of the nation under attack in the player's own opening war,
+ * else in the scenario's first war (Taipei for Taiwan 2027 played as the US), else the player's
+ * capital. Null when there is neither.
+ */
+export function openingFocus(map: GameMap, scenario: Pick<ScenarioCard, 'wars'>, playAs: string | null): NodeId | null {
+  const war = scenario.wars.find(([a, t]) => a === playAs || t === playAs) ?? scenario.wars[0];
+  const nation = war ? war[1] : playAs;
+  const i = map.nationIds.indexOf(nation as NationId);
+  return i < 0 ? null : (map.data.nations[i].capital!.cell as NodeId);
 }
 
 export function MapView(props: MapViewProps) {
@@ -43,7 +56,11 @@ export function MapView(props: MapViewProps) {
     const fit = () => {
       const rect = canvas.getBoundingClientRect();
       r.resize(rect.width, rect.height, window.devicePixelRatio || 1);
-      if (!userMoved.current) r.t = centerOn(r.proj, rect.width, rect.height, 24, 50, 3.2);
+      if (!userMoved.current) {
+        const { client: c, playAs } = propsRef.current;
+        const focus = c.meta ? openingFocus(c.map, c.meta.scenario, playAs) : null;
+        r.t = focus === null ? centerOn(r.proj, rect.width, rect.height, 24, 50, 3.2) : centerOn(r.proj, rect.width, rect.height, c.map.lon[focus], c.map.lat[focus], 4);
+      }
       dirty.current = true;
     };
     fit();

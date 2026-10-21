@@ -1,0 +1,166 @@
+import { describe, expect, it } from 'vitest';
+import { loadMap } from '../src/data/load';
+import type { NationId, NodeId } from '../src/core/types';
+
+const map = loadMap();
+type Point = [number, number];
+const at = ([lat, lon]: Point) => map.nodeAt(lat, lon);
+const landNeighbors = (n: NodeId) => [...map.neighbors(n)].filter((m) => !map.isSea(m));
+const where = (n: NodeId) => `${map.owner[n]} ${map.lat[n]},${map.lon[n]}`;
+
+function landEdges(a: string, b: string): string[] {
+  const out: string[] = [];
+  for (let n = 0 as NodeId; n < map.landCount; n++)
+    if (map.owner[n] === a) for (const m of landNeighbors(n)) if (map.owner[m] === b) out.push(`${where(n)} - ${where(m)}`);
+  return out;
+}
+
+/** Land-only hops between two points, Infinity when no land route exists. */
+function landHops(from: Point, to: Point): number {
+  const a = at(from), b = at(to);
+  expect(map.isSea(a) || map.isSea(b), `${from} and ${to} are on land`).toBe(false);
+  const dist = new Map([[a, 0]]), queue = [a];
+  for (let i = 0; i < queue.length; i++) {
+    const n = queue[i];
+    if (n === b) return dist.get(n)!;
+    for (const m of landNeighbors(n)) if (!dist.has(m)) { dist.set(m, dist.get(n)! + 1); queue.push(m); }
+  }
+  return Infinity;
+}
+
+const TALLINN: Point = [59.44, 24.75], HELSINKI: Point = [60.17, 24.94], BUSAN: Point = [35.1, 129.04], FUKUOKA: Point = [33.59, 130.4];
+const TAIPEI: Point = [25.04, 121.56], TAICHUNG: Point = [24.15, 120.68], KAOHSIUNG: Point = [22.63, 120.27], FUZHOU: Point = [26.07, 119.3];
+const KINMEN: Point = [24.44, 118.37], MATSU: Point = [26.16, 119.95], PENGHU: Point = [23.57, 119.6];
+
+describe('land adjacency follows land, bridges and tunnels', () => {
+  // Each pair is two shores of open water with no fixed link: an army needs a ship.
+  it.each([
+    ['Gulf of Finland', 'EST', 'FIN'], ['Korea Strait', 'KOR', 'JPN'], ['Strait of Hormuz', 'IRN', 'OMN'], ['Taiwan Strait', 'CHN', 'TWN'],
+    ['Strait of Gibraltar', 'ESP', 'MAR'], ['Bab-el-Mandeb', 'YEM', 'DJI'], ['Bab-el-Mandeb', 'YEM', 'ERI'], ['Bering Strait', 'RUS', 'USA'],
+    ['Palk Strait', 'IND', 'LKA'], ['Strait of Otranto', 'ITA', 'ALB'], ['La Perouse Strait', 'RUS', 'JPN'], ['Torres Strait', 'AUS', 'PNG'],
+    ['Strait of Malacca', 'MYS', 'IDN'],
+  ])('%s does not join %s and %s by land', (_, a, b) => {
+    const edges = landEdges(a, b);
+    // Malaysia and Indonesia do share a land border, on Borneo; none of it may cross the Strait of Malacca.
+    expect(a === 'MYS' ? edges.filter((e) => !/ [1-7]\.\d+,11\d/.test(e)) : edges).toEqual([]);
+  });
+
+  it('crosses the Strait of Dover only through the Channel Tunnel', () => {
+    expect(landEdges('GBR', 'FRA')).toEqual([`${where(at([51.15, 0.87]))} - ${where(at([50.93, 1.8]))}`]);
+  });
+
+  it('sends Tallinn to Helsinki round the Gulf of Finland through Russia', () => {
+    expect(landHops(TALLINN, HELSINKI)).toBeGreaterThanOrEqual(6);
+  });
+
+  it.each([
+    ['Busan to Fukuoka', BUSAN, FUKUOKA], ['Taipei to Fuzhou', TAIPEI, FUZHOU],
+  ])('has no land route %s', (_, a, b) => {
+    expect(landHops(a, b)).toBe(Infinity);
+  });
+
+  it.each([
+    ['Oresund Bridge', [55.68, 12.57], [55.6, 13.0], 1],
+    ['Crimean Bridge', [45.35, 36.47], [45.22, 36.7], 1],
+    ['King Fahd Causeway', [26.22, 50.58], [26.28, 50.2], 2],
+    ['Johor-Singapore Causeway', [1.35, 103.82], [1.49, 103.74], 2],
+    ['Great Belt Fixed Link', [55.68, 12.57], [55.4, 10.39], 4],
+    ['Bosporus bridges', [41.68, 26.56], [39.93, 32.86], 10],
+    ['Seikan Tunnel', [35.68, 139.69], [43.06, 141.35], 12],
+    ['Kanmon tunnels', [35.68, 139.69], [33.59, 130.4], 12],
+  ] as [string, Point, Point, number][])('carries armies over the %s', (_, a, b, hops) => {
+    expect(landHops(a, b)).toBeLessThanOrEqual(hops);
+  });
+
+  it('keeps Kaliningrad reachable by land from Poland and Lithuania', () => {
+    expect(landEdges('RUS', 'POL').length).toBeGreaterThan(0);
+    expect(landEdges('RUS', 'LTU').length).toBeGreaterThan(0);
+    expect(landHops([54.71, 20.51], [52.23, 21.01])).toBeLessThanOrEqual(6);
+    expect(map.owner[at([54.64, 19.91])]).toBe('RUS');
+    expect(map.ports[at([54.64, 19.91])]).toBeGreaterThan(0);
+  });
+});
+
+describe('capitals', () => {
+  const capitalCity = (nation: string) => map.cities.find((c) => c.capital && c.nation === nation);
+
+  it('sits in a cell its own nation owns for all 193 nations', () => {
+    expect(map.nationIds.length).toBe(193);
+    const wrong = map.data.nations.filter((n, i) => map.owner[n.capital!.cell] !== map.nationIds[i]).map((n) => `${n.iso3} ${n.capital!.name}`);
+    expect(wrong).toEqual([]);
+  });
+
+  it('is the cell holding the capital city, unless a larger capital holds that cell', () => {
+    const wrong: string[] = [];
+    for (const [i, n] of map.data.nations.entries()) {
+      const city = capitalCity(map.nationIds[i]);
+      if (!city) continue;
+      const cell = map.nodeAt(city.lat, city.lon);
+      if (cell === n.capital!.cell) continue;
+      const larger = map.cities.find((c) => c.capital && c.node === cell && c.pop > city.pop);
+      if (!larger || map.distanceKm(cell, n.capital!.cell as NodeId) > 30) wrong.push(`${n.iso3} ${city.name}`);
+    }
+    expect(wrong).toEqual([]);
+  });
+
+  it.each([
+    ['TWN', 'Taipei'], ['DNK', 'Kobenhavn'], ['GRC', 'Athens'], ['LTU', 'Vilnius'], ['PRT', 'Lisbon'], ['CUB', 'Havana'], ['PER', 'Lima'],
+    ['SVN', 'Ljubljana'], ['MKD', 'Skopje'], ['ISR', 'Jerusalem'], ['SSD', 'Juba'], ['PSE', 'Ramallah'], ['LKA', 'Colombo'], ['TKM', 'Ashgabat'],
+  ])('%s is governed from %s', (nation, name) => {
+    expect(map.data.nations.find((n) => n.iso3 === nation)!.capital!.name).toBe(name);
+    expect(capitalCity(nation)?.name).toBe(name);
+  });
+});
+
+describe('Taiwan and the strategic islands', () => {
+  it('draws Taiwan finely enough for a northern, central and southern front', () => {
+    const taipei = at(TAIPEI), taichung = at(TAICHUNG), kaohsiung = at(KAOHSIUNG);
+    expect([taipei, taichung, kaohsiung].map((n) => map.owner[n])).toEqual(['TWN', 'TWN', 'TWN']);
+    expect(new Set([taipei, taichung, kaohsiung]).size).toBe(3);
+    expect(map.data.nations.find((n) => n.iso3 === 'TWN')!.capital!.cell).toBe(taipei);
+    const main = map.nodesOf('TWN' as NationId).filter((n) => map.lon[n] > 120);
+    expect(main.length).toBeGreaterThanOrEqual(30);
+  });
+
+  it.each([
+    ['Keelung', [25.13, 121.74], 'port'], ['Songshan', [25.07, 121.55], 'airport'], ['Taoyuan', [25.08, 121.23], 'airport'],
+    ['Taichung', [24.26, 120.5], 'port'], ['Kaohsiung', [22.57, 120.31], 'port'], ['Kaohsiung', [22.57, 120.35], 'airport'],
+    ['Hualien', [23.98, 121.63], 'port'], ['Hualien', [24.02, 121.62], 'airport'],
+  ] as [string, Point, 'port' | 'airport'][])('puts the %s %s in a Taiwanese land cell that has one', (_, p, kind) => {
+    const n = at(p);
+    expect(map.owner[n]).toBe('TWN');
+    expect((kind === 'port' ? map.ports : map.airports)[n]).toBeGreaterThan(0);
+  });
+
+  it.each([
+    ['Kinmen', KINMEN, 'TWN'], ['Matsu', MATSU, 'TWN'], ['Penghu', PENGHU, 'TWN'], ['Okinawa', [26.35, 127.77] as Point, 'JPN'],
+    ['Guam', [13.45, 144.78] as Point, 'USA'], ['Diego Garcia', [-7.32, 72.42] as Point, 'GBR'],
+  ])('holds %s as its own island cell with a port and an airfield', (_, p, owner) => {
+    const n = at(p);
+    expect(map.owner[n]).toBe(owner);
+    expect(landNeighbors(n)).toEqual([]);
+    expect(map.isCoastal(n)).toBe(true);
+    expect(map.ports[n]).toBeGreaterThan(0);
+    expect(map.airports[n]).toBeGreaterThan(0);
+  });
+
+  it('keeps Xiamen Chinese next to Kinmen', () => {
+    expect(map.owner[at([24.48, 118.09])]).toBe('CHN');
+    expect(at([24.48, 118.09])).not.toBe(at(KINMEN));
+  });
+
+  it.each([
+    ['Singapore', [1.29, 103.85] as Point, 'SGP'], ['Bahrain', [26.22, 50.58] as Point, 'BHR'], ['Sevastopol', [44.62, 33.54] as Point, 'RUS'],
+    ['Kerch', [45.35, 36.47] as Point, 'RUS'],
+  ])('holds %s on a land cell with a port', (_, p, owner) => {
+    const n = at(p);
+    expect(map.owner[n]).toBe(owner);
+    expect(map.ports[at(p)] + landNeighbors(n).reduce((s, m) => s + (map.owner[m] === owner ? map.ports[m] : 0), 0)).toBeGreaterThan(0);
+  });
+});
+
+it('finds every land cell at its own centre', () => {
+  const wrong: number[] = [];
+  for (let n = 0 as NodeId; n < map.landCount; n++) if (map.nodeAt(map.lat[n], map.lon[n]) !== n) wrong.push(n);
+  expect(wrong).toEqual([]);
+});

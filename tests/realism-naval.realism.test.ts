@@ -19,7 +19,7 @@ interface TaiwanRun {
   m: RunMetrics;
   /** The US at war with China by US_EARLY_DAYS, as in the CSIS base case. */
   usInWar: boolean;
-  /** Taiwan's 1-degree land cells (4 at this resolution) held by China at the end. */
+  /** Taiwanese ground China holds at the end, in 1-degree cells: Taiwan's quarter-degree cells count 1/16 each. */
   cellsTaken: number;
   taipeiHeld: boolean;
   start: Record<string, Partial<Record<PlatformClass, number>>>;
@@ -39,6 +39,7 @@ function fielded(world: ReturnType<typeof createSession>['world'], catalog: Retu
   return out;
 }
 
+const TAIPEI = { lat: 25.04, lon: 121.56 };
 const taiwanRuns = new Map<number, TaiwanRun>();
 function taiwan(seed: number): TaiwanRun {
   let r = taiwanRuns.get(seed);
@@ -47,13 +48,13 @@ function taiwan(seed: number): TaiwanRun {
   const start = Object.fromEntries(['CHN', 'TWN', 'USA', 'JPN'].map((n) => [n, fielded(s.world, s.catalog, n)]));
   const m = measureRun(s.engine, s.world, s.map, DAYS);
   let cellsTaken = 0;
-  for (let n = 0; n < s.map.landCount; n++) if (s.map.owner[n] === 'TWN' && s.world.control[n] === 'CHN') cellsTaken++;
+  for (let n = 0; n < s.map.landCount; n++) if (s.map.owner[n] === 'TWN' && s.world.control[n] === 'CHN') cellsTaken += (2 * s.map.halfDeg[n]) ** 2;
   const entry = (n: string) => m.wars.find((w) => [w.a, w.b].sort().join() === ['CHN', n].sort().join())?.since;
   const day = (tick: number | undefined) => (tick === undefined ? undefined : (tick * s.world.dtHours) / 24);
   const usInWar = (day(entry('USA')) ?? Infinity) <= US_EARLY_DAYS;
   const belligerent = new Set(Object.entries(s.world.relations).filter(([, x]) => x.atWar).flatMap(([k]) => k.split('|')));
   const neutralTrade = Object.fromEntries(Object.entries(s.world.theater.tradeBlocked).filter(([n]) => !belligerent.has(n)));
-  r = { m, usInWar, cellsTaken, taipeiHeld: s.world.control[s.world.nations['TWN' as NationId].capital] === 'TWN', start, neutralTrade };
+  r = { m, usInWar, cellsTaken, taipeiHeld: s.world.control[s.map.nodeAt(TAIPEI.lat, TAIPEI.lon)] === 'TWN', start, neutralTrade };
   taiwanRuns.set(seed, r);
   const lost = (n: string, c: PlatformClass) => m.nations[n]?.lossesByClass[c] ?? 0;
   console.log(`taiwan seed ${seed}: US enters day ${day(entry('USA'))}, JPN day ${day(entry('JPN'))}; first landing day ${m.nations.CHN?.naval?.firstAssaultDay}; landings ${m.nations.CHN?.naval?.assaultLandings}; ` +
@@ -92,9 +93,9 @@ describe('Taiwan 2027 naval war and invasion (CSIS "The First Battle of the Next
 
   // CSIS base case over the whole campaign: China ~138 major ships, the US 2 carriers and 7-20 major surface
   // warships. A 30-day run covers most of the decisive fighting; bands are widened for that (judgement).
-  it.each(SEEDS)('with the US in from the start, the PLAN loses dozens of major ships including amphibious lift, and the US loses 0-3 carriers and a band of surface combatants (seed %i)', (seed) => {
+  it.for(SEEDS)('with the US in from the start, the PLAN loses dozens of major ships including amphibious lift, and the US loses 0-3 carriers and a band of surface combatants (seed %i)', { timeout: 300_000 }, (seed, { skip }) => {
     const { m, usInWar } = taiwan(seed);
-    if (!usInWar) return;
+    if (!usInWar) skip(`the US entered after day ${US_EARLY_DAYS}`);
     const chn = m.nations.CHN, usa = m.nations.USA;
     expect(chn.naval?.majorShipsLost ?? 0).toBeGreaterThanOrEqual(20);
     expect(chn.naval?.majorShipsLost ?? 0).toBeLessThanOrEqual(160);
@@ -103,24 +104,29 @@ describe('Taiwan 2027 naval war and invasion (CSIS "The First Battle of the Next
     const usSurface = (usa.lossesByClass.cruiser ?? 0) + (usa.lossesByClass.destroyer ?? 0) + (usa.lossesByClass.frigate ?? 0);
     expect(usSurface).toBeGreaterThanOrEqual(3);
     expect(usSurface).toBeLessThanOrEqual(25);
-  }, 300_000);
+  });
 
   // CSIS base case: allied submarines, bombers and Taiwan's shore batteries sink most of the PLAN's amphibious
   // fleet in the first weeks. Judgement: at least half the amphibious hulls by day 30.
-  it.each(SEEDS)('with the US in from the start, the PLAN loses most of its amphibious fleet (seed %i)', (seed) => {
+  it.for(SEEDS)('with the US in from the start, the PLAN loses most of its amphibious fleet (seed %i)', { timeout: 300_000 }, (seed, { skip }) => {
     const { m, start, usInWar } = taiwan(seed);
-    if (!usInWar) return;
+    if (!usInWar) skip(`the US entered after day ${US_EARLY_DAYS}`);
     expect((m.nations.CHN.lossesByClass.amphibious ?? 0) / (start.CHN.amphibious ?? 1)).toBeGreaterThanOrEqual(0.5);
-  }, 300_000);
+  });
 
   // CSIS base case: China gets about 30,000 troops ashore, who are cut off once its shipping is sunk.
   // Judgement: fewer than 80,000 PLA troops on Taiwan at day 30.
-  it.each(SEEDS)('with the US in from the start, the PLA has tens of thousands ashore, not hundreds of thousands (seed %i)', (seed) => {
+  it.for(SEEDS)('with the US in from the start, the PLA has tens of thousands ashore, not hundreds of thousands (seed %i)', { timeout: 300_000 }, (seed, { skip }) => {
     const { m, usInWar } = taiwan(seed);
-    if (!usInWar) return;
+    if (!usInWar) skip(`the US entered after day ${US_EARLY_DAYS}`);
     expect(m.nations.CHN.naval?.troopsOnEnemySoil ?? 0).toBeGreaterThan(5_000);
     expect(m.nations.CHN.naval?.troopsOnEnemySoil ?? 0).toBeLessThan(80_000);
-  }, 300_000);
+  });
+
+  // The three bands above skip a seed where the US comes in late; without this, a model where it never does would pass them all.
+  it('the US is in from the start in at least one seed, so the US-in bands assert something', () => {
+    expect(SEEDS.filter((seed) => taiwan(seed).usInWar).length).toBeGreaterThan(0);
+  }, 900_000);
 
   // CSIS base case: US attack submarines do much of the killing of PLAN shipping and lose few boats. Judgement: at most
   // 6 of the ~50 US SSNs in 30 days. Boats wait one zone off the PLAN's screen and the datum falls on the boat that

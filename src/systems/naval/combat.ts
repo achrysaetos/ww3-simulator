@@ -344,7 +344,7 @@ export function applyHits(env: TickEnv, target: Formation, hits: number[], by: N
     for (const x of hulls) if ((r -= x.stack.profile.signature) <= 0) { h = x; break; }
     h.dmg += w;
   }
-  let liftLost = 0, aircraftCapLost = 0, aircraftCap = 0;
+  let liftLost = 0, deckLost = 0, aircraftCapLost = 0, aircraftCap = 0;
   for (const s of c.hulls) aircraftCap += (s.platform.capacity?.aircraft ?? 0) * s.count;
   const sunkByPid = new Map<PlatformId, number>();
   for (const h of hulls) {
@@ -357,6 +357,7 @@ export function applyHits(env: TickEnv, target: Formation, hits: number[], by: N
       target.personnel = Math.max(0, target.personnel - h.stack.platform.crew);
       losses.casualties += h.stack.platform.crew * CREW_LOSS_SUNK;
       liftLost += h.stack.platform.capacity?.troops ?? 0;
+      deckLost += h.stack.platform.capacity?.vehicles ?? 0;
       aircraftCapLost += h.stack.platform.capacity?.aircraft ?? 0;
     } else {
       losses.damaged[pid] = (losses.damaged[pid] ?? 0) + 1;
@@ -369,7 +370,9 @@ export function applyHits(env: TickEnv, target: Formation, hits: number[], by: N
     for (const a of c.aircraft) target.equipment[a.pid] -= Math.round(a.count * share);
     for (const w of env.embarked.get(target.id) ?? []) if (w.kind === 'air_wing') shrink(env, w, share);
   }
-  if (liftLost && c.troopLift) for (const e of env.embarked.get(target.id) ?? []) if (e.kind !== 'air_wing') shrink(env, e, liftLost / c.troopLift);
+  // Troops and vehicles go down with the share of berths or deck lost, whichever is larger (cargo ships carry vehicles only).
+  const cargoLost = Math.max(c.troopLift ? liftLost / c.troopLift : 0, c.vehicleLift ? deckLost / c.vehicleLift : 0);
+  if (cargoLost) for (const e of env.embarked.get(target.id) ?? []) if (e.kind !== 'air_wing') shrink(env, e, cargoLost);
 
   const lb = ledger(world, target.nation);
   for (const n of Object.values(losses.sunk)) lb.hullsSunk += n;

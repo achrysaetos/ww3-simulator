@@ -13,6 +13,7 @@ import { takeLosses, type LossTally } from './losses';
 import { nodeDistance, type AirGroup, type AirPicture } from './picture';
 import { visibility } from './combat';
 import { emitBattle, hasSupport } from './superiority';
+import { spaceSupport } from '../strategic/space';
 import { AIRFRAME, ATTRITABLE_COST_USD_M, DRONE_SITE_LAUNCHES_PER_DAY, isRoundOnRail, LAUNCHER, MOBILE_TARGETS, NON_STRIKE_KINDS, STRIKE_ROLES, TARGET_OF_CLASS, TUNING } from './tables';
 
 export interface AirSlice {
@@ -423,7 +424,7 @@ function applyEffect(world: World, ctx: SimContext, pic: AirPicture, slice: AirS
     if (!owner || !pic.atWar(owner, attacker)) return { effects: [{ kind: 'no_effect', why: 'not_hostile' }], effective: false };
     const infra = world.theater.infrastructure;
     const before = infra[target];
-    const perHit = TUNING.structurePerHit * effectPk(m, tc) * (m.warheadKg / 450) ** (2 / 3);
+    const perHit = TUNING.structurePerHit * effectPk(m, tc) * spaceSupport(world, attacker, m, false) * (m.warheadKg / 450) ** (2 / 3);
     infra[target] = before * (1 - Math.min(0.5, perHit)) ** hits;
     return { effects: [{ kind: 'infrastructure', before, after: infra[target] }], effective: infra[target] < before };
   }
@@ -432,12 +433,12 @@ function applyEffect(world: World, ctx: SimContext, pic: AirPicture, slice: AirS
     if (!owner || !pic.atWar(owner, attacker)) return { effects: [{ kind: 'no_effect', why: 'not_hostile' }], effective: false };
     const grid = (world.theater.power ??= {});
     const before = grid[target] ?? 1;
-    const perHit = TUNING.powerPerHit * effectPk(m, tc) * (m.warheadKg / 450) ** (2 / 3);
+    const perHit = TUNING.powerPerHit * effectPk(m, tc) * spaceSupport(world, attacker, m, false) * (m.warheadKg / 450) ** (2 / 3);
     grid[target] = before * (1 - Math.min(0.5, perHit)) ** hits;
     return { effects: [{ kind: 'grid', before, after: grid[target] }], effective: grid[target] < before };
   }
   let cratered = false;
-  let p = effectPk(m, tc) * stillThere(m, tc, flightMin);
+  let p = effectPk(m, tc) * stillThere(m, tc, flightMin) * spaceSupport(world, attacker, m, MOBILE_TARGETS.has(tc));
   const effects: StrikeEffect[] = [];
   if (tc === 'aircraft') {
     p = (1 - TUNING.shelteredShare) * p + TUNING.shelteredShare * (m.pk.hardened ?? 0);

@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
-import { Engine } from '../src/core/engine';
+import { Engine, relationMut } from '../src/core/engine';
 import { addFormation } from '../src/core/forces';
 import type { NationId, NodeId, SimEvent } from '../src/core/types';
 import { initialStockpiles } from '../src/data/industry';
 import { economicStress, economy } from '../src/systems/economy';
+import { sanctionDecisions } from '../src/systems/ai/strategy';
+import { profiles } from '../src/data/nations';
 import { createWorld } from '../src/core/world';
 import { loadMap } from '../src/data/load';
 import { id, testCatalog, testWorld } from '../src/testkit';
@@ -125,8 +127,10 @@ describe('economy: blockade', () => {
     const t = dailyWorld();
     t.world.theater.tradeBlocked[JPN] = 0.8;
     t.world.theater.tradeBlocked[USA] = 0.8;
+    // Stocks cover the first week; rationing trims non-priority use as LNG runs down.
     t.days(7);
-    expect(t.world.slices.economy.nations[JPN].supply.energy).toBe(1);
+    expect(t.world.slices.economy.nations[JPN].supply.energy).toBeGreaterThan(0.9);
+    expect(t.shortages(JPN)).not.toContain('energy');
 
     // LNG (~3 weeks) and coal (~1 month) are gone; ~230 days of strategic oil still cover oil's share.
     t.days(53);
@@ -163,6 +167,47 @@ describe('economy: blockade by geography', () => {
   });
 });
 
+describe('economy: allied ammunition', () => {
+  it('tops up a treaty ally at war from a partner rich in shells, and nothing flows from states with no obligation', () => {
+    const t = dailyWorld();
+    const EST = id.nation('EST'), CHN = id.nation('CHN');
+    const est = t.world.nations[EST];
+    t.add({ nation: EST, name: 'Estonian brigade', kind: 'maneuver', echelon: 'brigade', node: est.capital, equipment: { [id.platform('t_mbt')]: 30 }, personnel: 4_000 });
+    t.war('RUS', 'EST');
+    est.bulk.ammo = 0;
+    t.world.nations[USA].bulk.ammo = 160_000;
+    t.days(10);
+    const allied = t.world.slices.economy.allied;
+    expect(allied['USA>EST']).toBeGreaterThan(0);
+    expect(est.bulk.ammo).toBeGreaterThan(0);
+    // Ten days at most 10% a month of the US stock.
+    expect(allied['USA>EST']).toBeLessThanOrEqual(160_000 * 0.1 * (10 / 30.4) * 1.01);
+    expect(Object.keys(allied).some((k) => k.startsWith(`${CHN}>`) || k.startsWith(`${RUS}>`))).toBe(false);
+  });
+});
+
+describe('economy: grid strikes', () => {
+  it('cuts the energy a nation gets when strikes wreck its grid, whatever fuel it holds, and restores it on repair', () => {
+    const t = dailyWorld();
+    const UKR = id.nation('UKR');
+    const cells = t.map.nodesOf(UKR);
+    const power: Record<number, number> = {};
+    (t.world.theater as { power?: Record<number, number> }).power = power;
+    for (const n of cells) power[n] = 0.5;
+    t.days(2);
+    const e = t.world.slices.economy.nations[UKR];
+    // Half the grid gone takes about half of electricity, ~20% of final energy use.
+    expect(e.supply.energy).toBeGreaterThan(0.85);
+    expect(e.supply.energy).toBeLessThan(0.95);
+    expect(t.world.slices.economy.nations[RUS].supply.energy).toBe(1);
+    // Grid damage cuts energy, not industrial integrity.
+    expect(t.world.slices.economy.nations[UKR].integrity).toBe(1);
+    for (const n of cells) delete power[n];
+    t.days(1);
+    expect(e.supply.energy).toBe(1);
+  });
+});
+
 describe('economy: energy price', () => {
   it('a Hormuz closure roughly doubles the world energy price, costing importers output and exporters none', () => {
     const t = dailyWorld();
@@ -175,7 +220,7 @@ describe('economy: energy price', () => {
     expect(price).toBeGreaterThan(1.6);
     expect(price).toBeLessThan(3);
     const jp = t.world.slices.economy.nations[JPN];
-    expect(jp.supply.energy).toBe(1);
+    expect(jp.supply.energy).toBeGreaterThan(0.95);
     expect(jp.gdpIndex).toBeLessThan(0.99);
     expect(t.world.slices.economy.nations[USA].gdpIndex).toBe(1);
   });
@@ -241,6 +286,17 @@ describe('economy: sanctions', () => {
   });
 });
 
+describe('ai: sanctions policy', () => {
+  it('has the West, and the EU as one bloc, sanction a state at war while its friends and neutrals trade on', () => {
+    const world = createWorld(loadMap(), { profiles });
+    expect(sanctionDecisions(world)).toEqual([]);
+    relationMut(world, RUS, id.nation('UKR')).atWar = true;
+    const by = sanctionDecisions(world).filter((c) => c.type === 'sanction' && c.target === RUS).map((c) => c.nation);
+    expect(by).toEqual(expect.arrayContaining(['USA', 'GBR', 'JPN', 'DEU', 'ITA', 'HUN'].map(id.nation)));
+    for (const n of ['CHN', 'IND', 'TUR', 'BLR', 'UKR']) expect(by).not.toContain(id.nation(n));
+  });
+});
+
 describe('economy: military fuel', () => {
   it('keeps an oil producer at war fuelled beyond its peacetime budget, without overfilling depots in peace', () => {
     const t = dailyWorld();
@@ -259,6 +315,21 @@ describe('economy: military fuel', () => {
 
     const depot = 6 * ((de.stats.milexUsd ?? 0) / 1e6) * 12 / 12;
     expect(de.bulk.fuel).toBeLessThanOrEqual(depot * 1.001);
+  });
+
+  it('fills depots no further than their peacetime capacity however far a nation mobilizes', () => {
+    const t = dailyWorld();
+    const TWN = id.nation('TWN');
+    const tw = t.world.nations[TWN];
+    t.world.pending.push({ type: 'set_mobilization', nation: TWN, level: 1 });
+    t.world.theater.tradeBlocked[TWN] = 1;
+    const depot = 6 * ((tw.stats.milexUsd ?? 0) / 1e6) * 12 / 12;
+    let peak = 0;
+    for (let d = 0; d < 90; d++) {
+      t.days(1);
+      peak = Math.max(peak, tw.bulk.fuel);
+    }
+    expect(peak).toBeLessThanOrEqual(depot * 1.001);
   });
 });
 

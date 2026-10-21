@@ -58,7 +58,8 @@ describe('coastal defence against a landing', () => {
       if (battery.order.posture === 'strike' && t?.nation === 'CHN' && t.kind === 'surface_group') atLift++;
     }
     expect(atLift).toBeGreaterThan(0);
-    expect(start - rounds()).toBeGreaterThanOrEqual(150);
+    // The 120 HF-3s reach the lift where it stages, 300-400 km out; HF-2s (160 km) only once it closes the beach.
+    expect(start - rounds()).toBeGreaterThanOrEqual(100);
   }, 120_000);
 });
 

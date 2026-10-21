@@ -10,6 +10,7 @@ export const CATEGORY_OF: Record<SimEvent['type'], EventCategory> = {
   formation_destroyed: 'combat',
   strike: 'strikes',
   nuclear_detonation: 'nuclear',
+  nuclear_alert: 'nuclear',
   war_declared: 'diplomacy',
   peace: 'diplomacy',
   escalation: 'diplomacy',
@@ -37,6 +38,7 @@ export function eventNations(e: SimEvent): NationId[] {
     case 'node_captured': return [e.from, e.to];
     case 'formation_destroyed': return [e.nation];
     case 'nuclear_detonation': return [e.by];
+    case 'nuclear_alert': return [e.nation];
     case 'escalation': return [e.a, e.b];
     case 'production': return [e.nation];
     case 'shortage': return [e.nation];
@@ -192,6 +194,9 @@ export function describeEvent(e: SimEvent, n: Namer): string {
     case 'node_captured': return `${n.nation(e.to)} takes ${n.place.name(e.node)} from ${n.nation(e.from)}`;
     case 'formation_destroyed': return `${n.nation(e.nation)}: ${n.formation(e.formation) ?? 'a formation'} destroyed`;
     case 'nuclear_detonation': return `NUCLEAR DETONATION ${n.place.at(e.node)}: ${n.nation(e.by)}, ${e.yieldKt.toLocaleString()} kt, est. ${e.casualties.toLocaleString()} casualties`;
+    case 'nuclear_alert': return e.stage === 'ordered'
+      ? `NUCLEAR ALERT: ${n.nation(e.nation)} orders warheads mated to launchers (${e.reason})`
+      : `NUCLEAR ALERT: ${n.nation(e.nation)} has ${e.ready.toLocaleString()} of ${e.of.toLocaleString()} warheads ready to launch`;
     case 'escalation': return `${n.nation(e.a)} and ${n.nation(e.b)} escalate to ${e.level.replace(/_/g, ' ')}`;
     case 'production': return `${n.nation(e.nation)} produces ${e.count} × ${n.item(e.item)}`;
     case 'shortage': return `${n.nation(e.nation)} shortage: ${e.what}`;

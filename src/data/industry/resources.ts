@@ -37,7 +37,10 @@ export const SEABORNE_TRADE_SHARE: Record<string, number> = {
 };
 export const DEFAULT_SEABORNE_TRADE_SHARE = 0.8;
 
-/** One national stock of an import stream: its share of the resource's imports and the months of those imports it holds. */
+/**
+ * One national stock of an import stream: its share of the resource's imports and the months of
+ * national use of that stream it holds, as reserves are reported (days of LNG, of oil, of grain).
+ */
 export interface Stock {
   share: number;
   months: number;
@@ -70,6 +73,19 @@ export interface ResourceSpec {
   buffers?: Record<string, number>;
   /** Per-nation stocks split by import stream, replacing the single buffer. Shares sum to 1. */
   tiered?: Record<string, Stock[]>;
+  /** Covered by export controls, so sanctions stop most of it rather than rerouting it like ordinary goods. */
+  exportControlled?: boolean;
+  /** How the state rations a stock it draws on. Absent: the stock is drawn at the full rate until it is empty. */
+  rationing?: Rationing;
+}
+
+/**
+ * Once a stock covers less than `belowMonths` of use, the state cuts non-priority demand in step
+ * with the cover left, down to `priority`, the share of demand it serves from a nearly empty stock.
+ */
+export interface Rationing {
+  priority: number;
+  belowMonths: number;
 }
 
 const fromRest = (shares: Record<string, number>): Record<string, number> => {
@@ -105,6 +121,13 @@ export const RESOURCE_SPECS: Record<Resource, ResourceSpec> = {
       GBR: energy([0.55, 2], [0.05, 1], [0.4, 0.3]),
       DEU: iea, FRA: iea, ITA: iea, ESP: iea, POL: iea, NLD: iea,
     },
+    // Forces, power for hospitals, water, telecoms and households, and the food chain keep their
+    // supply; industry and feedstock go first. Judgment: Taiwan's industry takes ~55% of its power
+    // and petrochemical feedstock ~30% of its oil (Energy Administration, Energy Statistics Handbook
+    // 2023). Restraint starts when a fuel is down to about a month of cover, as Taipower sheds load
+    // when its LNG tanks run low, while a 90-day oil reserve is drawn freely at first (IEA
+    // emergency system: stock draw first, demand restraint of 7-10% if a shortage persists).
+    rationing: { priority: 0.5, belowMonths: 1 },
   },
   food: {
     market: fromRest({ USA: 0.1, BRA: 0.1, ARG: 0.04, NLD: 0.05, CAN: 0.04, AUS: 0.04, UKR: 0.03, RUS: 0.04, FRA: 0.04, IND: 0.04, THA: 0.03, IDN: 0.03 }),
@@ -127,6 +150,8 @@ export const RESOURCE_SPECS: Record<Resource, ResourceSpec> = {
     selfSufficiency: { TWN: 1, KOR: 0.9, CHN: 0.6, USA: 0.35, JPN: 0.6, DEU: 0.3, FRA: 0.3, GBR: 0.2, ISR: 0.4, NLD: 0.3, RUS: 0.1, IND: 0.1, IRN: 0.05, PRK: 0.05, UKR: 0.05, TUR: 0.1 },
     defaultSelf: () => 0,
     bufferMonths: 6,
+    // US, EU, Japanese, Korean and Taiwanese export controls on Russia from 2022; US controls on China from 2022.
+    exportControlled: true,
     // Russia stockpiled microelectronics before 2022 (est.).
     buffers: { RUS: 9 },
   },
@@ -136,6 +161,8 @@ export const RESOURCE_SPECS: Record<Resource, ResourceSpec> = {
     selfSufficiency: { CHN: 1, USA: 0.15, JPN: 0.1, RUS: 0.3, IND: 0.3, MYS: 0.5, AUS: 0.3 },
     defaultSelf: () => 0,
     bufferMonths: 4,
+    // China's export licensing of gallium, germanium, graphite and rare-earth magnets (2023-25).
+    exportControlled: true,
     // Japan holds a national rare-metals stockpile (JOGMEC) of ~60 days, plus industry stock (est.).
     buffers: { JPN: 6, USA: 6 },
   },
@@ -145,6 +172,8 @@ export const RESOURCE_SPECS: Record<Resource, ResourceSpec> = {
     market: fromRest({ CHN: 0.35, IND: 0.1, RUS: 0.1, POL: 0.04, DEU: 0.04, FRA: 0.03, KOR: 0.05, USA: 0.05, TUR: 0.04 }),
     selfSufficiency: { CHN: 1, RUS: 0.95, IND: 0.85, USA: 0.6, KOR: 0.8, DEU: 0.5, FRA: 0.6, POL: 0.6, GBR: 0.3, JPN: 0.5, TUR: 0.7, IRN: 0.8, PRK: 0.9, UKR: 0.3, ISR: 0.6 },
     defaultSelf: () => 0.2,
+    // Explosives and propellants are munitions-list items (Wassenaar, EU Common Military List).
+    exportControlled: true,
     bufferMonths: 3,
   },
   steel: {

@@ -26,8 +26,8 @@ export const EAST_PLATFORM_CLASS: Record<string, ScaleClass> = Object.fromEntrie
     yars_mobile yars_silo topol_m_mobile topol_m_silo avangard_silo r36m2_silo
     df41_tel df31ag_tel df5b_silo df41_silo icbm_silo_empty hwasong_15_tel hwasong_17_tel hwasong_18_tel hwasong_19_tel`),
   ...ids('other', `
-    infantry_squad truck gaz_tigr
-    bmp1 bmp2 bmp3 bmd2 bmd4m btr82a btr_mdm mtlb m113 vtt323 zbd04a zbl08 zbd05 ztd05 ztl11 csk181 zsd89 type15
+    infantry_squad airborne_squad hj12_team truck gaz_tigr
+    bmp1 bmp2 bmp3 bmd2 bmd4m btr82a btr_mdm mtlb m113 vtt323 zbd04a zbd03 zbl08 zbd05 ztd05 ztl11 csk181 zsd89 type15
     2s19_msta 2s3 2s7m 2s9 2a65 d30 m109 bm21_grad bm27 bm30 tos1a tos2 polonez_launcher koksan mrl_240mm kn09_tel kn25_tel
     plz05 plz07 pcl181 phl11 phl16
     iskander_m_tel iskander_mk_tel oreshnik_tel hwasong_5_tel kn23_tel kn24_tel nodong_tel hwasong_12_tel
@@ -38,7 +38,7 @@ export const EAST_PLATFORM_CLASS: Record<string, ScaleClass> = Object.fromEntrie
     hq9_launcher hq16_launcher hq22_launcher hq17 pgz09 s200_launcher s75_launcher s125_launcher pongae5_launcher
     bavar373_launcher khordad15_launcher hawk_launcher
     shahed_136 shahed_129 mohajer_6 lancet orlan10
-    a50u il78 il76 an124 il38n tu142m kj500 kj2000 kj600 y20 y8q c130 yak130
+    a50u il78 il76 an124 il38n tu142m kj500 kj2000 kj600 y20 y9 y8q c130 yak130
     ka52 mi28 mi24p mi8amtsh z10 z19 z20 z8 z9 z18 mi171 ah1j
     grisha ropucha ivan_gren buyan_m karakurt molniya bykov
     type056a type022 type071 type075 type072a type072_iii type073a type074 roro_ferry type901 ccg_cutter ccg_patrol

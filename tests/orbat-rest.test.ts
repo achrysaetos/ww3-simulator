@@ -35,7 +35,6 @@ const IISS: Record<string, [tanks: number, air: number, surface: number, subs: n
   ISR: [400, 310, 0, 5],
   SAU: [910, 300, 7, 0],
   ARE: [340, 137, 0, 0],
-  TUR: [2380, 275, 16, 12],
   EGY: [2500, 550, 11, 8],
   SYR: [150, 0, 0, 0],
   IRQ: [390, 85, 0, 0],
@@ -70,7 +69,7 @@ const has = (iso: string, id: string) => byNation(iso).some((e) => (e.equipment[
 const LAND_AIR = new Set<OrbatEntry['kind']>(['maneuver', 'artillery', 'air_defense', 'missile', 'air_wing', 'strategic', 'logistics']);
 
 describe('hand-modelled ORBAT: Asia-Pacific, Middle East, rest of world', () => {
-  it('models exactly the 32 assigned nations', () => {
+  it('models exactly the 31 assigned nations (Turkey is in orbat/west)', () => {
     expect(new Set(rest.map((e) => e.nation))).toEqual(new Set(Object.keys(IISS)));
   });
 
@@ -106,12 +105,12 @@ describe('hand-modelled ORBAT: Asia-Pacific, Middle East, rest of world', () => 
 
   it('moves an offshore garrison onto its own land but leaves a fleet in its real port', () => {
     const map = loadMap();
-    const matsu: OrbatEntry = { nation: 'TWN', name: 'Matsu', kind: 'maneuver', echelon: 'brigade', base: { name: 'Nangan', lat: 26.16, lon: 119.94 }, equipment: { infantry_squad: 1 } };
-    const fleet: OrbatEntry = { ...matsu, name: 'Fleet', kind: 'surface_group', base: { name: 'Zuoying', lat: 22.69, lon: 120.27 } };
-    expect(map.owner[map.nodeAt(26.16, 119.94)]).toBe('CHN');
-    const [moved, kept] = placeOnOwnLand(map, [matsu, fleet]);
+    const dongyin: OrbatEntry = { nation: 'TWN', name: 'Dongyin', kind: 'maneuver', echelon: 'brigade', base: { name: 'Dongyin', lat: 26.37, lon: 120.49 }, equipment: { infantry_squad: 1 } };
+    const fleet: OrbatEntry = { ...dongyin, name: 'Fleet', kind: 'surface_group', base: { name: 'Zuoying', lat: 22.69, lon: 120.27 } };
+    expect(map.owner[map.nodeAt(26.37, 120.49)]).not.toBe('TWN');
+    const [moved, kept] = placeOnOwnLand(map, [dongyin, fleet]);
     expect(map.owner[map.nodeAt(moved.base.lat, moved.base.lon)]).toBe('TWN');
-    expect(moved.base.name).toBe('Nangan');
+    expect(moved.base.name).toBe('Dongyin');
     expect(kept.base).toEqual(fleet.base);
   });
 

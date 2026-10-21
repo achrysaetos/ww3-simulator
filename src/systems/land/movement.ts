@@ -4,6 +4,7 @@ import type { GameMap } from '../../core/map';
 import { findPath } from '../../core/path';
 import type { Command, Formation, NationId, NodeId, PlatformId, World } from '../../core/types';
 import { allied, canEnter, indexByNode, isLandFormation, landSlice } from './state';
+import { airlift, embarkation, liftMode, overseas } from './strategic';
 import {
   AIR_INTERDICTION, DISMOUNTS, ENTRENCH_PER_DAY, FATIGUE_MARCH_PER_DAY, FATIGUE_RECOVERY_PER_DAY, HOSTILE_GROUND_COST,
   MARCH_HOURS_PER_DAY, MARCH_SPEED_FACTOR, MORALE_RECOVERY_PER_DAY, NO_FUEL_SPEED, RAIL_BOOST_MAX, RAIL_KM_FULL, RALLY_MORALE, TERRAIN,
@@ -62,9 +63,23 @@ export function applyLandOrder(world: World, cmd: OrderCommand, ctx: SimContext)
     delete f.order.path;
     return true;
   }
-  // Heuristic is straight-line km; scale edge costs so the cheapest (full rail) edge never undercuts it.
-  const scale = 1 + RAIL_BOOST_MAX;
-  const path = findPath(ctx.map, f.node, target, (_a, b, km) => edgeKm(world, ctx.map, f, b, km) * scale);
+  // Across water the march ends at the gateway where the formation waits for lift (see strategic.ts).
+  let goal = target;
+  if (overseas(ctx.map, f.node, target)) {
+    const mode = posture === 'move' ? liftMode(world, ctx.catalog, f) : undefined;
+    const gate = mode && embarkation(world, ctx.map, f, target, mode);
+    if (gate === undefined) {
+      f.order = { posture: 'defend', issuedTick: world.tick };
+      ctx.emit({ type: 'message', tick: world.tick, nation: f.nation, text: `${f.name}: no ${mode ? `friendly ${mode === 'air' ? 'airfield' : 'port'} to embark at` : 'land route; order a move to deploy overseas'}` });
+      return true;
+    }
+    if (gate === f.node) {
+      f.order.path = [];
+      return true;
+    }
+    goal = gate;
+  }
+  const path = route(world, ctx.map, f, goal);
   if (!path) {
     f.order = { posture: 'defend', issuedTick: world.tick };
     ctx.emit({ type: 'message', tick: world.tick, nation: f.nation, text: `${f.name}: no land route to node ${target}` });
@@ -72,6 +87,12 @@ export function applyLandOrder(world: World, cmd: OrderCommand, ctx: SimContext)
   }
   f.order.path = path;
   return true;
+}
+
+/** Cheapest land route for this formation. The heuristic is straight-line km, so edge costs are scaled until the cheapest (full rail) edge never undercuts it. */
+function route(world: World, map: GameMap, f: Formation, to: NodeId): NodeId[] | null {
+  const scale = 1 + RAIL_BOOST_MAX;
+  return findPath(map, f.node, to, (_a, b, km) => edgeKm(world, map, f, b, km) * scale);
 }
 
 function rest(f: Formation, dtDays: number, isolated: boolean, engaged: boolean): void {
@@ -83,10 +104,20 @@ function rest(f: Formation, dtDays: number, isolated: boolean, engaged: boolean)
   if (f.status === 'routed' && !isolated && f.morale >= RALLY_MORALE) f.status = 'active';
 }
 
-/** Road-march km per day after fatigue, fuel and hostile air. */
+/** Fuel a formation burns per march hour: a full load lasts 72 hours of movement. */
+export const marchBurnPerHour = (f: Formation) => f.supplyCapacity.fuel / 72;
+
+/**
+ * Road-march km per day after fatigue, fuel and hostile air. Vehicles drive only
+ * as far as the fuel on hand carries them; past that the troops walk and tow.
+ */
 export function marchKmPerDay(world: World, catalog: Catalog, f: Formation): number {
   let speed = marchSpeedKph(f, catalog) * MARCH_SPEED_FACTOR * (1 - 0.5 * f.fatigue);
-  if (f.supply.fuel <= 0 && f.supplyCapacity.fuel > 0) speed *= NO_FUEL_SPEED;
+  const need = marchBurnPerHour(f) * MARCH_HOURS_PER_DAY;
+  if (need > 0) {
+    const fuelled = Math.min(1, Math.max(0, f.supply.fuel) / need);
+    speed *= fuelled + (1 - fuelled) * NO_FUEL_SPEED;
+  }
   const air = world.theater.airControl[f.node];
   if (air && atWar(world, f.nation, air.nation)) speed *= 1 - AIR_INTERDICTION * air.level;
   return speed * MARCH_HOURS_PER_DAY;
@@ -104,7 +135,7 @@ function march(world: World, ctx: SimContext, f: Formation, byNode: Map<number, 
 
   const hours = MARCH_HOURS_PER_DAY * dtDays;
   f.progressKm += kmPerDay * dtDays;
-  f.supply.fuel = Math.max(0, f.supply.fuel - (f.supplyCapacity.fuel / 72) * hours);
+  f.supply.fuel = Math.max(0, f.supply.fuel - marchBurnPerHour(f) * hours);
   f.fatigue = Math.min(1, f.fatigue + FATIGUE_MARCH_PER_DAY * dtDays);
   f.entrenchment = 0;
 
@@ -129,11 +160,13 @@ function march(world: World, ctx: SimContext, f: Formation, byNode: Map<number, 
       return;
     }
   }
+  f.progressKm = 0;
+  // At the gateway of an overseas move: wait there for lift.
+  if (f.order.posture === 'move' && f.order.target !== undefined && overseas(map, f.node, f.order.target)) return;
   const holder = world.control[f.node];
   const contesting = f.order.posture === 'attack' && holder && atWar(world, f.nation, holder);
   if (!contesting && f.order.posture !== 'reserve') f.order = { posture: 'defend', issuedTick: world.tick };
   delete f.order.path;
-  f.progressKm = 0;
 }
 
 export const landMovement: System = {
@@ -151,5 +184,6 @@ export const landMovement: System = {
       if (moving) march(world, ctx, f, byNode);
       else rest(f, dtDays, f.id in isolated, f.id in engaged);
     }
+    airlift(world, ctx, (f, to) => route(world, ctx.map, f, to));
   },
 };

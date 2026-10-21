@@ -46,6 +46,12 @@ inside a system, because a seed must replay a run exactly.
   ```
 
   The system initialises its slice in `init`.
+- A slice holds only plain JSON: no Sets, Maps, typed arrays or class instances.
+  Derived structures (logistics' supply searches, AI front pictures) live in runtime
+  caches keyed by the World or slice object, and must come out the same when rebuilt
+  from the World alone. `src/scenarios/save.ts` saves and resumes a run on that
+  contract, and `tests/save.test.ts` checks it: a run resumed from a save matches the
+  uninterrupted run exactly.
 - Signals that several systems need live on `world.theater`. Each field has one writer,
   named in its doc comment. Read other fields freely; never write them.
 - `Formation` fields are shared. The domain system that moves a formation owns its

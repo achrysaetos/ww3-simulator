@@ -381,6 +381,8 @@ export function planNaval(p: Plan): void {
   if (assault) runAssault(p, assault, liftCapable.filter((l) => sails(l, assault.port)));
   const unescorted = [...(assault ? liftCapable.filter((g) => g.order.posture !== 'reserve') : []), ...groups.filter((g) => roles.get(g) === 'capital')];
   for (const g of groups) {
+    // Groups with no fighting role (sealift) sail under naval/sealift.ts.
+    if (!roles.get(g)) continue;
     // Before entering a war only submarines deploy: quiet, they take station unseen, while surface
     // groups sent forward would sit in the enemy's opening salvo (judgment).
     if (!atWar && roles.get(g) !== 'submarine') continue;

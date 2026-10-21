@@ -1,6 +1,6 @@
 import { atWar, type SimContext } from '../../core/engine';
 import { platformCount } from '../../core/forces';
-import type { Formation, NationId, PlatformId, World } from '../../core/types';
+import type { Formation, Munition, MunitionKind, NationId, PlatformId, World } from '../../core/types';
 import { SAT_CLASSES, type SatClass, type SatCount } from './state';
 import { ASAT_PK, COLLISION_RATE, DEBRIS_EXPOSURE, DEBRIS_LIFE_YEARS, FRAGMENTS_PER_COLLISION, FRAGMENTS_PER_KILL } from './tables';
 
@@ -94,7 +94,7 @@ export function stepDebris(world: World, ctx: SimContext, spaceFormations: Forma
 }
 
 function aliveShare(world: World, nation: NationId, cls: SatClass): number | undefined {
-  const c = world.slices.strategic.space[nation]?.[cls];
+  const c = world.slices.strategic?.space[nation]?.[cls];
   const base = c ? c.alive + c.lost : 0;
   return base > 0 ? c!.alive / base : undefined;
 }
@@ -116,4 +116,20 @@ export function isrFactor(world: World, nation: NationId): number {
 export function cepFactor(world: World, nation: NationId): number {
   const share = aliveShare(world, nation, 'nav_satellite');
   return share === undefined ? 1 : 1 + 2 * (1 - share);
+}
+
+/** Weapons whose midcourse or terminal accuracy rests on satellite navigation (GPS/INS kits, cruise and ballistic missiles, one-way drones). */
+const GNSS_AIDED: ReadonlySet<MunitionKind> = new Set(['cruise', 'srbm', 'mrbm', 'irbm', 'hgv', 'glide_bomb', 'guided_bomb', 'guided_shell', 'guided_rocket', 'drone_oneway']);
+
+/**
+ * Multiplier on a strike's kill chance from the attacker's own constellations: reconnaissance to
+ * locate a mobile target, navigation for GNSS-aided weapons. Kill chance is taken as inversely
+ * proportional to CEP, between the 1/CEP^2 of a point target much smaller than the miss distance
+ * and the saturation of one inside it (estimate). 1 for a nation with intact constellations or none.
+ */
+export function spaceSupport(world: World, nation: NationId, m: Munition, mobileTarget: boolean): number {
+  let f = 1;
+  if (mobileTarget && m.kind !== 'loitering') f *= isrFactor(world, nation);
+  if (GNSS_AIDED.has(m.kind)) f /= cepFactor(world, nation);
+  return f;
 }

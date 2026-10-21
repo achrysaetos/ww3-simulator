@@ -1,4 +1,4 @@
-import type { FormationId, NationId } from '../../core/types';
+import type { FormationId, NationId, NodeId } from '../../core/types';
 
 /**
  * Inputs the nation-profile data supplies. Defined here so diplomacy and AI can
@@ -107,6 +107,23 @@ export interface WarRecord {
   ssbnLost: number;
 }
 
+/** A nuclear guarantor deciding how to answer a nuclear attack on an ally it covers (see umbrella.ts). */
+export interface UmbrellaCase {
+  guarantor: NationId;
+  attacker: NationId;
+  ally: NationId;
+  treaty: string;
+  /** The guarantor's probability of honouring the treaty, the weight of a nuclear answer. */
+  reliability: number;
+  detonations: number;
+  /** Any of the weapons was large or hit a city. */
+  strategic: boolean;
+  /** Where the latest weapon hit; the answer stays in that theatre. */
+  node: NodeId;
+  /** Tick the decision is due, after deliberation and allied consultation. */
+  dueTick: number;
+}
+
 export interface DiplomacyState {
   wars: War[];
   joins: PendingJoin[];
@@ -120,6 +137,8 @@ export interface DiplomacyState {
   ssbnFormations: FormationId[];
   /** `${war}|${victim}` pairs whose defensive treaties have been called, so each is called once. */
   invoked: string[];
+  /** Open extended-deterrence decisions. */
+  umbrella: UmbrellaCase[];
 }
 
 declare module '../../core/types' {

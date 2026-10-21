@@ -78,10 +78,10 @@ export const CHOKEPOINTS: readonly Chokepoint[] = [
 
 /**
  * Canals the sea graph does not connect. The map's 3-degree sea zones do not touch across
- * the isthmus of Suez, so ships transit these land cells (Port Said to Suez to the Gulf of Suez).
+ * the isthmus of Suez, so ships transit these land cells (Port Said to Suez, then down the Gulf of Suez's western shore).
  */
 export const CANALS: readonly { name: string; points: readonly [number, number][] }[] = [
-  { name: 'Suez Canal', points: [[30.5, 32.5], [29.5, 32.5], [28.5, 33.5], [27.5, 33.5]] },
+  { name: 'Suez Canal', points: [[30.5, 32.5], [29.5, 32.5], [28.5, 32.5], [27.5, 33.5]] },
 ];
 
 /** Static naval geography derived from the map once per map. */

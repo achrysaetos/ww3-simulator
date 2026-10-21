@@ -25,7 +25,7 @@ export interface System {
 }
 
 const HISTORY_LIMIT = 5_000;
-const NOTABLE: ReadonlySet<SimEvent['type']> = new Set(['war_declared', 'peace', 'node_captured', 'formation_destroyed', 'nuclear_detonation', 'escalation', 'capitulation', 'message']);
+const NOTABLE: ReadonlySet<SimEvent['type']> = new Set(['war_declared', 'peace', 'node_captured', 'formation_destroyed', 'nuclear_detonation', 'nuclear_alert', 'escalation', 'capitulation', 'message']);
 
 export class Engine {
   private readonly commandOwner = new Map<Command['type'], System>();
@@ -91,8 +91,15 @@ export class Engine {
 
 // ---------------------------------------------------------------- shared helpers
 
+// Relations are read in the inner loops of movement, combat and detection; building the key string on each read cost ~4% of a ww3-2027 tick plus its garbage.
+const relationKeys = new Map<NationId, Map<NationId, string>>();
+
 export function relationKey(a: NationId, b: NationId): string {
-  return a < b ? `${a}|${b}` : `${b}|${a}`;
+  let row = relationKeys.get(a);
+  if (!row) relationKeys.set(a, (row = new Map()));
+  let key = row.get(b);
+  if (key === undefined) row.set(b, (key = a < b ? `${a}|${b}` : `${b}|${a}`));
+  return key;
 }
 
 const NEUTRAL: Relation = { opinion: 0, atWar: false, escalation: 'peace', sanctions: false };

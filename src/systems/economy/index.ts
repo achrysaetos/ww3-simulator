@@ -6,6 +6,8 @@ import {
   AID_FLOWS, CATEGORIES, DEFAULT_SEABORNE_TRADE_SHARE, ITEMS, MIL_FUEL_TONS_PER_USD_M, SEABORNE_TRADE_SHARE, OIL_CONSUMPTION_MT, OIL_TONS_PER_PPP_USD_M, RATION_TONS_PER_DAY, RESOURCES, RESOURCE_SPECS, SHIPBUILDING_GT_PER_YEAR, SHIPYARD_WARSHIP_SHARE,
   itemSpec, type AidFlow, type ItemCategory, type Resource,
 } from '../../data/industry';
+import { defenseObligations } from '../../data/nations';
+import { recallReservists } from '../../data/nations/reserves';
 import { newLine, newNationEconomy, stocksOf, type LineState, type NationEconomy } from './state';
 
 export type { EconomyState, LineState, NationEconomy } from './state';
@@ -30,15 +32,31 @@ const WAR_TAX_FINANCED = 0.45;
 const MOBILIZE_MONTHS = 3;
 const DEMOBILIZE_MONTHS = 1;
 /**
- * Share of a sanctioning partner's trade that still arrives through third countries.
- * Russia's imports of Western dual-use chips recovered largely via China, Turkey and Central Asia (KSE 2023-24).
+ * Share of a partner's trade that still arrives, by why it stopped. Under sanctions, export-
+ * controlled inputs (`ResourceSpec.exportControlled`) leak through third countries: Russia's
+ * imports of Western dual-use chips recovered largely via China, Turkey and Central Asia (KSE
+ * 2023-24). Ordinary goods mostly reroute: Russia's goods imports fell ~15% in 2022 and were back
+ * near 2021 levels by 2023 (Bank of Russia balance of payments) though most of the world's GDP
+ * sanctioned it, as Chinese, Turkish and Central Asian suppliers replaced Western ones; traded
+ * commodities such as oil and grain find other buyers and sellers the same way.
  */
-const SANCTION_LEAK = 0.3;
+const STILL_ARRIVES: Record<Breach, { goods: number; controlled: number }> = {
+  war: { goods: 0, controlled: 0 },
+  sanctions: { goods: 0.8, controlled: 0.3 },
+};
+type Breach = 'war' | 'sanctions';
 /** Months of normal flow needed to rebuild one month of drawn-down stocks. */
 const BUFFER_REFILL_PER_MONTH = 0.25;
 /** Fraction of imports that GDP cannot replace at home in the short run (est.). */
 const IMPORT_GDP_LOSS = 0.5;
 const ENERGY_GDP_ELASTICITY = 0.7;
+/**
+ * Electricity's share of final energy use (IEA World Energy Balances: ~20% worldwide, ~18% in
+ * Ukraine), the part strikes on the grid take away whatever fuel the nation holds. Ukraine lost
+ * about half its generating capacity to strikes in 2024 (Ukrenergo, IEA Ukraine's Energy Security
+ * and the Coming Winter 2024) and cut supply with rolling blackouts of up to 12-16 hours a day.
+ */
+const ELECTRICITY_SHARE = 0.2;
 /**
  * Short-run price elasticity of world energy supply and demand combined, with stock
  * releases. Losing ~20% of world oil exports through Hormuz then lifts prices ~2.4x,
@@ -86,8 +104,10 @@ const DRAFT_SHARE_PER_MONTH = 0.019;
 const CONSCRIPTION_EXPONENT = 2.5;
 /** Mean months from call-up to a usable reservist: Russia 2022 weeks, Ukraine 1-2 months, NATO basic plus branch 3-6 months. */
 const TRAINING_MONTHS = 2.5;
-/** Full mobilization quadruples the fuel depots a military keeps stocked (est.). */
+/** Full mobilization quadruples the fuel a military's budget buys (est.). */
 const FUEL_MOBILIZATION_MULTIPLE = 4;
+/** Military depot capacity, months of peacetime fuel use; scenarios start them half full (initialStockpiles). */
+const DEPOT_MONTHS = 6;
 /**
  * Share of national oil use a state can route to its forces. In peacetime militaries
  * burn ~1-2% (US DoD ~11.6 Mt of ~1,000 Mt); in WWII the US armed forces took about a
@@ -170,10 +190,34 @@ function industrialIntegrity(world: World, map: GameMap): Map<NationId, number> 
   return out;
 }
 
-/** For each nation, the partners whose trade it has lost: 0 for war, the leak share for sanctions. */
-function tradePartners(world: World): Map<NationId, Map<NationId, number>> {
-  const out = new Map<NationId, Map<NationId, number>>();
-  const put = (a: NationId, b: NationId, v: number) => {
+/**
+ * Grid capacity per land cell, 0..1, absent = intact. Written by air strikes on power targets
+ * (theater.power); read through this narrow view so the economy runs on worlds without it.
+ */
+const powerOf = (world: World): Record<number, number> | undefined => (world.theater as { power?: Record<number, number> }).power;
+
+/** Population-weighted grid capacity serving the home cells each nation still holds, 0..1. */
+function gridIntact(world: World, map: GameMap): Map<NationId, number> {
+  const out = new Map<NationId, number>();
+  const power = powerOf(world);
+  if (!power) return out;
+  const idx = ownerIndex(map);
+  const intact = new Float64Array(map.nationIds.length);
+  const held = new Float64Array(map.nationIds.length);
+  for (let n = 0; n < map.landCount; n++) {
+    const i = idx[n];
+    if (i < 0 || world.control[n] !== map.owner[n]) continue;
+    held[i] += map.popShare[n];
+    intact[i] += map.popShare[n] * (power[n] ?? 1);
+  }
+  map.nationIds.forEach((id, i) => out.set(id, held[i] > 0 ? intact[i] / held[i] : 1));
+  return out;
+}
+
+/** For each nation, the partners whose trade it has lost and why. */
+function tradePartners(world: World): Map<NationId, Map<NationId, Breach>> {
+  const out = new Map<NationId, Map<NationId, Breach>>();
+  const put = (a: NationId, b: NationId, v: Breach) => {
     let m = out.get(a);
     if (!m) out.set(a, (m = new Map()));
     m.set(b, v);
@@ -181,7 +225,7 @@ function tradePartners(world: World): Map<NationId, Map<NationId, number>> {
   for (const [k, r] of Object.entries(world.relations)) {
     if (!r.atWar && !r.sanctions) continue;
     const [a, b] = k.split('|') as NationId[];
-    const v = r.atWar ? 0 : SANCTION_LEAK;
+    const v: Breach = r.atWar ? 'war' : 'sanctions';
     put(a, b, v);
     put(b, a, v);
   }
@@ -190,7 +234,8 @@ function tradePartners(world: World): Map<NationId, Map<NationId, number>> {
 
 interface Scan {
   integrity: Map<NationId, number>;
-  cut: Map<NationId, Map<NationId, number>>;
+  grid: Map<NationId, number>;
+  cut: Map<NationId, Map<NationId, Breach>>;
   personnel: Map<NationId, number>;
   worldGdp: number;
 }
@@ -202,7 +247,7 @@ function scan(world: World, ctx: SimContext): Scan {
   for (const f of Object.values(world.formations)) if (f.status !== 'destroyed') personnel.set(f.nation, (personnel.get(f.nation) ?? 0) + f.personnel);
   let worldGdp = 0;
   for (const n of Object.values(world.nations)) worldGdp += n.stats.gdp ?? 0;
-  return { integrity, cut: tradePartners(world), personnel, worldGdp };
+  return { integrity, grid: gridIntact(world, ctx.map), cut: tradePartners(world), personnel, worldGdp };
 }
 
 // ---------------------------------------------------------------- per-nation model
@@ -212,59 +257,71 @@ function seaCut(world: World, id: NationId): number {
   return (world.theater.tradeBlocked[id] ?? 0) * (SEABORNE_TRADE_SHARE[id] ?? DEFAULT_SEABORNE_TRADE_SHARE);
 }
 
-/** World energy price relative to normal: export capacity lost to blockade or damage, through a short-run elasticity. Sanctions only reroute oil, so they do not count. */
-function energyPrice(world: World, integrity: Map<NationId, number>): number {
+/** Share of world energy exports lost to blockade or damage. Sanctions only reroute oil, so they do not count. */
+function energyExportsLost(world: World, integrity: Map<NationId, number>): number {
   let lost = 0;
   for (const [supplier, share] of Object.entries(RESOURCE_SPECS.energy.market)) {
     if (!world.nations[supplier as NationId]) continue;
     lost += share * (1 - (1 - seaCut(world, supplier as NationId)) * (integrity.get(supplier as NationId) ?? 1));
   }
-  return Math.min(MAX_ENERGY_PRICE, Math.pow(Math.max(1e-3, 1 - lost), -1 / ENERGY_PRICE_ELASTICITY));
+  return lost;
 }
 
+/** World energy price relative to normal: lost export capacity through a short-run elasticity. */
+const energyPrice = (lost: number) => Math.min(MAX_ENERGY_PRICE, Math.pow(Math.max(1e-3, 1 - lost), -1 / ENERGY_PRICE_ELASTICITY));
+
 /** How much of a supplier's exports reach `buyer`, 0..1. */
-function supplierFlow(world: World, s: Scan, buyer: NationId, supplier: string): number {
+function supplierFlow(world: World, s: Scan, buyer: NationId, supplier: string, r: Resource): number {
   if (supplier === 'other' || !world.nations[supplier as NationId]) return 1;
-  const cut = s.cut.get(buyer)?.get(supplier as NationId);
-  const politics = cut ?? 1;
+  const breach = s.cut.get(buyer)?.get(supplier as NationId);
+  const politics = breach ? STILL_ARRIVES[breach][RESOURCE_SPECS[r].exportControlled ? 'controlled' : 'goods'] : 1;
   return politics * (1 - seaCut(world, supplier as NationId)) * (s.integrity.get(supplier as NationId) ?? 1);
 }
 
+const selfShare = (n: Nation, r: Resource) => clamp01(RESOURCE_SPECS[r].selfSufficiency[n.id] ?? RESOURCE_SPECS[r].defaultSelf(n.stats));
+
 function rawAccess(world: World, s: Scan, n: Nation, r: Resource): number {
   const spec = RESOURCE_SPECS[r];
-  const self = clamp01(spec.selfSufficiency[n.id] ?? spec.defaultSelf(n.stats));
+  const self = selfShare(n, r);
   if (self >= 1) return 1;
   let num = 0, den = 0;
   for (const [supplier, share] of Object.entries(spec.market)) {
     if (supplier === n.id) continue;
     den += share;
-    num += share * supplierFlow(world, s, n.id, supplier);
+    num += share * supplierFlow(world, s, n.id, supplier, r);
   }
   const imported = (den > 0 ? num / den : 1) * (1 - seaCut(world, n.id));
   return self + (1 - self) * imported;
 }
 
-/** Each national stock covers its stream's share of a shortfall until it runs out, then that share bites. */
-function drawSupply(e: NationEconomy, id: NationId, r: Resource, raw: number, dtMonths: number): number {
+/**
+ * Each national stock covers its stream's share of a shortfall until it runs out, then that share
+ * bites. A rationed resource (`ResourceSpec.rationing`) cuts non-priority demand as a stock's cover
+ * falls, so supply sags and the stock lasts longer instead of holding full and then falling off a
+ * cliff. `need` is demand relative to normal: output idled by lost trade burns no energy.
+ */
+function drawSupply(e: NationEconomy, id: NationId, r: Resource, raw: number, need: number, dtMonths: number): number {
   const stocks = stocksOf(id, r), left = e.buffers[r];
-  const shortfall = 1 - raw;
+  const shortfall = need - raw;
   if (shortfall <= 1e-3) {
     for (let i = 0; i < stocks.length; i++) left[i] = Math.min(stocks[i].months, left[i] + BUFFER_REFILL_PER_MONTH * dtMonths);
-    return raw;
+    return 1;
   }
+  const rationing = RESOURCE_SPECS[r].rationing;
   let covered = 0;
   for (let i = 0; i < stocks.length; i++) {
     if (left[i] <= 0) continue;
-    covered += stocks[i].share;
-    left[i] = Math.max(0, left[i] - shortfall * dtMonths);
+    const served = rationing ? rationing.priority + (1 - rationing.priority) * Math.min(1, left[i] / rationing.belowMonths) : 1;
+    covered += stocks[i].share * served;
+    left[i] = Math.max(0, left[i] - shortfall * served * dtMonths);
   }
-  return raw + shortfall * covered;
+  return (raw + shortfall * covered) / need;
 }
 
 function tradeLossOf(world: World, s: Scan, n: Nation): number {
   let lost = 0;
   const gdpOthers = s.worldGdp - (n.stats.gdp ?? 0);
-  for (const [p, flow] of s.cut.get(n.id) ?? []) lost += ((world.nations[p]?.stats.gdp ?? 0) / gdpOthers) * (1 - flow);
+  for (const [p, breach] of s.cut.get(n.id) ?? []) lost += ((world.nations[p]?.stats.gdp ?? 0) / gdpOthers) * (1 - STILL_ARRIVES[breach].goods);
   const blocked = seaCut(world, n.id);
   return clamp01(1 - (1 - blocked) * (1 - clamp01(lost)));
 }
@@ -311,16 +368,18 @@ function stepNation(world: World, ctx: SimContext, s: Scan, n: Nation, e: Nation
   }
   e.integrity = s.integrity.get(n.id) ?? 1;
   e.tradeLoss = tradeLossOf(world, s, n);
-  for (const r of RESOURCES) e.supply[r] = drawSupply(e, n.id, r, rawAccess(world, s, n, r), dtMonths);
+  const tradeOutput = 1 - ((n.stats.importsPctGdp ?? 30) / 100) * e.tradeLoss * IMPORT_GDP_LOSS;
+  for (const r of RESOURCES) e.supply[r] = drawSupply(e, n.id, r, rawAccess(world, s, n, r), r === 'energy' ? tradeOutput : 1, dtMonths);
+  e.supply.energy *= 1 - ELECTRICITY_SHARE * (1 - (s.grid.get(n.id) ?? 1));
   announceShortages(world, ctx, n.id, e);
 
-  const energyImported = 1 - clamp01(RESOURCE_SPECS.energy.selfSufficiency[n.id] ?? RESOURCE_SPECS.energy.defaultSelf(n.stats));
+  const energyImported = 1 - selfShare(n, 'energy');
   e.gdpIndex =
     e.integrity *
     (1 - ENERGY_GDP_ELASTICITY * (1 - e.supply.energy)) *
     (1 - ENERGY_BILL_SHARE * energyImported * (world.slices.economy.energyPrice - 1) * ENERGY_PRICE_PASSTHROUGH) *
     (1 - FOOD_GDP_ELASTICITY * (1 - e.supply.food)) *
-    (1 - ((n.stats.importsPctGdp ?? 30) / 100) * e.tradeLoss * IMPORT_GDP_LOSS);
+    tradeOutput;
 
   const gdpB = ((n.stats.gdp ?? 0) / 1e9) * e.gdpIndex;
   const share = defenseShare(n);
@@ -332,16 +391,20 @@ function stepNation(world: World, ctx: SimContext, s: Scan, n: Nation, e: Nation
   const spendMultiple = share / s0;
   for (const line of Object.values(e.lines)) runLine(n, e, line, spendMultiple, dtMonths);
 
-  // Depots hold ~6 months of what the budget buys. Refills are the larger of what the budget buys
-  // abroad and what the state can commandeer from national oil supply, which in war far exceeds the
-  // peacetime budget. The military takes first claim on scarce energy.
-  const budgetFuelPerMonth = (((n.stats.milexUsd ?? 0) / 1e6) * MIL_FUEL_TONS_PER_USD_M / 12) * (1 + (FUEL_MOBILIZATION_MULTIPLE - 1) * n.mobilization);
+  // Refills are the larger of what the budget buys abroad and what the state can commandeer from
+  // national oil supply, which in war far exceeds the peacetime budget. Forces are priority demand
+  // under rationing, so energy reaches them first. Depots are tanks built in peacetime:
+  // they hold DEPOT_MONTHS of the peacetime budget's fuel whatever the mobilization, so war raises
+  // the flow through them, not the stock they can keep.
+  const peaceFuelPerMonth = ((n.stats.milexUsd ?? 0) / 1e6) * MIL_FUEL_TONS_PER_USD_M / 12;
+  const budgetFuelPerMonth = peaceFuelPerMonth * (1 + (FUEL_MOBILIZATION_MULTIPLE - 1) * n.mobilization);
   const oilMt = OIL_CONSUMPTION_MT[n.id];
   const oilTonsPerYear = oilMt !== undefined ? oilMt * 1e6 : ((n.stats.gdpPpp ?? n.stats.gdp ?? 0) / 1e6) * OIL_TONS_PER_PPP_USD_M;
   const commandeeredPerMonth = (oilTonsPerYear / 12) * (MIL_OIL_SHARE_PEACE + (MIL_OIL_SHARE_FULL - MIL_OIL_SHARE_PEACE) * n.mobilization);
   const fuelPerMonth = Math.max(budgetFuelPerMonth, commandeeredPerMonth);
   const fuelBefore = n.bulk.fuel;
-  n.bulk.fuel = Math.min(Math.max(n.bulk.fuel, 6 * budgetFuelPerMonth), n.bulk.fuel + fuelPerMonth * dtMonths * Math.min(1, 2 * e.supply.energy));
+  const served = Math.min(1, e.supply.energy / (RESOURCE_SPECS.energy.rationing?.priority ?? 1));
+  n.bulk.fuel = Math.min(Math.max(n.bulk.fuel, DEPOT_MONTHS * peaceFuelPerMonth), n.bulk.fuel + fuelPerMonth * dtMonths * served);
   e.fuelDelivered += n.bulk.fuel - fuelBefore;
 
   const personnel = s.personnel.get(n.id) ?? 0;
@@ -365,6 +428,7 @@ function stepNation(world: World, ctx: SimContext, s: Scan, n: Nation, e: Nation
   const graduates = e.inTraining * lag(dtMonths, TRAINING_MONTHS);
   e.inTraining -= graduates;
   n.reserves += graduates;
+  n.reserves += recallReservists(n, dtMonths);
 }
 
 export const aidKey = (f: AidFlow) => `${f.donor}>${f.recipient}:${f.item}`;
@@ -391,6 +455,66 @@ function shipAid(world: World, dtMonths: number): void {
     } else {
       donor.stockpile[spec.id] = (donor.stockpile[spec.id] ?? 0) - units;
       recipient.stockpile[spec.id] = (recipient.stockpile[spec.id] ?? 0) + units;
+    }
+  }
+}
+
+/**
+ * Allies cross-level bulk ammunition in war, as NATO's mutual-support arrangements (STANAG 2034)
+ * provide and as the US did for Israel in 1973 (Operation Nickel Grass: ~22,000 t airlifted in a
+ * month, more by sea). A donor is a co-belligerent or a treaty ally bound to fight (commitment of
+ * at least ALLY_COMMITMENT); it tops up any such partner at war whose stock per soldier is below
+ * CROSS_LEVEL_SHARE of its own, releasing at most RELEASE_PER_MONTH of its stock a month in all.
+ * A pair with a standing shell pipeline in AID_FLOWS ships at that observed rate instead.
+ */
+const ALLY_COMMITMENT = 0.5;
+const CROSS_LEVEL_SHARE = 0.5;
+const RELEASE_PER_MONTH = 0.1;
+
+function enemiesOf(world: World): Map<NationId, Set<NationId>> {
+  const out = new Map<NationId, Set<NationId>>();
+  for (const [k, r] of Object.entries(world.relations)) {
+    if (!r.atWar) continue;
+    const [a, b] = k.split('|') as NationId[];
+    (out.get(a) ?? out.set(a, new Set()).get(a)!).add(b);
+    (out.get(b) ?? out.set(b, new Set()).get(b)!).add(a);
+  }
+  return out;
+}
+
+const PIPELINES = new Set(AID_FLOWS.filter((f) => ITEMS[f.item].sink.kind === 'bulk_ammo').map((f) => `${f.donor}>${f.recipient}`));
+
+const allyCache = new Map<string, boolean>();
+function treatyAlly(donor: NationId, recipient: NationId): boolean {
+  const key = `${donor}>${recipient}`;
+  let v = allyCache.get(key);
+  if (v === undefined) allyCache.set(key, (v = defenseObligations(donor, recipient).some((a) => a.commitment >= ALLY_COMMITMENT)));
+  return v;
+}
+
+function crossLevelAmmo(world: World, s: Scan, dtMonths: number): void {
+  const enemies = enemiesOf(world);
+  if (!enemies.size) return;
+  const state = world.slices.economy;
+  const usable = (n: Nation | undefined): n is Nation => !!n && n.status !== 'capitulated' && n.status !== 'collapsed';
+  const perHead = (n: Nation) => Math.max(0, n.bulk.ammo) / Math.max(1, s.personnel.get(n.id) ?? 0);
+  for (const donor of Object.values(world.nations)) {
+    if (!usable(donor) || donor.bulk.ammo <= 0) continue;
+    let budget = donor.bulk.ammo * RELEASE_PER_MONTH * dtMonths;
+    for (const [rid, foes] of enemies) {
+      if (budget <= 0) break;
+      const r = world.nations[rid];
+      if (rid === donor.id || !usable(r) || foes.has(donor.id) || !(s.personnel.get(rid) ?? 0) || PIPELINES.has(`${donor.id}>${rid}`)) continue;
+      const coBelligerent = [...foes].some((f) => enemies.get(donor.id)?.has(f));
+      if (!coBelligerent && !treatyAlly(donor.id, rid)) continue;
+      const gap = (CROSS_LEVEL_SHARE * perHead(donor) - perHead(r)) * (s.personnel.get(rid) ?? 0);
+      const tons = Math.min(gap, budget);
+      if (tons <= 0) continue;
+      budget -= tons;
+      donor.bulk.ammo -= tons;
+      r.bulk.ammo += tons;
+      const key = `${donor.id}>${rid}`;
+      state.allied[key] = (state.allied[key] ?? 0) + tons;
     }
   }
 }
@@ -435,7 +559,7 @@ export const economy: System = {
   commands: ['set_mobilization', 'produce', 'sanction'],
 
   init(world, ctx) {
-    world.slices.economy = { nations: {}, lastReportTick: world.tick, aid: {}, energyPrice: 1 };
+    world.slices.economy = { nations: {}, lastReportTick: world.tick, aid: {}, allied: {}, energyPrice: 1, energyExportsLost: 0 };
     const integrity = industrialIntegrity(world, ctx.map);
     for (const n of Object.values(world.nations)) {
       const e = newNationEconomy(n);
@@ -462,12 +586,15 @@ export const economy: System = {
   step(world, ctx) {
     const dtMonths = world.dtHours / HOURS_PER_MONTH;
     const s = scan(world, ctx);
-    world.slices.economy.energyPrice = energyPrice(world, s.integrity);
-    for (const [id, e] of Object.entries(world.slices.economy.nations) as [NationId, NationEconomy][]) {
+    const state = world.slices.economy;
+    state.energyExportsLost = energyExportsLost(world, s.integrity);
+    state.energyPrice = energyPrice(state.energyExportsLost);
+    for (const [id, e] of Object.entries(state.nations) as [NationId, NationEconomy][]) {
       const n = world.nations[id];
       if (n && n.status !== 'collapsed') stepNation(world, ctx, s, n, e, dtMonths);
     }
     shipAid(world, dtMonths);
+    crossLevelAmmo(world, s, dtMonths);
     report(world, ctx);
   },
 };

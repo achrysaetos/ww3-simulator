@@ -6,10 +6,11 @@ import { DEFAULT_PROFILE, type DiplomacyState, type StrategicProfile } from '../
 import { planAir } from './air';
 import { indexForces } from './forces';
 import { coBelligerents, hostileEdges, sectorsFor } from './fronts';
+import { planDeploy } from './deploy';
 import { planLand } from './land';
 import { planMissiles } from './missiles';
 import { planNaval } from './naval';
-import { planStrategy } from './strategy';
+import { planStrategy, sanctionDecisions } from './strategy';
 import { battleAreaOf, strikeTargets } from './strikes';
 import type { Plan, Sector } from './types';
 
@@ -36,13 +37,20 @@ const FRONT_CHANGES: ReadonlySet<SimEvent['type']> = new Set(['node_captured', '
  */
 export function createAi(profiles: Readonly<Record<string, StrategicProfile>> = {}): System {
   const fronts = new WeakMap<World, Int32Array>();
+  const memos = new WeakMap<World, Map<string, unknown>>();
   return {
     id: 'ai',
     init(world) {
-      world.slices.ai = { baseStrength: {}, aims: {}, lastNuclear: {}, lastPeaceOffer: {} };
+      world.slices.ai = { baseStrength: {}, aims: {}, lastNuclear: {}, lastPeaceOffer: {}, deployments: {} };
     },
     step(world, ctx) {
-      if (world.events.some((e) => FRONT_CHANGES.has(e.type))) fronts.delete(world);
+      if (world.events.some((e) => FRONT_CHANGES.has(e.type))) {
+        fronts.delete(world);
+        memos.delete(world);
+      }
+      let memo = memos.get(world);
+      if (!memo) memos.set(world, (memo = new Map()));
+      if (world.tick % STRATEGY_EVERY === 0) world.pending.push(...sanctionDecisions(world));
       const ids = Object.keys(world.nations) as NationId[];
       const surging = prewarSurges(world);
       const due = ids
@@ -65,7 +73,7 @@ export function createAi(profiles: Readonly<Record<string, StrategicProfile>> = 
         // Plans against the war it expects to join; nobody fires on a nation it is not at war with.
         planNaval({
           world, ctx, ai: world.slices.ai, nation: n, profile: profiles[n] ?? DEFAULT_PROFILE,
-          enemies: surge.enemies, friends: surge.friends, index, out: world.pending, sectors: [],
+          enemies: surge.enemies, friends: surge.friends, index, out: world.pending, sectors: [], memo: memo!,
         });
       }
       // Coalition partners usually share both friend and enemy sets, so they share one front picture.
@@ -85,10 +93,13 @@ export function createAi(profiles: Readonly<Record<string, StrategicProfile>> = 
         const p: Plan = {
           world, ctx, ai: world.slices.ai, nation: n, profile: profiles[n] ?? DEFAULT_PROFILE,
           enemies: foes, friends, index, out,
-          sectors: sectorsOf(friends, foes),
+          sectors: sectorsOf(friends, foes), memo: memo!,
         };
         if (strategy) planStrategy(p);
-        if (land) planLand(p);
+        if (land) {
+          planLand(p);
+          planDeploy(p);
+        }
         if (tasking) {
           const battleArea = battleAreaOf(p);
           const targets = strikeTargets(p, battleArea);

@@ -1,8 +1,8 @@
 import { atWar, type SimContext, type System } from '../../core/engine';
 import type { GameMap } from '../../core/map';
 import type { Formation, FormationId, MunitionId, NationId, NodeId, Platform, PlatformId, World } from '../../core/types';
-import { Controllers } from './network';
-import { refreshNetworks, snapshotInputs, type InputSnapshot, type SupplyNetwork } from './refresh';
+import type { NetworkSearch } from './network';
+import { refreshNetworks, searchesOf, snapshotInputs, type NetworkState } from './refresh';
 import {
   FOOD_TONS_PER_PERSON_DAY, IDLE_FUEL_HOURS_PER_DAY, BEACH_CAPACITY, INFRA_REPAIR_PER_DAY, LIFT_TONS_PER_TROOP, LIFT_TONS_PER_VEHICLE, MAX_REFILL_FRACTION_PER_DAY, NODE_TONS_PER_DAY,
   REARM_PER_DAY, REARMS_IN_PORT_ONLY, SEALIFT_CLASSES, RECONSTITUTE_DAYS, RECONSTITUTE_MIN_STRENGTH, RECONSTITUTED_KINDS, REGENERATED_CLASSES,
@@ -10,7 +10,7 @@ import {
 } from './tables';
 
 export { depotsOf } from './network';
-export type { SupplyNetwork } from './refresh';
+export type { NetworkInputs } from './refresh';
 export type { SupplyClass } from './tables';
 
 export interface Establishment {
@@ -18,13 +18,7 @@ export interface Establishment {
   personnel: number;
 }
 
-export interface LogisticsState {
-  /** Keyed by networkKey(members). Only networks some nation currently needs. */
-  networks: Record<string, SupplyNetwork>;
-  /** Which network each nation with forces or at war draws through. */
-  networkOf: Record<NationId, string>;
-  /** Network inputs as last seen, for change detection. */
-  seen: InputSnapshot;
+export interface LogisticsState extends NetworkState {
   /** Strength each formation is rebuilt toward, captured the first tick it is seen; kept for a destroyed formation that can be re-formed. */
   establishment: Record<FormationId, Establishment>;
   /** Tick each destroyed formation awaiting re-forming was destroyed. */
@@ -42,39 +36,38 @@ declare module '../../core/types' {
 }
 
 /** Share of nominal supply tonnage that reaches `nation`'s forces at `node`, 0..1. Zero for nations with no forces and no war. */
-export function supplyFactor(world: World, node: NodeId, nation: NationId): number {
+export function supplyFactor(world: World, map: GameMap, node: NodeId, nation: NationId): number {
   const s = world.slices.logistics;
   const key = s?.networkOf[nation];
-  const net = key ? s.networks[key] : undefined;
-  return net ? forcesFactor(s, net, node, nation).phi : 0;
+  return key ? forcesFactor(s, searchesOf(s, map).byKey.get(key)!, node, nation).phi : 0;
 }
 
 /** Supply factor for `nation`'s forces at `node`, and whether it comes over the beach. */
-function forcesFactor(s: LogisticsState, net: SupplyNetwork, node: NodeId, nation: NationId): { phi: number; beach: boolean } {
-  const { milli, route } = net.search.forcesSupplyAt(s.seen, node);
+function forcesFactor(s: LogisticsState, search: NetworkSearch, node: NodeId, nation: NationId): { phi: number; beach: boolean } {
+  const { milli, route } = search.forcesSupplyAt(s.seen, node);
   if (route !== 'beach' || milli <= 0) return { phi: milli / 1000, beach: false };
   const lift = s.lift[nation];
   return { phi: lift ? ((milli / 1000) * lift.now) / lift.most : 0, beach: true };
 }
 
-const initialState = (world: World, map: GameMap): LogisticsState => ({
-  networks: {}, networkOf: {}, seen: snapshotInputs(world, new Controllers(world, map)), establishment: {}, fallen: {}, lift: {}, short: {},
+const initialState = (world: World): LogisticsState => ({
+  networks: {}, networkOf: {}, seen: snapshotInputs(world), establishment: {}, fallen: {}, lift: {}, short: {},
 });
 
 export const logistics: System = {
   id: 'logistics',
   init(world, ctx) {
-    const s = (world.slices.logistics = initialState(world, ctx.map));
+    const s = (world.slices.logistics = initialState(world));
     // The opening networks belong to a ready-to-run world, so they are searched at setup rather than on the first tick.
     const forces = Object.values(world.formations).filter((f) => f.status !== 'destroyed' && f.status !== 'embarked');
-    s.networkOf = refreshNetworks(world, ctx.map, s.networks, s.seen, forces);
+    refreshNetworks(world, ctx.map, s, forces);
   },
   step(world, ctx) {
-    const s = (world.slices.logistics ??= initialState(world, ctx.map));
+    const s = (world.slices.logistics ??= initialState(world));
     const dtDays = world.dtHours / 24;
     reconstitute(world, ctx, s);
     const forces = activeFormations(world, ctx, s);
-    s.networkOf = refreshNetworks(world, ctx.map, s.networks, s.seen, forces);
+    refreshNetworks(world, ctx.map, s, forces);
     repairInfrastructure(world, ctx, dtDays);
     sustain(world, ctx, s, forces, dtDays);
   },
@@ -145,13 +138,13 @@ function sustain(world: World, ctx: SimContext, s: LogisticsState, forces: Forma
   const ashore = new Uint8Array(n), beachTons = new Map<NationId, number>();
   // Hoisted: dev loaders (vitest, tsx) compile imported bindings to getters, which dominates this loop.
   const refill = MAX_REFILL_FRACTION_PER_DAY * dtDays, idleHours = IDLE_FUEL_HOURS_PER_DAY, food = FOOD_TONS_PER_PERSON_DAY * dtDays;
-  const { networks, networkOf } = s;
+  const { networkOf } = s, searches = searchesOf(s, ctx.map).byKey;
 
   for (let i = 0; i < n; i++) {
     const f = forces[i];
     consumeBaseline(f, ctx, idleHours[f.kind] * dtDays, food);
-    const net = networks[networkOf[f.nation]];
-    const supply = net ? forcesFactor(s, net, f.node, f.nation) : undefined;
+    const search = searches.get(networkOf[f.nation]);
+    const supply = search ? forcesFactor(s, search, f.node, f.nation) : undefined;
     const phi = (factor[i] = supply?.phi ?? 0);
     if (phi <= 0) continue;
     ashore[i] = supply!.beach ? 1 : 0;

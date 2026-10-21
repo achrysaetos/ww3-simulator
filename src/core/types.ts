@@ -181,6 +181,8 @@ export interface Formation {
   status: 'active' | 'routed' | 'destroyed' | 'embarked';
   /** Carrier/transport formation this one is embarked on. */
   embarkedOn?: FormationId;
+  /** Territorial or home-defence force (Polish WOT, Ukrainian TDF, Baltic and Nordic home guards): fights only on its own nation's soil. */
+  territorial?: true;
 }
 
 // ---------------------------------------------------------------- nations
@@ -215,7 +217,7 @@ export interface Nation {
   stats: NationStats;
   capital: NodeId;
   government: Government;
-  /** Alliance/bloc memberships, e.g. 'NATO', 'CSTO', 'SCO'. */
+  /** Military treaties whose members host, transit and supply each other's forces, e.g. 'NATO', 'CSTO'; never SCO or BRICS. */
   blocs: string[];
   /** Current warfighting state; subsystems update these. */
   population: number;
@@ -223,8 +225,10 @@ export interface Nation {
   mobilization: number;
   /** Public/elite will to keep fighting, 0..1. Below ~0.2 a nation seeks terms. */
   warSupport: number;
-  /** Trained manpower pool not yet in formations. */
+  /** Trained manpower ready to replace losses or man new formations. */
   reserves: number;
+  /** Trained reservists not yet recalled; mobilization recalls them into `reserves` after a refresher. */
+  reservists: number;
   /** Warehoused munitions and platforms not assigned to formations. */
   stockpile: Record<ItemId, number>;
   /** National bulk stocks, tons. */
@@ -277,6 +281,8 @@ export type SimEvent =
   | { type: 'formation_destroyed'; tick: number; formation: FormationId; nation: NationId }
   | { type: 'nuclear_detonation'; tick: number; by: NationId; node: NodeId; yieldKt: number; casualties: number }
   | { type: 'escalation'; tick: number; a: NationId; b: NationId; level: EscalationLevel }
+  /** A nation mating stored warheads to launchers: ordered, first tranche ready, all ready. */
+  | { type: 'nuclear_alert'; tick: number; nation: NationId; stage: 'ordered' | 'ready' | 'complete'; ready: number; of: number; reason: string }
   | { type: 'production'; tick: number; nation: NationId; item: ItemId; count: number }
   | { type: 'shortage'; tick: number; nation: NationId; what: string }
   | { type: 'capitulation'; tick: number; nation: NationId; to: NationId[] }
