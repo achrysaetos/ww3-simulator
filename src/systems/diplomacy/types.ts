@@ -105,6 +105,8 @@ export interface WarRecord {
   /** Nations that have detonated nuclear weapons on its homeland or forces. */
   nuclearStruckBy: NationId[];
   ssbnLost: number;
+  /** Personnel of its ground formations when first assessed in this war; the yardstick for forces still in being. */
+  groundAtEntry?: number;
 }
 
 /** A nuclear guarantor deciding how to answer a nuclear attack on an ally it covers (see umbrella.ts). */

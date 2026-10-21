@@ -165,6 +165,37 @@ describe('capitulation', () => {
     expect(t.map.nodesOf(N('UKR')).every((n) => t.world.control[n] === 'RUS')).toBe(true);
   });
 
+  const brigade = (t: ReturnType<typeof testWorld>, nation: string, node: NodeId) =>
+    t.add({ nation: N(nation), name: `${nation} brigade at ${node}`, kind: 'maneuver', echelon: 'brigade', node, equipment: { [id.platform('t_inf')]: 400 } });
+
+  it('a nation whose army still stands fights on after losing its capital and most of its people', () => {
+    const t = testWorld([createDiplomacy()]);
+    t.war('CHN', 'TWN');
+    const cells = t.map.nodesOf(N('TWN')).filter((n) => n !== t.world.nations[N('TWN')].capital);
+    for (const n of cells.slice(0, 20)) brigade(t, 'TWN', n);
+    t.engine.step(t.world);
+    occupy(t, N('TWN'), N('CHN'), 0.6);
+    t.engine.run(t.world, days(3));
+    expect(t.world.history.some((e) => e.type === 'capitulation')).toBe(false);
+    expect(atWar(t.world, N('CHN'), N('TWN'))).toBe(true);
+  });
+
+  it('occupation terms hand over only the cells the capitulating state no longer holds with troops', () => {
+    const t = testWorld([createDiplomacy()]);
+    t.war('CHN', 'TWN');
+    const far = t.map.nodesOf(N('TWN')).sort((a, b) => t.map.distanceKm(b, t.world.nations[N('TWN')].capital) - t.map.distanceKm(a, t.world.nations[N('TWN')].capital));
+    const garrison = far[0];
+    t.world.nations[N('TWN')].government = 'liberal_democracy';
+    const army = Array.from({ length: 20 }, () => brigade(t, 'TWN', garrison));
+    t.engine.step(t.world);
+    for (const f of army.slice(1)) f.status = 'destroyed';
+    occupy(t, N('TWN'), N('CHN'), 0.6);
+    const events = t.engine.step(t.world);
+    expect(events).toContainEqual(expect.objectContaining({ type: 'capitulation', nation: 'TWN' }));
+    expect(t.world.control[garrison]).toBe('TWN');
+    expect(t.map.nodesOf(N('TWN')).filter((n) => n !== garrison).every((n) => t.world.control[n] === 'CHN')).toBe(true);
+  });
+
   it('losing only the capital region is not enough', () => {
     const t = testWorld([createDiplomacy()]);
     t.war('RUS', 'UKR');
