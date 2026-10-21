@@ -27,6 +27,22 @@ describe('naval AI amphibious assault', () => {
   }, 120_000);
 });
 
+describe('naval AI pre-war surge', () => {
+  it('a nation weighing a treaty call surges its submarines toward the war before it enters, and fires nothing while at peace', () => {
+    const s = createSession('taiwan-2027', 1);
+    const strait = s.map.nodeAt(24, 120);
+    const subs = () => Object.values(s.world.formations).filter((f) => f.nation === 'USA' && f.kind === 'submarine' && f.status === 'active' && f.name.startsWith('Submarine Squadron'));
+    const start = new Map(subs().map((f) => [f.id, s.map.distanceKm(f.node, strait)]));
+    let usFired = 0;
+    for (let i = 0; i < (4 * 24) / s.world.dtHours; i++) for (const e of s.engine.step(s.world)) if (e.type === 'strike' && e.by === 'USA') usFired++;
+    expect(s.world.relations['CHN|USA']?.atWar ?? false).toBe(false);
+    expect(usFired).toBe(0);
+    expect(s.world.slices.naval.ledger['USA' as NationId]?.minesLaid ?? 0).toBe(0);
+    const closed = subs().filter((f) => s.map.distanceKm(f.node, strait) < start.get(f.id)! - 1000);
+    expect(closed.length).toBeGreaterThanOrEqual(4);
+  }, 120_000);
+});
+
 describe('naval AI fleet in being', () => {
   const blackSeaFleet = (s: ReturnType<typeof createSession>) =>
     Object.values(s.world.formations).filter((f) => f.nation === 'RUS' && f.status === 'active' && (f.kind === 'surface_group' || f.kind === 'submarine') && f.name.startsWith('Black Sea Fleet'));

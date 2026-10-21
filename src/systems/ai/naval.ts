@@ -1,3 +1,4 @@
+import { atWar as isAtWar } from '../../core/engine';
 import type { GameMap } from '../../core/map';
 import type { Formation, FormationId, NationId, NodeId, PlatformClass, PlatformId } from '../../core/types';
 import { liftShare } from '../naval/amphibious';
@@ -319,6 +320,7 @@ export function planNaval(p: Plan): void {
   // A belligerent may not fight in neutral waters, so it blockades only passages a party to the war borders (San Remo Manual 1994, paras 14-16).
   const enemyChokes = chokepoints(map).filter((c) => [...c.users].some((u) => p.enemies.has(u as NationId)) && [...c.shores].some((n) => p.enemies.has(n) || p.friends.has(n)));
   const claimed = new Map<NodeId, number>();
+  const atWar = [...p.enemies].some((e) => isAtWar(p.world, p.nation, e));
 
   const blockade = (f: Formation): boolean => {
     const range = reachKm(p, f);
@@ -331,7 +333,8 @@ export function planNaval(p: Plan): void {
     }
     if (best === undefined) return false;
     claimed.set(best, (claimed.get(best) ?? 0) + 1);
-    issue(p, f, { posture: 'blockade', target: best });
+    // Before war a group only takes station: a blockade posture lays mines and interdicts trade.
+    issue(p, f, { posture: atWar ? 'blockade' : 'patrol', target: best });
     return true;
   };
 
@@ -340,6 +343,9 @@ export function planNaval(p: Plan): void {
   if (assault) runAssault(p, assault, liftCapable);
   const unescorted = [...(assault ? liftCapable.filter((g) => g.order.posture !== 'reserve') : []), ...groups.filter((g) => roles.get(g) === 'capital')];
   for (const g of groups) {
+    // Before entering a war only submarines deploy: quiet, they take station unseen, while surface
+    // groups sent forward would sit in the enemy's opening salvo (judgment).
+    if (!atWar && roles.get(g) !== 'submarine') continue;
     if (inPort.has(g.home) && roles.get(g) !== 'raider' && roles.get(g) !== 'ssbn') {
       issue(p, g, { posture: 'patrol', target: nearestSea(map, g.home) });
       continue;

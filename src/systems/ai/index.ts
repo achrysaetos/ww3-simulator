@@ -1,7 +1,7 @@
 import type { System } from '../../core/engine';
 import type { NationId, SimEvent, World } from '../../core/types';
 import { enemyMap } from '../diplomacy/assess';
-import { DEFAULT_PROFILE, type StrategicProfile } from '../diplomacy/types';
+import { DEFAULT_PROFILE, type DiplomacyState, type StrategicProfile } from '../diplomacy/types';
 import { planAir } from './air';
 import { indexForces } from './forces';
 import { coBelligerents, hostileEdges, sectorsFor } from './fronts';
@@ -41,6 +41,7 @@ export function createAi(profiles: Readonly<Record<string, StrategicProfile>> = 
     step(world, ctx) {
       if (world.events.some((e) => FRONT_CHANGES.has(e.type))) fronts.delete(world);
       const ids = Object.keys(world.nations) as NationId[];
+      const surging = prewarSurges(world);
       const due = ids
         .map((n, i) => ({
           n,
@@ -48,13 +49,22 @@ export function createAi(profiles: Readonly<Record<string, StrategicProfile>> = 
           land: (world.tick + i) % LAND_EVERY === 0,
           tasking: (world.tick + i + 1) % TASKING_EVERY === 0,
         }))
-        .filter(({ n, strategy, land, tasking }) => (strategy || land || tasking) && world.nations[n].controlledBy === 'ai' && world.nations[n].status === 'war');
+        .filter(({ n, strategy, land, tasking }) => (strategy || land || tasking) && world.nations[n].controlledBy === 'ai' && (world.nations[n].status === 'war' || surging.has(n)));
       if (!due.length) return;
 
       const enemies = enemyMap(world);
       let edges = fronts.get(world);
       if (!edges) fronts.set(world, (edges = hostileEdges(world, ctx.map, enemies)));
       const index = indexForces(world, ctx.catalog);
+      for (const { n, tasking } of due) {
+        const surge = surging.get(n);
+        if (!surge || !tasking || enemies.has(n)) continue;
+        // Plans against the war it expects to join; nobody fires on a nation it is not at war with.
+        planNaval({
+          world, ctx, ai: world.slices.ai, nation: n, profile: profiles[n] ?? DEFAULT_PROFILE,
+          enemies: surge.enemies, friends: surge.friends, index, out: world.pending, sectors: [],
+        });
+      }
       // Coalition partners usually share both friend and enemy sets, so they share one front picture.
       const sectorCache = new Map<string, Sector[]>();
       const sectorsOf = (friends: Set<NationId>, foes: Set<NationId>) => {
@@ -84,6 +94,23 @@ export function createAi(profiles: Readonly<Record<string, StrategicProfile>> = 
       }
     },
   };
+}
+
+/**
+ * Nations at peace that owe a decision on joining a war (a treaty call pending in diplomacy),
+ * with the side they would fight and the side they would fight for. Their submarines surge on
+ * warning, before a formal entry (planNaval): CSIS's 2023 Taiwan wargame has US attack
+ * submarines in action from D-day.
+ */
+function prewarSurges(world: World): Map<NationId, { enemies: Set<NationId>; friends: Set<NationId> }> {
+  const out = new Map<NationId, { enemies: Set<NationId>; friends: Set<NationId> }>();
+  const d = world.slices.diplomacy as DiplomacyState | undefined;
+  for (const j of d?.joins ?? []) {
+    const war = d!.wars.find((w) => w.id === j.war);
+    if (!war || world.nations[j.nation].status !== 'peace') continue;
+    out.set(j.nation, { enemies: new Set(war.sides[1 - j.side]), friends: new Set([j.nation, ...war.sides[j.side]]) });
+  }
+  return out;
 }
 
 export const ai = createAi();
