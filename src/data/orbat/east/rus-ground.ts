@@ -147,14 +147,14 @@ const eastern: OrbatEntry[] = [
 ];
 
 const vdv: OrbatEntry[] = [
-  unit(RUS, '76th Guards Air Assault Division', 'maneuver', 'division', KURSK(0.1), scale(VDV_DIV_TOE, 0.6), deployed),
-  unit(RUS, '98th Guards Airborne Division', 'maneuver', 'division', KOSTIANTYNIVKA(0.3), scale(VDV_DIV_TOE, 0.55), deployed),
-  unit(RUS, '106th Guards Airborne Division', 'maneuver', 'division', SIVERSK(0.3), scale(VDV_DIV_TOE, 0.55), deployed),
-  unit(RUS, '7th Guards Mountain Air Assault Division', 'maneuver', 'division', ORIKHIV(0.25), scale(VDV_DIV_TOE, 0.6), deployed),
-  unit(RUS, '104th Guards Air Assault Division', 'maneuver', 'division', KURSK(0.2), scale(VDV_DIV_TOE, 0.5), deployed),
-  unit(RUS, '11th Guards Air Assault Brigade', 'maneuver', 'brigade', KURSK(-0.15), scale(VDV_BDE_TOE, 0.6), deployed),
-  unit(RUS, '83rd Guards Air Assault Brigade', 'maneuver', 'brigade', KURSK(-0.2), scale(VDV_BDE_TOE, 0.6), deployed),
-  unit(RUS, '31st Guards Air Assault Brigade', 'maneuver', 'brigade', KOSTIANTYNIVKA(0.35), scale(VDV_BDE_TOE, 0.55), deployed),
+  unit(RUS, '76th Guards Air Assault Division', 'maneuver', 'division', KURSK(0.1), scale(VDV_DIV_TOE, 0.6), { ...deployed, airborne: true }),
+  unit(RUS, '98th Guards Airborne Division', 'maneuver', 'division', KOSTIANTYNIVKA(0.3), scale(VDV_DIV_TOE, 0.55), { ...deployed, airborne: true }),
+  unit(RUS, '106th Guards Airborne Division', 'maneuver', 'division', SIVERSK(0.3), scale(VDV_DIV_TOE, 0.55), { ...deployed, airborne: true }),
+  unit(RUS, '7th Guards Mountain Air Assault Division', 'maneuver', 'division', ORIKHIV(0.25), scale(VDV_DIV_TOE, 0.6), { ...deployed, airborne: true }),
+  unit(RUS, '104th Guards Air Assault Division', 'maneuver', 'division', KURSK(0.2), scale(VDV_DIV_TOE, 0.5), { ...deployed, airborne: true }),
+  unit(RUS, '11th Guards Air Assault Brigade', 'maneuver', 'brigade', KURSK(-0.15), scale(VDV_BDE_TOE, 0.6), { ...deployed, airborne: true }),
+  unit(RUS, '83rd Guards Air Assault Brigade', 'maneuver', 'brigade', KURSK(-0.2), scale(VDV_BDE_TOE, 0.6), { ...deployed, airborne: true }),
+  unit(RUS, '31st Guards Air Assault Brigade', 'maneuver', 'brigade', KOSTIANTYNIVKA(0.35), scale(VDV_BDE_TOE, 0.55), { ...deployed, airborne: true }),
   unit(RUS, '45th Guards Spetsnaz Brigade (VDV)', 'maneuver', 'brigade', at('Kubinka', 55.6, 36.65), { gaz_tigr: 60, infantry_squad: 60, truck: 80 }, { readiness: 0.7, experience: 0.7 }),
 ];
 

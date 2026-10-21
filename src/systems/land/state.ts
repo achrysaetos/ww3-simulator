@@ -23,6 +23,8 @@ export interface LandState {
   shellsFired: Record<NationId, number>;
   /** Tons of each formation waiting at an airfield that have already been flown out. */
   airlifted: Record<FormationId, number>;
+  /** Formations inserted by air and not yet reached by ground logistics, with the tick each landed: supplied by air alone. */
+  airheads: Record<FormationId, number>;
 }
 
 export interface Contest {
@@ -37,7 +39,7 @@ declare module '../../core/types' {
 }
 
 export function landSlice(world: World): LandState {
-  return (world.slices.land ??= { baseline: {}, isolatedDays: {}, contest: {}, fortified: {}, origin: [], shellsFired: {}, airlifted: {} });
+  return (world.slices.land ??= { baseline: {}, isolatedDays: {}, contest: {}, fortified: {}, origin: [], shellsFired: {}, airlifted: {}, airheads: {} });
 }
 
 /** North-south and east-west extent of a cell, as one depth of advance: ~111 km by 111*cos(lat) km for a 1-degree cell. */

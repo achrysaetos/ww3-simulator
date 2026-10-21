@@ -89,23 +89,47 @@ const PAYLOAD_SHARE = 0.6;
 const SORTIES_PER_DAY = 0.5;
 const ARMY_SHARE = 0.3;
 
-const airliftMemo = new WeakMap<World, { tick: number; tons: Map<NationId, number> }>();
+interface Fleet {
+  /** Maximum cargo tons of the ready transport aircraft. */
+  tons: number;
+  /** Longest unrefuelled combat radius among them, km. */
+  radiusKm: number;
+}
+const fleetMemo = new WeakMap<World, { tick: number; fleets: Map<NationId, Fleet> }>();
 
-/** Tons a day a nation can fly to an overseas theatre for its land forces. */
-export function airliftTonsPerDay(world: World, catalog: Catalog, nation: NationId): number {
-  let memo = airliftMemo.get(world);
+/** Each nation's military transport aircraft, read once a tick. */
+function fleet(world: World, catalog: Catalog, nation: NationId): Fleet | undefined {
+  let memo = fleetMemo.get(world);
   if (!memo || memo.tick !== world.tick) {
-    memo = { tick: world.tick, tons: new Map() };
+    memo = { tick: world.tick, fleets: new Map() };
     for (const f of Object.values(world.formations)) {
       if (f.status !== 'active') continue;
       for (const [pid, n] of Object.entries(f.equipment) as [PlatformId, number][]) {
         const p = catalog.platform(pid);
-        if (p.class === 'transport_aircraft') memo.tons.set(f.nation, (memo.tons.get(f.nation) ?? 0) + n * (p.capacity?.cargoTons ?? 0) * f.readiness);
+        if (p.class !== 'transport_aircraft' || n <= 0) continue;
+        const fl = memo.fleets.get(f.nation) ?? memo.fleets.set(f.nation, { tons: 0, radiusKm: 0 }).get(f.nation)!;
+        fl.tons += n * (p.capacity?.cargoTons ?? 0) * f.readiness;
+        fl.radiusKm = Math.max(fl.radiusKm, p.mobility.rangeKm / 2);
       }
     }
-    airliftMemo.set(world, memo);
+    fleetMemo.set(world, memo);
   }
-  return (memo.tons.get(nation) ?? 0) * PAYLOAD_SHARE * SORTIES_PER_DAY * ARMY_SHARE;
+  return memo.fleets.get(nation);
+}
+
+/** Tons a day a nation can fly to an overseas theatre for its land forces. */
+export function airliftTonsPerDay(world: World, catalog: Catalog, nation: NationId): number {
+  return (fleet(world, catalog, nation)?.tons ?? 0) * PAYLOAD_SHARE * SORTIES_PER_DAY * ARMY_SHARE;
+}
+
+/** Tons the whole transport fleet lands in one lift, as for an airborne assault. */
+export function liftTons(world: World, catalog: Catalog, nation: NationId): number {
+  return (fleet(world, catalog, nation)?.tons ?? 0) * PAYLOAD_SHARE;
+}
+
+/** Unrefuelled combat radius of the nation's transport fleet, km: how deep it can drop. */
+export function transportRadiusKm(world: World, catalog: Catalog, nation: NationId): number {
+  return fleet(world, catalog, nation)?.radiusKm ?? 0;
 }
 
 export type LiftMode = 'air' | 'sea';

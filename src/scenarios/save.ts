@@ -11,7 +11,8 @@ import { SYSTEMS } from '../systems';
 import { SCENARIOS, type Session } from '.';
 
 const FORMAT = 'ww3-save';
-const VERSION = 1;
+// 2: land airheads and AI airborne operations.
+const VERSION = 2;
 
 export interface SaveFile {
   format: typeof FORMAT;

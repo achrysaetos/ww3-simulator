@@ -110,15 +110,15 @@ export const usaArmy = [
   u('16th Combat Aviation Brigade, 7th Infantry Division', 'air_wing', 'brigade', jblm, { uh60m: 30, ch47f: 12, hh60m: 12 }, { readiness: 0.8, personnel: 2200 }),
 
   // 82nd Airborne Division
-  u('1st Brigade Combat Team, 82nd Airborne Division', 'maneuver', 'brigade', fortBragg, US_IBCT, { ...IBCT_P, readiness: 0.9 }),
-  u('2nd Brigade Combat Team, 82nd Airborne Division', 'maneuver', 'brigade', fortBragg, US_IBCT, { ...IBCT_P, readiness: 0.9 }),
-  u('3rd Brigade Combat Team, 82nd Airborne Division', 'maneuver', 'brigade', fortBragg, US_IBCT, { ...IBCT_P, readiness: 0.9 }),
+  u('1st Brigade Combat Team, 82nd Airborne Division', 'maneuver', 'brigade', fortBragg, US_IBCT, { ...IBCT_P, readiness: 0.9, airborne: true }),
+  u('2nd Brigade Combat Team, 82nd Airborne Division', 'maneuver', 'brigade', fortBragg, US_IBCT, { ...IBCT_P, readiness: 0.9, airborne: true }),
+  u('3rd Brigade Combat Team, 82nd Airborne Division', 'maneuver', 'brigade', fortBragg, US_IBCT, { ...IBCT_P, readiness: 0.9, airborne: true }),
   ...divisionEnablers('82nd Airborne Division', fortBragg),
 
   // 101st Airborne Division (Air Assault)
-  u('1st Brigade Combat Team, 101st Airborne Division', 'maneuver', 'brigade', fortCampbell, US_IBCT, IBCT_P),
-  u('2nd Brigade Combat Team, 101st Airborne Division', 'maneuver', 'brigade', fortCampbell, US_IBCT, IBCT_P),
-  u('3rd Brigade Combat Team, 101st Airborne Division', 'maneuver', 'brigade', fortCampbell, US_IBCT, IBCT_P),
+  u('1st Brigade Combat Team, 101st Airborne Division', 'maneuver', 'brigade', fortCampbell, US_IBCT, { ...IBCT_P, airborne: true }),
+  u('2nd Brigade Combat Team, 101st Airborne Division', 'maneuver', 'brigade', fortCampbell, US_IBCT, { ...IBCT_P, airborne: true }),
+  u('3rd Brigade Combat Team, 101st Airborne Division', 'maneuver', 'brigade', fortCampbell, US_IBCT, { ...IBCT_P, airborne: true }),
   ...divisionEnablers('101st Airborne Division', fortCampbell, { ah64e: 48, uh60m: 60, hh60m: 15, ch47f: 24, truck: 250 }),
 
   // 10th Mountain Division
@@ -139,7 +139,7 @@ export const usaArmy = [
 
   // Forward-based in Europe
   u('2nd Cavalry Regiment', 'maneuver', 'brigade', vilseck, { ...US_SBCT, stryker_icv: 54, stryker_dragoon: 81, stryker_shorad: 12 }, { readiness: 0.9, personnel: 4500 }),
-  u('173rd Airborne Brigade', 'maneuver', 'brigade', vicenza, US_IBCT, { readiness: 0.9, personnel: 3800 }),
+  u('173rd Airborne Brigade', 'maneuver', 'brigade', vicenza, US_IBCT, { readiness: 0.9, personnel: 3800, airborne: true }),
   u('12th Combat Aviation Brigade', 'air_wing', 'brigade', ansbach, add(US_CAB, { ah64e: 24 }), { readiness: 0.85, personnel: 2600 }),
   u('Rotational Combat Aviation Brigade (Poland)', 'air_wing', 'brigade', powidz, US_CAB, { readiness: 0.85, personnel: 2200 }),
   u('V Corps Forward Command Post', 'logistics', 'corps', poznan, { truck: 200 }, { readiness: 0.9, personnel: 1000 }),

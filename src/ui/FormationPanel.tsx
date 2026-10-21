@@ -23,7 +23,10 @@ export const POSTURES_BY_KIND: Record<FormationKind, readonly Posture[]> = {
   space: ['patrol', 'reserve'],
 };
 
-export const NEEDS_TARGET: ReadonlySet<Posture> = new Set(['move', 'attack', 'strike', 'air_superiority', 'patrol', 'blockade']);
+export const NEEDS_TARGET: ReadonlySet<Posture> = new Set(['move', 'attack', 'strike', 'air_superiority', 'patrol', 'blockade', 'air_assault']);
+
+/** Postures a formation can be given: its kind's, plus an air assault for airborne troops. */
+export const posturesOf = (f: Formation): readonly Posture[] => (f.airborne ? [...POSTURES_BY_KIND[f.kind], 'air_assault'] : POSTURES_BY_KIND[f.kind]);
 const STRIKE_CLASSES: TargetClass[] = ['structure', 'hardened', 'soft', 'armor', 'ship', 'aircraft'];
 
 /** Who commands a formation of the player's nation. */
@@ -97,7 +100,7 @@ export function FormationPanel({ client, palette, places, routes, playAs, comman
       {own && f.status !== 'destroyed' ? (
         <Section title="Issue orders">
           <div className="posture-grid">
-            {POSTURES_BY_KIND[f.kind].map((p) => (
+            {posturesOf(f).map((p) => (
               <button
                 key={p}
                 data-testid={`posture-${p}`}
@@ -221,6 +224,7 @@ const DOING: Record<Posture, (target: string) => string> = {
   blockade: (t) => `Blockading ${t}`,
   escort: (t) => `Escorting near ${t}`,
   embark: () => 'Embarking on sealift',
+  air_assault: (t) => `Air assault onto ${t}`,
 };
 
 /** One line on what the unit is doing now and what is happening to it. */
