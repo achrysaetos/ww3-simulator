@@ -191,7 +191,8 @@ export function MapView(props: MapViewProps) {
     for (let i = 0; i < v.length; i += 3) {
       if (v[i] !== n) continue;
       const by = client.state.nations.get(client.meta?.nationIds[v[i + 1]] as NationId);
-      return <div className="tt-warn" data-testid="tt-contest">Contested: {by?.name ?? 'the enemy'} has pushed {Math.round(v[i + 2] * 100)}% of the way across</div>;
+      const pct = Math.round(v[i + 2] * 100);
+      return <div className="tt-warn tt-plain" data-testid="tt-contest">{pct ? `Contested: ${by?.name ?? 'the enemy'} has pushed ${pct}% of the way across` : `Contested: ${by?.name ?? 'the enemy'} is attacking but has gained no ground yet`}</div>;
     }
     return null;
   };
