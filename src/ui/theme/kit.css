@@ -1,0 +1,68 @@
+/*
+ * The redesign's visual kit (ui-redesign/generators/KIT.md) as CSS: tokens,
+ * glass panels with gold corner brackets, condensed military type, chips,
+ * meters, buttons, and the scanline and vignette layers. Classes carry a ww-
+ * prefix so they sit beside the older panel styles until those move over.
+ */
+:root {
+  --ww-ink: #04070c;
+  --ww-text: #e8eef6;
+  --ww-muted: #8fa6c0;
+  --ww-faint: #5d6f86;
+  --ww-blue: #4aa3ff;
+  --ww-red: #ff4d4f;
+  --ww-gold: #ffb547;
+  --ww-green: #3fd98a;
+  --ww-line: rgba(150, 195, 240, 0.16);
+  --ww-title: 'Barlow Condensed', 'Arial Narrow', sans-serif;
+  --ww-sans: 'Inter', system-ui, sans-serif;
+  --ww-mono: 'IBM Plex Mono', ui-monospace, monospace;
+}
+
+.ww-glass {
+  background: linear-gradient(180deg, rgba(18, 28, 44, 0.84), rgba(8, 13, 22, 0.8));
+  backdrop-filter: blur(16px) saturate(1.3);
+  -webkit-backdrop-filter: blur(16px) saturate(1.3);
+  border: 1px solid var(--ww-line);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  border-radius: 4px;
+  color: var(--ww-text);
+}
+.ww-corners { position: relative; }
+.ww-corners::before, .ww-corners::after { content: ''; position: absolute; width: 12px; height: 12px; pointer-events: none; }
+.ww-corners::before { left: -1px; top: -1px; border-left: 2px solid var(--ww-gold); border-top: 2px solid var(--ww-gold); }
+.ww-corners::after { right: -1px; bottom: -1px; border-right: 2px solid var(--ww-gold); border-bottom: 2px solid var(--ww-gold); }
+
+.ww-label { font-family: var(--ww-title); font-weight: 600; text-transform: uppercase; letter-spacing: 0.16em; font-size: 12px; color: var(--ww-muted); }
+.ww-title { font-family: var(--ww-title); font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; line-height: 1; }
+.ww-mono { font-family: var(--ww-mono); font-variant-numeric: tabular-nums; }
+.ww-muted { color: var(--ww-muted); }
+
+.ww-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 40px; padding: 0 16px;
+  border-radius: 3px; border: 1px solid rgba(150, 195, 240, 0.28); background: rgba(20, 32, 50, 0.6); color: var(--ww-text);
+  font-family: var(--ww-title); font-weight: 600; font-size: 15px; letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer;
+}
+.ww-btn:hover { border-color: rgba(150, 195, 240, 0.5); background: rgba(30, 46, 70, 0.7); }
+.ww-btn.gold { background: linear-gradient(180deg, #ffc76a, #f0a136); border-color: #ffd38a; color: #1a1204; box-shadow: 0 0 24px rgba(255, 181, 71, 0.35); }
+.ww-kbd {
+  display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 3px;
+  border: 1px solid rgba(150, 195, 240, 0.35); font-family: var(--ww-mono); font-size: 11px; color: #b9c8da; background: rgba(255, 255, 255, 0.04);
+}
+.ww-chip {
+  display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 9px; border-radius: 2px;
+  font-family: var(--ww-title); font-weight: 600; font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase;
+  background: rgba(150, 195, 240, 0.12); color: #b9d4f2;
+}
+.ww-chip.blue { background: rgba(74, 163, 255, 0.16); color: #8fc6ff; }
+.ww-chip.red { background: rgba(255, 77, 79, 0.16); color: #ff8f90; }
+.ww-chip.gold { background: rgba(255, 181, 71, 0.16); color: #ffc56b; }
+.ww-chip.green { background: rgba(63, 217, 138, 0.14); color: #7fe8b0; }
+.ww-bar { display: block; height: 4px; border-radius: 2px; background: rgba(150, 195, 240, 0.14); overflow: hidden; }
+.ww-bar i { display: block; height: 4px; background: var(--ww-blue); box-shadow: 0 0 8px rgba(74, 163, 255, 0.8); }
+.ww-bar.red i { background: var(--ww-red); box-shadow: 0 0 8px rgba(255, 77, 79, 0.8); }
+.ww-bar.gold i { background: var(--ww-gold); box-shadow: 0 0 8px rgba(255, 181, 71, 0.8); }
+.ww-bar.green i { background: var(--ww-green); box-shadow: 0 0 8px rgba(63, 217, 138, 0.8); }
+
+.ww-scan { position: absolute; inset: 0; pointer-events: none; background: repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.018) 0 1px, transparent 1px 3px); }
+.ww-vig { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(ellipse at 50% 50%, transparent 55%, rgba(2, 4, 8, 0.65) 100%); }

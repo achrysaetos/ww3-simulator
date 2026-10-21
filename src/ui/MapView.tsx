@@ -1,14 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
-import { feature, mesh } from 'topojson-client';
-import type { GeometryCollection, Topology } from 'topojson-specification';
 import type { GameMap } from '../core/map';
 import type { FormationId, NationId, NodeId } from '../core/types';
 import type { SimClient } from './client';
 import type { Palette } from './colors';
-import { MapRenderer, type Overlays } from './renderer';
-import { NO_NATION, type ScenarioCard } from './snapshot';
-import { centerOn, pickNode, zoomAt, type ViewTransform } from './view';
 import type { PlaceNamer } from './events';
+import type { Manifest } from './map/tiles';
+import { ZoomControl } from './map/ZoomControl';
+import { contactOf, MapRenderer, type Overlays } from './renderer';
+import { NO_NATION, type ScenarioCard } from './snapshot';
+import { BAND_PRESET, pinTo, unproject, zoomForPxPerDeg, type ZoomBand } from './view';
+import './theme/kit.css';
 
 export interface MapViewProps {
   client: SimClient;
@@ -24,6 +25,8 @@ export interface MapViewProps {
   focusHandle: { current: ((node: NodeId) => void) | null };
 }
 
+const TILES = `${import.meta.env.BASE_URL}tiles/`;
+
 /**
  * Where the map opens: the capital of the nation under attack in the player's own opening war,
  * else in the scenario's first war (Taipei for Taiwan 2027 played as the US), else the player's
@@ -37,6 +40,7 @@ export function openingFocus(map: GameMap, scenario: Pick<ScenarioCard, 'wars'>,
 }
 
 export function MapView(props: MapViewProps) {
+  const glRef = useRef<HTMLCanvasElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<MapRenderer | null>(null);
   const propsRef = useRef(props);
@@ -44,39 +48,58 @@ export function MapView(props: MapViewProps) {
   const [hover, setHover] = useState<{ node: NodeId; x: number; y: number } | null>(null);
   const hoverRef = useRef<NodeId | null>(null);
   hoverRef.current = hover?.node ?? null;
+  const [hud, setHud] = useState<{ band: ZoomBand; km: number }>({ band: 'theatre', km: 1 });
+  const [failed, setFailed] = useState<string | null>(null);
   const dirty = useRef(true);
-  const userMoved = useRef(false);
+  const opened = useRef(false);
 
   useEffect(() => {
     const canvas = canvasRef.current!;
     const { client, palette } = propsRef.current;
-    const r = new MapRenderer(canvas, client.map, palette);
+    let r: MapRenderer;
+    try {
+      r = new MapRenderer(glRef.current!, canvas, client.map, palette, client.meta?.nationIds ?? client.map.nationIds, TILES);
+    } catch (e) {
+      setFailed(e instanceof Error ? e.message : String(e));
+      return;
+    }
     rendererRef.current = r;
     (window as unknown as { __map?: MapRenderer }).__map = r;
+    r.onInvalidate = () => (dirty.current = true);
     const fit = () => {
       const rect = canvas.getBoundingClientRect();
       r.resize(rect.width, rect.height, window.devicePixelRatio || 1);
-      if (!userMoved.current) {
+      if (!opened.current && rect.width > 0) {
+        opened.current = true;
         const { client: c, playAs } = propsRef.current;
         const focus = c.meta ? openingFocus(c.map, c.meta.scenario, playAs) : null;
-        r.t = focus === null ? centerOn(r.proj, rect.width, rect.height, 24, 50, 3.2) : centerOn(r.proj, rect.width, rect.height, c.map.lon[focus], c.map.lat[focus], 4);
+        const at = focus === null ? { lon: 24, lat: 50 } : { lon: c.map.lon[focus], lat: c.map.lat[focus] };
+        // Open on the night globe and fly down to the theatre: the war starts here.
+        r.setCamera(r.bandCamera('world', { lon: at.lon - 25, lat: at.lat - 12 }));
+        r.flyTo(r.bandCamera('theatre', at), performance.now() + 350);
       }
       dirty.current = true;
     };
     fit();
     propsRef.current.focusHandle.current = (node) => {
-      r.t = centerOn(r.proj, r.width, r.height, client.map.lon[node], client.map.lat[node], Math.max(r.t.k, 4));
-      userMoved.current = true;
-      dirty.current = true;
+      r.flyTo({ lon: client.map.lon[node], lat: client.map.lat[node], zoom: Math.max(r.cam.zoom, zoomForPxPerDeg(BAND_PRESET.theatre)) });
     };
     const ro = new ResizeObserver(fit);
     ro.observe(canvas);
 
     let alive = true;
-    import('world-atlas/countries-50m.json').then((m) => {
+    void Promise.all([
+      fetch(`${TILES}manifest.json`).then((x) => x.json() as Promise<Manifest>),
+      fetch(`${TILES}lights.json`).then((x) => x.json() as Promise<number[]>),
+    ]).then(([manifest, lights]) => {
       if (!alive) return;
-      const topo = (m.default ?? m) as unknown as Topology<{ countries: GeometryCollection; land: GeometryCollection }>;
-      r.setTopology(mesh(topo, topo.objects.countries, (a, b) => a !== b), feature(topo, topo.objects.land));
+      r.setManifest(manifest);
+      r.setLights(Float32Array.from(lights));
+      void fetch(`${TILES}places.json`).then((x) => x.json()).then((rows) => alive && r.setPlaces(rows));
+      dirty.current = true;
+    }).catch((e) => setFailed(`terrain tiles did not load (${e})`));
+    void Promise.all(['600 12px "Barlow Condensed"', '500 10px "IBM Plex Mono"', '400 12px Inter'].map((f) => document.fonts.load(f))).then(() => {
+      r.fontsReady();
       dirty.current = true;
     });
 
@@ -86,6 +109,7 @@ export function MapView(props: MapViewProps) {
     });
 
     let raf = 0;
+    let shown = { band: '', km: 0 };
     const loop = (now: number) => {
       if (dirty.current || r.animating) {
         const changed = dirty.current;
@@ -100,6 +124,11 @@ export function MapView(props: MapViewProps) {
           targeting: p.targeting,
           overlays: p.overlays,
         }, now, changed);
+        const km = Number(r.kmPerPx.toPrecision(2));
+        if (r.band !== shown.band || km !== shown.km) {
+          shown = { band: r.band, km };
+          setHud({ band: r.band, km });
+        }
       }
       raf = requestAnimationFrame(loop);
     };
@@ -116,7 +145,7 @@ export function MapView(props: MapViewProps) {
     dirty.current = true;
   }, [props.playAs, props.selected, props.targeting, props.overlays, hover?.node]);
 
-  const drag = useRef<{ x: number; y: number; t: ViewTransform; moved: boolean } | null>(null);
+  const drag = useRef<{ x: number; y: number; grab: [number, number] | null; last: [number, number]; moved: boolean } | null>(null);
 
   const local = (e: { clientX: number; clientY: number }) => {
     const rect = canvasRef.current!.getBoundingClientRect();
@@ -124,53 +153,54 @@ export function MapView(props: MapViewProps) {
   };
 
   const onPointerDown = (e: React.PointerEvent) => {
-    const r = rendererRef.current!;
+    const r = rendererRef.current;
+    if (!r) return;
     const [x, y] = local(e);
-    drag.current = { x, y, t: r.t, moved: false };
+    drag.current = { x, y, grab: unproject(r.cam, r.vp, x, y), last: [x, y], moved: false };
     canvasRef.current!.setPointerCapture(e.pointerId);
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
-    const r = rendererRef.current!;
+    const r = rendererRef.current;
+    if (!r) return;
     const [x, y] = local(e);
     const d = drag.current;
     if (d) {
       if (Math.hypot(x - d.x, y - d.y) > 4) d.moved = true;
       if (d.moved) {
-        r.t = { k: d.t.k, x: d.t.x + x - d.x, y: d.t.y + y - d.y };
-        userMoved.current = true;
+        // Keep the grabbed ground under the cursor; off the globe, rotate by the motion instead.
+        r.setCamera(d.grab ? pinTo(r.cam, r.vp, d.grab[0], d.grab[1], x, y) : { ...r.cam, lon: r.cam.lon - (x - d.last[0]) * 0.3, lat: r.cam.lat + (y - d.last[1]) * 0.3 });
+        d.last = [x, y];
         dirty.current = true;
         return;
       }
     }
-    const node = pickNode(r.map, r.proj, r.t, x, y);
+    const node = r.pick(x, y);
     setHover(node === null ? null : { node, x, y });
   };
 
   const onPointerUp = (e: React.PointerEvent) => {
     const d = drag.current;
     drag.current = null;
-    if (!d || d.moved) return;
-    const r = rendererRef.current!;
+    const r = rendererRef.current;
+    if (!d || d.moved || !r) return;
     const [x, y] = local(e);
     const p = propsRef.current;
     if (p.targeting) {
-      const node = pickNode(r.map, r.proj, r.t, x, y);
+      const node = r.pick(x, y);
       if (node !== null) p.onTarget(node);
       return;
     }
     for (let i = r.hits.length - 1; i >= 0; i--) {
       const h = r.hits[i];
       if (x >= h.x && x <= h.x + h.w && y >= h.y && y <= h.y + h.h) {
-        if (h.zoomTo !== null) {
-          r.t = centerOn(r.proj, r.width, r.height, r.map.lon[h.node], r.map.lat[h.node], h.zoomTo);
-          userMoved.current = true;
-          dirty.current = true;
-        } else {
+        if (h.zoomTo !== null) r.flyTo(h.zoomTo);
+        else {
           // A stack that cannot open further: repeated clicks cycle through it.
           const at = p.selected ? h.ids.indexOf(p.selected) : -1;
           p.onSelectFormation(h.ids[(at + 1) % h.ids.length]);
         }
+        dirty.current = true;
         return;
       }
     }
@@ -178,10 +208,26 @@ export function MapView(props: MapViewProps) {
   };
 
   const onWheel = (e: React.WheelEvent) => {
-    const r = rendererRef.current!;
+    const r = rendererRef.current;
+    if (!r) return;
     const [x, y] = local(e);
-    r.t = zoomAt(r.t, x, y, Math.exp(-e.deltaY * 0.0015));
-    userMoved.current = true;
+    const delta = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
+    r.glideZoom(-delta * 0.0022, x, y);
+    dirty.current = true;
+  };
+
+  const onDoubleClick = (e: React.MouseEvent) => {
+    const r = rendererRef.current;
+    if (!r || propsRef.current.targeting) return;
+    const [x, y] = local(e);
+    r.glideZoom(1, x, y);
+    dirty.current = true;
+  };
+
+  const flyToBand = (b: ZoomBand) => {
+    const r = rendererRef.current;
+    if (!r) return;
+    r.flyTo(r.bandCamera(b));
     dirty.current = true;
   };
 
@@ -196,7 +242,7 @@ export function MapView(props: MapViewProps) {
     }
     return null;
   };
-  const hoverInfo = hover && (() => {
+  const hoverInfo = hover && !drag.current?.moved && (() => {
     const owner = client.state.control[hover.node];
     const ids = client.meta?.nationIds ?? client.map.nationIds;
     const holder = owner === NO_NATION ? null : client.state.nations.get(ids[owner]);
@@ -204,15 +250,18 @@ export function MapView(props: MapViewProps) {
     const sea = map.isSea(hover.node);
     const here = rendererRef.current?.formationsAt(hover.node) ?? [];
     return (
-      <div className="map-tooltip" style={{ left: hover.x + 14, top: hover.y + 14 }}>
+      <div className="map-tooltip ww-glass" style={{ left: hover.x + 16, top: hover.y + 16 }}>
         <div className="tt-title">{places.name(hover.node)}</div>
-        <div>{sea ? 'Sea zone' : `${map.terrain[hover.node]} · ${holder?.name ?? 'unclaimed'}`}</div>
+        <div className="tt-sub">{sea ? 'Sea zone' : `${map.terrain[hover.node]} · ${holder?.name ?? 'unclaimed'}`}</div>
         {!sea && map.owner[hover.node] !== (holder?.id ?? '') && <div className="tt-warn">Occupied (pre-war: {map.owner[hover.node]})</div>}
         {contestAt(hover.node)}
         {here.length > 0 && (
           <ul className="tt-list">
-            {here.slice(0, 6).map((f) => <li key={f.entry.id}>{f.entry.nation} · {f.entry.name}</li>)}
-            {here.length > 6 && <li className="muted">+{here.length - 6} more</li>}
+            {here.slice(0, 6).map((f) => {
+              const c = contactOf(f);
+              return <li key={f.entry.id}>{f.entry.nation} · {f.entry.name}{c && <span className="tt-age"> · seen {Math.round(c.ageHours)}h ago, ±{Math.round(c.errorKm)} km</span>}</li>;
+            })}
+            {here.length > 6 && <li className="ww-muted">+{here.length - 6} more</li>}
           </ul>
         )}
         {props.targeting && <div className="tt-hint">Click to set target</div>}
@@ -222,6 +271,7 @@ export function MapView(props: MapViewProps) {
 
   return (
     <div className="map-wrap">
+      <canvas ref={glRef} className="map-gl" aria-hidden="true" />
       <canvas
         ref={canvasRef}
         className={`map-canvas ${props.targeting ? `targeting-${props.targeting}` : ''}`}
@@ -231,7 +281,12 @@ export function MapView(props: MapViewProps) {
         onPointerUp={onPointerUp}
         onPointerLeave={() => setHover(null)}
         onWheel={onWheel}
+        onDoubleClick={onDoubleClick}
       />
+      <div className="ww-scan" />
+      <div className="ww-vig" />
+      <ZoomControl band={hud.band} kmPerPx={hud.km} onBand={flyToBand} />
+      {failed && <div className="map-failed ww-glass">The map could not start: {failed}</div>}
       {hoverInfo}
     </div>
   );

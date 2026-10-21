@@ -3,7 +3,7 @@ import type { FormationId, NationId, NodeId, SimEvent } from '../src/core/types'
 import { id, testWorld } from '../src/testkit';
 import { nationColor, Palette } from '../src/ui/colors';
 import { applySnapshot, emptyClientState, nationCards, NO_NATION, SnapshotEncoder } from '../src/ui/snapshot';
-import { baseProjection, pickNode, toLonLat, toScreen } from '../src/ui/view';
+import { flight, pickNode, project, unproject, zoomAt, type Camera } from '../src/ui/view';
 
 describe('snapshot codec', () => {
   const setup = () => {
@@ -183,25 +183,48 @@ describe('nation colors', () => {
 
 describe('map picking', () => {
   const { map } = testWorld();
-  const proj = baseProjection(1400, 700);
+  const vp = { width: 1400, height: 700 };
   const city = (name: string) => map.cities.find((c) => c.name === name)!;
 
-  it.each(['Paris', 'Kiev', 'Tokyo', 'Washington, D.C.', 'Canberra', 'Buenos Aires'])('a click on %s selects its cell at any pan and zoom', (name) => {
+  it.each(['Paris', 'Kiev', 'Tokyo', 'Washington, D.C.', 'Canberra', 'Buenos Aires'])('a click on %s selects its cell from the globe down to the front', (name) => {
     const c = city(name);
-    for (const t of [{ k: 1, x: 0, y: 0 }, { k: 6, x: -3500, y: -900 }, { k: 23, x: 12_000, y: -5_000 }]) {
-      const [sx, sy] = toScreen(proj, t, c.lon, c.lat)!;
-      expect(pickNode(map, proj, t, sx, sy)).toBe(c.node);
+    for (const cam of [{ lon: c.lon - 30, lat: c.lat / 2, zoom: 8 }, { lon: c.lon + 4, lat: c.lat - 3, zoom: 12 }, { lon: c.lon + 0.2, lat: c.lat - 0.1, zoom: 16 }]) {
+      const [sx, sy] = project(cam, vp, c.lon, c.lat)!;
+      expect(pickNode(map, cam, vp, sx, sy)).toBe(c.node);
     }
   });
 
-  it('distinguishes adjacent cells and ignores clicks off the globe', () => {
-    const t = { k: 10, x: -6000, y: -2000 };
+  it('distinguishes adjacent cells and ignores clicks off the globe and on its far side', () => {
     const paris = city('Paris');
-    const [sx, sy] = toScreen(proj, t, paris.lon + 1, paris.lat)!;
-    const east = pickNode(map, proj, t, sx, sy) as NodeId;
+    const cam = { lon: paris.lon, lat: paris.lat, zoom: 13 };
+    const [sx, sy] = project(cam, vp, paris.lon + 1, paris.lat)!;
+    const east = pickNode(map, cam, vp, sx, sy) as NodeId;
     expect(east).not.toBe(paris.node);
     expect(map.lon[east] - map.lon[paris.node]).toBeCloseTo(1);
-    expect(toLonLat(proj, { k: 1, x: 0, y: 0 }, 2, 2)).toBeNull();
+    expect(unproject({ lon: 0, lat: 0, zoom: 8 }, vp, 2, 2)).toBeNull();
+    expect(project({ lon: paris.lon, lat: paris.lat, zoom: 8 }, vp, city('Canberra').lon, city('Canberra').lat)).toBeNull();
     expect(map.owner[paris.node]).toBe('FRA' as NationId);
+  });
+
+  it('keeps the ground under the cursor fixed while zooming', () => {
+    let cam: Camera = { lon: 31, lat: 48, zoom: 9 };
+    const at = [1100, 200] as const;
+    const before = unproject(cam, vp, ...at)!;
+    for (const f of [2, 2, 4, 8, 0.5]) {
+      cam = zoomAt(cam, vp, ...at, f);
+      const [x, y] = project(cam, vp, ...before)!;
+      expect(Math.hypot(x - at[0], y - at[1])).toBeLessThan(0.5);
+    }
+  });
+
+  it('flies from end to end, pulling out mid-flight when the ends are far apart', () => {
+    const kyiv: Camera = { lon: 30.5, lat: 50.4, zoom: 14 }, taipei: Camera = { lon: 121.5, lat: 25, zoom: 14 };
+    const f = flight(kyiv, taipei, vp);
+    expect(f.at(0)).toEqual(kyiv);
+    expect(f.at(1).lon).toBeCloseTo(taipei.lon);
+    expect(f.at(1).zoom).toBeCloseTo(taipei.zoom);
+    expect(f.at(0.5).zoom).toBeLessThan(11);
+    const near = flight(kyiv, { ...kyiv, lon: 31 }, vp);
+    expect(near.at(0.5).zoom).toBeGreaterThan(13);
   });
 });

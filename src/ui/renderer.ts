@@ -1,19 +1,24 @@
 /**
- * Canvas map renderer. Geometry is projected once per canvas size into Path2D
- * objects in base-projection coordinates; pan and zoom only change the canvas
- * transform. Territory paths rebuild only when control or wars change.
+ * The map: a WebGL globe of pre-rendered relief with the war situation shaded
+ * in (map/globe.ts), under a 2D canvas of the things that move or get clicked:
+ * counters, labels, orders, contested cells and event flashes. The camera
+ * flies; it never jumps, so motion on the map always means something happened.
  */
-import { geoGraticule10, geoPath, type GeoProjection } from 'd3-geo';
-import type { GeoPermissibleObjects } from 'd3-geo';
 import type { GameMap } from '../core/map';
 import type { FormationId, NodeId, SimEvent } from '../core/types';
-import { rgba, type Palette } from './colors';
-import { LAYER, weatherLayer } from '../systems/weather/effects';
+import type { Palette } from './colors';
 import { eventNode } from './events';
-import { NO_NATION, type ClientState, type FormationView } from './snapshot';
+import { GlobeGL } from './map/globe';
+import { ControlMask, OverlayRaster, Rel, relations } from './map/situation';
+import type { Manifest } from './map/tiles';
+import { weatherLayer } from '../systems/weather/effects';
+import type { ClientState, FormationView } from './snapshot';
 import { clusterStacks, gridSize, indexByNode, type Stack } from './stacks';
-import { CounterSprites, type CounterBox } from './symbols';
-import { baseProjection, IDENTITY, MAX_ZOOM, type ViewTransform } from './view';
+import { CounterSprites, ECHELON_W, LOOK, type CounterBox, type Side } from './symbols';
+import {
+  BAND_PRESET, bandOf, clampCamera, flight, kmPerPx, project, pxPerDeg, unproject, worldZoom, zoomAt, zoomForPxPerDeg,
+  type Camera, type Viewport, type ZoomBand,
+} from './view';
 
 export interface Overlays {
   air: boolean;
@@ -35,186 +40,183 @@ export interface RenderInput {
   overlays: Overlays;
 }
 
+/** What an intel contact adds to a formation the viewer does not own (unit A1's fog of war). */
+export interface ContactInfo {
+  ageHours: number;
+  confidence: number;
+  errorKm: number;
+}
+
+/** Contacts below this confidence are drawn grey; matches the engine's STALE_CONFIDENCE. */
+export const STALE_CONFIDENCE = 0.25;
+
+export function contactOf(f: FormationView): ContactInfo | null {
+  return (f as FormationView & { contact?: ContactInfo | null }).contact ?? null;
+}
+
 interface Flash {
   node: NodeId;
   kind: 'battle' | 'strike' | 'nuclear' | 'capture';
   t0: number;
 }
 
-const FLASH_MS: Record<Flash['kind'], number> = { battle: 900, strike: 1100, capture: 700, nuclear: 4000 };
-const ECHELON_W: Record<string, number> = { battalion: 13, squadron: 13, flotilla: 15, brigade: 16, wing: 17, division: 19, task_group: 19, corps: 21, army: 23, fleet: 23 };
-/** Target on-screen size of a stacking cell. */
-const CELL_PX = 34;
+const FLASH_MS: Record<Flash['kind'], number> = { battle: 1100, strike: 1300, capture: 900, nuclear: 4500 };
+/** Target on-screen size of a stacking cell, per band. */
+const CELL_PX: Record<ZoomBand, number> = { world: 72, theatre: 92, front: 34 };
 /** On-screen width of one map node at which its stack fans out into individual counters. */
-const FAN_PX = 48;
-const FAN_SLOT_PX = 26;
-/** How far the cached base layer extends past each edge of the view, CSS px. */
-const PAN_MARGIN = 220;
+const FAN_PX = 70;
+const FAN_SLOT_PX = 50;
+const COUNTER_SCALE: Record<ZoomBand, number> = { world: 0.72, theatre: 0.9, front: 1.05 };
 
 export interface HitBox extends CounterBox {
   /** Strongest first. */
   ids: FormationId[];
   node: NodeId;
-  /** Zoom that opens this stack up; null when it cannot open further. */
-  zoomTo: number | null;
+  /** Where clicking flies to open the stack up; null when it cannot open further. */
+  zoomTo: Camera | null;
 }
 
+interface Place {
+  name: string;
+  lon: number;
+  lat: number;
+  pop: number;
+  capital: boolean;
+}
+
+interface Label {
+  img: OffscreenCanvas;
+  w: number;
+  h: number;
+}
+
+const GOLD = '#ffb547';
+
 export class MapRenderer {
-  proj: GeoProjection = baseProjection(800, 400);
-  t: ViewTransform = IDENTITY;
-  width = 800;
-  height = 400;
+  cam: Camera = { lon: 30, lat: 48, zoom: 9 };
+  vp: Viewport = { width: 800, height: 600 };
   dpr = 1;
   hits: HitBox[] = [];
-  /** The visible canvas: each frame is the cached scene plus animated flashes. */
-  private readonly screen: CanvasRenderingContext2D;
-  /** Draws into `scene`: everything but the flashes, redrawn only when the picture changes. */
-  private ctx: CanvasRenderingContext2D;
-  private scene: OffscreenCanvas;
-  /** Base-projection corners per node: x0,y0 .. x3,y3. */
-  private corners = new Float32Array(0);
-  private center = new Float32Array(0);
-  private readonly orthoEdges: Int32Array;
-  private readonly edgeEnds: Float32Array;
-  private edgeProj = new Float32Array(0);
-  private sphere = new Path2D();
-  private graticule = new Path2D();
-  private seaGrid = new Path2D();
-  private borders: Path2D | null = null;
-  private coast: Path2D | null = null;
-  private topo: { borders: GeoPermissibleObjects; land: GeoPermissibleObjects } | null = null;
-  private territory = new Map<number, Path2D>();
-  /** Control as of the last territory build, to rebuild only the nations whose cells changed hands. */
-  private builtControl: Uint16Array | null = null;
-  private front = new Path2D();
-  private builtFor = { control: -1, wars: '', size: '' };
-  private flashes: Flash[] = [];
-  private weatherFor: { packed: Uint8Array | null; pairs: Float32Array } = { packed: null, pairs: new Float32Array(0) };
-  private airPatterns = new Map<number, CanvasPattern>();
-  private sortedCities: GameMap['cities'] | null = null;
+  private readonly globe: GlobeGL;
+  private readonly ctx: CanvasRenderingContext2D;
   private readonly sprites = new CounterSprites();
-  private base: OffscreenCanvas | null = null;
-  private baseAt: ViewTransform = IDENTITY;
-  private baseFor: { air: Float32Array | null; contest: Float32Array | null; control: number; overlays: Overlays | null; topo: Path2D | null } = { air: null, contest: null, control: -1, overlays: null, topo: null };
-  /** Projected width of one degree of longitude at zoom 1. */
-  private degPx = 1;
+  private readonly mask: ControlMask;
+  private readonly overlay: OverlayRaster;
+  private rel: Uint8Array = new Uint8Array(0);
+  private relKey = '';
+  private maskFor = -1;
+  private overlayFor: { state: ClientState | null; air: unknown; infra: unknown; fallout: unknown; weather: unknown; sea: unknown; overlays: Overlays | null } = { state: null, air: null, infra: null, fallout: null, weather: null, sea: null, overlays: null };
+  private weatherFor: { packed: Uint8Array | null; pairs: Float32Array } = { packed: null, pairs: new Float32Array(0) };
+  private flashes: Flash[] = [];
+  private fly: { path: ReturnType<typeof flight>; t0: number } | null = null;
+  /** Wheel zoom eases toward a target about the cursor instead of stepping. */
+  private glide: { zoom: number; x: number; y: number } | null = null;
+  private lastFrame = 0;
+  /** Adaptive resolution: frame interval while moving, and when the camera last moved. */
+  private moveDt = 16;
+  private motionScale = 1;
+  private lastMove = 0;
+  private drawnCam: Camera | null = null;
+  private globeDirty = true;
+  private tilesPending = false;
   private byNode = new Map<NodeId, FormationView[]>();
   private indexedFrom: readonly FormationView[] | null = null;
   private stacks: Stack[] = [];
   private stacksGrid = -1;
+  private readonly labels = new Map<string, Label>();
+  /** Labelled places, capitals first then by population. */
+  private places: Place[];
+  private readonly areaNames = new Map<NodeId, string | null>();
+  /** Set when a tile lands or fonts load, so the owner schedules a frame. */
+  onInvalidate: () => void = () => {};
 
-  constructor(private readonly canvas: HTMLCanvasElement, readonly map: GameMap, private readonly palette: Palette) {
-    this.screen = canvas.getContext('2d')!;
-    this.scene = new OffscreenCanvas(canvas.width, canvas.height);
-    this.ctx = this.scene.getContext('2d')! as unknown as CanvasRenderingContext2D;
-    const edges: number[] = [], ends: number[] = [];
-    for (let a = 0; a < map.landCount; a++)
-      for (let k = map.adjStart[a]; k < map.adjStart[a + 1]; k++) {
-        const b = map.adj[k];
-        if (b <= a || b >= map.landCount) continue;
-        // Cells are squares of different sizes; the frontier runs along the side two squares share.
-        const ha = map.halfDeg[a], hb = map.halfDeg[b];
-        const dLat = map.lat[b] - map.lat[a], dLon = ((map.lon[b] - map.lon[a] + 540) % 360) - 180;
-        const latLo = Math.max(-ha, dLat - hb), latHi = Math.min(ha, dLat + hb);
-        const lonLo = Math.max(-ha, dLon - hb), lonHi = Math.min(ha, dLon + hb);
-        if (Math.abs(Math.abs(dLon) - ha - hb) < 1e-3 && latHi - latLo > 1e-3) {
-          const lon = map.lon[a] + Math.sign(dLon) * ha;
-          edges.push(a, b);
-          ends.push(lon, map.lat[a] + latLo, lon, map.lat[a] + latHi);
-        } else if (Math.abs(Math.abs(dLat) - ha - hb) < 1e-3 && lonHi - lonLo > 1e-3) {
-          const lat = map.lat[a] + Math.sign(dLat) * ha;
-          edges.push(a, b);
-          ends.push(map.lon[a] + lonLo, lat, map.lon[a] + lonHi, lat);
-        }
-      }
-    this.orthoEdges = Int32Array.from(edges);
-    this.edgeEnds = Float32Array.from(ends);
+  constructor(glCanvas: HTMLCanvasElement, private readonly canvas: HTMLCanvasElement, readonly map: GameMap, private readonly palette: Palette, nationIds: readonly string[], tiles: string) {
+    this.globe = new GlobeGL(glCanvas, tiles);
+    this.globe.onTile = () => {
+      this.globeDirty = true;
+      this.onInvalidate();
+    };
+    this.ctx = canvas.getContext('2d')!;
+    this.mask = new ControlMask(map, nationIds);
+    this.overlay = new OverlayRaster(map);
+    this.places = map.cities.map((c) => ({ name: c.name, lon: c.lon, lat: c.lat, pop: c.pop, capital: c.capital }))
+      .sort((a, b) => Number(b.capital) - Number(a.capital) || b.pop - a.pop);
   }
 
-  setTopology(borders: GeoPermissibleObjects, land: GeoPermissibleObjects) {
-    this.topo = { borders, land };
-    this.buildTopology();
+  setManifest(m: Manifest) {
+    this.globe.setManifest(m);
+    this.globeDirty = true;
+  }
+
+  setLights(lonLatPop: Float32Array) {
+    this.globe.setLights(lonLatPop);
+    this.globeDirty = true;
+  }
+
+  /** GeoNames towns (public/tiles/places.json), which name the front down to villages the engine has no city for. */
+  setPlaces(rows: readonly [string, number, number, number, number][]) {
+    this.places = rows.map(([name, lon, lat, pop, kind]) => ({ name, lon, lat, pop, capital: kind === 2 }));
+    this.areaNames.clear();
+    this.onInvalidate();
+  }
+
+  /** Fonts arrived: re-rasterize text. */
+  fontsReady() {
+    this.sprites.clear();
+    this.labels.clear();
   }
 
   resize(width: number, height: number, dpr: number) {
-    this.width = width;
-    this.height = height;
+    this.vp = { width, height };
     this.dpr = dpr;
     this.canvas.width = Math.round(width * dpr);
     this.canvas.height = Math.round(height * dpr);
-    this.scene = new OffscreenCanvas(this.canvas.width, this.canvas.height);
-    this.ctx = this.scene.getContext('2d')! as unknown as CanvasRenderingContext2D;
-    this.proj = baseProjection(width, height);
+    this.globe.resize(width, height, dpr);
     this.sprites.setDpr(dpr);
-    const { map, proj } = this;
-    this.degPx = proj([1, 0])![0] - proj([0, 0])![0];
-    this.base = null;
-    this.stacksGrid = -1;
-    this.corners = new Float32Array(map.size * 8);
-    this.center = new Float32Array(map.size * 2);
-    for (let n = 0; n < map.size; n++) {
-      const half = map.halfDeg[n];
-      const la = map.lat[n], lo = map.lon[n];
-      const pts = [[lo - half, la + half], [lo + half, la + half], [lo + half, la - half], [lo - half, la - half]];
-      pts.forEach(([x, y], i) => {
-        const p = proj([Math.max(-180, Math.min(180, x)), Math.max(-90, Math.min(90, y))])!;
-        this.corners[n * 8 + i * 2] = p[0];
-        this.corners[n * 8 + i * 2 + 1] = p[1];
-      });
-      const c = proj([lo, la])!;
-      this.center[n * 2] = c[0];
-      this.center[n * 2 + 1] = c[1];
-    }
-    this.edgeProj = new Float32Array(this.edgeEnds.length);
-    for (let i = 0; i < this.edgeEnds.length; i += 2) {
-      const p = proj([this.edgeEnds[i], this.edgeEnds[i + 1]])!;
-      this.edgeProj[i] = p[0];
-      this.edgeProj[i + 1] = p[1];
-    }
-    const path = (o: GeoPermissibleObjects) => {
-      const p = new Path2D();
-      geoPath(proj, p as unknown as CanvasRenderingContext2D)(o);
-      return p;
-    };
-    this.sphere = path({ type: 'Sphere' });
-    this.graticule = path(geoGraticule10());
-    this.seaGrid = new Path2D();
-    for (let n = map.landCount; n < map.size; n++) this.quad(this.seaGrid, n);
-    this.buildTopology();
-    this.builtFor.size = `${width}x${height}`;
-    this.territory.clear();
-    this.builtControl = null;
-    this.builtFor.control = -1;
+    this.cam = clampCamera(this.cam, this.vp);
+    this.globeDirty = true;
   }
 
-  private buildTopology() {
-    if (!this.topo) return;
-    const mk = (o: GeoPermissibleObjects) => {
-      const p = new Path2D();
-      geoPath(this.proj, p as unknown as CanvasRenderingContext2D)(o);
-      return p;
-    };
-    this.borders = mk(this.topo.borders);
-    this.coast = mk(this.topo.land);
+  /** Move the camera now (dragging, wheel), cancelling any flight. */
+  setCamera(c: Camera) {
+    this.cam = clampCamera(c, this.vp);
+    this.fly = null;
+    this.glide = null;
+    this.globeDirty = true;
+    this.onInvalidate();
   }
 
-  /** The per-node weather layer, expanded once per day from the packed per-region snapshot. */
-  private weatherPairs(packed: Uint8Array): Float32Array {
-    if (this.weatherFor.packed !== packed) this.weatherFor = { packed, pairs: weatherLayer(this.map, packed) };
-    return this.weatherFor.pairs;
+  flyTo(to: Camera, now = performance.now()) {
+    this.glide = null;
+    this.fly = { path: flight(this.cam, clampCamera(to, this.vp), this.vp), t0: now };
+    this.onInvalidate();
   }
 
-  private quad(p: Path2D, n: number) {
-    const c = this.corners, o = n * 8;
-    p.moveTo(c[o], c[o + 1]);
-    p.lineTo(c[o + 2], c[o + 3]);
-    p.lineTo(c[o + 4], c[o + 5]);
-    p.lineTo(c[o + 6], c[o + 7]);
-    p.closePath();
+  /** A camera partway along the flight between two cameras, to step a flight frame by frame. */
+  cameraAlong(from: Camera, to: Camera, t: number): Camera {
+    return flight(from, to, this.vp).at(t);
   }
 
-  screenOf(n: NodeId): [number, number] {
-    return [this.center[n * 2] * this.t.k + this.t.x, this.center[n * 2 + 1] * this.t.k + this.t.y];
+  /** Zoom by `dz` (log2 units) about a screen point, eased over the next frames. */
+  glideZoom(dz: number, x: number, y: number) {
+    this.fly = null;
+    const zoom = clampCamera({ ...this.cam, zoom: (this.glide?.zoom ?? this.cam.zoom) + dz }, this.vp).zoom;
+    this.glide = { zoom, x, y };
+    this.onInvalidate();
+  }
+
+  /** The camera for a band, centred where the view is now. */
+  bandCamera(band: ZoomBand, at: { lon: number; lat: number } = this.cam): Camera {
+    const zoom = band === 'world' ? worldZoom(this.vp) : zoomForPxPerDeg(BAND_PRESET[band]);
+    return { lon: at.lon, lat: band === 'world' ? Math.max(-30, Math.min(50, at.lat)) : at.lat, zoom };
+  }
+
+  get band(): ZoomBand {
+    return bandOf(this.cam);
+  }
+
+  get kmPerPx() {
+    return kmPerPx(this.cam);
   }
 
   addEvents(events: readonly SimEvent[], now: number) {
@@ -228,315 +230,16 @@ export class MapRenderer {
   }
 
   get animating() {
-    return this.flashes.length > 0;
+    return this.flashes.length > 0 || this.fly !== null || this.glide !== null || this.tilesPending || this.globe.scale < 1;
   }
 
-  private rebuildTerritory(state: ClientState, nationIds: readonly string[]) {
-    const atWar = new Set<string>();
-    for (const [a, b] of state.wars) {
-      atWar.add(`${a}|${b}`);
-      atWar.add(`${b}|${a}`);
-    }
-    if (this.builtFor.control !== state.controlVersion) {
-      const ctl = state.control, prev = this.builtControl;
-      const dirty = new Set<number>();
-      for (let n = 0; n < this.map.landCount; n++) {
-        if (!prev) dirty.add(ctl[n]);
-        else if (prev[n] !== ctl[n]) dirty.add(ctl[n]).add(prev[n]);
-      }
-      dirty.delete(NO_NATION);
-      for (const owner of dirty) this.territory.delete(owner);
-      for (let n = 0; n < this.map.landCount; n++) {
-        const owner = ctl[n];
-        if (!dirty.has(owner)) continue;
-        let p = this.territory.get(owner);
-        if (!p) this.territory.set(owner, (p = new Path2D()));
-        this.quad(p, n);
-      }
-      this.builtControl = ctl.slice(0, this.map.landCount);
-    }
-    this.front = new Path2D();
-    const e = this.orthoEdges, ep = this.edgeProj, ctl = state.control;
-    for (let i = 0; i < e.length; i += 2) {
-      const a = ctl[e[i]], b = ctl[e[i + 1]];
-      if (a === b || a === NO_NATION || b === NO_NATION) continue;
-      if (!atWar.has(`${nationIds[a]}|${nationIds[b]}`)) continue;
-      const j = i * 2;
-      this.front.moveTo(ep[j], ep[j + 1]);
-      this.front.lineTo(ep[j + 2], ep[j + 3]);
-    }
-    this.builtFor.control = state.controlVersion;
-    this.builtFor.wars = state.warsKey;
+  screenOf(n: NodeId): [number, number] | null {
+    return project(this.cam, this.vp, this.map.lon[n], this.map.lat[n]);
   }
 
-  private airPattern(ctx: CanvasRenderingContext2D, nation: number, nationId: string): CanvasPattern | null {
-    const cached = this.airPatterns.get(nation);
-    if (cached) return cached;
-    const [r, g, b] = this.palette.of(nationId).rgb;
-    const tile = new OffscreenCanvas(8, 8);
-    const c = tile.getContext('2d')!;
-    c.strokeStyle = rgba([Math.min(255, r + 90), Math.min(255, g + 90), Math.min(255, b + 90)], 0.85);
-    c.lineWidth = 1.4;
-    c.beginPath();
-    c.moveTo(0, 8); c.lineTo(8, 0);
-    c.moveTo(-2, 2); c.lineTo(2, -2);
-    c.moveTo(6, 10); c.lineTo(10, 6);
-    c.stroke();
-    const p = ctx.createPattern(tile, 'repeat');
-    if (p) this.airPatterns.set(nation, p);
-    return p;
-  }
-
-  /**
-   * Draw a frame. `changed` says whether anything but the flashes moved since the last frame
-   * (a snapshot, pan, zoom, hover or selection); while only flashes animate, a frame is one
-   * blit of the cached scene plus the flashes, not 2,500 counters again.
-   */
-  render(input: RenderInput, now: number, changed = true) {
-    if (changed) this.drawScene(input);
-    const s = this.screen;
-    s.setTransform(1, 0, 0, 1, 0, 0);
-    s.drawImage(this.scene, 0, 0);
-    s.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    this.drawFlashes(s, now);
-  }
-
-  private drawScene(input: RenderInput) {
-    const { ctx, t, dpr } = this;
-    const { state, nationIds } = input;
-    if (this.builtFor.control !== state.controlVersion || this.builtFor.wars !== state.warsKey) this.rebuildTerritory(state, nationIds);
-    const dx = t.x - this.baseAt.x, dy = t.y - this.baseAt.y;
-    if (!this.base || this.baseAt.k !== t.k || Math.abs(dx) > PAN_MARGIN || Math.abs(dy) > PAN_MARGIN || this.baseFor.air !== state.air || this.baseFor.contest !== state.contest || this.baseFor.control !== state.controlVersion || this.baseFor.overlays !== input.overlays || this.baseFor.topo !== this.coast) {
-      this.renderBase(input);
-      this.baseAt = { ...t };
-      this.baseFor = { air: state.air, contest: state.contest, control: state.controlVersion, overlays: input.overlays, topo: this.coast };
-    }
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = '#05080d';
-    ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
-    ctx.drawImage(this.base!, Math.round((t.x - this.baseAt.x - PAN_MARGIN) * dpr), Math.round((t.y - this.baseAt.y - PAN_MARGIN) * dpr));
-
-    if (input.hoverNode !== null && input.targeting) {
-      ctx.setTransform(dpr * t.k, 0, 0, dpr * t.k, dpr * t.x, dpr * t.y);
-      const p = new Path2D();
-      this.quad(p, input.hoverNode);
-      ctx.fillStyle = input.targeting === 'nuclear' ? 'rgba(255,230,80,0.45)' : 'rgba(255,255,255,0.25)';
-      ctx.fill(p);
-      ctx.strokeStyle = input.targeting === 'nuclear' ? '#ffe14d' : '#ffffff';
-      ctx.lineWidth = 1.5 / t.k;
-      ctx.stroke(p);
-    }
-
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    this.drawOrders(input);
-    this.drawFormations(input);
-  }
-
-  /**
-   * Everything that changes only with a snapshot, the zoom or the overlay
-   * toggles goes into an offscreen bitmap PAN_MARGIN larger than the view on
-   * each side. Panning within the margin, and animating flashes, then cost
-   * one blit instead of rasterizing coastlines and 193 territories again.
-   */
-  private renderBase(input: RenderInput) {
-    const { t, dpr } = this;
-    const w = Math.ceil((this.width + 2 * PAN_MARGIN) * dpr), h = Math.ceil((this.height + 2 * PAN_MARGIN) * dpr);
-    if (!this.base || this.base.width !== w || this.base.height !== h) {
-      this.base = new OffscreenCanvas(w, h);
-      this.airPatterns.clear();
-    }
-    const ctx = this.base.getContext('2d')! as unknown as CanvasRenderingContext2D;
-    const { state, nationIds, overlays } = input;
-    const nationAt = (i: number) => nationIds[i] ?? '';
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, w, h);
-    ctx.setTransform(dpr * t.k, 0, 0, dpr * t.k, dpr * (t.x + PAN_MARGIN), dpr * (t.y + PAN_MARGIN));
-    const px = 1 / t.k;
-
-    ctx.fillStyle = '#0c1724';
-    ctx.fill(this.sphere);
-    ctx.strokeStyle = 'rgba(120,160,200,0.07)';
-    ctx.lineWidth = px;
-    ctx.stroke(this.graticule);
-    if (overlays.seaZones && t.k >= 2) {
-      ctx.strokeStyle = 'rgba(110,150,190,0.08)';
-      ctx.stroke(this.seaGrid);
-    }
-
-    for (const [nation, path] of this.territory) {
-      const [hu, sa, li] = this.palette.of(nationAt(nation)).hsl;
-      ctx.fillStyle = `hsl(${hu} ${sa * 0.85}% ${li * 0.62}%)`;
-      ctx.fill(path);
-    }
-
-    if (overlays.sea) this.drawSparseControl(ctx, state.sea, nationAt, 0.4);
-    if (overlays.air) {
-      const a = state.air;
-      for (let i = 0; i < a.length; i += 3) {
-        const pat = this.airPattern(ctx, a[i + 1], nationAt(a[i + 1]));
-        if (!pat) continue;
-        const p = new Path2D();
-        this.quad(p, a[i]);
-        ctx.fillStyle = rgba(this.palette.of(nationAt(a[i + 1])).rgb, 0.18 * a[i + 2]);
-        ctx.fill(p);
-        ctx.globalAlpha = 0.35 + 0.6 * a[i + 2];
-        ctx.fillStyle = pat;
-        ctx.fill(p);
-        ctx.globalAlpha = 1;
-      }
-    }
-    if (overlays.infra) this.fillPairs(ctx, state.infra, (v) => `rgba(255,110,40,${Math.min(0.85, (1 - v) * 1.1)})`);
-    if (overlays.fallout) this.fillPairs(ctx, state.fallout, (v) => `rgba(190,255,60,${Math.min(0.75, v * 0.8)})`);
-    this.drawContest(ctx, state, nationAt);
-    if (overlays.weather) this.fillPairs(ctx, this.weatherPairs(state.weather), weatherStyle);
-
-    if (this.coast) {
-      ctx.strokeStyle = 'rgba(150,185,220,0.45)';
-      ctx.lineWidth = 0.8 * px;
-      ctx.stroke(this.coast);
-    }
-    if (this.borders) {
-      ctx.strokeStyle = 'rgba(225,232,242,0.42)';
-      ctx.lineWidth = 0.7 * px;
-      ctx.stroke(this.borders);
-    }
-
-    ctx.lineCap = 'round';
-    ctx.strokeStyle = 'rgba(255,60,40,0.35)';
-    ctx.lineWidth = 7 * px;
-    ctx.stroke(this.front);
-    ctx.strokeStyle = '#ff5a3c';
-    ctx.lineWidth = 2.4 * px;
-    ctx.stroke(this.front);
-
-    ctx.setTransform(dpr, 0, 0, dpr, dpr * PAN_MARGIN, dpr * PAN_MARGIN);
-    if (overlays.cities) this.drawCities(ctx);
-  }
-
-  /**
-   * Fronts moving inside a cell: the share an attacker has pushed across it, filled in its
-   * colour from the side its own cells border, with the cell outlined while it is contested.
-   */
-  private drawContest(ctx: CanvasRenderingContext2D, state: ClientState, nationAt: (i: number) => string) {
-    const v = state.contest, c = this.center, px = 1 / this.t.k;
-    for (let i = 0; i < v.length; i += 3) {
-      const n = v[i], by = v[i + 1], share = v[i + 2];
-      const cell = new Path2D();
-      this.quad(cell, n);
-      const cx = c[n * 2], cy = c[n * 2 + 1];
-      let dx = 0, dy = 0;
-      for (const m of this.map.neighbors(n as NodeId)) if (state.control[m] === by) { dx += c[m * 2] - cx; dy += c[m * 2 + 1] - cy; }
-      const len = Math.hypot(dx, dy);
-      const color = this.palette.of(nationAt(by)).rgb;
-      ctx.save();
-      ctx.clip(cell);
-      ctx.fillStyle = rgba(color, 0.75);
-      if (len === 0) {
-        ctx.globalAlpha = 0.2 + 0.6 * share;
-        ctx.fill(cell);
-      } else {
-        // Fill the half-plane facing the attacker, its edge `share` of the way across the cell.
-        const ux = dx / len, uy = dy / len;
-        let r = 0;
-        for (let k = 0; k < 4; k++) r = Math.max(r, Math.abs((this.corners[n * 8 + k * 2] - cx) * ux + (this.corners[n * 8 + k * 2 + 1] - cy) * uy));
-        const s0 = r * (1 - 2 * share), w = 2 * r;
-        const at = (s: number, t: number): [number, number] => [cx + ux * s - uy * t, cy + uy * s + ux * t];
-        const band = new Path2D();
-        band.moveTo(...at(s0, -w));
-        band.lineTo(...at(r * 1.5, -w));
-        band.lineTo(...at(r * 1.5, w));
-        band.lineTo(...at(s0, w));
-        band.closePath();
-        ctx.fill(band);
-      }
-      ctx.restore();
-      ctx.setLineDash([3 * px, 2 * px]);
-      ctx.strokeStyle = rgba(color, 0.95);
-      ctx.lineWidth = 1.2 * px;
-      ctx.stroke(cell);
-      ctx.setLineDash([]);
-    }
-  }
-
-  /** Fill each node of a flat (node, value) list. */
-  private fillPairs(ctx: CanvasRenderingContext2D, v: Float32Array, style: (value: number) => string) {
-    for (let i = 0; i < v.length; i += 2) {
-      const p = new Path2D();
-      this.quad(p, v[i]);
-      ctx.fillStyle = style(v[i + 1]);
-      ctx.fill(p);
-    }
-  }
-
-  private drawSparseControl(ctx: CanvasRenderingContext2D, v: Float32Array, nationAt: (i: number) => string, alpha: number) {
-    for (let i = 0; i < v.length; i += 3) {
-      const p = new Path2D();
-      this.quad(p, v[i]);
-      ctx.fillStyle = rgba(this.palette.of(nationAt(v[i + 1])).rgb, alpha * v[i + 2]);
-      ctx.fill(p);
-    }
-  }
-
-  /** Capitals first, then by population; a label is skipped if it would overlap one already placed. */
-  private drawCities(ctx: CanvasRenderingContext2D) {
-    const { t } = this;
-    const minPop = t.k < 2 ? 5e6 : t.k < 4 ? 1.5e6 : t.k < 8 ? 4e5 : 0;
-    ctx.font = '500 11px "Inter", system-ui, sans-serif';
-    ctx.textBaseline = 'middle';
-    const placed: [number, number, number, number][] = [];
-    const cities = this.sortedCities ??= [...this.map.cities].sort((a, b) => Number(b.capital) - Number(a.capital) || b.pop - a.pop);
-    for (const c of cities) {
-      if (c.pop < minPop && !(c.capital && c.pop > minPop / 5)) continue;
-      const p = this.proj([c.lon, c.lat]);
-      if (!p) continue;
-      const x = p[0] * t.k + t.x, y = p[1] * t.k + t.y;
-      if (x < -PAN_MARGIN || y < -PAN_MARGIN || x > this.width + PAN_MARGIN || y > this.height + PAN_MARGIN) continue;
-      ctx.fillStyle = c.capital ? '#f4f7fb' : '#b8c4d4';
-      ctx.strokeStyle = '#05080d';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      if (c.capital) ctx.rect(x - 2.5, y - 2.5, 5, 5);
-      else ctx.arc(x, y, 1.8, 0, Math.PI * 2);
-      ctx.fill();
-      if (c.capital) ctx.stroke();
-      const w = ctx.measureText(c.name).width;
-      const box: [number, number, number, number] = [x + 4, y - 7, x + 6 + w, y + 7];
-      if (placed.some((b) => box[0] < b[2] && box[2] > b[0] && box[1] < b[3] && box[3] > b[1])) continue;
-      placed.push(box);
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = 'rgba(5,8,13,0.85)';
-      ctx.strokeText(c.name, x + 5, y);
-      ctx.fillStyle = c.capital ? '#e8eef6' : '#a9b6c6';
-      ctx.fillText(c.name, x + 5, y);
-    }
-  }
-
-  private drawOrders(input: RenderInput) {
-    const { ctx } = this;
-    ctx.save();
-    ctx.setLineDash([5, 4]);
-    for (const f of input.state.formations) {
-      if (f.target === null || f.status === 'destroyed' || f.target === f.node) continue;
-      const mine = f.entry.nation === input.playAs, sel = f.entry.id === input.selected;
-      if (!mine && !sel) continue;
-      const [x0, y0] = this.screenOf(f.node), [x1, y1] = this.screenOf(f.target);
-      ctx.strokeStyle = sel ? '#ffe066' : f.posture === 'strike' ? 'rgba(255,120,90,0.8)' : 'rgba(200,220,255,0.6)';
-      ctx.lineWidth = sel ? 2 : 1.2;
-      ctx.beginPath();
-      ctx.moveTo(x0, y0);
-      ctx.lineTo(x1, y1);
-      ctx.stroke();
-      const a = Math.atan2(y1 - y0, x1 - x0);
-      ctx.setLineDash([]);
-      ctx.beginPath();
-      ctx.moveTo(x1, y1);
-      ctx.lineTo(x1 - 8 * Math.cos(a - 0.4), y1 - 8 * Math.sin(a - 0.4));
-      ctx.moveTo(x1, y1);
-      ctx.lineTo(x1 - 8 * Math.cos(a + 0.4), y1 - 8 * Math.sin(a + 0.4));
-      ctx.stroke();
-      ctx.setLineDash([5, 4]);
-    }
-    ctx.restore();
+  pick(sx: number, sy: number): NodeId | null {
+    const ll = unproject(this.cam, this.vp, sx, sy);
+    return ll ? this.map.nodeAt(ll[1], ll[0]) : null;
   }
 
   /** Formations at a node, strongest first, as of the latest snapshot rendered. */
@@ -544,122 +247,532 @@ export class MapRenderer {
     return this.byNode.get(node) ?? [];
   }
 
-  private drawFormations(input: RenderInput) {
-    const { ctx, t } = this;
+  private sideOf(f: FormationView | undefined, nation: string, nationIds: readonly string[]): Side {
+    const i = nationIds.indexOf(nation);
+    const r = i < 0 ? Rel.None : this.rel[i];
+    if (r === Rel.Own || r === Rel.Friend) return 'friend';
+    if (r === Rel.Enemy) {
+      const c = f && contactOf(f);
+      return c && c.confidence < STALE_CONFIDENCE ? 'stale' : 'enemy';
+    }
+    return 'neutral';
+  }
+
+  private syncSituation(input: RenderInput) {
+    const { state, nationIds, playAs, overlays } = input;
+    const key = `${playAs}|${state.warsKey}|${nationIds.length}`;
+    let relChanged = false;
+    if (key !== this.relKey) {
+      this.rel = relations(nationIds, state.wars, playAs);
+      this.relKey = key;
+      relChanged = true;
+    }
+    if (relChanged || this.maskFor !== state.controlVersion) {
+      const dirty = this.mask.update(state.control, this.rel);
+      if (dirty) this.globe.setMask(this.mask.data, dirty);
+      this.maskFor = state.controlVersion;
+      this.globeDirty = true;
+    }
+    const o = this.overlayFor;
+    if (relChanged || o.overlays !== overlays || o.air !== state.air || o.sea !== state.sea || o.infra !== state.infra || o.fallout !== state.fallout || o.weather !== state.weather) {
+      if (this.weatherFor.packed !== state.weather) this.weatherFor = { packed: state.weather, pairs: state.weather.length ? weatherLayer(this.map, state.weather) : new Float32Array(0) };
+      this.overlay.paint({
+        air: overlays.air ? state.air : null,
+        sea: overlays.sea ? state.sea : null,
+        infra: overlays.infra ? state.infra : null,
+        fallout: overlays.fallout ? state.fallout : null,
+        weather: overlays.weather ? this.weatherFor.pairs : null,
+      }, this.rel);
+      this.globe.setOverlay(this.overlay.data);
+      this.overlayFor = { state, air: state.air, sea: state.sea, infra: state.infra, fallout: state.fallout, weather: state.weather, overlays };
+      this.globeDirty = true;
+    }
+  }
+
+  /**
+   * Draw a frame. `changed` says whether anything but time moved since the
+   * last frame (a snapshot, hover, selection); flights and flashes animate on
+   * their own.
+   */
+  render(input: RenderInput, now: number, changed = true) {
+    const dt = Math.min(100, Math.max(1, now - this.lastFrame));
+    this.lastFrame = now;
+    if (this.glide) {
+      const g = this.glide, left = g.zoom - this.cam.zoom;
+      const step = Math.abs(left) < 0.003 ? left : left * (1 - Math.exp(-dt / 70));
+      this.cam = zoomAt(this.cam, this.vp, g.x, g.y, 2 ** step);
+      if (step === left) this.glide = null;
+      this.globeDirty = true;
+    }
+    if (this.fly) {
+      const u = (now - this.fly.t0) / this.fly.path.ms;
+      this.cam = clampCamera(this.fly.path.at(Math.min(1, u)), this.vp);
+      if (u >= 1) this.fly = null;
+      this.globeDirty = true;
+    }
+    if (changed) this.syncSituation(input);
+    this.adaptResolution(now, dt);
+    if (this.globeDirty || this.tilesPending) {
+      this.globeDirty = false;
+      this.tilesPending = this.globe.draw(this.cam, this.vp, { seaGrid: input.overlays.seaZones });
+    }
+    const ctx = this.ctx, dpr = this.dpr;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const band = this.band;
+    if (band !== 'world') this.drawContest(input);
+    this.drawHover(input);
+    this.drawOrders(input);
+    const counters = this.drawFormations(input);
+    if (input.overlays.cities) this.drawCities(counters);
+    this.drawFlashes(now);
+  }
+
+  /**
+   * Keep motion smooth where fill rate is short (integrated or software GPUs):
+   * while the camera moves and frames run long, draw the terrain at a lower
+   * resolution; one full-resolution frame follows when it stops.
+   */
+  private adaptResolution(now: number, dt: number) {
+    const moved = this.cam !== this.drawnCam;
+    this.drawnCam = this.cam;
+    const g = this.globe;
+    if (moved) {
+      // Pick up at the scale the last motion settled on, so every drag does not relearn it.
+      if (now - this.lastMove > 180) this.moveDt = 16;
+      else {
+        this.moveDt += (dt - this.moveDt) * 0.3;
+        if (this.moveDt > 24 && this.motionScale > 0.3) {
+          this.motionScale = Math.max(0.3, this.motionScale * 0.7);
+          this.moveDt = 16;
+        } else if (this.moveDt < 11 && this.motionScale < 1) this.motionScale = Math.min(1, this.motionScale / 0.7);
+      }
+      this.lastMove = now;
+      g.scale = this.motionScale;
+    } else if (g.scale < 1 && now - this.lastMove > 180) {
+      g.scale = 1;
+      this.globeDirty = true;
+    }
+  }
+
+  /** The cell's four corners on screen, or null if any is behind the globe. */
+  private cellQuad(n: number): [number, number][] | null {
+    const m = this.map, h = m.halfDeg[n], out: [number, number][] = [];
+    for (const [dx, dy] of [[-1, 1], [1, 1], [1, -1], [-1, -1]]) {
+      const p = project(this.cam, this.vp, m.lon[n] + dx * h, m.lat[n] + dy * h);
+      if (!p) return null;
+      out.push(p);
+    }
+    return out;
+  }
+
+  private drawHover(input: RenderInput) {
+    if (input.hoverNode === null || !input.targeting) return;
+    const q = this.cellQuad(input.hoverNode);
+    if (!q) return;
+    const ctx = this.ctx, nuclear = input.targeting === 'nuclear';
+    ctx.beginPath();
+    q.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+    ctx.closePath();
+    ctx.fillStyle = nuclear ? 'rgba(255,77,79,0.28)' : 'rgba(255,181,71,0.22)';
+    ctx.fill();
+    ctx.strokeStyle = nuclear ? '#ff4d4f' : GOLD;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
+
+  /**
+   * Fronts moving inside a cell: the share an attacker has pushed across it,
+   * filled from the side its own cells border, with the cell outlined in the
+   * attacker's side colour while it is contested.
+   */
+  private drawContest(input: RenderInput) {
+    const { state, nationIds } = input, v = state.contest, ctx = this.ctx, m = this.map;
+    for (let i = 0; i < v.length; i += 3) {
+      const n = v[i], by = v[i + 1], share = v[i + 2];
+      const q = this.cellQuad(n);
+      if (!q || q.every(([x, y]) => x < 0 || y < 0 || x > this.vp.width || y > this.vp.height)) continue;
+      const side = this.sideOf(undefined, nationIds[by] ?? '', nationIds);
+      const color = side === 'friend' ? '74,163,255' : side === 'enemy' ? '255,77,79' : '255,181,71';
+      const c = this.screenOf(n as NodeId);
+      if (!c) continue;
+      let dx = 0, dy = 0;
+      for (const nb of m.neighbors(n as NodeId)) {
+        if (state.control[nb] !== by) continue;
+        const p = this.screenOf(nb);
+        if (p) { dx += p[0] - c[0]; dy += p[1] - c[1]; }
+      }
+      const cell = new Path2D();
+      q.forEach(([x, y], k) => (k ? cell.lineTo(x, y) : cell.moveTo(x, y)));
+      cell.closePath();
+      ctx.save();
+      ctx.clip(cell);
+      ctx.fillStyle = `rgba(${color},0.32)`;
+      const len = Math.hypot(dx, dy);
+      if (len === 0) {
+        ctx.globalAlpha = 0.3 + 0.6 * share;
+        ctx.fill(cell);
+      } else {
+        const ux = dx / len, uy = dy / len;
+        let r = 0;
+        for (const [x, y] of q) r = Math.max(r, Math.abs((x - c[0]) * ux + (y - c[1]) * uy));
+        const s0 = r * (1 - 2 * share), w = 2 * r;
+        const at = (s: number, t: number): [number, number] => [c[0] + ux * s - uy * t, c[1] + uy * s + ux * t];
+        ctx.beginPath();
+        ctx.moveTo(...at(s0, -w));
+        ctx.lineTo(...at(r * 1.5, -w));
+        ctx.lineTo(...at(r * 1.5, w));
+        ctx.lineTo(...at(s0, w));
+        ctx.closePath();
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+  }
+
+  private label(text: string, font: string, color: string, track: number): Label {
+    const key = `${font}|${color}|${track}|${text}`;
+    let l = this.labels.get(key);
+    if (l) return l;
+    if (this.labels.size > 1500) this.labels.clear();
+    const probe = new OffscreenCanvas(1, 1).getContext('2d')!;
+    probe.font = font;
+    probe.letterSpacing = `${track}px`;
+    const m = probe.measureText(text);
+    const size = parseFloat(font.match(/(\d+(?:\.\d+)?)px/)?.[1] ?? '12');
+    const pad = 4, w = Math.ceil(m.width + 2 * pad), h = Math.ceil(size * 1.4 + 2 * pad);
+    const img = new OffscreenCanvas(Math.ceil(w * this.dpr), Math.ceil(h * this.dpr));
+    const c = img.getContext('2d')!;
+    c.scale(this.dpr, this.dpr);
+    c.font = font;
+    c.letterSpacing = `${track}px`;
+    c.textBaseline = 'middle';
+    c.lineJoin = 'round';
+    c.lineWidth = 3;
+    c.strokeStyle = 'rgba(3,6,11,0.85)';
+    c.strokeText(text, pad, h / 2);
+    c.fillStyle = color;
+    c.fillText(text, pad, h / 2);
+    l = { img, w, h };
+    this.labels.set(key, l);
+    return l;
+  }
+
+  private blit(l: Label, x: number, y: number) {
+    this.ctx.drawImage(l.img, x, y, l.w, l.h);
+  }
+
+  /** Capitals first, then by population; a label is skipped if it would overlap one already placed. */
+  private drawCities(counters: readonly [number, number, number, number][]) {
+    const placed: [number, number, number, number][] = [];
+    const ppd = pxPerDeg(this.cam), ctx = this.ctx;
+    if (ppd < 9) return;
+    const minPop = ppd < 20 ? 4e6 : ppd < 50 ? 6e5 : ppd < 130 ? 2.5e5 : ppd < 260 ? 6e4 : ppd < 500 ? 1.2e4 : 0;
+    for (const c of this.places) {
+      if (c.pop < minPop && !(c.capital && ppd >= 20)) continue;
+      const p = project(this.cam, this.vp, c.lon, c.lat);
+      if (!p) continue;
+      const [x, y] = p;
+      if (x < -40 || y < -20 || x > this.vp.width + 40 || y > this.vp.height + 20) continue;
+      const big = c.capital || c.pop > 1e6;
+      const l = this.label(c.name.toUpperCase(), `600 ${big ? 13 : 11.5}px "Barlow Condensed", "Arial Narrow", sans-serif`, big ? '#eef3f9' : '#c9d5e3', 1.3);
+      const box: [number, number, number, number] = [x + 3, y - l.h / 2, x + 3 + l.w, y + l.h / 2];
+      const hits = (b: readonly number[]) => box[0] < b[2] && box[2] > b[0] && box[1] < b[3] && box[3] > b[1];
+      // Big cities always get their name; smaller ones give way to labels and counters.
+      if (placed.some(hits) || (!big && counters.some(hits))) continue;
+      placed.push(box);
+      ctx.beginPath();
+      if (c.capital) {
+        ctx.fillStyle = '#ffd27f';
+        for (let k = 0; k < 10; k++) {
+          const a = -Math.PI / 2 + (k * Math.PI) / 5, r = k % 2 ? 2.2 : 5;
+          if (k) ctx.lineTo(x + Math.cos(a) * r, y + Math.sin(a) * r); else ctx.moveTo(x + Math.cos(a) * r, y + Math.sin(a) * r);
+        }
+        ctx.closePath();
+      } else {
+        ctx.fillStyle = '#e8eef6';
+        ctx.arc(x, y, 2.3, 0, Math.PI * 2);
+      }
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(3,6,11,0.8)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      this.blit(l, x + 3, y - l.h / 2);
+    }
+  }
+
+  /** Gold is the player's intent: own orders are gold arrows, the selected one bright. */
+  private drawOrders(input: RenderInput) {
+    const ctx = this.ctx;
+    for (const f of input.state.formations) {
+      if (f.target === null || f.status === 'destroyed' || f.target === f.node) continue;
+      const mine = f.entry.nation === input.playAs, sel = f.entry.id === input.selected;
+      if (!sel && (!mine || this.band !== 'front')) continue;
+      const a0 = this.screenOf(f.node), a1 = this.screenOf(f.target);
+      if (!a0 || !a1) continue;
+      const [x0, y0] = a0, [x1, y1] = a1, len = Math.hypot(x1 - x0, y1 - y0);
+      if (len < 6) continue;
+      // Bow the arrow a little so stacked orders to one target stay readable.
+      const mx = (x0 + x1) / 2 - (y1 - y0) * 0.12, my = (y0 + y1) / 2 + (x1 - x0) * 0.12;
+      const strike = f.posture === 'strike';
+      ctx.save();
+      ctx.lineCap = 'round';
+      ctx.globalAlpha = sel ? 1 : 0.55;
+      ctx.strokeStyle = strike ? 'rgba(255,107,94,0.35)' : 'rgba(255,181,71,0.3)';
+      ctx.lineWidth = sel ? 7 : 3;
+      ctx.beginPath();
+      ctx.moveTo(x0, y0);
+      ctx.quadraticCurveTo(mx, my, x1, y1);
+      ctx.stroke();
+      ctx.setLineDash(sel ? [] : [6, 5]);
+      ctx.strokeStyle = strike ? '#ff6b5e' : sel ? '#ffd27f' : GOLD;
+      ctx.lineWidth = sel ? 2.4 : 1.2;
+      ctx.stroke();
+      ctx.setLineDash([]);
+      const a = Math.atan2(y1 - my, x1 - mx), h = sel ? 11 : 8;
+      ctx.fillStyle = ctx.strokeStyle;
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x1 - h * Math.cos(a - 0.45), y1 - h * Math.sin(a - 0.45));
+      ctx.lineTo(x1 - h * Math.cos(a + 0.45), y1 - h * Math.sin(a + 0.45));
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  /** Returns the screen boxes the counters and their labels took. */
+  private drawFormations(input: RenderInput): [number, number, number, number][] {
+    const placed: [number, number, number, number][] = [];
+    const { ctx, cam } = this;
+    const { nationIds } = input;
     if (input.state.formations !== this.indexedFrom) {
       this.indexedFrom = input.state.formations;
       this.byNode = indexByNode(input.state.formations);
       this.stacksGrid = -1;
     }
-    const grid = gridSize(CELL_PX, t.k);
+    const band = this.band, ppd = pxPerDeg(cam);
+    const grid = gridSize(CELL_PX[band], ppd);
     if (grid !== this.stacksGrid) {
-      this.stacks = clusterStacks(this.byNode, (n) => [this.center[n * 2], this.center[n * 2 + 1]], grid);
+      this.stacks = clusterStacks(this.byNode, (n) => [this.map.lon[n], -this.map.lat[n]], grid);
       this.stacksGrid = grid;
     }
-    const nodePx = this.degPx * t.k;
-    const fan = nodePx >= FAN_PX;
-    const zoomScale = Math.min(1.4, Math.max(0.75, 0.75 + 0.18 * Math.log2(t.k)));
+    const scale = COUNTER_SCALE[band];
     const atNode = new Map<NodeId, number>();
-    const order = [...this.stacks].sort((a, b) => Number(a.nation === input.playAs) - Number(b.nation === input.playAs));
+    /** Bottom row of the last fan drawn at a node, so a second side's fan goes underneath instead of on top. */
+    const fanBottom = new Map<NodeId, number>();
+    const own = (s: Stack) => this.sideOf(s.members[0], s.nation, nationIds) === 'friend';
+    // Enemies under friends, so the player's own counters are never hidden.
+    const order = [...this.stacks].sort((a, b) => Number(own(a)) - Number(own(b)));
     this.hits = [];
     let selectedBox: CounterBox | null = null;
+    const labelled: { stack: Stack; box: CounterBox; side: Side }[] = [];
     for (const stack of order) {
-      const [cx, cy] = this.screenOf(stack.node);
-      if (cx < -60 || cy < -60 || cx > this.width + 60 || cy > this.height + 60) continue;
+      const p = this.screenOf(stack.node);
+      if (!p) continue;
+      const [cx, cy] = p;
+      if (cx < -80 || cy < -80 || cx > this.vp.width + 80 || cy > this.vp.height + 80) continue;
+      const lead = stack.members[0];
+      const side = this.sideOf(lead, stack.nation, nationIds);
+      // Far out, only the sides at war; forces of nations out of it appear from the front zoom in.
+      if (side === 'neutral' && band !== 'front') continue;
       const nth = atNode.get(stack.node) ?? 0;
       atNode.set(stack.node, nth + 1);
-      const own = stack.nation === input.playAs;
-      const fill = this.palette.of(stack.nation).css;
-      if (fan && stack.nodes === 1 && stack.members.length > 1) {
+      const nodePx = 2 * this.map.halfDeg[stack.node] * ppd;
+      if (side !== 'friend') this.drawUncertainty(stack, cx, cy);
+      if (nodePx >= FAN_PX && stack.nodes === 1 && stack.members.length > 1) {
         const cols = Math.max(2, Math.min(4, Math.floor(nodePx / FAN_SLOT_PX)));
         const cap = cols * cols;
         const shown = stack.members.length > cap ? stack.members.slice(0, cap - 1) : stack.members;
         const slots = shown.length + (stack.members.length > shown.length ? 1 : 0);
-        const rows = Math.ceil(slots / cols), step = Math.min(FAN_SLOT_PX * zoomScale, nodePx / cols);
-        const at = (i: number): [number, number] => [cx + ((i % cols) - (Math.min(cols, slots) - 1) / 2) * step + nth * 8, cy + (Math.floor(i / cols) - (rows - 1) / 2) * step + nth * 8];
+        const rows = Math.ceil(slots / cols), step = Math.min(FAN_SLOT_PX * scale, nodePx / cols);
+        const prev = fanBottom.get(stack.node);
+        const y0 = prev === undefined ? cy - ((rows - 1) / 2) * step : prev + step;
+        fanBottom.set(stack.node, y0 + (rows - 1) * step);
+        const at = (i: number): [number, number] => [cx + ((i % cols) - (Math.min(cols, slots) - 1) / 2) * step, y0 + Math.floor(i / cols) * step];
         shown.forEach((f, i) => {
           const [x, y] = at(i);
-          const box = this.sprites.draw(ctx, x, y, (ECHELON_W[f.entry.echelon] ?? 16) * zoomScale * 0.85, f.entry.kind, f.entry.echelon, f.strength, fill, own, f.status === 'routed');
+          const s = this.sideOf(f, stack.nation, nationIds);
+          const box = this.sprites.draw(ctx, x, y, ECHELON_W[f.entry.echelon] * scale * 0.85, f.entry.kind, f.entry.echelon, s, f.strength, f.status === 'routed');
           this.hits.push({ ...box, ids: [f.entry.id], node: stack.node, zoomTo: null });
+          this.designator(f, x + box.w / 2 + 1, y, s);
           if (f.entry.id === input.selected) selectedBox = box;
         });
         if (shown.length < stack.members.length) {
           const rest = stack.members.slice(shown.length);
           const [x, y] = at(shown.length);
-          const box = this.drawStack(rest, x, y, zoomScale * 0.85, fill, own);
-          this.hits.push({ ...box, ids: rest.map((f) => f.entry.id), node: stack.node, zoomTo: t.k < MAX_ZOOM ? Math.min(MAX_ZOOM, t.k * 1.6) : null });
+          const box = this.drawStack(rest, x, y, scale * 0.85, side);
+          this.hits.push({ ...box, ids: rest.map((f) => f.entry.id), node: stack.node, zoomTo: { lon: this.map.lon[stack.node], lat: this.map.lat[stack.node], zoom: cam.zoom + 0.7 } });
           if (rest.some((f) => f.entry.id === input.selected)) selectedBox = box;
         }
         continue;
       }
-      const box = this.drawStack(stack.members, cx + nth * 7, cy + nth * 7, zoomScale, fill, own);
-      const zoomTo = stack.members.length === 1 ? null : stack.nodes > 1 ? Math.min(MAX_ZOOM, t.k * 2.5) : Math.min(MAX_ZOOM, Math.max(t.k * 1.5, (FAN_PX * 1.05) / this.degPx));
-      this.hits.push({ ...box, ids: stack.members.map((f) => f.entry.id), node: stack.node, zoomTo: zoomTo !== null && zoomTo > t.k ? zoomTo : null });
+      const box = this.drawStack(stack.members, cx + nth * 9, cy + nth * 9, scale, side);
+      const node = { lon: this.map.lon[stack.node], lat: this.map.lat[stack.node] };
+      const zoomTo = stack.members.length === 1 ? null
+        : stack.nodes > 1 ? { ...node, zoom: cam.zoom + 1.3 }
+          : { ...node, zoom: Math.max(cam.zoom + 0.6, zoomForPxPerDeg((FAN_PX * 1.1) / (2 * this.map.halfDeg[stack.node]))) };
+      this.hits.push({ ...box, ids: stack.members.map((f) => f.entry.id), node: stack.node, zoomTo });
       if (input.selected && stack.members.some((f) => f.entry.id === input.selected)) selectedBox = box;
+      if (band === 'front' && stack.members.length === 1) this.designator(lead, box.x + box.w + 1, cy + nth * 9, side);
+      else if (band !== 'world') labelled.push({ stack, box, side });
     }
-    if (selectedBox) {
-      const b: CounterBox = selectedBox;
-      ctx.save();
-      ctx.shadowColor = '#ffe066';
-      ctx.shadowBlur = 10;
-      ctx.strokeStyle = '#ffe066';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(b.x - 3, b.y - 2, b.w + 6, b.h + 4);
-      ctx.restore();
+    for (const b of this.hits) placed.push([b.x, b.y, b.x + b.w, b.y + b.h]);
+    for (const l of labelled) this.stackLabel(l.stack, l.box, l.side, placed);
+    if (selectedBox) this.drawSelection(selectedBox);
+    return placed;
+  }
+
+  /** Where an enemy contact probably is now: a dashed ring of its error radius, and its age once it is not fresh. */
+  private drawUncertainty(stack: Stack, x: number, y: number) {
+    const c = contactOf(stack.members[0]);
+    if (!c) return;
+    const r = c.errorKm / this.kmPerPx, ctx = this.ctx;
+    const stale = c.confidence < STALE_CONFIDENCE;
+    if (r >= 14) {
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fillStyle = stale ? 'rgba(143,166,192,0.05)' : 'rgba(255,77,79,0.06)';
+      ctx.fill();
+      ctx.setLineDash([3, 4]);
+      ctx.strokeStyle = stale ? 'rgba(143,166,192,0.45)' : 'rgba(255,107,94,0.5)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    if (c.ageHours >= 2 && this.band !== 'world') {
+      const age = c.ageHours < 48 ? `${Math.round(c.ageHours)}h old` : `${Math.round(c.ageHours / 24)}d old`;
+      const l = this.label(age, '500 10px "IBM Plex Mono", ui-monospace, monospace', stale ? '#8fa6c0' : '#ff9a9b', 0);
+      const lx = x + 14, ly = y + 2;
+      ctx.fillStyle = 'rgba(8,13,22,0.8)';
+      ctx.fillRect(lx, ly, l.w, l.h - 2);
+      this.blit(l, lx, ly - 1);
     }
   }
 
-  /** The strongest member's symbol over a shadow counter, with a count badge and the stack's mean strength. */
-  private drawStack(members: readonly FormationView[], x: number, y: number, zoomScale: number, fill: string, own: boolean): CounterBox {
+  /** The nearest city of 100,000 or more within about 150 km, cached per node. */
+  private areaName(node: NodeId): string | null {
+    const hit = this.areaNames.get(node);
+    if (hit !== undefined) return hit;
+    const lon = this.map.lon[node], lat = this.map.lat[node], k = Math.cos((lat * Math.PI) / 180);
+    let best: string | null = null, bestD = 1.4 ** 2;
+    for (const p of this.places) {
+      if (p.pop < 1e5) continue;
+      const d = ((p.lon - lon) * k) ** 2 + (p.lat - lat) ** 2;
+      if (d < bestD) { bestD = d; best = p.name; }
+    }
+    this.areaNames.set(node, best);
+    return best;
+  }
+
+  /** A unit's short designator (the number in its name) beside its counter, as on the front mockup. */
+  private designator(f: FormationView, x: number, y: number, side: Side) {
+    const num = f.entry.name.match(/\d+/)?.[0];
+    if (!num) return;
+    const l = this.label(num, '500 11px "IBM Plex Mono", ui-monospace, monospace', side === 'friend' ? '#cfe6ff' : side === 'enemy' ? '#ffb0b1' : '#b9c8da', 0);
+    this.blit(l, x, y - l.h / 2);
+  }
+
+  /** An army group's name, a strength bar and its size, to the right of the counter (theatre mockup). */
+  private stackLabel(stack: Stack, box: CounterBox, side: Side, placed: [number, number, number, number][]) {
+    const lead = stack.members[0];
+    if (stack.members.length < 3 && lead.entry.echelon !== 'corps' && lead.entry.echelon !== 'army') return;
+    let strength = 0;
+    for (const f of stack.members) strength += f.strength;
+    strength /= stack.members.length;
+    const friend = side === 'friend';
+    // A corps or army is named for itself; a stack of brigades is named for where it stands, as a staff would.
+    const own = lead.entry.echelon === 'corps' || lead.entry.echelon === 'army' || stack.members.length === 1;
+    const area = this.areaName(stack.node);
+    const name = friend && own ? shortName(lead.entry.name) : area ? `${area} group` : `${lead.entry.nation} group`;
+    const title = this.label(name.toUpperCase(), '600 12.5px "Barlow Condensed", "Arial Narrow", sans-serif', '#e8eef6', 1.4);
+    const sub = this.label(`${friend ? '' : 'est. '}${stack.members.length} units · ${Math.round(strength * 100)}%`, '400 10px "IBM Plex Mono", ui-monospace, monospace', friend ? '#8fa6c0' : '#c98f90', 0);
+    const x = box.x + box.w + 4, y = box.y + box.h / 2 - title.h + 2, w = Math.max(title.w, sub.w);
+    const rect: [number, number, number, number] = [x, y, x + w, y + title.h + sub.h];
+    if (placed.some((b) => rect[0] < b[2] && rect[2] > b[0] && rect[1] < b[3] && rect[3] > b[1])) return;
+    placed.push(rect);
+    this.blit(title, x, y);
+    const ctx = this.ctx, bw = Math.min(70, title.w - 8);
+    ctx.fillStyle = 'rgba(150,195,240,0.16)';
+    ctx.fillRect(x + 4, y + title.h - 3, bw, 2.5);
+    ctx.fillStyle = LOOK[side].bar;
+    ctx.fillRect(x + 4, y + title.h - 3, bw * strength, 2.5);
+    this.blit(sub, x, y + title.h - 1);
+  }
+
+  private drawSelection(b: CounterBox) {
+    const ctx = this.ctx, x0 = b.x - 5, y0 = b.y - 4, x1 = b.x + b.w + 5, y1 = b.y + b.h + 4, k = 6;
+    ctx.save();
+    ctx.strokeStyle = GOLD;
+    ctx.lineWidth = 2;
+    ctx.shadowColor = 'rgba(255,181,71,0.8)';
+    ctx.shadowBlur = 8;
+    ctx.beginPath();
+    for (const [x, y, dx, dy] of [[x0, y0, 1, 1], [x1, y0, -1, 1], [x1, y1, -1, -1], [x0, y1, 1, -1]]) {
+      ctx.moveTo(x + dx * k, y);
+      ctx.lineTo(x, y);
+      ctx.lineTo(x, y + dy * k);
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /** The strongest member's counter over a shadow counter, with a count badge and the stack's mean strength. */
+  private drawStack(members: readonly FormationView[], x: number, y: number, scale: number, side: Side): CounterBox {
     const { ctx } = this;
     const lead = members[0];
-    const w = (ECHELON_W[lead.entry.echelon] ?? 16) * zoomScale;
-    if (members.length === 1) return this.sprites.draw(ctx, x, y, w, lead.entry.kind, lead.entry.echelon, lead.strength, fill, own, lead.status === 'routed');
+    const w = ECHELON_W[lead.entry.echelon] * scale;
+    if (members.length === 1) return this.sprites.draw(ctx, x, y, w, lead.entry.kind, lead.entry.echelon, side, lead.strength, lead.status === 'routed');
     let strength = 0;
     for (const f of members) strength += f.strength;
-    ctx.globalAlpha = 0.6;
-    this.sprites.draw(ctx, x + 3, y - 3, w, lead.entry.kind, lead.entry.echelon, 0, fill, own, false);
+    ctx.globalAlpha = 0.55;
+    this.sprites.draw(ctx, x + 3, y - 3, w, lead.entry.kind, lead.entry.echelon, side, 0, false);
     ctx.globalAlpha = 1;
-    const box = this.sprites.draw(ctx, x, y, w, lead.entry.kind, lead.entry.echelon, strength / members.length, fill, own, false);
+    const box = this.sprites.draw(ctx, x, y, w, lead.entry.kind, lead.entry.echelon, side, strength / members.length, false);
     const label = members.length > 999 ? '999+' : String(members.length);
-    const bw = 5 + label.length * 6, bx = x + w / 2 - 2, by = y - w * 0.33 - 9;
-    ctx.fillStyle = own ? '#e8f1ff' : '#0a0e14';
-    ctx.strokeStyle = own ? '#0a0e14' : 'rgba(232,241,255,0.75)';
+    const bw = 7 + label.length * 6, bx = x + w / 2 - 3, by = y - CounterSprites.half(w, side) - 8;
+    ctx.fillStyle = 'rgba(8,13,22,0.92)';
+    ctx.strokeStyle = LOOK[side].stroke;
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.roundRect(bx, by, bw, 12, 3);
+    ctx.roundRect(bx, by, bw, 13, 2);
     ctx.fill();
     ctx.stroke();
-    ctx.fillStyle = own ? '#0a0e14' : '#e8eef6';
-    ctx.font = '600 9.5px "JetBrains Mono", ui-monospace, monospace';
+    ctx.fillStyle = '#e8eef6';
+    ctx.font = '600 10px "IBM Plex Mono", ui-monospace, monospace';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(label, bx + bw / 2, by + 6.5);
+    ctx.fillText(label, bx + bw / 2, by + 7);
+    ctx.textAlign = 'start';
     return { x: box.x, y: Math.min(box.y, by), w: box.w + bw - 2, h: box.h + (box.y - Math.min(box.y, by)) };
   }
 
-  private drawFlashes(ctx: CanvasRenderingContext2D, now: number) {
+  private drawFlashes(now: number) {
+    const ctx = this.ctx;
     this.flashes = this.flashes.filter((f) => now - f.t0 < FLASH_MS[f.kind]);
     for (const f of this.flashes) {
       // rAF timestamps can precede the performance.now() stamped on the event.
-      const u = Math.max(0, now - f.t0) / FLASH_MS[f.kind];
-      const [x, y] = this.screenOf(f.node);
+      const u = Math.max(0, now - f.t0) / FLASH_MS[f.kind], e = 1 - (1 - u) ** 3;
+      const p = this.screenOf(f.node);
+      if (!p) continue;
+      const [x, y] = p;
       ctx.save();
       switch (f.kind) {
         case 'battle':
-          ctx.strokeStyle = `rgba(255,170,60,${1 - u})`;
+          ctx.strokeStyle = `rgba(255,181,71,${0.9 * (1 - u)})`;
           ctx.lineWidth = 2;
           ctx.beginPath();
-          ctx.arc(x, y, 6 + 16 * u, 0, Math.PI * 2);
+          ctx.arc(x, y, 6 + 20 * e, 0, Math.PI * 2);
           ctx.stroke();
           break;
         case 'strike':
-          ctx.strokeStyle = `rgba(255,70,70,${1 - u})`;
+          ctx.strokeStyle = `rgba(255,77,79,${1 - u})`;
           ctx.lineWidth = 1.5;
           ctx.beginPath();
-          ctx.arc(x, y, 4 + 10 * u, 0, Math.PI * 2);
-          ctx.moveTo(x - 12, y); ctx.lineTo(x + 12, y);
-          ctx.moveTo(x, y - 12); ctx.lineTo(x, y + 12);
+          ctx.arc(x, y, 4 + 14 * e, 0, Math.PI * 2);
+          ctx.moveTo(x - 10, y); ctx.lineTo(x + 10, y);
+          ctx.moveTo(x, y - 10); ctx.lineTo(x, y + 10);
           ctx.stroke();
           ctx.fillStyle = `rgba(255,230,200,${(1 - u) * 0.9})`;
           ctx.beginPath();
@@ -667,12 +780,12 @@ export class MapRenderer {
           ctx.fill();
           break;
         case 'capture':
-          ctx.strokeStyle = `rgba(255,255,255,${0.6 * (1 - u)})`;
-          ctx.lineWidth = 1;
-          ctx.strokeRect(x - 4 - 4 * u, y - 4 - 4 * u, 8 + 8 * u, 8 + 8 * u);
+          ctx.strokeStyle = `rgba(232,238,246,${0.7 * (1 - u)})`;
+          ctx.lineWidth = 1.2;
+          ctx.strokeRect(x - 5 - 6 * e, y - 5 - 6 * e, 10 + 12 * e, 10 + 12 * e);
           break;
         case 'nuclear': {
-          const r = 10 + 90 * Math.sqrt(u);
+          const r = 12 + 110 * Math.sqrt(u);
           const g = ctx.createRadialGradient(x, y, 0, x, y, r);
           g.addColorStop(0, `rgba(255,255,240,${1 - u})`);
           g.addColorStop(0.35, `rgba(255,210,90,${0.8 * (1 - u)})`);
@@ -692,13 +805,16 @@ export class MapRenderer {
       ctx.restore();
     }
   }
+
+  /** Nation colour, for UI that still keys on it (tooltips). */
+  nationCss(id: string) {
+    return this.palette.of(id).css;
+  }
 }
 
-/** Mud brown, snow white, rough sea and cyclones in deepening blue-violet; stronger with severity. */
-function weatherStyle(code: number): string {
-  const kind = Math.floor(code), severity = code - kind;
-  if (kind === LAYER.mud) return `rgba(150,105,55,${0.25 + 0.4 * severity})`;
-  if (kind === LAYER.snow) return `rgba(240,245,255,${0.2 + 0.35 * severity})`;
-  if (kind === LAYER.roughSea) return `rgba(70,90,200,${0.2 + 0.4 * severity})`;
-  return 'rgba(170,60,220,0.6)';
+/** "1st Guards Tank Army" stays; "47th Separate Mechanized Brigade" becomes "47th Mech Brigade". */
+export function shortName(name: string): string {
+  const s = name.replace(/\bSeparate\b\s*/i, '').replace(/\bMechani[sz]ed\b/i, 'Mech').replace(/\bMotori[sz]ed Rifle\b/i, 'Motor Rifle').replace(/\s+/g, ' ').trim();
+  return s.length > 22 ? `${s.slice(0, 21)}…` : s;
 }
+
