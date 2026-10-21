@@ -16,24 +16,49 @@ export type SupplyClass = (typeof SUPPLY_CLASSES)[number];
 export const FOOD_TONS_PER_PERSON_DAY = 0.002;
 
 /**
- * Hours of full-rate fuel burn per day that a formation uses while idle: generators,
- * heaters, engine runs, admin moves, training flights, ships on station. Estimate.
- * Calibration: US armored division planning puts a stationary/defensive day at
- * roughly a quarter to a third of the 2,000-3,000 t/day it burns on the move
- * (RAND MR-1293 / FM 4-0 class III factors); a day of movement is about 10 h of
- * engine time, so 2 h/day of idle burn lands near that ratio.
+ * Hours of full-rate fuel burn per platform per day spent keeping it ready when no
+ * operation is charged for it: engine runs, generators and admin moves for vehicles,
+ * training and readiness flights for aircraft, days underway for ships. Applied at each
+ * platform's own catalog fuel rate (Platform.mobility.fuelTonsPerHour).
+ *
+ * Calibration target: the US military burns about 85-100M barrels of operational fuel a
+ * year (DLA Energy FY2019; DoD Operational Energy reports FY2019-21), about 32-37k t/day,
+ * and the Air Force uses roughly 60% of it, Air Mobility Command about half the Air
+ * Force's share.
+ * - Ground vehicles: US armored division planning puts a stationary/defensive day at
+ *   roughly a quarter to a third of the 2,000-3,000 t/day it burns on the move (RAND
+ *   MR-1293 / FM 4-0 class III factors); a day of movement is about 10 h of engine time,
+ *   so 2 h/day. Air defence runs radars and launchers on gensets around the clock.
+ * - Fighters and attack aircraft: ~18 flight hours per aircraft per month (USAF fighter
+ *   fleets fly 200-250 h/yr per tail; NATO's pilot minimum is 180 h/yr), 0.6 h/day.
+ * - Bombers: B-52H and B-2 fleets fly about 250-300 h/yr per airframe (USAF flying-hour
+ *   programme), 0.7 h/day.
+ * - Tankers: KC-135 and KC-46 about 300 h/yr per airframe in peacetime, 0.8 h/day.
+ * - Strategic airlift: the C-17 was sized for 1,000 h/yr and flies 800-1,000 in
+ *   peacetime channel and exercise missions; C-130s ~600. 2.2 h/day (800 h/yr).
+ * - AEW, EW and maritime patrol: 400-600 h/yr (E-3, RC-135, P-8, E-2D), 1.2 h/day.
+ * - Helicopters: the Army flying-hour programme funds ~12-15 h per aircraft per month,
+ *   0.5 h/day. Drones fly long sorties at very low burn, 1 h/day.
+ * - Surface ships: US Navy OPTEMPO targets ~50 days underway per quarter deployed and
+ *   ~25 non-deployed, so a fleet spends about a third of its days at sea, mostly at
+ *   economical speed burning about a third of the rated transit rate, plus hotel load in
+ *   port: about 4 h/day of full-rate burn. SSKs charge batteries on diesel, 2 h/day.
+ *   Nuclear hulls list 0 t/h and burn nothing.
+ * Estimates except where a source is named.
  */
-export const IDLE_FUEL_HOURS_PER_DAY: Record<FormationKind, number> = {
-  maneuver: 2,
-  artillery: 2,
-  air_defense: 4, // radars and launchers on gensets around the clock
-  missile: 1,
-  air_wing: 0.6, // ~18 training hours per aircraft per month (NATO minimum is ~15)
-  surface_group: 8, // loiter burn is about a third of transit-speed burn
-  submarine: 2, // SSK snorkel charging; SSNs list 0 t/h so burn nothing
-  strategic: 1,
-  logistics: 3, // the trucks themselves
-  space: 0,
+export const READINESS_HOURS_PER_DAY: Record<PlatformClass, number> = {
+  infantry: 2, mbt: 2, ifv: 2, apc: 2, recon: 2, sp_artillery: 2, towed_artillery: 2, mlrs: 2,
+  atgm: 2, engineer: 2, truck: 2, fuel_truck: 2,
+  sam_long: 4, sam_medium: 4, shorad: 4, abm: 4, ew: 4, radar: 4,
+  tel_srbm: 1, tel_mrbm: 1, tel_irbm: 1, icbm_silo: 1, icbm_mobile: 1, cruise_launcher: 1, coastal_asm: 1,
+  fighter: 0.6, multirole: 0.6, attack_aircraft: 0.6, bomber: 0.7, stealth_bomber: 0.7,
+  awacs: 1.2, tanker: 0.8, transport_aircraft: 2.2, maritime_patrol: 1.2, ew_aircraft: 1.2,
+  isr_drone: 1, strike_drone: 1, loitering_munition_launcher: 1,
+  attack_helo: 0.5, transport_helo: 0.5, asw_helo: 0.5,
+  carrier: 4, amphibious: 4, cruiser: 4, destroyer: 4, frigate: 4, corvette: 4, patrol: 4, mine_warfare: 4,
+  replenishment: 4, cargo_ship: 4, tanker_ship: 4, usv: 4,
+  ssn: 0, ssk: 2, ssgn: 0, ssbn: 0, uuv: 0,
+  recon_satellite: 0, nav_satellite: 0, comms_satellite: 0, asat: 0,
 };
 
 /**
