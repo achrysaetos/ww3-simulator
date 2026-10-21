@@ -3,12 +3,12 @@ import { atWar, type SimContext, type System } from '../../core/engine';
 import type { GameMap } from '../../core/map';
 import { findPath } from '../../core/path';
 import type { Command, Formation, NationId, NodeId, PlatformId, World } from '../../core/types';
-import { allied, canEnter, indexByNode, isLandFormation, landSlice } from './state';
+import { allied, canEnter, hostilesAt, indexByNode, isLandFormation, landSlice } from './state';
 import { cannotDrop, insert, supplyAirheads } from './airborne';
 import { airlift, embarkation, liftMode, overseas } from './strategic';
 import { exposureLosses, groundFactorAt } from '../weather/effects';
 import {
-  AIR_INTERDICTION, DISMOUNTS, ENTRENCH_PER_DAY, FATIGUE_MARCH_PER_DAY, FATIGUE_RECOVERY_PER_DAY, HOSTILE_GROUND_COST,
+  AIR_INTERDICTION, BREAK_CONTACT_PACE, DISMOUNTS, ENTRENCH_PER_DAY, FATIGUE_MARCH_PER_DAY, FATIGUE_RECOVERY_PER_DAY, HOSTILE_GROUND_COST,
   MARCH_HOURS_PER_DAY, MARCH_SPEED_FACTOR, MORALE_RECOVERY_PER_DAY, NO_FUEL_SPEED, RAIL_BOOST_MAX, RAIL_KM_FULL, RALLY_MORALE, RIVER_ASSAULT_COST, RIVER_BRIDGE_COST, TERRAIN,
 } from './tables';
 
@@ -156,7 +156,8 @@ function march(world: World, ctx: SimContext, f: Formation, byNode: Map<number, 
   if (here && atWar(world, f.nation, here) && !friendlyGround(world, f.nation, path[0])) return;
 
   const hours = MARCH_HOURS_PER_DAY * dtDays;
-  f.progressKm += kmPerDay * dtDays;
+  const pressed = hostilesAt(world, byNode, f.node, f.nation).some((g) => g.kind === 'maneuver' && g.status === 'active' && g.order.posture === 'attack');
+  f.progressKm += kmPerDay * dtDays * (pressed ? BREAK_CONTACT_PACE : 1);
   f.supply.fuel = Math.max(0, f.supply.fuel - marchBurnPerHour(f) * hours);
   f.fatigue = Math.min(1, f.fatigue + FATIGUE_MARCH_PER_DAY * dtDays);
   f.entrenchment = 0;

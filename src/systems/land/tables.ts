@@ -117,6 +117,13 @@ export const RAIL_KM_FULL = 300;
 export const HOSTILE_GROUND_COST = 2;
 /** Without fuel, vehicles cannot move; troops walk and tow what they can. */
 export const NO_FUEL_SPEED = 0.1;
+/**
+ * Share of its march pace a formation keeps while it breaks contact from a cell the enemy is assaulting: it pulls
+ * back by bounds behind a covering force, still under fire. FM 3-90 treats retrograde under pressure as the most
+ * dangerous operation; the Avdiivka (February 2024) and Debaltseve (February 2015) withdrawals cost heavily.
+ */
+// param: tag=judgment range=[0.1,0.5] source=FM 3-90 retrograde; Avdiivka 2024
+export const BREAK_CONTACT_PACE = 0.25;
 
 /** Per-day rates. */
 export const ENTRENCH_PER_DAY = 0.2;

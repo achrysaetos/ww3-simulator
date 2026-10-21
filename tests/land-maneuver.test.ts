@@ -124,6 +124,40 @@ describe('concentration of force', () => {
   }, SCENARIO_MS);
 });
 
+describe('breaking contact', () => {
+  // The 6736 garrison pulls back one cell, once in quiet and once while a 3:1 assault from 6502 is on it. A unit under
+  // assault leaves by bounds behind a covering force (FM 3-90); Avdiivka and Debalteve were slow, costly exits.
+  const exitTick = (pressed: boolean) => {
+    const s = session('ukraine-2026', ['UKR', 'RUS']);
+    const from = 6502 as NodeId, target = 6736 as NodeId;
+    const garrison = landForces(s, 'UKR').filter((f) => f.node === target);
+    const rear = [...s.map.neighbors(target)].find((n) => n < s.map.landCount && s.world.control[n] === 'UKR' && ![...s.map.neighbors(n)].includes(from))!;
+    if (pressed) {
+      const def = garrison.reduce((a, f) => a + platformCount(f), 0);
+      const force: Formation[] = [];
+      for (const f of landForces(s, 'RUS').filter((g) => !g.territorial).sort((a, b) => platformCount(b) - platformCount(a)))
+        if (force.reduce((a, g) => a + platformCount(g), 0) < 3 * def) force.push(f);
+      stage(force, from);
+      s.attack(force, target);
+    }
+    s.days(2);
+    expect(s.world.control[target]).toBe('UKR');
+    for (const f of garrison) s.world.pending.push({ type: 'order', nation: f.nation, formation: f.id, order: { posture: 'move', target: rear } });
+    for (let t = 1; t <= 40; t++) {
+      s.engine.step(s.world);
+      if (garrison.every((f) => f.node !== target)) return t;
+    }
+    return Infinity;
+  };
+
+  it('a garrison under assault takes far longer to get out than one in quiet', () => {
+    const quiet = exitTick(false), pressed = exitTick(true);
+    console.log(`break contact: quiet ${quiet} ticks, under assault ${pressed} ticks`);
+    expect(quiet).toBeLessThan(Infinity);
+    expect(pressed).toBeGreaterThanOrEqual(2 * quiet);
+  }, SCENARIO_MS);
+});
+
 describe('river lines', () => {
   // Kherson across the Dnipro into the fortified left-bank cell 7483 (Nova Kakhovka-Oleshky), held by a Russian
   // division and a brigade. The same force attacking from a foothold already on the left bank (7698 handed to
@@ -145,7 +179,8 @@ describe('river lines', () => {
   it('crossing the Dnipro against a defended bank gains a fraction of the ground at a far higher price', () => {
     const river = assault(false), dry = assault(true);
     console.log(`Dnipro: across ${river.km.toFixed(1)} km for ${river.lost} platforms; dry ${dry.km.toFixed(1)} km for ${dry.lost}`);
-    expect(dry.km).toBeGreaterThan(2);
+    // The scenario opens in the southern spring thaw, so even the dry assault wades through mud.
+    expect(dry.km).toBeGreaterThan(1);
     expect(river.km).toBeLessThan(0.3 * dry.km);
     expect(river.lost / Math.max(0.5, river.km)).toBeGreaterThan(3 * (dry.lost / dry.km));
   }, SCENARIO_MS);

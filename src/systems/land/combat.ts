@@ -8,6 +8,7 @@ import { marchBurnPerHour, marchKmPerDay } from './movement';
 import { allied, cellDepthKm, destroyFormation, hostilesAt, indexByNode, landSlice } from './state';
 import { updateEncirclement } from './encirclement';
 import { c2FireFactor } from '../c2';
+import { groundFactorAt } from '../weather/effects';
 import {
   AIR_SUPPRESSION, AMMO_DAYS_INTENSE, ATTRITION_KM_PER_DAY, ATTRITION_MAX_KM_PER_DAY, BREAKTHROUGH_KM_PER_DAY, COVERED_KM_PER_DAY, HOSTILE_GROUND_COST,
   ASSAULT_EXPOSURE, BELT_DRAG, DELIBERATE_ASSAULT_RATIO, FRONTAGE_PLATFORMS, WITHDRAWAL_KM, POSITIONAL_INTENSITY, AMMO_RATION_BELOW, AREA_FIRE_REF_DENSITY, CAS_BONUS, DIRECT_DENSITY_EXP, COMBAT_FUEL_DUTY, COMBINED_ARMS,
@@ -484,10 +485,12 @@ function advanceKm(world: World, ctx: SimContext, node: NodeId, attackers: Forma
   const movers = attackers.filter((f) => isPressing(f) && mobility(world, f) > 0);
   if (!movers.length) return 0;
   const dtDays = world.dtHours / 24;
+  // Mud and deep snow slow an advance as they slow a march: the 2023 and 2024 spring offensives waited on dry ground.
+  const ground = groundFactorAt(world, ctx.map, node);
   // Unopposed: a road march through hostile ground (reconnaissance, obstacles, demolitions).
-  const unopposed = Math.max(...movers.map((f) => marchKmPerDay(world, ctx.catalog, f))) / (HOSTILE_GROUND_COST * moveCost);
+  const unopposed = (ground * Math.max(...movers.map((f) => marchKmPerDay(world, ctx.catalog, f)))) / (HOSTILE_GROUND_COST * moveCost);
   if (!defenders.length && !cover.length) return unopposed * dtDays;
-  const pace = Math.max(...movers.map((f) => mobility(world, f))) * (river ? RIVER_TEMPO : 1);
+  const pace = ground * Math.max(...movers.map((f) => mobility(world, f))) * (river ? RIVER_TEMPO : 1);
   const fort = landSlice(world).fortified[node] ?? 0;
   if (!defenders.length) {
     // An empty cell the line next door covers with fire: infiltrated at parity, broken through by a force that outweighs that line.
