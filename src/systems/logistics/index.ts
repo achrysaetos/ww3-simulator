@@ -150,12 +150,18 @@ function sustain(world: World, ctx: SimContext, s: LogisticsState, forces: Forma
   // Hoisted: dev loaders (vitest, tsx) compile imported bindings to getters, which dominates this loop.
   const refill = MAX_REFILL_FRACTION_PER_DAY * dtDays, food = FOOD_TONS_PER_PERSON_DAY * dtDays;
   const { networkOf } = s, searches = searchesOf(s, ctx.map).byKey, upkeep = upkeepOf(ctx.catalog);
+  const landCount = ctx.map.landCount, atSea = new Uint8Array(n);
 
   s.peaceBurn = peaceBurn(forces, upkeep);
   for (let i = 0; i < n; i++) {
     const f = forces[i];
     consumeBaseline(f, upkeep, dtDays, food, world.nations[f.nation].status === 'war');
     const search = searches.get(networkOf[f.nation]);
+    atSea[i] = NAVAL_KINDS.has(f.kind) && !alongside(f, landCount) ? 1 : 0;
+    // Surface groups take on fuel and food at sea from the fleet's oilers and stores ships, which the
+    // orders of battle do not list (US Combat Logistics Force, PLAN Type 901/903); a submarine is not
+    // replenished on patrol and gets nothing until it docks.
+    if (atSea[i] && f.kind === 'submarine') continue;
     const supply = search ? forcesFactor(s, search, f.node, f.nation) : undefined;
     const phi = (factor[i] = supply?.phi ?? 0);
     if (phi <= 0) continue;
@@ -213,11 +219,15 @@ function sustain(world: World, ctx: SimContext, s: LogisticsState, forces: Forma
       have.ammo = Math.min(cap.ammo, have.ammo + want[j + 1] * sh[1]);
       have.food = Math.min(cap.food, have.food + want[j + 2] * sh[2]);
     }
+    if (atSea[i]) continue;
     repair(f, ctx, phi * REPAIR_FRACTION_PER_DAY * dtDays);
     replace(world, ctx, upkeep, f, s.establishment[f.id], phi * REPLACE_FRACTION_PER_DAY * dtDays * (f.order.posture === 'reserve' ? RESERVE_REPLACE_MULTIPLIER : 1));
   }
   rearm(world, ctx, upkeep, forces, factor, dtDays);
 }
+
+/** In port: a port cell, or the sea zone off a home base whose quay the map's coastline puts offshore (Rota, Norfolk). */
+const alongside = (f: Formation, landCount: number): boolean => f.node < landCount || f.node === f.home;
 
 const nodeScratches = new WeakMap<GameMap, { tons: Float64Array; factor: Float64Array }>();
 
@@ -242,7 +252,7 @@ function rearm(world: World, ctx: SimContext, upkeep: Upkeep, forces: Formation[
   for (let i = 0; i < forces.length; i++) {
     const f = forces[i], phi = factor[i];
     const rate = REARM_PER_DAY[f.kind] * phi * dtDays;
-    if (rate <= 0 || (REARMS_IN_PORT_ONLY.has(f.kind) && f.node >= landCount)) continue;
+    if (rate <= 0 || (REARMS_IN_PORT_ONLY.has(f.kind) && !alongside(f, landCount))) continue;
     const stock = world.nations[f.nation].stockpile;
     fullLoad(f, upkeep, load);
     for (let j = 0; j < load.munitions.length; j++) {
@@ -467,6 +477,7 @@ interface PlatformUpkeep {
   airframe: boolean;
   /** Re-formed without stock (REGENERATED_CLASSES). */
   regenerated: boolean;
+
   loadout: Platform['loadout'];
 }
 
@@ -483,6 +494,7 @@ function upkeepOf(catalog: Catalog): Upkeep {
         peaceFuel: p.mobility.fuelTonsPerHour * PEACETIME_READINESS_HOURS_PER_DAY[p.class],
         airframe: !!AIRFRAME[p.class],
         regenerated: REGENERATED_CLASSES.has(p.class),
+
         loadout: p.loadout,
       });
     upkeepCache.set(catalog, (hit = out));

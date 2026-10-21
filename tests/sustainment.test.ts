@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { NationId } from '../src/core/types';
+import type { Formation, NationId, PlatformId } from '../src/core/types';
 import { createSession } from '../src/scenarios';
 
 /** Steps a session `days` days, handing each tick's events to `on`. */
@@ -24,3 +24,36 @@ describe('peacetime fuel (LE-7)', () => {
     expect(s.world.nations['PAK' as NationId].status).toBe('war');
   }, 120_000);
 });
+
+describe('repair and replenishment at sea (NV-2)', () => {
+  // Battle damage needs a yard: on main a mission-killed Burke 4,000 km from Rota was back in the line in ten days.
+  it('a damaged destroyer stays damaged at sea and is repaired once its squadron reaches port', () => {
+    const s = createSession('peace-2027', 1);
+    const { world, map } = s;
+    const usa = 'USA' as NationId;
+    world.nations[usa].controlledBy = 'human';
+    const des = Object.values(world.formations).find((f) => f.name.startsWith('Destroyer Squadron 60'))!;
+    const sub = Object.values(world.formations).find((f) => f.name === 'Submarine Squadron 4')!;
+    const station = map.nodeAt(43.5, -28.5);
+    for (const f of [des, sub]) world.pending.push({ type: 'order', nation: usa, formation: f.id, order: { posture: 'patrol', target: station } });
+    runDays(s, 6);
+    expect(map.isSea(des.node) && des.node !== des.home).toBe(true);
+    const burke = Object.keys(des.equipment)[0] as PlatformId;
+    des.equipment[burke] -= 1;
+    des.damaged[burke] = 1;
+    const subFood: number[] = [];
+    runDays(s, 12, (_, day) => {
+      if (des.node !== des.home) expect(des.damaged[burke], `day ${day}: repaired at sea`).toBe(1);
+      if (sub.node !== sub.home) subFood.push(sub.supply.food);
+    });
+    expect(subFood.length).toBeGreaterThan(10);
+    for (let i = 1; i < subFood.length; i++) expect(subFood[i], 'a submarine is not revictualled at sea').toBeLessThanOrEqual(subFood[i - 1]);
+
+    world.pending.push({ type: 'order', nation: usa, formation: des.id, order: { posture: 'reserve' } });
+    runDays(s, 30);
+    expect(des.node).toBe(des.home);
+    expect(des.damaged[burke] ?? 0).toBe(0);
+  }, 120_000);
+});
+
+export type { Formation };

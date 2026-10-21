@@ -483,6 +483,7 @@ describe('logistics', () => {
     const sea = [...t.map.neighbors(port)].find((n) => t.map.isSea(n))!;
     const ship = (node: NodeId) => t.add({ nation: id.nation('POL'), name: 'frigate', kind: 'surface_group', echelon: 'squadron', node, equipment: { [id.platform('t_destroyer')]: 1 } });
     const docked = ship(port), afloat = ship(sea);
+    afloat.home = port;
     docked.magazine[cruise] = afloat.magazine[cruise] = 0;
     pol.stockpile[cruise] = 100;
     t.engine.run(t.world, 4 * DAY);
