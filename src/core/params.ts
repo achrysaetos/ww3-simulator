@@ -74,10 +74,14 @@ function apply(overrides: Readonly<Record<string, number>> | undefined): void {
   for (const id in overrides) active[slot.get(id)!] = overrides[id];
 }
 
-/** Runs `fn` with `overrides` in force for every param getter, then restores what was in force before. */
+/**
+ * Runs `fn` with `overrides` in force for every param getter, then restores what was in force
+ * before. Undefined overrides keep what is already in force, so a World without params stepped
+ * inside a caller's `withParams` runs under the caller's.
+ */
 export function withParams<T>(overrides: Readonly<Record<string, number>> | undefined, fn: () => T): T {
   const outer = activeOverrides;
-  if (overrides === outer) return fn();
+  if (!overrides || overrides === outer) return fn();
   apply(overrides);
   try {
     return fn();

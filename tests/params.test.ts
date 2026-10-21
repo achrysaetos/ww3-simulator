@@ -51,6 +51,15 @@ describe('param registry', () => {
     expect(() => withParams({ 'land.KILL_ZONE_COMMIT': 0.5 }, () => { throw new Error('boom'); })).toThrow('boom');
     expect(KILL_ZONE_COMMIT()).toBe(0.3);
     expect(() => withParams({ 'land.NO_SUCH_KNOB': 1 }, () => 0)).toThrow('unknown param land.NO_SUCH_KNOB');
+    expect(KILL_ZONE_COMMIT()).toBe(0.3);
+  });
+
+  it('keeps the outer overrides for a body with none of its own, and restores them after a nested set', () => {
+    withParams({ 'land.KILL_ZONE_COMMIT': 0.5 }, () => {
+      expect(withParams(undefined, () => KILL_ZONE_COMMIT())).toBe(0.5);
+      expect(withParams({ 'land.KILL_ZONE_COMMIT': 0.2 }, () => KILL_ZONE_COMMIT())).toBe(0.2);
+      expect(KILL_ZONE_COMMIT()).toBe(0.5);
+    });
   });
 
   it('reads RELIABILITY_LOGIT when diplomacy asks, so a run override reaches treaties built at load', () => {
