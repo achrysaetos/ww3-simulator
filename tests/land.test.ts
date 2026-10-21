@@ -194,6 +194,19 @@ describe('land movement', () => {
     expect(battles.every((b) => b.winner === undefined)).toBe(true);
   });
 
+  it('breaks contact from inside an enemy-held cell onto friendly ground, but fights on toward ground further in', () => {
+    const s = setup();
+    s.add({ nation: UKR, name: 'def', kind: 'maneuver', echelon: 'brigade', node: PLAIN_UKR, equipment: brigade(1), entrenchment: 1 });
+    const out = s.add({ nation: RUS, name: 'out', kind: 'maneuver', echelon: 'brigade', node: PLAIN_UKR, equipment: brigade(1) });
+    const on = s.add({ nation: RUS, name: 'on', kind: 'maneuver', echelon: 'brigade', node: PLAIN_UKR, equipment: brigade(1) });
+    const deeper = [...s.map.neighbors(PLAIN_UKR)].find((n) => n < s.map.landCount && s.world.control[n] === UKR && n !== PLAIN_RUS)!;
+    s.order(out, { posture: 'move', target: PLAIN_RUS });
+    s.order(on, { posture: 'attack', target: deeper });
+    s.days(3);
+    expect(out.node).toBe(PLAIN_RUS);
+    expect(on.node).toBe(PLAIN_UKR);
+  });
+
   it('moves faster by rail through intact friendly infrastructure, and crawls without fuel', () => {
     const ticksToArrive = (prep: (s: ReturnType<typeof setup>, f: Formation) => void) => {
       const s = setup();

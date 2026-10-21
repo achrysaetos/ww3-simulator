@@ -96,6 +96,23 @@ describe('engine pacing', () => {
     expect(pacer.achievedTps).toBeCloseTo(5, 0);
   });
 
+  it('reads neither above the requested rate when a slow tick ends just before a fast one, nor zero while slow ticks run', () => {
+    let t = 0, cost = 900;
+    const pacer: Pacer = new Pacer(() => {
+      t += cost;
+      pacer.sent();
+    }, () => t);
+    pacer.setSpeed(1);
+    vi.advanceTimersByTime(0);
+    pacer.ack();
+    expect(pacer.achievedTps).toBeGreaterThan(0.5);
+    t = 1000;
+    cost = 50;
+    vi.advanceTimersByTime(100);
+    pacer.ack();
+    expect(pacer.achievedTps).toBeLessThanOrEqual(1);
+  });
+
   it('stops ticking when paused and steps once on demand only when nothing is in flight', () => {
     const { pacer, ticks } = rig(10);
     pacer.setSpeed(0);

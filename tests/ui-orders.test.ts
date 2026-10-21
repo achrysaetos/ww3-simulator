@@ -34,6 +34,15 @@ describe('event wording', () => {
     expect(air).toMatch(/^Air battle (over|near) Kiev: Russia against Ukraine\. Lost: Ukraine 1 aircraft, 1 aircrew\.$/);
   });
 
+  it('names front-line towns the city list lacks, and a port\'s sea zone after the port', () => {
+    const p = new PlaceNamer(t.map);
+    expect(p.name(t.nodeAt(48.72, 37.56))).toMatch(/Kramatorsk|Pokrovsk/);
+    expect(p.name(t.nodeAt(59.38, 28.19))).toMatch(/Narva/);
+    expect(p.name(t.nodeAt(51.73, 36.19))).toMatch(/Kursk/);
+    const busan = geography(t.map).portZone.get(t.map.cities.find((c) => c.name === 'Busan')!.node)!;
+    expect(p.name(busan)).toMatch(/^off .*Busan/);
+  });
+
   it('turns refusals with internal ids into names, places and a reason', () => {
     const text = humanizeMessage('order to f264 refused: no sea route to node ' + warsaw, namer);
     expect(text).toBe('1st Armored Brigade Combat Team: order refused, no sea route to Warsaw');

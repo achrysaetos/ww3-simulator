@@ -8,35 +8,50 @@ import { currentDate } from '../core/engine';
 import type { NationId, SimEvent, World } from '../core/types';
 import { createSession, SCENARIOS } from '../scenarios';
 import { resumeRun, saveRun } from '../scenarios/save';
+import { CliError, parseArgs, type CliArgs } from './args';
 
-const args = new Map<string, string>();
-for (let i = 2; i < process.argv.length; i++) {
-  const a = process.argv[i];
-  if (a.startsWith('--')) args.set(a.slice(2), process.argv[i + 1]?.startsWith('--') || i + 1 >= process.argv.length ? 'true' : process.argv[++i]);
+let args: CliArgs;
+try {
+  args = parseArgs(process.argv.slice(2));
+} catch (e) {
+  if (!(e instanceof CliError)) throw e;
+  console.error(`error: ${e.message}`);
+  process.exit(2);
 }
-if (args.has('list')) {
+if (args.list) {
   for (const s of SCENARIOS) console.log(`${s.id.padEnd(18)} ${s.name}: ${s.summary}`);
   process.exit(0);
 }
-const days = Number(args.get('days') ?? 30);
-const quiet = args.has('quiet');
-const resumeFrom = args.get('resume'), saveTo = args.get('save');
-for (const [flag, path] of [['resume', resumeFrom], ['save', saveTo]])
-  if (path === 'true') {
-    console.error(`--${flag} needs a file path`);
-    process.exit(1);
+const { days, quiet, resume: resumeFrom, save: saveTo } = args;
+
+function fail(message: string): never {
+  console.error(`error: ${message}`);
+  process.exit(1);
+}
+function load(path: string) {
+  let text: string;
+  try {
+    text = readFileSync(path, 'utf8');
+  } catch (e) {
+    return fail(`cannot read ${path}: ${(e as Error).message}`);
   }
+  try {
+    return resumeRun(text);
+  } catch (e) {
+    return fail(`cannot resume ${path}: ${(e as Error).message}`);
+  }
+}
 
 const t0 = performance.now();
 const { engine, world, map, scenarioId } = start();
 function start() {
   if (resumeFrom) {
-    const r = resumeRun(readFileSync(resumeFrom, 'utf8'));
+    const r = load(resumeFrom);
     console.log(`${r.scenario.id}: resumed ${resumeFrom} at ${currentDate(r.world).toISOString().slice(0, 13)} (tick ${r.world.tick}) in ${((performance.now() - t0) / 1000).toFixed(1)} s`);
     return { ...r, scenarioId: r.scenario.id };
   }
-  const scenarioId = args.get('scenario') ?? 'ww3-2027';
-  const s = createSession(scenarioId, Number(args.get('seed') ?? 1));
+  const scenarioId = args.scenario;
+  const s = createSession(scenarioId, args.seed);
   console.log(`${scenarioId}: ${s.placement.placed} formations placed in ${((performance.now() - t0) / 1000).toFixed(1)} s`);
   const unknown = Object.keys(s.placement.unknownPlatforms);
   if (unknown.length) console.log(`  ${unknown.length} ORBAT equipment ids not in catalog: ${unknown.slice(0, 20).join(' ')}${unknown.length > 20 ? ' ...' : ''}`);

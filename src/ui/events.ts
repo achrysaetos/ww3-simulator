@@ -1,6 +1,7 @@
 import type { GameMap } from '../core/map';
 import type { FormationId, NationId, NodeId, SimEvent, StrikeEffect } from '../core/types';
 import { allianceById } from '../data/nations/alliances';
+import { geography } from '../systems/naval/geography';
 
 export const EVENT_CATEGORIES = ['combat', 'strikes', 'nuclear', 'diplomacy', 'territory', 'economy', 'messages'] as const;
 export type EventCategory = (typeof EVENT_CATEGORIES)[number];
@@ -62,29 +63,80 @@ export function isEmptyFight(e: SimEvent): boolean {
   return Object.values(e.casualties).every((c) => c <= 0);
 }
 
-/** Nearest notable city within ~250 km, else coordinates. Cached per node. */
+interface Place { name: string; lat: number; lon: number }
+
+/**
+ * Towns the city list leaves out but the wars are fought over, so a fight in the Donbas or on
+ * Kinmen is not reported "near Dnipro" or "at Xiamen". Used for naming only, not map labels.
+ */
+const FRONT_PLACES: readonly Place[] = [
+  { name: 'Kramatorsk', lat: 48.72, lon: 37.56 }, { name: 'Pokrovsk', lat: 48.28, lon: 37.18 }, { name: 'Zaporizhzhia', lat: 47.84, lon: 35.14 },
+  { name: 'Mariupol', lat: 47.1, lon: 37.55 }, { name: 'Kherson', lat: 46.64, lon: 32.61 }, { name: 'Mykolaiv', lat: 46.97, lon: 32.0 },
+  { name: 'Sevastopol', lat: 44.6, lon: 33.52 }, { name: 'Huliaipole', lat: 47.66, lon: 36.26 }, { name: 'Kursk', lat: 51.73, lon: 36.19 },
+  { name: 'Belgorod', lat: 50.6, lon: 36.6 }, { name: 'Bryansk', lat: 53.24, lon: 34.36 }, { name: 'Pskov', lat: 57.82, lon: 28.33 },
+  { name: 'Narva', lat: 59.38, lon: 28.19 }, { name: 'Tartu', lat: 58.38, lon: 26.72 }, { name: 'Daugavpils', lat: 55.87, lon: 26.53 },
+  { name: 'Kaunas', lat: 54.9, lon: 23.9 }, { name: 'Kaliningrad', lat: 54.71, lon: 20.51 }, { name: 'Suwałki', lat: 54.1, lon: 22.93 },
+  { name: 'Seoul', lat: 37.57, lon: 126.98 }, { name: 'Kaesong', lat: 37.97, lon: 126.55 }, { name: 'Pyongtaek', lat: 36.99, lon: 127.09 },
+  { name: 'Kinmen', lat: 24.44, lon: 118.38 }, { name: 'Matsu', lat: 26.16, lon: 119.95 }, { name: 'Penghu', lat: 23.57, lon: 119.58 },
+  { name: 'Tainan', lat: 22.99, lon: 120.21 }, { name: 'Taoyuan', lat: 24.99, lon: 121.3 }, { name: 'Keelung', lat: 25.13, lon: 121.74 },
+  { name: 'Hualien', lat: 23.99, lon: 121.6 }, { name: 'Naha', lat: 26.21, lon: 127.68 }, { name: 'Guam', lat: 13.44, lon: 144.79 },
+];
+
+/** The ports a sea zone serves, so a ship off Busan is named for Busan and not only for the nearest big city. */
+const portZones = new WeakMap<GameMap, Map<number, NodeId[]>>();
+function portsOf(map: GameMap, zone: NodeId): NodeId[] {
+  let m = portZones.get(map);
+  if (!m) {
+    m = new Map();
+    for (const [port, z] of geography(map).portZone) (m.get(z) ?? m.set(z, []).get(z)!).push(port as NodeId);
+    portZones.set(map, m);
+  }
+  return m.get(zone) ?? [];
+}
+
+/** Nearest notable city or front-line town within ~250 km, else coordinates; a port's sea zone is named "off" the port. Cached per node. */
 export class PlaceNamer {
   private readonly cache = new Map<number, string>();
-  constructor(private readonly map: GameMap) {}
+  private readonly places: readonly Place[];
+  /** The biggest city in each cell that has one, and each city name's population. */
+  private readonly cityAt = new Map<number, string>();
+  private readonly pop = new Map<string, number>();
+  constructor(private readonly map: GameMap) {
+    for (const c of [...map.cities].sort((a, b) => a.pop - b.pop)) {
+      this.cityAt.set(c.node, c.name);
+      this.pop.set(c.name, c.pop);
+    }
+    this.places = [...map.cities.map((c) => ({ name: c.name === 'Sevastapol' ? 'Sevastopol' : c.name, lat: c.lat, lon: c.lon })), ...FRONT_PLACES];
+  }
   name(node: NodeId): string {
     let s = this.cache.get(node);
     if (s !== undefined) return s;
     const { map } = this;
-    let best: (typeof map.cities)[number] | null = null, bestD = 250;
-    for (const c of map.cities) {
+    const ports = map.isSea(node) ? portsOf(map, node) : [];
+    if (ports.length) {
+      const names = [...new Set(ports.map((p) => this.name(p)).filter((n) => !/°/.test(n)).sort((a, b) => (this.pop.get(b) ?? 0) - (this.pop.get(a) ?? 0)).map((n) => n.replace(/^near /, '')))].slice(0, 2);
+      if (names.length) {
+        s = `off ${names.join(' and ')}`;
+        this.cache.set(node, s);
+        return s;
+      }
+    }
+    let best: Place | null = null, bestD = 250;
+    for (const c of this.places) {
       const d = Math.hypot(c.lat - map.lat[node], (c.lon - map.lon[node]) * Math.cos((c.lat * Math.PI) / 180)) * 111;
       if (d < bestD) { bestD = d; best = c; }
     }
     const lat = map.lat[node], lon = map.lon[node];
     const coord = `${Math.abs(lat).toFixed(0)}°${lat >= 0 ? 'N' : 'S'} ${Math.abs(lon).toFixed(0)}°${lon >= 0 ? 'E' : 'W'}`;
-    s = best ? (bestD < 60 ? best.name : `near ${best.name}`) : map.isSea(node) ? `sea zone ${coord}` : coord;
+    // A cell holding a city is named for it, even when the city sits off the cell's centre.
+    s = best && bestD < 60 ? best.name : this.cityAt.get(node) ?? (best ? `near ${best.name}` : map.isSea(node) ? `sea zone ${coord}` : coord);
     this.cache.set(node, s);
     return s;
   }
   /** "at Kiev", "near Kiev", "in sea zone 20°N 120°E". */
   at(node: NodeId): string {
     const s = this.name(node);
-    return s.startsWith('near ') ? s : s.startsWith('sea zone') ? `in ${s}` : `at ${s}`;
+    return s.startsWith('near ') || s.startsWith('off ') ? s : s.startsWith('sea zone') ? `in ${s}` : `at ${s}`;
   }
 }
 

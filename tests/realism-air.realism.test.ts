@@ -108,8 +108,13 @@ describe('gulf-2027, 30 days', () => {
   });
 
   // Gap: the Iran order of battle has ~60 MRBM launchers and ~280 missiles, against ~2,000 and 100+ launchers in 2024 (IISS), so salvos stay in the tens.
-  it.fails('Iran fires salvos of hundreds (at least 300 ballistic missiles at Israel in 30 days)', () => {
-    for (const r of runs) expect(tally(r, 'IRN', 'ISR', ['ballistic_missile']).fired).toBeGreaterThanOrEqual(300);
+  // Asserts the measured shortfall (82 and 89 fired, seeds 1 and 2) so a crash or a silent zero fails it; it fails once the OOB closes the gap, and the target (at least 300) then replaces it.
+  it('KNOWN GAP: Iran fires tens of ballistic missiles at Israel in 30 days, short of the 300 target', () => {
+    for (const r of runs) {
+      const fired = tally(r, 'IRN', 'ISR', ['ballistic_missile']).fired;
+      expect(fired).toBeGreaterThan(50);
+      expect(fired).toBeLessThan(300);
+    }
   });
 
   // October 2024 and June 2025: Israeli F-15I and F-35I flew 1,500-2,000 km to strike Iran with stand-off weapons.
