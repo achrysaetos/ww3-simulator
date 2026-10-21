@@ -185,3 +185,52 @@ it('maps a point outside every cell and sea zone to the nearest node by great-ci
   expect(outside.length).toBeGreaterThan(100);
   expect(outside.filter((p) => at(p) !== nearest(p))).toEqual([]);
 });
+
+describe('terrain follows relief', () => {
+  it.each([
+    ['the Central Range at Yushan', [23.47, 120.96]], ['the Central Range at Hehuan', [24.14, 121.27]], ['the Taebaek range', [37.6, 128.7]],
+    ['the Japanese Alps', [36.29, 137.65]], ['the Swiss Alps', [46.5, 8.5]], ['the Zagros', [33.5, 48.5]],
+  ] as [string, Point][])('makes %s mountain', (_, p) => {
+    expect(map.terrain[at(p)]).toBe('mountain');
+  });
+
+  it.each([
+    ['the Chianan plain', [23.38, 120.3]], ['the Hungarian plain', [47.0, 20.5]], ['Kansas', [38.5, -98.5]], ['the Netherlands', [52.6, 5.5]],
+  ] as [string, Point][])('keeps %s flat', (_, p) => {
+    expect(map.terrain[at(p)]).toBe('plain');
+  });
+
+  it('gives each land cell its mean elevation and local relief', () => {
+    const tibet = at([32.5, 88.5]), alps = at([46.5, 8.5]), netherlands = at([52.6, 5.5]);
+    expect(map.elevation[tibet]).toBeGreaterThan(4000);
+    expect(map.elevation[netherlands]).toBeLessThan(50);
+    expect(map.ruggedness[alps]).toBeGreaterThan(500);
+    expect(map.ruggedness[netherlands]).toBeLessThan(30);
+  });
+
+  it('leaves inland Taiwan off the coast', () => {
+    const main = map.nodesOf('TWN' as NationId).filter((n) => map.lon[n] > 120);
+    expect(map.isCoastal(at([23.47, 120.96]))).toBe(false);
+    expect(main.filter((n) => !map.isCoastal(n)).length).toBeGreaterThanOrEqual(10);
+  });
+});
+
+describe('land inside one nation crosses water only by bridge or tunnel', () => {
+  it.each([
+    ['Sicily from Calabria', [37.6, 14.2], [38.11, 15.65]], ['Hainan from Leizhou', [19.6, 110.0], [21.27, 110.36]],
+    ['Sakhalin from the mainland', [50.9, 142.16], [49.09, 140.25]], ['Northern Ireland from Scotland', [54.6, -5.93], [55.86, -4.25]],
+    ['the North Island from the South Island', [-41.29, 174.78], [-43.53, 172.64]],
+  ] as [string, Point, Point][])('parts %s', (_, a, b) => {
+    expect(landHops(a, b)).toBe(Infinity);
+  });
+
+  it.each([['POL', 'HUN'], ['TJK', 'PAK']])('joins %s and %s only through the country between them', (a, b) => {
+    expect(landEdges(a, b)).toEqual([]);
+  });
+
+  it('lists the fixed links so their capacity can be limited', () => {
+    const tunnel = map.fixedLinks.find((l) => l.name === 'Channel Tunnel')!;
+    expect([map.owner[tunnel.a], map.owner[tunnel.b]].sort()).toEqual(['FRA', 'GBR']);
+    expect([...map.neighbors(tunnel.a)]).toContain(tunnel.b);
+  });
+});

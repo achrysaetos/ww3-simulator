@@ -8,11 +8,14 @@ export interface WorldData {
   nations: { iso3: string; name: string; stats: Record<string, number>; capital: { name: string; cell: number } | null }[];
   /**
    * Land cells are squares: 1 degree, or 1/2 to 1/8 degree inside refined 1-degree squares. `adj` lists each
-   * cell's land neighbours: cells whose land touches, or that a bridge or tunnel joins.
+   * cell's land neighbours: cells whose land touches, or that a bridge or tunnel joins. `elevation` and
+   * `ruggedness` are the mean elevation and mean local relief (range within about 9 km) of the cell's land, in metres.
    */
-  cells: { lat: number[]; lon: number[]; half: number[]; owner: number[]; terrain: number[]; popShare: number[]; railKm: number[]; ports: number[]; airports: number[]; coastZone: number[]; adj: number[][] };
+  cells: { lat: number[]; lon: number[]; half: number[]; owner: number[]; terrain: number[]; elevation: number[]; ruggedness: number[]; popShare: number[]; railKm: number[]; ports: number[]; airports: number[]; coastZone: number[]; adj: number[][] };
   cities: { name: string; nation: number; cell: number; pop: number; capital: boolean; lat: number; lon: number }[];
   sea: { res: number; lat: number[]; lon: number[]; neighbors: number[][] };
+  /** Bridges and tunnels that join two land cells across water; each pair is also in `cells.adj`. */
+  fixedLinks: { name: string; a: number; b: number }[];
 }
 
 export interface City { name: string; nation: NationId; node: NodeId; pop: number; capital: boolean; lat: number; lon: number }
@@ -83,6 +86,10 @@ export class GameMap {
   /** Half the side of a node's square in degrees: 0.5 for most land cells, less in refined squares, 1.5 for sea zones. */
   readonly halfDeg: Float32Array;
   readonly terrain: Terrain[];
+  /** Mean elevation of a land cell in metres (ETOPO 2022); 0 for sea. */
+  readonly elevation: Float32Array;
+  /** Mean local relief of a land cell in metres: the elevation range within about 9 km, averaged; 0 for sea. */
+  readonly ruggedness: Float32Array;
   /** Initial owner per node; '' for sea. */
   readonly owner: NationId[];
   /** Share of owner's population/industry in this cell (sums to 1 per nation). */
@@ -96,6 +103,8 @@ export class GameMap {
   /** Great-circle km to each neighbor, parallel to adj. */
   readonly adjKm: Float32Array;
   readonly cities: City[];
+  /** Land edges that cross water by bridge or tunnel (the Channel Tunnel, the Crimean Bridge), for capacity limits. */
+  readonly fixedLinks: { name: string; a: NodeId; b: NodeId }[];
   readonly nationIds: NationId[];
   private readonly cellIndex: SquareIndex;
   private readonly seaIndex: Map<number, number>;
@@ -118,6 +127,8 @@ export class GameMap {
     this.ports = new Uint8Array(this.size);
     this.airports = new Uint8Array(this.size);
     this.terrain = new Array(this.size);
+    this.elevation = new Float32Array(this.size);
+    this.ruggedness = new Float32Array(this.size);
     this.owner = new Array(this.size);
     this.cellIndex = new SquareIndex(cells.lat, cells.lon, cells.half);
     for (let i = 0; i < L; i++) {
@@ -125,6 +136,8 @@ export class GameMap {
       this.lon[i] = cells.lon[i];
       this.halfDeg[i] = cells.half[i];
       this.terrain[i] = TERRAINS[cells.terrain[i]];
+      this.elevation[i] = cells.elevation[i];
+      this.ruggedness[i] = cells.ruggedness[i];
       this.owner[i] = this.nationIds[cells.owner[i]];
       this.popShare[i] = cells.popShare[i];
       this.railKm[i] = cells.railKm[i];
@@ -168,6 +181,7 @@ export class GameMap {
         this.adjKm[this.adjStart[n] + k] = this.distanceKm(n as NodeId, m as NodeId);
       });
 
+    this.fixedLinks = data.fixedLinks.map((l) => ({ name: l.name, a: l.a as NodeId, b: l.b as NodeId }));
     this.cities = data.cities.map((c) => ({ name: c.name, nation: this.nationIds[c.nation], node: c.cell as NodeId, pop: c.pop, capital: c.capital, lat: c.lat, lon: c.lon }));
   }
 
