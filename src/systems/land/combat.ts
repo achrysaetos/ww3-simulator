@@ -390,11 +390,16 @@ export function seize(world: World, ctx: SimContext, nation: NationId, node: Nod
  * Abkhazia and South Ossetia lines. So does the rest of the border between the
  * occupier and the occupied, which years of war have fortified too: Ukraine's
  * 2024-25 belts along the Sumy, Kharkiv and Chernihiv borders, Russia's in
- * Belgorod and Kursk.
+ * Belgorod and Kursk. So does the Korean DMZ, held under arms since the 1953 armistice: the
+ * ROK's forward barrier belts, anti-tank walls and minefields south of it, and the North's
+ * fortified zone north of it.
  */
+const STANDING_BORDERS: readonly (readonly [NationId, NationId])[] = [['KOR' as NationId, 'PRK' as NationId]];
+
 function fortifyStandingLines(world: World, map: GameMap): void {
   const { fortified } = landSlice(world);
   const lines = new Set<string>();
+  for (const [a, b] of STANDING_BORDERS) lines.add(`${a}|${b}`).add(`${b}|${a}`);
   for (let n = 0; n < map.landCount; n++) {
     const holder = world.control[n];
     if (holder && holder !== map.owner[n]) lines.add(`${holder}|${map.owner[n]}`).add(`${map.owner[n]}|${holder}`);
