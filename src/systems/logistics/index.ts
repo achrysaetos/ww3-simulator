@@ -46,15 +46,15 @@ export function supplyFactor(world: World, node: NodeId, nation: NationId): numb
   const s = world.slices.logistics;
   const key = s?.networkOf[nation];
   const net = key ? s.networks[key] : undefined;
-  return net ? forcesFactor(world, s, net, node, nation) : 0;
+  return net ? forcesFactor(s, net, node, nation).phi : 0;
 }
 
-function forcesFactor(world: World, s: LogisticsState, net: SupplyNetwork, node: NodeId, nation: NationId): number {
-  const phi = net.search.milliForForcesAt(s.seen, node) / 1000;
-  const holder = world.control[node];
-  if (phi <= 0 || !holder || !atWar(world, nation, holder)) return phi;
+/** Supply factor for `nation`'s forces at `node`, and whether it comes over the beach. */
+function forcesFactor(s: LogisticsState, net: SupplyNetwork, node: NodeId, nation: NationId): { phi: number; beach: boolean } {
+  const { milli, route } = net.search.forcesSupplyAt(s.seen, node);
+  if (route !== 'beach' || milli <= 0) return { phi: milli / 1000, beach: false };
   const lift = s.lift[nation];
-  return lift ? (phi * lift.now) / lift.most : 0;
+  return { phi: lift ? ((milli / 1000) * lift.now) / lift.most : 0, beach: true };
 }
 
 const initialState = (world: World, map: GameMap): LogisticsState => ({
@@ -151,10 +151,10 @@ function sustain(world: World, ctx: SimContext, s: LogisticsState, forces: Forma
     const f = forces[i];
     consumeBaseline(f, ctx, idleHours[f.kind] * dtDays, food);
     const net = networks[networkOf[f.nation]];
-    const phi = (factor[i] = net ? forcesFactor(world, s, net, f.node, f.nation) : 0);
+    const supply = net ? forcesFactor(s, net, f.node, f.nation) : undefined;
+    const phi = (factor[i] = supply?.phi ?? 0);
     if (phi <= 0) continue;
-    const holder = world.control[f.node];
-    ashore[i] = holder && atWar(world, f.nation, holder) ? 1 : 0;
+    ashore[i] = supply!.beach ? 1 : 0;
     // Spelled out per class: keyed access by class name dominated this loop.
     const cap = f.supplyCapacity, have = f.supply, j = i * 3;
     const tons =

@@ -169,6 +169,13 @@ export function refreshNetworks(world: World, map: GameMap, networks: Record<str
     demand.add(f.nation);
     if (landKinds.has(f.kind) && f.node < landCount && world.control[f.node] !== f.nation) intruders.push(f);
   }
+  // Personnel per nation in each cell an intruder stands in, to weigh intruders against the cell's defenders.
+  const strength = new Map<number, Map<NationId, number>>();
+  for (const f of intruders) strength.set(f.node, new Map());
+  for (const f of forces) {
+    const here = landKinds.has(f.kind) ? strength.get(f.node) : undefined;
+    if (here) here.set(f.nation, (here.get(f.nation) ?? 0) + f.personnel);
+  }
 
   const networkOf: Record<NationId, string> = {};
   const wanted = new Map<string, NationId[]>();
@@ -196,7 +203,13 @@ export function refreshNetworks(world: World, map: GameMap, networks: Record<str
     for (const m of members) for (const e of enemies.get(m) ?? []) if (!memberSet.has(e)) foeSet.add(e);
     const foes = [...foeSet].sort();
     const occupied: number[] = [];
-    for (const f of intruders) if (foeSet.has(f.nation) && memberSet.has(world.control[f.node])) occupied.push(f.node);
+    for (const [node, here] of strength) {
+      const holder = world.control[node];
+      if (!holder || !memberSet.has(holder)) continue;
+      let foe = 0, own = 0;
+      for (const [n, p] of here) if (foeSet.has(n)) foe += p; else if (memberSet.has(n)) own += p;
+      if (foe > own) occupied.push(node);
+    }
     occupied.sort((a, b) => a - b);
     const net = networks[key];
     if (!net) {

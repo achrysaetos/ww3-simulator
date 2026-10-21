@@ -121,6 +121,15 @@ export const DECAY_HALF_KM = 350;
 /** Throughput penalty for a friendly cell adjacent to enemy-held ground (artillery and drone interdiction of the last 20-30 km, Ukraine 2022-24). */
 export const FRONTLINE_CAPACITY = 0.5;
 export const FRONTLINE_COST = 1.5;
+/**
+ * Share of an adjacent friendly cell's factor that reaches forces fighting inside a
+ * cell the network cannot enter: the last 10-20 km under drone and artillery
+ * observation, crossed by night, on foot, by quad bike or unmanned ground vehicle
+ * (RUSI, Watling and Reynolds, "Tactical Developments During the Third Year of the
+ * Russo-Ukrainian War", 2025). Judgment; with it Russia fires 13-15k shells a day in
+ * ukraine-2026, inside the 10-20k band.
+ */
+export const LAST_MILE_CAPACITY = 0.5;
 
 /**
  * Best supply an airfield can get by airlift alone. Calibration: the Stalingrad

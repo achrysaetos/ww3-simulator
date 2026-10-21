@@ -10,7 +10,7 @@ import { updateEncirclement } from './encirclement';
 import {
   AIR_SUPPRESSION, AMMO_DAYS_INTENSE, ATTRITION_KM_PER_DAY, ATTRITION_MAX_KM_PER_DAY, BREAKTHROUGH_KM_PER_DAY, COVERED_KM_PER_DAY, HOSTILE_GROUND_COST,
   ASSAULT_EXPOSURE, DELIBERATE_ASSAULT_RATIO, FRONTAGE_PLATFORMS, WITHDRAWAL_KM, POSITIONAL_INTENSITY, AMMO_RATION_BELOW, AREA_FIRE_REF_DENSITY, CAS_BONUS, DIRECT_DENSITY_EXP, COMBAT_FUEL_DUTY, COMBINED_ARMS,
-  ENGAGED_HOURS_PER_DAY, ENTRENCH_MAX_BONUS, EXPERIENCE_PER_COMBAT_DAY, FATIGUE_COMBAT_PER_DAY, INDIRECT_FIRE, RETREAT_LOSS,
+  ENGAGED_HOURS_PER_DAY, ENTRENCH_MAX_BONUS, KILL_ZONE_COMMIT, NEXT_LINE_ENTRENCHMENT, EXPERIENCE_PER_COMBAT_DAY, FATIGUE_COMBAT_PER_DAY, INDIRECT_FIRE, RETREAT_LOSS,
   RETREAT_MORALE, ROUT_ABANDON, ROUT_MORALE, SHELL_TONS, SHELLS_PER_TUBE_DAY, TERRAIN, TUBE_ARTILLERY, exposureOf, targetClassOf,
 } from './tables';
 
@@ -214,6 +214,12 @@ function retreat(world: World, ctx: SimContext, f: Formation, threat: NodeId, by
   return true;
 }
 
+/** Level of air control `nation`'s side holds over `node`, 0..1. */
+function airControlOf(world: World, nation: NationId, node: NodeId): number {
+  const ac = world.theater.airControl[node];
+  return ac && allied(world, nation, ac.nation) ? ac.level : 0;
+}
+
 /** Platform-weighted entrenchment of a group at `node`, 0..1; on its own side's ground it occupies the cell's standing fortifications. */
 function entrenchmentOf(world: World, fighters: Formation[], node: NodeId): number {
   if (!fighters.length) return 0;
@@ -257,7 +263,9 @@ function resolveBattle(world: World, ctx: SimContext, node: NodeId, att: Side, d
   const d = summarize(world, catalog, def, node, terrain.closed);
   // An attacker without a deliberate-assault superiority attacks on a few narrow axes, not along the whole cell.
   const intensity = how.kind === 'assault' ? Math.min(1, Math.max(POSITIONAL_INTENSITY, fireRatio(a, d) / DELIBERATE_ASSAULT_RATIO)) : POSITIONAL_INTENSITY;
-  const hours = (ENGAGED_HOURS_PER_DAY * world.dtHours * intensity) / 24;
+  // Against a prepared line only part of an assaulting force is in the kill zone at once; the rest waits outside it while the guns fire.
+  const committed = how.kind === 'assault' ? 1 - (1 - KILL_ZONE_COMMIT) * entrenchmentOf(world, def.fighters, node) * (1 - airControlOf(world, att.nation, node)) : 1;
+  const hours = (ENGAGED_HOURS_PER_DAY * world.dtHours * intensity * committed) / 24;
   const routedVulnerability = (s: Side) => (s.fighters.some((f) => f.status === 'routed') ? 2 : 1);
   const noise = () => Math.exp(rng.normal(0, 0.2));
   const onDef = expectedKills(a, d, hours, attEdge * noise(), routedVulnerability(def) / defEdge);
@@ -312,8 +320,10 @@ function resolveBattle(world: World, ctx: SimContext, node: NodeId, att: Side, d
       else f.order = { posture: 'defend', issuedTick: world.tick };
     });
     // A shaken but intact defender gives up its forward line and digs in on the next one; only a routed one leaves the cell.
+    // One not yet dug in has no line to give up and fights where it stands, so a shaken defender yields once per line rather than every tick.
     settle(def, defLost, ledgers.def, defRate <= attRate, (f) => {
       if (f.status === 'routed') return fallBackFrom(node)(f);
+      if (f.entrenchment < NEXT_LINE_ENTRENCHMENT) return;
       yielded = true;
       f.entrenchment = 0;
       slice.baseline[f.id] = platformCount(f);

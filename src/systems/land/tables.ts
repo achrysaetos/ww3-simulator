@@ -194,6 +194,25 @@ export const exposureOf = (c: PlatformClass): number => EXPOSURE[c] ?? 1;
  * Pokrovsk in 2023-25 (UK MoD; RUSI "Meatgrinder", 2023).
  */
 export const ASSAULT_EXPOSURE = 2;
+/**
+ * Share of an assaulting force inside the kill zone at once when it attacks a fully
+ * prepared line; the rest waits out of drone and artillery reach while its guns fire.
+ * Scales with the defender's entrenchment, so a hasty defence faces the whole force.
+ * In 2024-25 drone-saturated observation 10-20 km deep made massed mechanised
+ * assaults suicidal, and Russia attacked in waves of small infantry groups with most
+ * of the force held back (RUSI, Watling and Reynolds, "Tactical Developments During
+ * the Third Year of the Russo-Ukrainian War", 2025; ISW). Judgment, calibrated with
+ * the front supplied so that Russia loses ~1,000-1,700 men and 5-8 tanks a day
+ * (UK MoD, Oryx) while firing 10-20k shells.
+ */
+export const KILL_ZONE_COMMIT = 0.3;
+/**
+ * Entrenchment a shaken defender must have dug before it can give up a line for the
+ * next one: two and a half days of digging at ENTRENCH_PER_DAY. Below it there is no
+ * prepared line to give up. Judgment: Ukrainian withdrawals in 2023-25 came every
+ * few days to weeks on an active axis, not continuously (Avdiivka, Vuhledar, Pokrovsk).
+ */
+export const NEXT_LINE_ENTRENCHMENT = 0.5;
 /** Depth given up when a defender falls back to its next prepared line: 2-5 km per withdrawal in 2023-25 (Avdiivka, Vuhledar). */
 export const WITHDRAWAL_KM = 3;
 /**

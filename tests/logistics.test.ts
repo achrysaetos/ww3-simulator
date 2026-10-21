@@ -5,7 +5,7 @@ import { loadMap } from '../src/data/load';
 
 const MAP = loadMap();
 import { logistics, supplyFactor } from '../src/systems/logistics';
-import { BEACH_CAPACITY, NODE_TONS_PER_DAY } from '../src/systems/logistics/tables';
+import { BEACH_CAPACITY, LAST_MILE_CAPACITY, NODE_TONS_PER_DAY } from '../src/systems/logistics/tables';
 
 const PLENTY = { fuel: 1e7, ammo: 1e7, food: 1e7 };
 const DAY = 4; // ticks at the default 6 h
@@ -65,6 +65,45 @@ describe('logistics', () => {
     expect(f.supply.food).toBe(0);
     expect(f.supply.fuel).toBeLessThan(fuelBefore);
     expect(t.world.nations[id.nation('UKR')].bulk.food).toBe(bulkBefore);
+  });
+
+  it('feeds forces fighting in an enemy-held cell across the line from friendly ground, at the last-mile share, but not a spearhead two cells deep', () => {
+    const t = setup();
+    t.war('RUS', 'UKR');
+    const rus = id.nation('RUS');
+    const home = t.nodeAt(50.5, 37.5); // Belgorod oblast, beside Kharkiv oblast
+    const contested = t.nodeAt(49.5, 36.5); // Kharkiv
+    const deep = t.nodeAt(48.5, 34.5); // Dnipro region, no Russian ground next to it
+    expect([t.world.control[home], t.world.control[contested], t.world.control[deep]]).toEqual([rus, id.nation('UKR'), id.nation('UKR')]);
+    const assault = t.brigade('RUS', contested), spearhead = t.brigade('RUS', deep);
+    t.drain(assault, 0.3);
+    t.engine.run(t.world, 2 * DAY);
+    const across = supplyFactor(t.world, contested, rus);
+    const best = Math.max(...[...t.map.neighbors(contested)].filter((n) => t.world.control[n] === rus).map((n) => supplyFactor(t.world, n, rus)));
+    expect(best).toBeGreaterThan(0);
+    expect(across).toBeCloseTo(LAST_MILE_CAPACITY * best, 3);
+    expect(t.fill(assault, 'ammo')).toBeGreaterThan(0.31);
+    expect(supplyFactor(t.world, spearhead.node, rus)).toBe(0);
+  });
+
+  it('lets intruders cut the roads through a cell only while they outnumber its defenders', () => {
+    const t = setup();
+    t.war('RUS', 'UKR');
+    const ukr = id.nation('UKR');
+    const cell = t.nodeAt(49.5, 36.5);
+    const defenders = [t.brigade('UKR', cell), t.brigade('UKR', cell)];
+    const raid = t.brigade('RUS', cell);
+    const cut = () => {
+      const s = t.world.slices.logistics;
+      return s.networks[s.networkOf[ukr]].occupied.includes(cell);
+    };
+    t.engine.run(t.world, 1);
+    expect(cut()).toBe(false);
+    expect(supplyFactor(t.world, cell, ukr)).toBeGreaterThan(0.2);
+    defenders[1].status = 'destroyed';
+    raid.personnel = 2 * defenders[0].personnel;
+    t.engine.run(t.world, 1);
+    expect(cut()).toBe(true);
   });
 
   it('supplies an island base the map lists no port for by sea', () => {
