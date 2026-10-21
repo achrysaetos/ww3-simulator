@@ -5,6 +5,7 @@ import { geography, seaNeighbour } from './geography';
 import { type Composition, ledger, liftDemand } from './state';
 import { LANDING_AIR_SUPPORT, LANDING_BASE_LOSS, LANDING_OPPOSED_LOSS, LANDING_SEA_SUPPORT, OFFLOAD_HOURS } from './tables';
 import type { Catalog } from '../../core/catalog';
+import { amphibiousFactorAt } from '../weather/effects';
 
 /** Kinds that defend a beach. */
 const GROUND_KINDS = new Set<Formation['kind']>(['maneuver', 'artillery', 'air_defense', 'missile', 'logistics']);
@@ -50,13 +51,16 @@ export function landings(env: TickEnv): void {
     }
     if (lift.node !== seaNeighbour(ctx.map, target)) continue;
     if ((world.tick - (offshore[lift.id] ??= world.tick)) * world.dtHours < OFFLOAD_HOURS) continue;
+    // Past sea state 4 the boats stay out and wait for the sea to drop; rough water still drowns some of those who go.
+    const sea = amphibiousFactorAt(world, ctx.map, lift.node);
+    if (sea < 0.5) continue;
     delete offshore[lift.id];
     const support = supportAt(env, lift, target);
     const { defense, held } = beach(env, lift, target);
     let attack = held;
     for (const f of aboard) attack += combatValue(env, f);
     const r = attack > 0 ? defense / attack : 10;
-    const loss = Math.min(0.95, (LANDING_BASE_LOSS + LANDING_OPPOSED_LOSS * (r / (1 + r)) * (1 - support)) * ctx.rng.range(0.8, 1.2));
+    const loss = Math.min(0.95, (LANDING_BASE_LOSS + LANDING_OPPOSED_LOSS * (r / (1 + r)) * (1 - support)) * (2 - sea) * ctx.rng.range(0.8, 1.2));
     const lb = ledger(world, lift.nation);
     lb.assaultLandings++;
     lb.firstAssaultTick ??= world.tick;

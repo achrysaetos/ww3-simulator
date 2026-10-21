@@ -15,6 +15,7 @@ import { supplyFactor } from '../systems/logistics';
 import { geography } from '../systems/naval/geography';
 import { isNavalFormation, liftDemand } from '../systems/naval/state';
 import { authority } from '../systems/orders';
+import { conditionsAt, type Conditions, weatherLayer } from '../systems/weather/effects';
 import type {
   Command, CommandDomain, Echelon, Formation, FormationId, FormationKind, ItemId, MunitionKind, Nation, NationId, NodeId, PlatformId, Posture, SimEvent, World,
 } from '../core/types';
@@ -228,6 +229,8 @@ export interface FormationDetail {
   lifts: LiftOption[];
   /** For a surface group: the formations it carries. */
   aboard: { id: FormationId; name: string }[];
+  /** Today's weather where it stands; null in a world without weather. */
+  weather: Conditions | null;
 }
 
 export interface LiftOption {
@@ -265,6 +268,8 @@ export interface Snapshot {
   /** Flat (node, value) pairs for nodes with infrastructure < 1. */
   infra: Float32Array;
   fallout: Float32Array;
+  /** Flat (node, code) pairs of operational weather (weather/effects.ts weatherLayer), sent when the day changes. */
+  weather?: Float32Array;
   focusNation?: NationDetail;
   focusFormation?: FormationDetail;
 }
@@ -278,6 +283,7 @@ export class SnapshotEncoder {
   private readonly nationIndex: Map<NationId, number>;
   private events: SimEvent[] = [];
   private dropped = 0;
+  private weatherDay?: number;
   /** First war_declared that put each nation into each war, keyed `nation|enemy`. */
   private readonly entries = new Map<string, WarEntry>();
 
@@ -320,6 +326,10 @@ export class SnapshotEncoder {
     };
     this.events = [];
     this.dropped = 0;
+    if (world.slices.weather && world.slices.weather.day !== this.weatherDay) {
+      this.weatherDay = world.slices.weather.day;
+      snap.weather = weatherLayer(world, map);
+    }
 
     const prev = this.lastControl;
     if (!prev) snap.control = control;
@@ -548,6 +558,7 @@ function formationDetail(world: World, map: GameMap, catalog: Catalog, f: Format
     portZone: zone ?? null,
     lifts,
     aboard,
+    weather: conditionsAt(world, map, f.node) ?? null,
   };
 }
 
@@ -615,6 +626,7 @@ export interface ClientState {
   sea: Float32Array;
   infra: Float32Array;
   fallout: Float32Array;
+  weather: Float32Array;
   focusNation?: NationDetail;
   focusFormation?: FormationDetail;
   /** Events from the latest snapshot only. */
@@ -625,7 +637,7 @@ export function emptyClientState(size: number): ClientState {
   return {
     tick: 0, date: '', control: new Uint16Array(size).fill(NO_NATION), controlVersion: 0,
     formations: [], rosterVersion: 0, nations: new Map(), wars: [], warsKey: '',
-    air: new Float32Array(0), sea: new Float32Array(0), infra: new Float32Array(0), fallout: new Float32Array(0),
+    air: new Float32Array(0), sea: new Float32Array(0), infra: new Float32Array(0), fallout: new Float32Array(0), weather: new Float32Array(0),
     latestEvents: [],
   };
 }
@@ -673,6 +685,7 @@ export function applySnapshot(state: ClientState, snap: Snapshot, nationIds: rea
   state.sea = snap.sea;
   state.infra = snap.infra;
   state.fallout = snap.fallout;
+  if (snap.weather) state.weather = snap.weather;
   state.focusNation = snap.focusNation;
   state.focusFormation = snap.focusFormation;
   state.latestEvents = snap.events;

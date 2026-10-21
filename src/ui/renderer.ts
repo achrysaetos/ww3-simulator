@@ -8,6 +8,7 @@ import type { GeoPermissibleObjects } from 'd3-geo';
 import type { GameMap } from '../core/map';
 import type { FormationId, NodeId, SimEvent } from '../core/types';
 import { rgba, type Palette } from './colors';
+import { LAYER } from '../systems/weather/effects';
 import { eventNode } from './events';
 import { NO_NATION, type ClientState, type FormationView } from './snapshot';
 import { clusterStacks, gridSize, indexByNode, type Stack } from './stacks';
@@ -19,6 +20,7 @@ export interface Overlays {
   sea: boolean;
   infra: boolean;
   fallout: boolean;
+  weather: boolean;
   cities: boolean;
   seaZones: boolean;
 }
@@ -378,6 +380,7 @@ export class MapRenderer {
     }
     if (overlays.infra) this.fillPairs(ctx, state.infra, (v) => `rgba(255,110,40,${Math.min(0.85, (1 - v) * 1.1)})`);
     if (overlays.fallout) this.fillPairs(ctx, state.fallout, (v) => `rgba(190,255,60,${Math.min(0.75, v * 0.8)})`);
+    if (overlays.weather) this.fillPairs(ctx, state.weather, weatherStyle);
 
     if (this.coast) {
       ctx.strokeStyle = 'rgba(150,185,220,0.45)';
@@ -636,4 +639,13 @@ export class MapRenderer {
       ctx.restore();
     }
   }
+}
+
+/** Mud brown, snow white, rough sea and cyclones in deepening blue-violet; stronger with severity. */
+function weatherStyle(code: number): string {
+  const kind = Math.floor(code), severity = code - kind;
+  if (kind === LAYER.mud) return `rgba(150,105,55,${0.25 + 0.4 * severity})`;
+  if (kind === LAYER.snow) return `rgba(240,245,255,${0.2 + 0.35 * severity})`;
+  if (kind === LAYER.roughSea) return `rgba(70,90,200,${0.2 + 0.4 * severity})`;
+  return 'rgba(170,60,220,0.6)';
 }

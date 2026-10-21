@@ -141,6 +141,9 @@ input[type='range'] { flex: 1; accent-color: var(--accent); }
 .lg-air { background: repeating-linear-gradient(135deg, #8cc8ff 0 2px, transparent 2px 5px); }
 .lg-infra { background: rgba(255,110,40,0.8); }
 .lg-fallout { background: rgba(190,255,60,0.7); }
+.lg-mud { background: rgba(150,105,55,0.6); }
+.lg-snow { background: rgba(240,245,255,0.5); }
+.lg-sea { background: rgba(70,90,200,0.55); }
 .target-banner { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); padding: 6px 14px; border-radius: 4px; background: rgba(15,58,82,0.92); border: 1px solid var(--accent); font-weight: 600; }
 .target-banner.nuclear { background: rgba(58,48,8,0.95); border-color: var(--nuke); color: var(--nuke); }
 .toast { position: absolute; bottom: 40px; left: 50%; transform: translateX(-50%); background: rgba(10,18,28,0.95); border: 1px solid var(--line-2); padding: 8px 14px; border-radius: 4px; max-width: min(560px, calc(100% - 32px)); width: max-content; z-index: 4; }

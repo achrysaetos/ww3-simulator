@@ -3,6 +3,7 @@ import type { Formation, FormationId, FormationKind, NationId, NodeId, Order, Po
 import type { SimClient } from './client';
 import type { Palette } from './colors';
 import type { PlaceNamer } from './events';
+import type { Conditions } from '../systems/weather/effects';
 import type { FormationDetail } from './snapshot';
 import type { Routes } from './routes';
 import { Bar, Section, Stat, fmtNum } from './widgets';
@@ -161,6 +162,12 @@ export function FormationPanel({ client, palette, places, routes, playAs, comman
         <Bar label="Entrenchment" value={f.entrenchment} tone="good" />
       </Section>
 
+      {detail.weather && (
+        <Section title="Weather">
+          <p className="small" data-testid="weather">{weatherLine(detail.weather)}</p>
+        </Section>
+      )}
+
       <Section title="Supply">
         {detail.supplyFlow !== null && <Bar label="Supply line throughput here" value={detail.supplyFlow} tone="auto" />}
         {detail.isolatedDays > 0 && <p className="tt-warn">Cut off from friendly supply for {detail.isolatedDays.toFixed(1)} days.</p>}
@@ -203,6 +210,19 @@ export function FormationPanel({ client, palette, places, routes, playAs, comman
 }
 
 /** Refused or failed orders, as the log words them: prefixed with the formation's name. */
+/** Today's weather in a line: what matters on land or at sea. */
+function weatherLine(c: Conditions): string {
+  const parts = [`${Math.round(c.tempC)}°C`, `low cloud ${Math.round(c.cloud * 100)}%`, `night ${c.nightHours.toFixed(1)} h`];
+  if (c.cyclone) parts.push('tropical cyclone');
+  if (c.sea) parts.push(`seas ${c.waveM.toFixed(1)} m`, `wind ${Math.round(c.windKt)} kt`);
+  else {
+    if (c.mud >= 0.1) parts.push(`mud ${Math.round(c.mud * 100)}%`);
+    if (c.snowCm >= 1) parts.push(`snow ${Math.round(c.snowCm)} cm`);
+    if (c.frozen) parts.push('ground frozen');
+  }
+  return parts.join(' · ');
+}
+
 function latestReport(client: SimClient, f: Formation): string | null {
   const prefix = `${f.name}: `;
   const rows = client.feed.rows.messages;
