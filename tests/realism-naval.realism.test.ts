@@ -105,6 +105,23 @@ describe('Taiwan 2027 naval war and invasion (CSIS "The First Battle of the Next
     expect(usSurface).toBeLessThanOrEqual(25);
   }, 300_000);
 
+  // CSIS base case: allied submarines, bombers and Taiwan's shore batteries sink most of the PLAN's amphibious
+  // fleet in the first weeks. Judgement: at least half the amphibious hulls by day 30.
+  it.each(SEEDS)('with the US in from the start, the PLAN loses most of its amphibious fleet (seed %i)', (seed) => {
+    const { m, start, usInWar } = taiwan(seed);
+    if (!usInWar) return;
+    expect((m.nations.CHN.lossesByClass.amphibious ?? 0) / (start.CHN.amphibious ?? 1)).toBeGreaterThanOrEqual(0.5);
+  }, 300_000);
+
+  // CSIS base case: China gets about 30,000 troops ashore, who are cut off once its shipping is sunk.
+  // Judgement: fewer than 80,000 PLA troops on Taiwan at day 30.
+  it.each(SEEDS)('with the US in from the start, the PLA has tens of thousands ashore, not hundreds of thousands (seed %i)', (seed) => {
+    const { m, usInWar } = taiwan(seed);
+    if (!usInWar) return;
+    expect(m.nations.CHN.naval?.troopsOnEnemySoil ?? 0).toBeGreaterThan(5_000);
+    expect(m.nations.CHN.naval?.troopsOnEnemySoil ?? 0).toBeLessThan(80_000);
+  }, 300_000);
+
   // CSIS base case: the PLA gets ashore but cannot be sustained once its shipping is attrited; Taipei never falls.
   it('with the US in from the start, the landing fails or holds a small lodgement without breakout in most seeds, and Taipei holds in every seed', () => {
     const runs = SEEDS.map(taiwan).filter((r) => r.usInWar);
