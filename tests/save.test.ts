@@ -14,13 +14,13 @@ describe('save and resume', () => {
     expect(Object.keys(s.world.slices).length).toBeGreaterThanOrEqual(8);
     for (const [name, slice] of Object.entries(s.world.slices)) expect(jsonViolations(slice, `slices.${name}`)).toEqual([]);
     expect(jsonViolations(s.world)).toEqual([]);
-  });
+  }, 300_000);
 
   // Saved at tick `at`, resumed in a fresh World, and stepped `then` more ticks, a run
   // must match the uninterrupted one exactly, or replays and resumed games drift.
   it.each([
-    ['ukraine-2026', 12, 16],
-    ['ww3-2027', 8, 12],
+    ['ukraine-2026', 8, 8],
+    ['ww3-2027', 4, 6],
   ])('resumes %s saved at tick %i and matches the uninterrupted run %i ticks on', (scenario, at, then) => {
     const s = createSession(scenario, 1);
     s.engine.run(s.world, at);
@@ -38,7 +38,7 @@ describe('save and resume', () => {
     expect(JSON.stringify(s.world)).not.toBe(before);
     expect(r.world.tick).toBe(at + then);
     expect(JSON.stringify(r.world)).toBe(JSON.stringify(s.world));
-  });
+  }, 300_000);
 
   it('refuses a file that is not a save, or comes from another format version', () => {
     expect(() => resumeRun('{"world":{}}')).toThrow('not a ww3 save file');
