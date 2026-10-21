@@ -88,7 +88,7 @@ export interface Assessment {
   /** Share of homeland population/industry held by someone else. */
   popLost: number;
   capitalLost: boolean;
-  /** Enemy control or ground forces within two cells (~200 km) of the capital. */
+  /** Enemy control or ground forces within 200 km of the capital. */
   capitalThreatened: boolean;
 }
 
