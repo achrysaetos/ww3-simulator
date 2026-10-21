@@ -9,7 +9,7 @@ import { delegated } from '../orders';
 import type { NetworkSearch } from './network';
 import { refreshNetworks, searchesOf, snapshotInputs, type NetworkState } from './refresh';
 import {
-  FOOD_TONS_PER_PERSON_DAY, BEACH_CAPACITY, FRONT_REPAIR_SHARE, INFRA_REPAIR_PER_DAY, LIFT_TONS_PER_TROOP, LIFT_TONS_PER_VEHICLE, MAX_REFILL_FRACTION_PER_DAY, NODE_TONS_PER_DAY,
+  FOOD_TONS_PER_PERSON_DAY, BEACH_CAPACITY, CAPTURED_INFRASTRUCTURE, CAPTURED_REPAIR_SHARE, FRONT_REPAIR_SHARE, INFRA_REPAIR_PER_DAY, LIFT_TONS_PER_TROOP, LIFT_TONS_PER_VEHICLE, MAX_REFILL_FRACTION_PER_DAY, NODE_TONS_PER_DAY,
   MIN_BRIGADE_PERSONNEL, PEACETIME_READINESS_HOURS_PER_DAY, RAISE_EVERY_DAYS, RAISE_TRAINING_DAYS, READINESS_HOURS_PER_DAY, REARM_PER_DAY, REARMS_IN_PORT_ONLY, RESERVE_BUFFER_SHARE, SEALIFT_CLASSES, RECONSTITUTE_DAYS, RECONSTITUTE_MIN_STRENGTH, RECONSTITUTED_KINDS, REGENERATED_CLASSES,
   REPAIR_FRACTION_PER_DAY, REPLACE_FRACTION_PER_DAY, RESERVE_REPLACE_MULTIPLIER, SUPPLY_CLASSES, type SupplyClass,
 } from './tables';
@@ -73,7 +73,7 @@ function forcesFactor(s: LogisticsState, search: NetworkSearch, node: NodeId, na
 }
 
 const initialState = (world: World): LogisticsState => ({
-  networks: {}, networkOf: {}, seen: snapshotInputs(world), establishment: {}, fallen: {}, lift: {}, short: {}, raised: {}, raising: [], peaceBurn: {},
+  networks: {}, networkOf: {}, seen: snapshotInputs(world), establishment: {}, fallen: {}, lift: {}, short: {}, raised: {}, raising: [], captured: {}, peaceBurn: {},
 });
 
 export const logistics: System = {
@@ -98,8 +98,9 @@ export const logistics: System = {
     fieldRaised(world, ctx, s);
     const forces = activeFormations(world, ctx, s);
     raiseFromReserves(world, ctx, s);
+    demolishCaptured(world, ctx, s);
     refreshNetworks(world, ctx.map, s, forces);
-    repairInfrastructure(world, ctx, dtDays);
+    repairInfrastructure(world, ctx, s, dtDays);
     sustain(world, ctx, s, forces, dtDays);
   },
 };
@@ -136,10 +137,30 @@ function liftTons(p: Platform): number {
   return c?.cargoTons ?? (c?.vehicles ?? 0) * LIFT_TONS_PER_VEHICLE + (c?.troops ?? 0) * LIFT_TONS_PER_TROOP;
 }
 
-/** Repair crews restore cells their controller holds, at FRONT_REPAIR_SHARE of the rate along the front where work is under fire. */
-function repairInfrastructure(world: World, ctx: SimContext, dtDays: number): void {
+/**
+ * Cells that changed hands in war since logistics last looked lose their infrastructure to the
+ * retreating side's demolitions, down to CAPTURED_INFRASTRUCTURE of what was there, and stay
+ * marked as captured ground until rebuilt. Read before the network refresh takes in the new control.
+ */
+function demolishCaptured(world: World, ctx: SimContext, s: LogisticsState): void {
+  const infra = world.theater.infrastructure, control = world.control, before = s.seen.control;
+  s.captured ??= {};
+  for (let n = 0; n < ctx.map.landCount; n++) {
+    const was = before[n], now = control[n];
+    if (was === now || !was || !now || !atWar(world, was, now)) continue;
+    infra[n] *= CAPTURED_INFRASTRUCTURE;
+    s.captured[n] = world.tick;
+  }
+}
+
+/**
+ * Repair crews restore cells their controller holds, at FRONT_REPAIR_SHARE of the rate along the front
+ * where work is under fire, and at CAPTURED_REPAIR_SHARE on ground taken in war until it is rebuilt.
+ */
+function repairInfrastructure(world: World, ctx: SimContext, s: LogisticsState, dtDays: number): void {
   const infra = world.theater.infrastructure, map = ctx.map, control = world.control;
   const step = INFRA_REPAIR_PER_DAY * dtDays;
+  for (const key in s.captured) if (infra[Number(key)] >= 1) delete s.captured[Number(key)];
   for (let n = 0; n < map.landCount; n++) {
     if (infra[n] >= 1) continue;
     const c = control[n];
@@ -149,7 +170,8 @@ function repairInfrastructure(world: World, ctx: SimContext, dtDays: number): vo
       const o = control[map.adj[k]];
       front = !!o && atWar(world, o, c);
     }
-    infra[n] = Math.min(1, infra[n] + (front ? FRONT_REPAIR_SHARE * step : step));
+    const rate = (front ? FRONT_REPAIR_SHARE : 1) * (s.captured[n] !== undefined ? CAPTURED_REPAIR_SHARE : 1);
+    infra[n] = Math.min(1, infra[n] + rate * step);
   }
 }
 

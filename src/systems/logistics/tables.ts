@@ -228,6 +228,25 @@ export const INFRA_REPAIR_PER_DAY = 0.03;
  */
 export const FRONT_REPAIR_SHARE = 0.5;
 
+/**
+ * Share of a cell's infrastructure left when it changes hands in war, and its railway is closed until
+ * rebuilt. A retreating army blows its rail bridges and junctions and takes the rolling stock: in 2022
+ * Ukrzaliznytsia evacuated its trains and demolished bridges ahead of the Russian advance, and Russia
+ * could not run supply on the Ukrainian lines it overran, so its Kyiv axis stalled on trucks about
+ * 100 km from Belarusian railheads (RUSI, "Operation Z", 2022; Watling and Reynolds). Roads survive
+ * with blown bridges and craters, so the cell keeps most of its road capacity. Judgment.
+ */
+// param: tag=estimated range=[0.5,0.9] source=RUSI Operation Z 2022 (judgment)
+export const CAPTURED_INFRASTRUCTURE = 0.7;
+/**
+ * Share of the repair rate on ground taken from the enemy until it is rebuilt: the captor's railway
+ * troops, not the nation's own rail company and contractors, relay demolished track and bridges, and
+ * the 1944 Allied advance and Russia's 2022 southern rail reopened in weeks to months (Ruppenthal,
+ * Logistical Support of the Armies vol. 2; ISW on the Melitopol-Crimea line). Judgment.
+ */
+// param: tag=estimated range=[0.1,0.5] source=judgment; Ruppenthal 1959
+export const CAPTURED_REPAIR_SHARE = 0.25;
+
 /** Formation kinds that occupy ground and block enemy supply through their cell. */
 export const LAND_KINDS: ReadonlySet<FormationKind> = new Set(['maneuver', 'artillery', 'air_defense', 'missile', 'logistics', 'strategic']);
 

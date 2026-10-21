@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { NationId, PlatformId } from '../src/core/types';
 import { createSession } from '../src/scenarios';
+import { supplyFactor } from '../src/systems/logistics';
 
 /** Steps a session `days` days, handing each tick's events to `on`. */
 function runDays(s: ReturnType<typeof createSession>, days: number, on?: (events: ReturnType<typeof s.engine.step>, day: number) => void): void {
@@ -112,5 +113,34 @@ describe('raising formations (LE-2)', () => {
     expect(fresh()).toEqual([]);
     runDays(s, 6);
     expect(fresh().map((f) => [f.nation, f.kind, f.personnel, f.node])).toEqual([[pol, 'maneuver', drawn, nation.capital]]);
+  }, 120_000);
+});
+
+describe('end of the supply line (LE-3)', () => {
+  // Kyiv axis, 2022: Russia could not run trains on the Ukrainian rail it overran and stalled ~100 km past its
+  // Belarusian railheads (RUSI, Operation Z). On main a corridor 350 km deep was fed as well as the border cell.
+  it('ukraine-2026: a corridor seized from the Belarus border to 49N is fed by road, thinning with depth, for weeks', () => {
+    const s = createSession('ukraine-2026', 1);
+    const { world, map } = s;
+    const rus = 'RUS' as NationId;
+    runDays(s, 1);
+    const spine = [51.9, 51.1, 50.3, 49.5, 49.0].map((lat) => map.nodeAt(lat, 30.3));
+    const band = new Set<number>();
+    for (const n of spine) {
+      band.add(n);
+      for (const v of map.neighbors(n)) if (!map.isSea(v) && map.owner[v] !== 'BLR') band.add(v);
+    }
+    const hold = () => { for (const n of band) world.control[n] = rus; };
+    hold();
+    const template = Object.values(world.formations).find((f) => f.nation === rus && f.kind === 'maneuver')!;
+    for (const n of spine) world.formations[`corridor${n}` as never] = { ...structuredClone(template), id: `corridor${n}` as never, node: n as never, home: n as never };
+    const border = spine[0], deep = spine[spine.length - 1];
+    const deepSupply: number[] = [];
+    for (let week = 1; week <= 4; week++) {
+      for (let d = 0; d < 7; d++) { runDays(s, 1); hold(); }
+      deepSupply.push(supplyFactor(world, map, deep, rus));
+    }
+    for (const phi of deepSupply) expect(phi).toBeLessThan(0.3);
+    expect(supplyFactor(world, map, border, rus)).toBeGreaterThan(2 * deepSupply[3]);
   }, 120_000);
 });

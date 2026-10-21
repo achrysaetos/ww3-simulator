@@ -156,6 +156,8 @@ interface Workspace {
   readonly railCost: Float32Array;
   readonly portCap: Float32Array;
   readonly blocked: Uint8Array;
+  /** 1 on cells whose railway is closed (SearchInputs.captured) while a search runs. */
+  readonly unrailed: Uint8Array;
   readonly seaQ: Float64Array;
   /** Frontline memo, valid where frontStamp equals stamp. */
   readonly frontStamp: Int32Array;
@@ -184,7 +186,7 @@ function workspaceFor(map: GameMap): Workspace {
     w = {
       adjStart: map.adjStart, adj: map.adj, landCount: map.landCount,
       mode: net.mode, roadCost: net.roadCost, railCost: net.railCost, portCap: net.portCap,
-      blocked: new Uint8Array(size), seaQ: new Float64Array(size), frontStamp: new Int32Array(size), front: new Uint8Array(size), stamp: 0,
+      blocked: new Uint8Array(size), unrailed: new Uint8Array(size), seaQ: new Float64Array(size), frontStamp: new Int32Array(size), front: new Uint8Array(size), stamp: 0,
       heap: new MaxHeap(), reopened: [],
       state: new Uint16Array(0), cap: new Float64Array(0), cost: new Float64Array(0), parent: new Int32Array(0), side: new Uint8Array(0), cell: new Uint16Array(0), infra: [],
     };
@@ -205,7 +207,7 @@ const valueOf = (w: Workspace, x: number): number => {
  * are cheap and the last truck leg from the railhead dominates.
  */
 function relaxEdges(w: Workspace, u: number, from: number, to: number): void {
-  const { adj, adjStart, landCount, mode, roadCost, railCost, portCap, cap, cost, parent, blocked, seaQ, frontStamp, front, stamp, heap, state, side, cell, infra } = w;
+  const { adj, adjStart, landCount, mode, roadCost, railCost, portCap, cap, cost, parent, blocked, unrailed, seaQ, frontStamp, front, stamp, heap, state, side, cell, infra } = w;
   const capU = cap[u], costU = cost[u];
   for (let k = from; k < to; k++) {
     const v = adj[k];
@@ -228,7 +230,7 @@ function relaxEdges(w: Workspace, u: number, from: number, to: number): void {
       default: {
         if (side[cell[v]] !== FRIENDLY) continue;
         q = infra[v];
-        const rail = mode[k] === Mode.Rail && infra[u] >= RAIL_CUT && q >= RAIL_CUT;
+        const rail = mode[k] === Mode.Rail && infra[u] >= RAIL_CUT && q >= RAIL_CUT && !unrailed[u] && !unrailed[v];
         c = (rail ? railCost[k] : roadCost[k]) / (0.25 + 0.75 * q);
         if (frontStamp[v] !== stamp) {
           frontStamp[v] = stamp;
@@ -289,6 +291,8 @@ const NO_F64 = new Float64Array(0), NO_I32 = new Int32Array(0);
 export interface SearchInputs {
   control: readonly (NationId | undefined)[];
   infrastructure: readonly number[];
+  /** Cells whose railway is closed until rebuilt, so traffic moves by road. */
+  captured?: readonly number[];
   sea: Readonly<Record<number, { nation: NationId; level: number }>>;
   air: Readonly<Record<number, { nation: NationId; level: number }>>;
 }
@@ -551,6 +555,7 @@ export class NetworkSearch {
     w.infra = inputs.infrastructure;
     w.stamp++;
     for (const n of this.blocked) w.blocked[n] = 1;
+    for (const n of inputs.captured ?? []) w.unrailed[n] = 1;
     w.heap.load(this.heapIds, this.heapKeys, this.heapSize);
     w.seaQ.fill(1, w.landCount);
     const sea = inputs.sea;
@@ -571,6 +576,7 @@ export class NetworkSearch {
       this.heapLive = w.heap.size;
     }
     for (const n of this.blocked) w.blocked[n] = 0;
+    w.unrailed.fill(0);
     [this.heapIds, this.heapKeys, this.heapSize] = w.heap.save();
   }
 }
