@@ -89,7 +89,7 @@ export function FormationPanel({ client, palette, places, routes, playAs, comman
       )}
 
       <Section title="Situation">
-        <p className="activity" data-testid="activity">{activity(detail, (n) => places.name(n), (id) => client.state.nations.get(id)?.name ?? id)}</p>
+        <p className="activity" data-testid="activity">{activity(detail, (n) => places.name(n), (id) => client.state.nations.get(id)?.name ?? id, client.namer.formation)}</p>
         {report && <p className="tt-warn small" data-testid="report">Latest report: {report}</p>}
         <div className="stat-grid">
           <Stat label="Location"><a onClick={() => onFocus(f.node)}>{places.name(f.node)}</a></Stat>
@@ -303,11 +303,13 @@ const DOING: Record<Posture, (target: string) => string> = {
 };
 
 /** One line on what the unit is doing now and what is happening to it. */
-export function activity(d: FormationDetail, place: (n: NodeId) => string, nationName: (id: NationId) => string): string {
+export function activity(d: FormationDetail, place: (n: NodeId) => string, nationName: (id: NationId) => string, formationName?: (id: FormationId) => string | undefined): string {
   const f = d.formation;
   if (f.status === 'destroyed') return 'Destroyed.';
   if (f.status === 'embarked') return `Embarked${f.embarkedOn ? ` on ${f.embarkedOn}` : ''}, at sea.`;
   const parts = [DOING[f.order.posture](place(f.order.target ?? f.node))];
+  const escorted = f.order.posture === 'escort' && f.order.targetFormation ? formationName?.(f.order.targetFormation) : undefined;
+  if (escorted) parts[0] = `Escorting ${escorted} near ${place(f.order.target ?? f.node)}`;
   if (f.order.targetClass && f.order.posture === 'strike') parts[0] += ` (${f.order.targetClass} targets)`;
   if (f.order.path?.length) parts.push(`${f.order.path.length} ${f.order.path.length === 1 ? 'cell' : 'cells'} to go`);
   if (f.status === 'routed') parts.push('routed and falling back');
