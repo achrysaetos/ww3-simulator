@@ -215,11 +215,23 @@ export function NationPanel({ client, palette, playAs, objectives, onCommand, on
 }
 
 function Delegation({ d, onCommand }: { d: NationDetail; onCommand: Props['onCommand'] }) {
-  const ai = d.authority.ai;
+  // A change takes effect on the next tick; show it at once and drop the draft when the World agrees.
+  const [draft, setDraft] = useState<Partial<Record<CommandDomain, boolean>>>({});
+  const live = d.authority.ai;
+  const settled = COMMAND_DOMAINS.filter((k) => draft[k] !== undefined && draft[k] === live[k]);
+  if (settled.length) setDraft((x) => Object.fromEntries(Object.entries(x).filter(([k]) => !settled.includes(k as CommandDomain))));
+  const ai = Object.fromEntries(COMMAND_DOMAINS.map((k) => [k, draft[k] ?? live[k]])) as Record<CommandDomain, boolean>;
   const all = COMMAND_DOMAINS.every((k) => ai[k]);
   const none = COMMAND_DOMAINS.every((k) => !ai[k]);
-  const set = (domain: CommandDomain, on: boolean) => onCommand({ type: 'delegate', nation: d.id, domain, ai: on }, `${DOMAIN_LABEL[domain].name}: ${on ? 'delegated to the AI' : 'under your command'}`);
-  const setAll = (on: boolean) => COMMAND_DOMAINS.forEach((k) => ai[k] !== on && onCommand({ type: 'delegate', nation: d.id, domain: k, ai: on }, on ? 'Everything delegated to the AI' : 'You command everything yourself'));
+  const set = (domain: CommandDomain, on: boolean) => {
+    setDraft((x) => ({ ...x, [domain]: on }));
+    onCommand({ type: 'delegate', nation: d.id, domain, ai: on }, `${DOMAIN_LABEL[domain].name}: ${on ? 'delegated to the AI' : 'under your command'}`);
+  };
+  const setAll = (on: boolean) => COMMAND_DOMAINS.forEach((k) => {
+    if (ai[k] === on) return;
+    setDraft((x) => ({ ...x, [k]: on }));
+    onCommand({ type: 'delegate', nation: d.id, domain: k, ai: on }, on ? 'Everything delegated to the AI' : 'You command everything yourself');
+  });
   return (
     <div className="delegation" data-testid="delegation">
       <div className="field-label">AI delegate <span className="muted">commands what you hand it, except formations you have ordered</span></div>
@@ -227,7 +239,7 @@ function Delegation({ d, onCommand }: { d: NationDetail; onCommand: Props['onCom
         <label key={k} className="chk deleg" title={`The AI decides ${DOMAIN_LABEL[k].what}`}>
           <input type="checkbox" checked={ai[k]} onChange={(e) => set(k, e.target.checked)} data-testid={`delegate-${k}`} />
           <span>{DOMAIN_LABEL[k].name}</span>
-          <span className={`deleg-who ${ai[k] ? 'ai' : 'you'}`}>{ai[k] ? 'AI' : 'You'}</span>
+          <span className={`deleg-who ${ai[k] ? 'ai' : 'you'}`}>{ai[k] ? 'AI' : 'You'}{draft[k] !== undefined ? ' · next tick' : ''}</span>
         </label>
       ))}
       <div className="row gap">

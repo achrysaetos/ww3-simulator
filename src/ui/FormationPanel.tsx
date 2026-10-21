@@ -309,7 +309,7 @@ export function activity(d: FormationDetail, place: (n: NodeId) => string, natio
   if (f.status === 'embarked') return `Embarked${f.embarkedOn ? ` on ${f.embarkedOn}` : ''}, at sea.`;
   const parts = [DOING[f.order.posture](place(f.order.target ?? f.node))];
   if (f.order.targetClass && f.order.posture === 'strike') parts[0] += ` (${f.order.targetClass} targets)`;
-  if (f.order.path?.length) parts.push(`${f.order.path.length} cells to go`);
+  if (f.order.path?.length) parts.push(`${f.order.path.length} ${f.order.path.length === 1 ? 'cell' : 'cells'} to go`);
   if (f.status === 'routed') parts.push('routed and falling back');
   if (d.engaged) parts.push('in contact with the enemy');
   if (f.order.posture === 'defend' && f.entrenchment > 0.05) parts.push(`${Math.round(f.entrenchment * 100)}% dug in`);

@@ -330,7 +330,7 @@ function Command({ client, palette, initialNation }: { client: SimClient; palett
           <span><i className="lg-fallout" /> Fallout</span>
         </div>
         {d && <Decisions client={client} d={d} onCommand={sendCommand} />}
-        {targeting && <div className={`target-banner ${targeting}`}>{targeting === 'nuclear' ? 'Select nuclear aim point' : pending?.lift ? `Select destination overseas: deploy by ${pending.lift === 'air' ? 'airlift' : 'sealift'}` : `Select target: ${pending?.posture.replace(/_/g, ' ')}`} · Esc to cancel</div>}
+        {targeting && <div className={`target-banner ${targeting}`}><button className="small-btn" onClick={() => { setPending(null); setNuclearPick(false); }} data-testid="cancel-target">Cancel</button> {targeting === 'nuclear' ? 'Select nuclear aim point' : pending?.lift ? `Select destination overseas: deploy by ${pending.lift === 'air' ? 'airlift' : 'sealift'}` : `Select target: ${pending?.posture.replace(/_/g, ' ')}`} · Esc to cancel</div>}
         {toast && <div className={`toast ${toast.tone}`} data-testid="toast" role="status">{toast.text}</div>}
         {client.error && <div className="toast error">Simulation error: {client.error}</div>}
       </main>
