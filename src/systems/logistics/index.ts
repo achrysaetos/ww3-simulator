@@ -1,4 +1,5 @@
 import { atWar, type SimContext, type System } from '../../core/engine';
+import type { Catalog } from '../../core/catalog';
 import type { GameMap } from '../../core/map';
 import type { Formation, FormationId, MunitionId, NationId, NodeId, Platform, PlatformId, World } from '../../core/types';
 import { AIRFRAME } from '../air/tables';
@@ -139,12 +140,12 @@ function sustain(world: World, ctx: SimContext, s: LogisticsState, forces: Forma
   const { tons: nodeTons, factor: nodeFactor } = nodeScratch(ctx.map);
   const ashore = new Uint8Array(n), beachTons = new Map<NationId, number>();
   // Hoisted: dev loaders (vitest, tsx) compile imported bindings to getters, which dominates this loop.
-  const refill = MAX_REFILL_FRACTION_PER_DAY * dtDays, hours = READINESS_HOURS_PER_DAY, food = FOOD_TONS_PER_PERSON_DAY * dtDays;
-  const { networkOf } = s, searches = searchesOf(s, ctx.map).byKey;
+  const refill = MAX_REFILL_FRACTION_PER_DAY * dtDays, food = FOOD_TONS_PER_PERSON_DAY * dtDays;
+  const { networkOf } = s, searches = searchesOf(s, ctx.map).byKey, upkeep = upkeepOf(ctx.catalog);
 
   for (let i = 0; i < n; i++) {
     const f = forces[i];
-    consumeBaseline(f, ctx, hours, dtDays, food);
+    consumeBaseline(f, upkeep, dtDays, food);
     const search = searches.get(networkOf[f.nation]);
     const supply = search ? forcesFactor(s, search, f.node, f.nation) : undefined;
     const phi = (factor[i] = supply?.phi ?? 0);
@@ -204,9 +205,9 @@ function sustain(world: World, ctx: SimContext, s: LogisticsState, forces: Forma
       have.food = Math.min(cap.food, have.food + want[j + 2] * sh[2]);
     }
     repair(f, ctx, phi * REPAIR_FRACTION_PER_DAY * dtDays);
-    replace(world, ctx, f, s.establishment[f.id], phi * REPLACE_FRACTION_PER_DAY * dtDays * (f.order.posture === 'reserve' ? RESERVE_REPLACE_MULTIPLIER : 1));
+    replace(world, ctx, upkeep, f, s.establishment[f.id], phi * REPLACE_FRACTION_PER_DAY * dtDays * (f.order.posture === 'reserve' ? RESERVE_REPLACE_MULTIPLIER : 1));
   }
-  rearm(world, ctx, s, forces, factor, dtDays);
+  rearm(world, ctx, upkeep, forces, factor, dtDays);
 }
 
 const nodeScratches = new WeakMap<GameMap, { tons: Float64Array; factor: Float64Array }>();
@@ -224,18 +225,19 @@ function nodeScratch(map: GameMap): { tons: Float64Array; factor: Float64Array }
  * friendly port. A nation's stock of each munition is shared pro rata when it cannot
  * cover every request. Rounds an ORBAT carries beyond the loadouts are not topped up.
  */
-function rearm(world: World, ctx: SimContext, s: LogisticsState, forces: Formation[], factor: Float64Array, dtDays: number): void {
+function rearm(world: World, ctx: SimContext, upkeep: Upkeep, forces: Formation[], factor: Float64Array, dtDays: number): void {
   const requests: { f: Formation; m: MunitionId; want: number; asked: Map<MunitionId, number> }[] = [];
   const askedBy = new Map<NationId, Map<MunitionId, number>>();
   const landCount = ctx.map.landCount;
-  const load = new Map<MunitionId, number>();
+  const load = loadScratch;
   for (let i = 0; i < forces.length; i++) {
     const f = forces[i], phi = factor[i];
     const rate = REARM_PER_DAY[f.kind] * phi * dtDays;
     if (rate <= 0 || (REARMS_IN_PORT_ONLY.has(f.kind) && f.node >= landCount)) continue;
     const stock = world.nations[f.nation].stockpile;
-    fullLoad(f, ctx, load);
-    for (const [m, full] of load) {
+    fullLoad(f, upkeep, load);
+    for (let j = 0; j < load.munitions.length; j++) {
+      const m = load.munitions[j], full = load.rounds[j];
       const missing = full - (f.magazine[m] ?? 0);
       if (missing <= 0 || !((stock[m] ?? 0) >= 1)) continue;
       const want = Math.min(missing, full * rate);
@@ -254,12 +256,31 @@ function rearm(world: World, ctx: SimContext, s: LogisticsState, forces: Formati
   }
 }
 
-/** Fills `out` with the rounds of each munition the formation's platforms carry at full load. */
-function fullLoad(f: Formation, ctx: SimContext, out: Map<MunitionId, number>): void {
-  out.clear();
+/** Rounds of each munition at full load, in the order the formation's platforms first name them. */
+interface FullLoad {
+  readonly at: Map<MunitionId, number>;
+  readonly munitions: MunitionId[];
+  readonly rounds: number[];
+}
+
+const loadScratch: FullLoad = { at: new Map(), munitions: [], rounds: [] };
+
+/** Fills `out` with the rounds the formation's platforms carry at full load. */
+function fullLoad(f: Formation, upkeep: Upkeep, out: FullLoad): void {
+  const { at, munitions, rounds } = out;
+  at.clear();
+  munitions.length = rounds.length = 0;
   for (const key in f.equipment) {
     const n = f.equipment[key as PlatformId];
-    if (n > 0) for (const l of ctx.catalog.platform(key as PlatformId).loadout) out.set(l.munition, (out.get(l.munition) ?? 0) + l.count * n);
+    if (n > 0)
+      for (const l of upkeep.get(key as PlatformId)!.loadout) {
+        const j = at.get(l.munition);
+        if (j === undefined) {
+          at.set(l.munition, munitions.length);
+          munitions.push(l.munition);
+          rounds.push(l.count * n);
+        } else rounds[j] += l.count * n;
+      }
   }
 }
 
@@ -334,17 +355,49 @@ function drawBulk(world: World, ctx: SimContext, s: LogisticsState, id: NationId
  * the naval model charges a fleet's station-keeping for everything aboard, and the air
  * model flies an air wing's aircraft every day.
  */
-function consumeBaseline(f: Formation, ctx: SimContext, hours: typeof READINESS_HOURS_PER_DAY, dtDays: number, foodPerPerson: number): void {
+function consumeBaseline(f: Formation, upkeep: Upkeep, dtDays: number, foodPerPerson: number): void {
   if (!NAVAL_KINDS.has(f.kind)) {
     const flown = f.kind === 'air_wing';
     let fuel = 0;
     for (const pid in f.equipment) {
-      const p = ctx.catalog.platform(pid as PlatformId);
-      if (!(flown && AIRFRAME[p.class])) fuel += p.mobility.fuelTonsPerHour * hours[p.class] * f.equipment[pid as PlatformId];
+      const u = upkeep.get(pid as PlatformId)!;
+      if (!(flown && u.airframe)) fuel += u.readinessFuel * f.equipment[pid as PlatformId];
     }
     f.supply.fuel = Math.max(0, f.supply.fuel - fuel * dtDays);
   }
   f.supply.food = Math.max(0, f.supply.food - f.personnel * foodPerPerson);
+}
+
+/** What sustain reads of each platform, by id. */
+type Upkeep = ReadonlyMap<PlatformId, PlatformUpkeep>;
+
+interface PlatformUpkeep {
+  /** Fuel tons a day at readiness: the platform's hourly burn times its class's readiness hours. */
+  readinessFuel: number;
+  /** Flown by the air model, which charges its own fuel. */
+  airframe: boolean;
+  /** Re-formed without stock (REGENERATED_CLASSES). */
+  regenerated: boolean;
+  loadout: Platform['loadout'];
+}
+
+const upkeepCache = new WeakMap<Catalog, Upkeep>();
+
+/** The catalog's platforms as sustain reads them, built once per catalog. */
+function upkeepOf(catalog: Catalog): Upkeep {
+  let hit = upkeepCache.get(catalog);
+  if (!hit) {
+    const out = new Map<PlatformId, PlatformUpkeep>();
+    for (const [id, p] of catalog.platforms)
+      out.set(id, {
+        readinessFuel: p.mobility.fuelTonsPerHour * READINESS_HOURS_PER_DAY[p.class],
+        airframe: !!AIRFRAME[p.class],
+        regenerated: REGENERATED_CLASSES.has(p.class),
+        loadout: p.loadout,
+      });
+    upkeepCache.set(catalog, (hit = out));
+  }
+  return hit;
 }
 
 function repair(f: Formation, ctx: SimContext, p: number): void {
@@ -363,12 +416,12 @@ function repair(f: Formation, ctx: SimContext, p: number): void {
  * formation's establishment. Rifle squads re-form from the troops the formation has,
  * in proportion to its manpower, and trucks are requisitioned, so neither needs stock.
  */
-function replace(world: World, ctx: SimContext, f: Formation, est: Establishment, rate: number): void {
+function replace(world: World, ctx: SimContext, upkeep: Upkeep, f: Formation, est: Establishment, rate: number): void {
   const nation = world.nations[f.nation];
   const manned = Math.min(1, f.personnel / Math.max(1, est.personnel));
   for (const key in est.equipment) {
     const pid = key as PlatformId, full = est.equipment[pid];
-    const free = REGENERATED_CLASSES.has(ctx.catalog.platform(pid).class);
+    const free = upkeep.get(pid)!.regenerated;
     const missing = (free ? Math.floor(full * manned) : full) - (f.equipment[pid] ?? 0) - (f.damaged[pid] ?? 0);
     if (missing <= 0) continue;
     const stock = free ? Infinity : nation.stockpile[pid] ?? 0;
