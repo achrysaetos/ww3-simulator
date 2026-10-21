@@ -153,11 +153,11 @@ export const HQ: Readonly<Record<HqLevel, { fire: number; delayH: number; recove
 
 /**
  * Chance one precision weapon that reaches an HQ's cell hits the HQ (an imprecise one, a third of that):
- * a strike on something else in the cell, and a strike aimed at the command bunkers there (target
- * class 'hardened'), as Ukraine's 2022 HIMARS raids on Russian command posts located by their
- * emissions were. Estimates.
+ * a strike on something else in the cell, where a dispersed command post is a few km² of a cell of
+ * thousands, and a strike aimed at the command bunkers there (target class 'hardened'), as Ukraine's
+ * 2022 HIMARS raids on Russian command posts located by their emissions were. Estimates.
  */
-export const HQ_HIT_PER_WEAPON = 0.03;
+export const HQ_HIT_PER_WEAPON = 0.002;
 export const HQ_AIMED_HIT_PER_WEAPON = 0.15;
 /** Integrity a strike hit takes off an HQ. */
 export const HQ_HIT_DAMAGE = 0.6;
