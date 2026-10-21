@@ -52,21 +52,31 @@ describe('naval AI pre-war surge', () => {
 });
 
 describe('coastal defence against a landing', () => {
+  /**
+   * Rounds the battery fires in 14 days vary a lot by seed with when and where the lift stands
+   * inshore: 50-120 over seeds 1-12 at 4058e6e (mean 84, under 100 on 8 of 12). Holding rounds
+   * for a later salvo, the defect this guards, fired 35-42 per seed (1ef1549). So the test takes
+   * the mean of three seeds and asks for 60, about halfway between the defect's ceiling and the
+   * typical salvo.
+   */
   it("Taiwan's coastal missile brigade fires on the PLA lift off its beaches instead of holding its rounds for a later salvo", () => {
-    const s = createSession('taiwan-2027', 1);
-    const battery = Object.values(s.world.formations).find((f) => f.name.startsWith('Coastal Defense Command'))!;
-    const rounds = () => Object.values(battery.magazine).reduce((a, n) => a + n, 0);
-    const start = rounds();
-    let atLift = 0;
-    for (let i = 0; i < (14 * 24) / s.world.dtHours; i++) {
-      s.engine.step(s.world);
-      const t = battery.order.targetFormation ? s.world.formations[battery.order.targetFormation] : undefined;
-      if (battery.order.posture === 'strike' && t?.nation === 'CHN' && t.kind === 'surface_group') atLift++;
+    const fired: number[] = [];
+    for (const seed of [1, 2, 3]) {
+      const s = createSession('taiwan-2027', seed);
+      const battery = Object.values(s.world.formations).find((f) => f.name.startsWith('Coastal Defense Command'))!;
+      const rounds = () => Object.values(battery.magazine).reduce((a, n) => a + n, 0);
+      const start = rounds();
+      let atLift = 0;
+      for (let i = 0; i < (14 * 24) / s.world.dtHours; i++) {
+        s.engine.step(s.world);
+        const t = battery.order.targetFormation ? s.world.formations[battery.order.targetFormation] : undefined;
+        if (battery.order.posture === 'strike' && t?.nation === 'CHN' && t.kind === 'surface_group') atLift++;
+      }
+      expect(atLift).toBeGreaterThan(0);
+      fired.push(start - rounds());
     }
-    expect(atLift).toBeGreaterThan(0);
-    // The 120 HF-3s reach the lift where it stages, 300-400 km out; HF-2s (160 km) only once it closes the beach.
-    expect(start - rounds()).toBeGreaterThanOrEqual(100);
-  }, 120_000);
+    expect(fired.reduce((a, b) => a + b, 0) / fired.length).toBeGreaterThanOrEqual(60);
+  }, 360_000);
 });
 
 describe('naval AI standoff', () => {
