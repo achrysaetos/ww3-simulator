@@ -2,7 +2,7 @@ import type { System } from '../../core/engine';
 import type { FormationId, NationId, PlatformId } from '../../core/types';
 import { assess, enemyMap } from './assess';
 import { processEvents } from './escalation';
-import { checkCapitulation, negotiatedPeace, offerPeace, updateSupport } from './support';
+import { checkCapitulation, negotiatedPeace, offerPeace, reviewOffers, updateSupport } from './support';
 import type { DiplomacyInput } from './types';
 import { openUmbrellaCases, resolveUmbrella } from './umbrella';
 import { adoptWars, declareWar, invasions, neutralEntry, resolveJoins } from './wars';
@@ -47,10 +47,12 @@ export function createDiplomacy(input: DiplomacyInput = {}): System {
       }
       invasions(world, s, alliances, situation.invadedBy);
       resolveJoins(world, ctx, s, alliances, profiles);
-      if (world.tick % Math.max(1, Math.round(24 / world.dtHours)) === 0) neutralEntry(world, ctx, s, alliances, profiles);
+      const daily = world.tick % Math.max(1, Math.round(24 / world.dtHours)) === 0;
+      if (daily) neutralEntry(world, ctx, s, alliances, profiles);
       updateSupport(world, s, profiles);
       checkCapitulation(world, ctx, s);
       negotiatedPeace(world, ctx, s);
+      if (daily) reviewOffers(world, ctx, s);
     },
   };
 }

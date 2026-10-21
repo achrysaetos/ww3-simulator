@@ -64,7 +64,7 @@ export function warSupport(nation: World['nations'][NationId], rec: WarRecord, a
   const casualties = MUELLER_PER_DECADE * sensitivity * Math.log10(1 + perCapita);
   const territory = regime.elite * (TERRITORY_WEIGHT * (a?.popLost ?? 0) + (a?.capitalLost ? CAPITAL_LOSS : 0));
   const economy = regime.elite * TRADE_WEIGHT * (world.theater.tradeBlocked[nation.id] ?? 0);
-  const nuclear = NUCLEAR_SHOCK * (0.5 + 0.5 * sensitivity) * Math.min(3, rec.nuclearHits);
+  const nuclear = nation.nuclear.warheads > 0 ? 0 : NUCLEAR_SHOCK * (0.5 + 0.5 * sensitivity) * Math.min(3, rec.nuclearHits);
   const weariness = WEARINESS_PER_YEAR * sensitivity * (days / 365);
   return Math.min(1, Math.max(0, rec.baseline + rally - casualties - territory - economy - nuclear - weariness));
 }
@@ -145,7 +145,10 @@ export function checkCapitulation(world: World, ctx: SimContext, s: DiplomacySta
   }
 }
 
-/** Both sides of a dyad worn out after a month or more: armistice on current lines. */
+/**
+ * Both sides of a dyad worn out after a month or more: armistice on current lines. A human who
+ * kept strategic decisions is not signed up for it; the other side's offer is put to the player.
+ */
 export function negotiatedPeace(world: World, ctx: SimContext, s: DiplomacyState): void {
   for (const war of [...s.wars])
     for (const a of [...war.sides[0]])
@@ -153,24 +156,42 @@ export function negotiatedPeace(world: World, ctx: SimContext, s: DiplomacyState
         if (!atWar(world, a, b)) continue;
         const since = world.relations[relationKey(a, b)].warSince ?? world.tick;
         if (((world.tick - since) * world.dtHours) / 24 < MIN_WAR_DAYS_FOR_TERMS) continue;
-        if (world.nations[a].warSupport < EXHAUSTED_BELOW && world.nations[b].warSupport < EXHAUSTED_BELOW) makePeace(world, ctx, s, a, b, 'negotiated: armistice on current lines');
+        if (world.nations[a].warSupport >= EXHAUSTED_BELOW || world.nations[b].warSupport >= EXHAUSTED_BELOW) continue;
+        const [da, db] = [delegated(world, a, 'strategic'), delegated(world, b, 'strategic')];
+        if (da && db) makePeace(world, ctx, s, a, b, 'negotiated: armistice on current lines');
+        else if (da !== db && !s.offers[relationKey(a, b)]) offerPeace(world, ctx, s, da ? a : b, da ? b : a);
       }
 }
 
+/** Whether `to`, its strategic decisions in the AI's hands, takes `from`'s offer: its own support is low, or it is losing ground. */
+function aiAccepts(world: World, s: DiplomacyState, from: NationId, to: NationId): boolean {
+  if (!delegated(world, to, 'strategic')) return false;
+  const support = world.nations[to].warSupport;
+  const losing = (s.assessment[to]?.popLost ?? 0) > (s.assessment[from]?.popLost ?? 0);
+  return support < 0.4 || (losing && support < 0.55);
+}
+
 /**
- * A target whose strategic decisions the AI makes accepts when its own support is low or it is
- * losing ground; a human who kept strategic control accepts by sending its own offer back.
+ * A target whose strategic decisions the AI makes accepts per aiAccepts; a human who kept
+ * strategic control accepts by sending its own offer back. A refused offer stays on the table
+ * (see reviewOffers).
  */
 export function offerPeace(world: World, ctx: SimContext, s: DiplomacyState, from: NationId, to: NationId): void {
   if (!atWar(world, from, to)) return;
   const k = relationKey(from, to);
-  const target = world.nations[to];
-  const reciprocal = s.offers[k] === to;
-  const losing = (s.assessment[to]?.popLost ?? 0) > (s.assessment[from]?.popLost ?? 0);
-  const accepts = reciprocal || (delegated(world, to, 'strategic') && (target.warSupport < 0.4 || (losing && target.warSupport < 0.55)));
-  if (accepts) makePeace(world, ctx, s, from, to, 'negotiated: armistice on current lines');
+  if (s.offers[k] === to || aiAccepts(world, s, from, to)) makePeace(world, ctx, s, from, to, 'negotiated: armistice on current lines');
   else {
     s.offers[k] = from;
     ctx.emit({ type: 'message', tick: world.tick, nation: from, text: `${from} offers peace to ${to}` });
+  }
+}
+
+/** Open offers are weighed again as the war turns: an AI-run target takes one once aiAccepts holds. */
+export function reviewOffers(world: World, ctx: SimContext, s: DiplomacyState): void {
+  for (const [k, from] of Object.entries(s.offers)) {
+    const [a, b] = k.split('|') as [NationId, NationId];
+    const to = a === from ? b : a;
+    if (!atWar(world, from, to)) delete s.offers[k];
+    else if (aiAccepts(world, s, from, to)) makePeace(world, ctx, s, from, to, 'negotiated: armistice on current lines');
   }
 }
