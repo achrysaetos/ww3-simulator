@@ -6,14 +6,18 @@
  * bathymetry, lakes, rivers, roads, rails, urban areas, coast glow and borders
  * in RGB, and a land mask in alpha for the runtime territory tint.
  *
+ * Place names come from GeoNames cities5000 (CC BY 4.0, geonames.org).
+ *
  * Tile z/x/y spans 180/2^z degrees; x counts east from 180W, y south from 90N.
- * The whole world is cut to z3, the playable theatres deeper (THEATRES).
+ * The whole world is cut to z3, the playable theatres deeper (THEATRES), the
+ * opening fronts to z8.
  * Downloads are cached in .cache/tiles-src, so a rerun only re-renders.
  *
  *   npx tsx scripts/build-tiles.ts            # fetch what is missing, render everything
  *   npx tsx scripts/build-tiles.ts --only 6   # re-render one level
  *   npx tsx scripts/build-tiles.ts --keys 5/38/7,7/153/30   # re-render a few tiles to tune the look
  */
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -23,6 +27,7 @@ const CACHE = path.join(ROOT, '.cache/tiles-src');
 const OUT = path.join(ROOT, 'public/tiles');
 const ERDDAP = 'https://coastwatch.pfeg.noaa.gov/erddap/griddap/ETOPO_2022_v1_15s.dods';
 const NE = 'https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson';
+const GEONAMES = 'https://download.geonames.org/export/dump/cities5000.zip';
 const PLAYWRIGHT = '/opt/node-tools/node_modules/playwright/index.mjs';
 const CHROMIUM = '/opt/pw-browsers/chromium';
 export const TILE = 512;
@@ -54,6 +59,8 @@ const THEATRES: { z: number; boxes: Box[] }[] = [
   { z: 5, boxes: [[-12, 30, 62, 72], [58, 0, 148, 50]] },
   { z: 6, boxes: [[12, 40, 47, 62], [30, 22, 63, 41], [64, 18, 93, 38], [122, 32, 133, 44], [114, 19, 127, 29]] },
   { z: 7, boxes: [[29, 43.5, 41.5, 52.5], [19, 53, 30.5, 60.5], [124.5, 36, 130, 39.8], [118, 21.5, 123, 26.5]] },
+  // Front zoom over the lines that are fought over from the first day: Ukraine and the Korean DMZ.
+  { z: 8, boxes: [[32.5, 46.2, 39.8, 50.4], [125.5, 37.4, 129.5, 38.7]] },
 ];
 export const MAX_GLOBAL_Z = 3;
 const PAGE = '<!doctype html><meta charset="utf-8"><script src="d3-array.min.js"></script><script src="d3-geo.min.js"></script><script src="page.js"></script>';
@@ -141,6 +148,36 @@ function writeLights() {
   fs.writeFileSync(path.join(OUT, 'lights.json'), JSON.stringify(out));
 }
 
+/**
+ * Place names for the map labels, from GeoNames (CC BY 4.0): every town of
+ * 5,000 or more inside a theatre, so the front zoom can name Orikhiv and
+ * Tokmak, and cities of 150,000 or more elsewhere. Rows are
+ * [name, lon, lat, population, 2 national capital | 1 regional capital | 0].
+ */
+async function writePlaces() {
+  const zip = path.join(CACHE, 'cities5000.zip');
+  if (!fs.existsSync(zip)) {
+    const res = await retry(() => fetch(GEONAMES), 'geonames');
+    fs.writeFileSync(zip, Buffer.from(await res.arrayBuffer()));
+  }
+  const text = execFileSync('unzip', ['-p', zip, 'cities5000.txt'], { maxBuffer: 1 << 28 }).toString('utf8');
+  const theatres = THEATRES.find((t) => t.z === 6)!.boxes;
+  const inside = (lon: number, lat: number) => theatres.some((b) => lon >= b[0] && lon <= b[2] && lat >= b[1] && lat <= b[3]);
+  const rows: [string, number, number, number, number][] = [];
+  for (const line of text.split('\n')) {
+    const c = line.split('\t');
+    if (c.length < 15) continue;
+    const lat = Number(c[4]), lon = Number(c[5]), pop = Number(c[14]), code = c[7];
+    if (code === 'PPLX') continue;
+    const kind = code === 'PPLC' ? 2 : code === 'PPLA' ? 1 : 0;
+    if (pop < 150_000 && kind < 2 && !inside(lon, lat)) continue;
+    rows.push([c[1], Math.round(lon * 1000) / 1000, Math.round(lat * 1000) / 1000, pop, kind]);
+  }
+  rows.sort((a, b) => b[4] - a[4] || b[3] - a[3]);
+  fs.writeFileSync(path.join(OUT, 'places.json'), JSON.stringify(rows));
+  console.log(`places: ${rows.length}`);
+}
+
 async function render(only: number | null, keys: Set<string> | null) {
   const { chromium } = await import(PLAYWRIGHT);
   const browser = await chromium.launch({ executablePath: CHROMIUM, args: ['--js-flags=--max-old-space-size=8192'] });
@@ -201,6 +238,7 @@ async function main() {
   await pool(NE_LAYERS, 4, fetchNe);
   await pool(DEMS, 3, fetchDem);
   writeLights();
+  await writePlaces();
   if (process.argv.includes('--fetch-only')) return;
   await render(only, keys);
 }
