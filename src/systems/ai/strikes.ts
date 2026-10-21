@@ -438,7 +438,6 @@ export class SamCover {
   }
 }
 
-
 /** Great-circle test with a cheap latitude-band reject first; shooters test thousands of targets. */
 export function withinKm(map: GameMap, a: NodeId, b: NodeId, km: number): boolean {
   return Math.abs(map.lat[a] - map.lat[b]) * 111 <= km && map.distanceKm(a, b) <= km;
