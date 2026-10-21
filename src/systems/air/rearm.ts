@@ -1,10 +1,13 @@
 /**
- * Rearming air wings, missile brigades and air-defense units from national stocks.
- * A formation's full load is its platforms' loadouts; rounds carried beyond that
- * (an ORBAT's extra magazine) are spent first and never topped up.
+ * Rearming air wings, missile brigades and air-defense units from national stocks, where
+ * the supply chain reaches them: a battery cut off in a pocket, or a wing at a base the
+ * network cannot reach, does not reload. A formation's full load is its platforms'
+ * loadouts; rounds carried beyond that (an ORBAT's extra magazine) are spent first and
+ * never topped up.
  */
 import type { SimContext } from '../../core/engine';
 import type { Formation, FormationKind, ItemId, MunitionId, Nation, PlatformId, World } from '../../core/types';
+import { supplyFactor } from '../logistics';
 import { BULK_AMMO_KINDS, isRoundOnRail, REARM_SHARE_PER_DAY } from './tables';
 
 const REARMED: ReadonlySet<FormationKind> = new Set(['air_wing', 'missile', 'air_defense']);
@@ -13,6 +16,9 @@ export function rearm(world: World, ctx: SimContext): void {
   const share = REARM_SHARE_PER_DAY * (world.dtHours / 24);
   for (const f of Object.values(world.formations)) {
     if (f.status !== 'active' || !REARMED.has(f.kind)) continue;
+    // A carrier's wing draws on the ship's magazine, which the naval model does not track apart from it;
+    // a world run without the logistics system has no supply chain to limit it.
+    if (f.node < ctx.map.landCount && world.slices.logistics && supplyFactor(world, ctx.map, f.node, f.nation) <= 0) continue;
     const nation = world.nations[f.nation];
     for (const [mid, full, item] of fullLoad(f, ctx)) {
       const deficit = full - (f.magazine[mid] ?? 0);

@@ -5,6 +5,7 @@ import { loadMap } from '../src/data/load';
 
 const MAP = loadMap();
 import { logistics, supplyFactor } from '../src/systems/logistics';
+import { airWar } from '../src/systems/air';
 import { BEACH_CAPACITY, HOST_SUPPORT, INFRA_REPAIR_FRONT_SHARE, INFRA_REPAIR_PER_DAY, LAST_MILE_CAPACITY, NODE_TONS_PER_DAY } from '../src/systems/logistics/tables';
 
 const PLENTY = { fuel: 1e7, ammo: 1e7, food: 1e7 };
@@ -65,6 +66,23 @@ describe('logistics', () => {
     expect(f.supply.food).toBe(0);
     expect(f.supply.fuel).toBeLessThan(fuelBefore);
     expect(t.world.nations[id.nation('UKR')].bulk.food).toBe(bulkBefore);
+  });
+
+  it('reloads a missile brigade from national stocks only where the supply chain reaches it', () => {
+    const t = testWorld([logistics, airWar]);
+    const ukr = id.nation('UKR');
+    for (const n of Object.values(t.world.nations)) n.bulk = { ...PLENTY };
+    t.world.nations[ukr].stockpile[id.munition('t_srbm')] = 1_000;
+    const pocket = t.nodeAt(49.5, 33.5);
+    for (const n of t.map.neighbors(pocket)) t.world.control[n] = id.nation('RUS');
+    t.war('UKR', 'RUS');
+    const brigade = (node: NodeId) => t.add({ nation: ukr, name: 'missile brigade', kind: 'missile', echelon: 'brigade', node, equipment: { [id.platform('t_tel')]: 10 } });
+    const cut = brigade(pocket), rear = brigade(t.nodeAt(49.8, 24));
+    cut.magazine = {};
+    rear.magazine = {};
+    t.engine.run(t.world, 2 * DAY);
+    expect(rear.magazine[id.munition('t_srbm')] ?? 0).toBeGreaterThan(0);
+    expect(cut.magazine[id.munition('t_srbm')] ?? 0).toBe(0);
   });
 
   it('feeds forces fighting in an enemy-held cell across the line from friendly ground, at the last-mile share, but not a spearhead two cells deep', () => {
