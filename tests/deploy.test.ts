@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Command, Formation, NodeId } from '../src/core/types';
-import { createAi } from '../src/systems/ai';
+import { createAi, type Plan } from '../src/systems/ai';
+import { issue } from '../src/systems/ai/forces';
 import { applyLandOrder, landMovement } from '../src/systems/land';
 import { landMass } from '../src/systems/land/strategic';
 import { navalWar } from '../src/systems/naval';
@@ -133,5 +134,46 @@ describe('strategic deployment planning', () => {
     expect(t.map.ports[port]).toBeGreaterThan(0);
     expect(movesOf(cmds, guard)).toHaveLength(0);
     expect(movesOf(cmds, militia)).toHaveLength(0);
+  });
+});
+
+describe('refused orders', () => {
+  it('sends a refused order once, and again only when the formation moves or three days pass', () => {
+    const t = testWorld([createAi()]);
+    t.war('USA', 'RUS');
+    const brigade = heavyBrigade(t, 'USA', t.nodeAt(...FORT_HOOD));
+    for (let n = 0; n < t.map.landCount; n++) if (t.world.control[n] === N('USA') && t.map.ports[n]) t.world.control[n] = N('RUS');
+    const p = { world: t.world, ai: t.world.slices.ai, out: [] as Command[] } as unknown as Plan;
+    const ctx = t.engine.context(t.world);
+    const overseas = { posture: 'move', target: t.nodeAt(...BREMERHAVEN) } as const;
+    const pass = () => {
+      const before = p.out.length;
+      issue(p, brigade, overseas);
+      for (const c of p.out.slice(before)) if (c.type === 'order') applyLandOrder(t.world, c, ctx);
+      t.world.tick += 2;
+      return p.out.length - before;
+    };
+    expect(pass()).toBe(1);
+    expect(brigade.order.posture).toBe('defend');
+    let resent = 0;
+    for (let i = 0; i < 4; i++) resent += pass();
+    expect(resent).toBe(0);
+    brigade.node = t.nodeAt(32.5, -97.3);
+    expect(pass()).toBe(1);
+    for (let i = 0; i < 6; i++) resent += pass();
+    expect(resent).toBe(1);
+  });
+
+  it('sends an order again once the formation carried it out, as a wing re-flies a strike on the same target', () => {
+    const t = testWorld([createAi()]);
+    const wing = t.add({ nation: N('USA'), name: 'Bomb wing', kind: 'air_wing', echelon: 'wing', node: t.nodeAt(...FORT_HOOD), equipment: { [P('t_inf')]: 1 } });
+    const p = { world: t.world, ai: t.world.slices.ai, out: [] as Command[] } as unknown as Plan;
+    const strike = { posture: 'strike', target: t.nodeAt(...BREMERHAVEN) } as const;
+    issue(p, wing, strike);
+    wing.order = { ...strike, issuedTick: t.world.tick + 1 };
+    wing.order = { posture: 'defend', issuedTick: t.world.tick + 3 };
+    t.world.tick += 4;
+    issue(p, wing, strike);
+    expect(p.out).toHaveLength(2);
   });
 });

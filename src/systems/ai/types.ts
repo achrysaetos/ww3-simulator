@@ -1,6 +1,6 @@
 import type { Command, FormationId, NationId, NodeId } from '../../core/types';
 import type { SimContext } from '../../core/engine';
-import type { World, Formation } from '../../core/types';
+import type { World, Formation, Order } from '../../core/types';
 import type { StrategicProfile } from '../diplomacy/types';
 
 /** Something worth taking: an enemy capital, city, industrial cell or port. */
@@ -28,6 +28,14 @@ export interface AiState {
   deployments: Record<FormationId, NodeId>;
   /** Tick of each nation's last airborne operation. */
   airborne: Record<NationId, number>;
+  /** The last order sent to each formation; cleared when a front changes. */
+  sent: Record<FormationId, SentOrder>;
+}
+
+/** An order the AI sent a formation, and where the formation stood then. */
+export interface SentOrder extends Pick<Order, 'posture' | 'target' | 'targetFormation'> {
+  node: NodeId;
+  tick: number;
 }
 
 declare module '../../core/types' {

@@ -12,7 +12,8 @@ import { SCENARIOS, type Session } from '.';
 
 const FORMAT = 'ww3-save';
 // 2: land airheads and AI airborne operations.
-const VERSION = 2;
+// 3: the AI remembers the last order it sent each formation.
+const VERSION = 3;
 
 export interface SaveFile {
   format: typeof FORMAT;
