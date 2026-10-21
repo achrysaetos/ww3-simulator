@@ -8,7 +8,7 @@ import { blastFatalities, empDamage, empRadiusKm, overpressureRadiusKm, sspk, th
 import { depositFallout } from './fallout';
 import { addSoot } from './climate';
 import type { Burst, LaunchWarning, ReleaseRequest, Salvo } from './state';
-import { BMD_SYSTEMS, DISPERSION_KM2, EARLY_WARNING, IN_PORT, POINT_TARGET, SOOT_TONS_PER_PERSON, bmdCovers, hardnessPsi } from './tables';
+import { BMD_LEAKAGE, BMD_SYSTEMS, DISPERSION_KM2, EARLY_WARNING, IN_PORT, POINT_TARGET, SOOT_TONS_PER_PERSON, bmdCovers, hardnessPsi } from './tables';
 
 /** Decides whether a nation under a detected counterforce attack launches before impact. The AI system supplies it. */
 export type LaunchOnWarningHook = (world: World, warning: LaunchWarning, ctx: SimContext) => ReleaseRequest[];
@@ -82,14 +82,22 @@ function victimOf(world: World, node: NodeId, byNode: Map<number, Formation[]>, 
   return byNode.get(node)?.find((f) => f.nation !== attacker)?.nation;
 }
 
-function defend(world: World, ctx: SimContext, salvo: Salvo, kind: Munition['kind'], victim: NationId | undefined): number {
+/**
+ * Layered defence of one salvo. Each layer that covers the target engages the RVs still flying, less those it never
+ * gets a shot at (BMD_LEAKAGE) and those beyond what its fire units can take on this tick (`engaged`, by system).
+ */
+function defend(world: World, ctx: SimContext, salvo: Salvo, kind: Munition['kind'], victim: NationId | undefined, engaged: Map<string, number>): number {
   if (!victim) return 0;
   const stock = world.slices.strategic.interceptors;
   let intercepted = 0;
   for (const sys of BMD_SYSTEMS) {
     const left = salvo.warheads - intercepted;
     if (left <= 0 || !stock[sys.id] || !sys.engages.includes(kind) || !bmdCovers(sys, ctx.map, victim, salvo.target)) continue;
-    const r = interceptSalvo(ctx.rng, left, stock[sys.id], sys.pk, sys.shotsPerTarget);
+    const room = sys.perTick - (engaged.get(sys.id) ?? 0);
+    const shots = Math.min(room, ctx.rng.binomial(left, 1 - BMD_LEAKAGE()));
+    if (shots <= 0) continue;
+    engaged.set(sys.id, (engaged.get(sys.id) ?? 0) + shots);
+    const r = interceptSalvo(ctx.rng, shots, stock[sys.id], sys.pk, sys.shotsPerTarget);
     stock[sys.id] -= r.used;
     intercepted += r.killed;
   }
@@ -136,6 +144,7 @@ export function resolveSalvos(world: World, ctx: SimContext, onWarning: LaunchOn
   const s = world.slices.strategic;
   s.warnings = [];
   const asked = new Set<string>();
+  const engaged = new Map<string, number>();
   while (s.salvos.length) {
     const batch = s.salvos;
     s.salvos = [];
@@ -149,7 +158,7 @@ export function resolveSalvos(world: World, ctx: SimContext, onWarning: LaunchOn
     }
     for (const sv of batch) {
       const m = ctx.catalog.munition(sv.munition);
-      const intercepted = defend(world, ctx, sv, m.kind, victimOf(world, sv.target, byNode, sv.by));
+      const intercepted = defend(world, ctx, sv, m.kind, victimOf(world, sv.target, byNode, sv.by), engaged);
       const arriving = sv.warheads - intercepted;
       ctx.emit({ type: 'strike', tick: world.tick, by: sv.by, munition: sv.munition, fired: sv.warheads, intercepted, target: sv.target, effects: [{ kind: 'nuclear_detonations', count: arriving }] });
       if (arriving > 0) detonate(world, ctx, sv.by, sv.target, m, arriving, sv.burst ?? defaultBurst(byNode.get(sv.target) ?? [], sv.by, ctx.catalog), byNode);

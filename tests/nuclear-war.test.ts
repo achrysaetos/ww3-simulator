@@ -43,6 +43,24 @@ describe('city casualties', () => {
   });
 });
 
+describe('theatre missile defence', () => {
+  it('stops much of a North Korean MRBM and IRBM salvo on Korea and Japan, but some warheads leak through', () => {
+    const s = createSession('korea-2027', 1);
+    const prk = s.world.nations[N('PRK')];
+    prk.controlledBy = 'human';
+    prk.nuclear.deployed = prk.nuclear.warheads;
+    const city = (name: string) => s.map.cities.find((c) => c.name === name)!.node;
+    for (const [target, munition, warheads] of [['Busan', 'nodong', 6], ['Seoul', 'nodong', 6], ['Tokyo', 'hwasong12', 8]] as const)
+      s.world.pending.push({ type: 'nuclear_release', nation: N('PRK'), target: city(target), warheads, munition: munition as MunitionId });
+    const strikes = s.engine.step(s.world).filter((e) => e.type === 'strike' && e.by === 'PRK');
+    const fired = strikes.reduce((a, e) => a + (e.type === 'strike' ? e.fired : 0), 0);
+    const intercepted = strikes.reduce((a, e) => a + (e.type === 'strike' ? e.intercepted : 0), 0);
+    expect(fired).toBe(20);
+    expect(intercepted).toBeGreaterThan(fired / 2);
+    expect(intercepted).toBeLessThan(fired);
+  });
+});
+
 describe('SSBNs in port', () => {
   it('die to a warhead or two on the base, while the boat on patrol survives', () => {
     const s = createSession('peace-2027', 1);
