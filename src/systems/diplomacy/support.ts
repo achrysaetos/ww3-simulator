@@ -119,11 +119,12 @@ export function checkCapitulation(world: World, ctx: SimContext, s: DiplomacySta
     if (nation.status !== 'war') continue;
     const a = s.assessment[nation.id];
     const occupied = !!a && a.capitalLost && a.popLost >= OCCUPIED_COLLAPSE;
-    ground ??= groundStrength(world);
     const rec = s.records[nation.id];
-    const now = ground.get(nation.id) ?? 0;
-    const atEntry = rec ? (rec.groundAtEntry ??= now) : now;
+    const strength = () => (ground ??= groundStrength(world)).get(nation.id) ?? 0;
+    if (rec && rec.groundAtEntry === undefined) rec.groundAtEntry = strength();
     if (!occupied && nation.warSupport > CAPITULATE_BELOW) continue;
+    const now = strength();
+    const atEntry = rec?.groundAtEntry ?? now;
     const forcesLeft = atEntry > 0 ? Math.min(1, now / atEntry) : 0;
     if (meansToFight(forcesLeft, a, allied(world, s, nation.id)) >= REGIME[nation.government].yields) continue;
     const victors = enemiesOf(world, nation.id);
