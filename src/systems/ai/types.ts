@@ -15,6 +15,10 @@ export interface NuclearLadder {
   rung: number;
   /** Nuclear attacks on it already answered or let pass: homeland hits plus distinct attackers. */
   answered: number;
+  /** Tick of its first public nuclear warning, the signalling rung that must stand before first use. */
+  warnedTick?: number;
+  /** Nuclear strikes it has ordered in this war: the first is limited, later ones climb to the theatre and general rungs. */
+  strikes?: number;
 }
 
 export interface AiState {

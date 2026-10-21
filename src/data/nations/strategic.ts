@@ -55,17 +55,34 @@ const FRAGILE: Record<string, number> = {
  *   Oct 1973 nuclear alert came after early front-line collapse.
  * PRK: 2022 Law on the State Policy on Nuclear Forces, Art. 6: use when leadership or NC3 is attacked,
  *   when important strategic objects are struck, or to "take the initiative" as a war expands.
+ *
+ * Answers to a nuclear attack (`answer`):
+ * USA: NPR 2022 "flexible and tailored" options; counterforce targeting under the 2020 Report on
+ *   Nuclear Employment Strategy (no deliberate targeting of civilian populations).
+ * RUS: Fundamentals (2024) para. 4 and 18, retaliation "inevitable"; the escalation-control
+ *   literature (Kofman, Fink and Edmonds, CNA 2020) has calibrated, rising damage, forces first.
+ * CHN: 2019 white paper and Cunningham and Fravel (2015): a limited arsenal for assured retaliation
+ *   that can inflict unacceptable damage, with no doctrine of limited nuclear war: cities, at once.
+ * IND: 2003 doctrine: "nuclear retaliation to a first strike will be massive and designed to inflict
+ *   unacceptable damage".
+ * PAK: full-spectrum deterrence (Kidwai 2015): battlefield to strategic rungs, forces first.
+ * FRA: a single "final warning" before strikes on "centres of power" (Macron 2020).
+ * GBR: a minimum deterrent sized against Moscow (the Moscow criterion), so cities at the top rung.
+ * ISR, PRK: last-resort and regime-survival postures assessed as countervalue and massive.
  */
 const NUCLEAR_THRESHOLDS: Record<string, NuclearThreshold> = {
-  USA: { firstUse: true, coreLossShare: null, forceLossShare: null, economicLossShare: null, onStrategicAttack: true, onChemBio: true, coversAllies: true },
-  RUS: { firstUse: true, coreLossShare: 0.05, forceLossShare: 0.25, economicLossShare: null, onStrategicAttack: true, onChemBio: true, coversAllies: true },
-  CHN: { firstUse: false, coreLossShare: null, forceLossShare: null, economicLossShare: null, onStrategicAttack: true, onChemBio: false, coversAllies: false },
-  IND: { firstUse: false, coreLossShare: null, forceLossShare: null, economicLossShare: null, onStrategicAttack: false, onChemBio: true, coversAllies: false },
-  PAK: { firstUse: true, coreLossShare: 0.1, forceLossShare: 0.3, economicLossShare: 0.3, onStrategicAttack: true, onChemBio: true, coversAllies: false },
-  FRA: { firstUse: true, coreLossShare: 0.1, forceLossShare: null, economicLossShare: null, onStrategicAttack: true, onChemBio: false, coversAllies: true },
-  GBR: { firstUse: true, coreLossShare: 0.15, forceLossShare: null, economicLossShare: null, onStrategicAttack: true, onChemBio: true, coversAllies: true },
-  ISR: { firstUse: true, coreLossShare: 0.15, forceLossShare: 0.5, economicLossShare: null, onStrategicAttack: false, onChemBio: true, coversAllies: false },
-  PRK: { firstUse: true, coreLossShare: 0.05, forceLossShare: 0.2, economicLossShare: null, onStrategicAttack: true, onChemBio: true, coversAllies: false },
+  USA: { firstUse: true, coreLossShare: null, forceLossShare: null, economicLossShare: null, onStrategicAttack: true, onChemBio: true, coversAllies: true, answer: { scale: 'tailored', targets: 'counterforce' } },
+  RUS: {
+    firstUse: true, coreLossShare: 0.05, forceLossShare: 0.25, economicLossShare: null, onStrategicAttack: true, onChemBio: true, coversAllies: true,
+    navalLoss: { ssbnShare: 0.2, ssnShare: 0.3, cruisers: 3 }, answer: { scale: 'tailored', targets: 'counterforce' },
+  },
+  CHN: { firstUse: false, coreLossShare: null, forceLossShare: null, economicLossShare: null, onStrategicAttack: true, onChemBio: false, coversAllies: false, answer: { scale: 'massive', targets: 'countervalue' } },
+  IND: { firstUse: false, coreLossShare: null, forceLossShare: null, economicLossShare: null, onStrategicAttack: false, onChemBio: true, coversAllies: false, answer: { scale: 'massive', targets: 'countervalue' } },
+  PAK: { firstUse: true, coreLossShare: 0.1, forceLossShare: 0.3, economicLossShare: 0.3, onStrategicAttack: true, onChemBio: true, coversAllies: false, answer: { scale: 'tailored', targets: 'counterforce' } },
+  FRA: { firstUse: true, coreLossShare: 0.1, forceLossShare: null, economicLossShare: null, onStrategicAttack: true, onChemBio: false, coversAllies: true, answer: { scale: 'tailored', targets: 'countervalue' } },
+  GBR: { firstUse: true, coreLossShare: 0.15, forceLossShare: null, economicLossShare: null, onStrategicAttack: true, onChemBio: true, coversAllies: true, answer: { scale: 'tailored', targets: 'countervalue' } },
+  ISR: { firstUse: true, coreLossShare: 0.15, forceLossShare: 0.5, economicLossShare: null, onStrategicAttack: false, onChemBio: true, coversAllies: false, answer: { scale: 'massive', targets: 'countervalue' } },
+  PRK: { firstUse: true, coreLossShare: 0.05, forceLossShare: 0.2, economicLossShare: null, onStrategicAttack: true, onChemBio: true, coversAllies: false, answer: { scale: 'massive', targets: 'countervalue' } },
 };
 
 const o = (id: string, kind: ObjectiveKind, targets: string, priority: 1 | 2 | 3, description: string): StrategicObjective => ({
