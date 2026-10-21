@@ -4,9 +4,11 @@
  *  - Natural Earth geography regions, populated places, ports, airports, railroads (public domain)
  *  - World Bank World Development Indicators API (CC BY 4.0)
  *  - ETOPO 2022 global relief model (NOAA NCEI, public domain), for elevation, relief and terrain
+ *  - GHS-POP R2023A 2020 population grid (European Commission JRC, CC BY 4.0), for where each nation's people live
  *
  * Run: npm run data   (downloads are cached in .cache/)
  */
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { feature } from 'topojson-client';
@@ -16,6 +18,7 @@ import type { FeatureCollection, Geometry, MultiPolygon, Polygon } from 'geojson
 import { MANUAL_STATS, SOVEREIGN_OF } from './manual-stats';
 import { LandLabels, Raster } from './land-grid';
 import { cellRelief, loadDem } from './dem';
+import { loadPopulation } from './population';
 import { SquareIndex, squareKey } from '../src/core/map';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
@@ -513,11 +516,7 @@ async function main() {
     if (cell < 0) continue;
     cities.push({ name: p.nameascii ?? p.name, iso3: iso3Of(cell), cell, lat: p.latitude, lon: p.longitude, pop: p.pop_max ?? 0, capital: isCapital && iso3Of(cell) === iso });
   }
-  const cityPopByCell = new Map<number, number>();
-  for (const c of cities) {
-    cityPopByCell.set(c.cell, (cityPopByCell.get(c.cell) ?? 0) + c.pop);
-    if (c.pop >= 1_000_000) terrain[c.cell] = 'urban';
-  }
+  for (const c of cities) if (c.pop >= 1_000_000) terrain[c.cell] = 'urban';
 
   const countPoints = (fc: FeatureCollection) => {
     const m = new Map<number, number>();
@@ -621,14 +620,17 @@ async function main() {
     if (!cities.some((c) => c.iso3 === n.iso3 && c.capital)) console.warn('no Natural Earth capital for', n.iso3, '- using', n.capital.name);
   }
 
-  // Population and industry weights per cell; the terrain term scales with the cell's area.
-  const habit: Record<Terrain, number> = { plain: 1, forest: 0.4, jungle: 0.35, hills: 0.6, mountain: 0.2, desert: 0.08, marsh: 0.4, arctic: 0.02, urban: 3 };
-  const weightBy = new Map<string, number>();
-  const rawW = cellList.map((c, n) => {
-    const w = habit[terrain[n]] * (2 * c.half) ** 2 + (cityPopByCell.get(n) ?? 0) / 250_000 + (railKm.get(n) ?? 0) / 400;
-    weightBy.set(c.iso3, (weightBy.get(c.iso3) ?? 0) + w);
-    return w;
+  // Each cell's share of its nation's people: GHS-POP residents on the cell's land, plus one so no cell is empty.
+  // A metro area spreads over the cells its built-up land covers: Taipei and New Taipei fill the Taipei basin's
+  // cells, not the one cell holding the city's point.
+  const population = await loadPopulation(CACHE, (zip, dir) => execFileSync('unzip', ['-o', '-q', zip, '-d', dir]));
+  const residents = new Float64Array(cellList.length).fill(1);
+  population.each((lat, lon, people) => {
+    const n = labels.pointLabel(lat, lon, 4);
+    if (n >= 0) residents[n] += people;
   });
+  const weightBy = new Map<string, number>();
+  cellList.forEach((c, n) => weightBy.set(c.iso3, (weightBy.get(c.iso3) ?? 0) + residents[n]));
 
   const cells = {
     lat: cellList.map((c) => c.lat),
@@ -638,7 +640,7 @@ async function main() {
     terrain: terrain.map((t) => TERRAIN.indexOf(t)),
     elevation: relief.map((r) => Math.round(r.elevation)),
     ruggedness: relief.map((r) => Math.round(r.ruggedness)),
-    popShare: cellList.map((c, n) => +(rawW[n] / weightBy.get(c.iso3)!).toFixed(5)),
+    popShare: cellList.map((c, n) => +(residents[n] / weightBy.get(c.iso3)!).toFixed(5)),
     railKm: cellList.map((_, n) => Math.round(railKm.get(n) ?? 0)),
     ports: cellList.map((_, n) => portCount.get(n) ?? 0),
     airports: cellList.map((_, n) => airCount.get(n) ?? 0),
@@ -656,6 +658,7 @@ async function main() {
       'Natural Earth (public domain) via world-atlas and nvkelso/natural-earth-vector',
       'World Bank World Development Indicators (CC BY 4.0)',
       'ETOPO 2022 15 arc-second global relief model, NOAA NCEI (public domain), via NOAA CoastWatch ERDDAP',
+      'GHS-POP R2023A, 2020 residents at 30 arc-seconds, European Commission JRC (CC BY 4.0)',
     ],
     terrainTypes: TERRAIN,
     nations,
