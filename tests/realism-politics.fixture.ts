@@ -1,4 +1,5 @@
 import { atWar } from '../src/core/engine';
+import { platformCount } from '../src/core/forces';
 import type { NationId, World } from '../src/core/types';
 import { alliances, strategicProfile } from '../src/data/nations';
 import { createSession } from '../src/scenarios';
@@ -31,8 +32,24 @@ function thresholdCrossed(world: World, n: NationId): boolean {
   const rec = d.records[n];
   if ((rec?.nuclearStruckBy.length ?? 0) > 0) return true;
   if (!t?.firstUse || !a) return false;
-  return (t.coreLossShare !== null && a.popLost >= t.coreLossShare)
+  const gdp = world.slices.economy?.nations[n]?.gdpIndex;
+  return a.capitalLost
+    || (t.coreLossShare !== null && a.popLost >= t.coreLossShare)
+    || (t.forceLossShare !== null && forcesLost(world, n) >= t.forceLossShare)
+    || (t.economicLossShare !== null && gdp !== undefined && 1 - gdp >= t.economicLossShare)
     || (t.onStrategicAttack && (a.capitalThreatened || (rec?.ssbnLost ?? 0) > 0));
+}
+
+/** Share of land and air platforms destroyed, against the strength the AI first recorded for each formation. */
+function forcesLost(world: World, n: NationId): number {
+  const seen = world.slices.ai.baseStrength;
+  let base = 0, lost = 0;
+  for (const f of Object.values(world.formations)) {
+    if (f.nation !== n || !(f.kind === 'maneuver' || f.kind === 'artillery' || f.kind === 'air_wing') || seen[f.id] === undefined) continue;
+    base += seen[f.id];
+    lost += Math.max(0, seen[f.id] - platformCount(f));
+  }
+  return base > 0 ? lost / base : 0;
 }
 
 /** Run a scenario on the full world for `days`, recording who went to war with whom, when and why. */
