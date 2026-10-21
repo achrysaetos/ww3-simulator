@@ -20,4 +20,6 @@ export interface OrbatEntry {
   source?: string;
   /** Territorial or home-defence force that fights only on its own nation's soil. */
   territorial?: true;
+  /** Parachute or air-assault formation, insertable by air. */
+  airborne?: true;
 }

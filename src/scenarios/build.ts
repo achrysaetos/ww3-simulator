@@ -44,6 +44,7 @@ export function placeOrbat(world: World, map: GameMap, catalog: Catalog, entries
       ...(e.experience !== undefined && { experience: e.experience }),
       ...(e.personnel !== undefined && { personnel: e.personnel }),
       ...(e.territorial && { territorial: true as const }),
+      ...(e.airborne && { airborne: true as const }),
     });
     for (const [raw, n] of Object.entries(e.extraMagazine ?? {})) {
       const mid = (alias[raw] ?? raw) as MunitionId;

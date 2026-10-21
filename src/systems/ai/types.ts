@@ -26,6 +26,8 @@ export interface AiState {
   lastPeaceOffer: Record<NationId, number>;
   /** Formations sent overseas by strategic deployment, and the port each is bound for. */
   deployments: Record<FormationId, NodeId>;
+  /** Tick of each nation's last airborne operation. */
+  airborne: Record<NationId, number>;
 }
 
 declare module '../../core/types' {

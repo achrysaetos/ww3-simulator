@@ -135,7 +135,8 @@ export type Posture =
   | 'patrol' // naval/air presence
   | 'blockade' // naval interdiction of a sea zone
   | 'escort' // protect another formation
-  | 'embark'; // loaded on sea/air lift
+  | 'embark' // loaded on sea/air lift
+  | 'air_assault'; // airborne/air-assault insertion onto order.target
 
 export interface Order {
   posture: Posture;
@@ -183,6 +184,8 @@ export interface Formation {
   embarkedOn?: FormationId;
   /** Territorial or home-defence force (Polish WOT, Ukrainian TDF, Baltic and Nordic home guards): fights only on its own nation's soil. */
   territorial?: true;
+  /** Trained and equipped to be inserted by parachute or helicopter (VDV, US 82nd/101st/173rd, PLA Airborne Corps). */
+  airborne?: true;
 }
 
 // ---------------------------------------------------------------- nations
