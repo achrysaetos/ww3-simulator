@@ -1,3 +1,4 @@
+import { hostility } from '../../core/engine';
 import type { GameMap } from '../../core/map';
 import type { Formation, NationId, World } from '../../core/types';
 import { Controllers, NetworkSearch, networkKey, networkMembers } from './network';
@@ -195,13 +196,7 @@ const sameList = (a: readonly number[] | readonly string[], b: readonly number[]
  */
 export function refreshNetworks(world: World, map: GameMap, s: NetworkState, forces: Formation[]): void {
   const { controllers, byKey } = searchesOf(s, map);
-  const enemies = new Map<NationId, NationId[]>();
-  for (const k in world.relations) {
-    if (!world.relations[k].atWar) continue;
-    const [a, b] = k.split('|') as NationId[];
-    (enemies.get(a) ?? enemies.set(a, []).get(a)!).push(b);
-    (enemies.get(b) ?? enemies.set(b, []).get(b)!).push(a);
-  }
+  const enemies = hostility(world).foes;
   const demand = new Set<NationId>(enemies.keys());
   // Land forces on ground another nation holds: the only ones that can block a network's supply.
   const intruders: Formation[] = [];

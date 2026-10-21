@@ -70,12 +70,18 @@ export class Engine {
     const ctx = this.context(world);
     const queued = world.pending;
     world.pending = [];
-    for (const cmd of queued) {
-      const owner = this.commandOwner.get(cmd.type);
-      if (owner?.apply) owner.apply(world, cmd, ctx);
-      else ctx.emit({ type: 'message', tick: world.tick, text: `no system handles command ${cmd.type}` });
+    const outer = stepping;
+    stepping = { world };
+    try {
+      for (const cmd of queued) {
+        const owner = this.commandOwner.get(cmd.type);
+        if (owner?.apply) owner.apply(world, cmd, ctx);
+        else ctx.emit({ type: 'message', tick: world.tick, text: `no system handles command ${cmd.type}` });
+      }
+      for (const s of this.systems) s.step(world, ctx);
+    } finally {
+      stepping = outer;
     }
-    for (const s of this.systems) s.step(world, ctx);
     world.rngState = ctx.rng.state;
     world.tick++;
     return world.events;
@@ -114,19 +120,65 @@ export function relationMut(world: World, a: NationId, b: NationId): Relation {
   return (world.relations[k] ??= { ...NEUTRAL });
 }
 
+/** Sets whether `a` and `b` are at war. The only writer of `Relation.atWar` in a running sim, so the tick's hostility index stays current. */
+export function setAtWar(world: World, a: NationId, b: NationId, on: boolean): Relation {
+  const r = relationMut(world, a, b);
+  r.atWar = on;
+  if (stepping?.world === world) stepping.hostility = undefined;
+  return r;
+}
+
+/** Sets whether `a` and `b` sanction each other. The only writer of `Relation.sanctions` in a running sim. */
+export function setSanctions(world: World, a: NationId, b: NationId, on: boolean): Relation {
+  const r = relationMut(world, a, b);
+  r.sanctions = on;
+  if (stepping?.world === world) stepping.hostility = undefined;
+  return r;
+}
+
+/** The pairs at war or under sanctions, in `world.relations` order, and each nation's enemies in that order. */
+export interface Hostility {
+  readonly pairs: readonly { readonly a: NationId; readonly b: NationId; readonly war: boolean }[];
+  readonly foes: ReadonlyMap<NationId, ReadonlySet<NationId>>;
+}
+
+/**
+ * The world being stepped, with its hostility index once something has read it.
+ * Systems read war status thousands of times a tick and it changes a few times a
+ * war, so the index is built from `world.relations` on first read in each step and
+ * dropped by `setAtWar`/`setSanctions`. Outside a step every read goes to the
+ * relations themselves, so tests and tools that edit them directly see their edits.
+ */
+let stepping: { world: World; hostility?: Hostility } | undefined;
+
+export function hostility(world: World): Hostility {
+  if (stepping?.world !== world) return indexHostility(world);
+  return (stepping.hostility ??= indexHostility(world));
+}
+
+function indexHostility(world: World): Hostility {
+  const pairs: { a: NationId; b: NationId; war: boolean }[] = [];
+  const foes = new Map<NationId, Set<NationId>>();
+  for (const k in world.relations) {
+    const r = world.relations[k];
+    if (!r.atWar && !r.sanctions) continue;
+    const [a, b] = k.split('|') as NationId[];
+    pairs.push({ a, b, war: r.atWar });
+    if (!r.atWar) continue;
+    (foes.get(a) ?? foes.set(a, new Set()).get(a)!).add(b);
+    (foes.get(b) ?? foes.set(b, new Set()).get(b)!).add(a);
+  }
+  return { pairs, foes };
+}
+
 export function atWar(world: World, a: NationId, b: NationId): boolean {
-  return a !== b && relation(world, a, b).atWar;
+  if (a === b) return false;
+  if (stepping?.world === world) return (stepping.hostility ??= indexHostility(world)).foes.get(a)?.has(b) ?? false;
+  return relation(world, a, b).atWar;
 }
 
 export function enemiesOf(world: World, nation: NationId): NationId[] {
-  const out: NationId[] = [];
-  for (const [k, r] of Object.entries(world.relations)) {
-    if (!r.atWar) continue;
-    const [a, b] = k.split('|') as NationId[];
-    if (a === nation) out.push(b);
-    else if (b === nation) out.push(a);
-  }
-  return out;
+  return [...(hostility(world).foes.get(nation) ?? [])];
 }
 
 export function newId<T extends string>(world: World, prefix: string): T {

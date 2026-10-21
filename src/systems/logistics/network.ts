@@ -10,7 +10,7 @@ import {
  * plus every bloc partner it is not at war with. Nations with the same membership
  * share one computed network, so NATO costs one search, not thirty.
  */
-export function networkMembers(world: World, enemies: ReadonlyMap<NationId, readonly NationId[]>): (nation: NationId) => NationId[] {
+export function networkMembers(world: World, enemies: ReadonlyMap<NationId, ReadonlySet<NationId>>): (nation: NationId) => NationId[] {
   const byBloc = new Map<string, NationId[]>();
   for (const id in world.nations) {
     const other = world.nations[id as NationId];
@@ -30,7 +30,7 @@ export function networkMembers(world: World, enemies: ReadonlyMap<NationId, read
     }
     const foes = enemies.get(nation);
     if (!foes && (blocs.length === 0 || partners.includes(nation))) return blocs.length ? partners : [nation];
-    const out = partners.filter((o) => o !== nation && !foes?.includes(o));
+    const out = partners.filter((o) => o !== nation && !foes?.has(o));
     out.push(nation);
     return out.sort();
   };

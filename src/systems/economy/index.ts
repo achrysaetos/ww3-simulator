@@ -1,5 +1,5 @@
 import type { SimContext, System } from '../../core/engine';
-import { atWar, relationMut } from '../../core/engine';
+import { atWar, hostility, setSanctions } from '../../core/engine';
 import type { GameMap } from '../../core/map';
 import type { ItemId, MunitionId, Nation, NationId, PlatformId, World } from '../../core/types';
 import {
@@ -222,10 +222,8 @@ function tradePartners(world: World): Map<NationId, Map<NationId, Breach>> {
     if (!m) out.set(a, (m = new Map()));
     m.set(b, v);
   };
-  for (const [k, r] of Object.entries(world.relations)) {
-    if (!r.atWar && !r.sanctions) continue;
-    const [a, b] = k.split('|') as NationId[];
-    const v: Breach = r.atWar ? 'war' : 'sanctions';
+  for (const { a, b, war } of hostility(world).pairs) {
+    const v: Breach = war ? 'war' : 'sanctions';
     put(a, b, v);
     put(b, a, v);
   }
@@ -471,17 +469,6 @@ const ALLY_COMMITMENT = 0.5;
 const CROSS_LEVEL_SHARE = 0.5;
 const RELEASE_PER_MONTH = 0.1;
 
-function enemiesOf(world: World): Map<NationId, Set<NationId>> {
-  const out = new Map<NationId, Set<NationId>>();
-  for (const [k, r] of Object.entries(world.relations)) {
-    if (!r.atWar) continue;
-    const [a, b] = k.split('|') as NationId[];
-    (out.get(a) ?? out.set(a, new Set()).get(a)!).add(b);
-    (out.get(b) ?? out.set(b, new Set()).get(b)!).add(a);
-  }
-  return out;
-}
-
 const PIPELINES = new Set(AID_FLOWS.filter((f) => ITEMS[f.item].sink.kind === 'bulk_ammo').map((f) => `${f.donor}>${f.recipient}`));
 
 const allyCache = new Map<string, boolean>();
@@ -493,7 +480,7 @@ function treatyAlly(donor: NationId, recipient: NationId): boolean {
 }
 
 function crossLevelAmmo(world: World, s: Scan, dtMonths: number): void {
-  const enemies = enemiesOf(world);
+  const enemies = hostility(world).foes;
   if (!enemies.size) return;
   const state = world.slices.economy;
   const usable = (n: Nation | undefined): n is Nation => !!n && n.status !== 'capitulated' && n.status !== 'collapsed';
@@ -578,7 +565,7 @@ export const economy: System = {
       case 'produce':
         return produce(world, ctx, cmd.nation, cmd.item, cmd.ratePerMonth);
       case 'sanction':
-        if (cmd.nation !== cmd.target) relationMut(world, cmd.nation, cmd.target).sanctions = cmd.on;
+        if (cmd.nation !== cmd.target) setSanctions(world, cmd.nation, cmd.target, cmd.on);
         return;
     }
   },
