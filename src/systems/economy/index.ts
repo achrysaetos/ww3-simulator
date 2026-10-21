@@ -3,7 +3,7 @@ import { atWar, hostility, setSanctions } from '../../core/engine';
 import type { GameMap } from '../../core/map';
 import type { ItemId, MunitionId, Nation, NationId, PlatformId, World } from '../../core/types';
 import {
-  AID_FLOWS, CATEGORIES, DEFAULT_SEABORNE_TRADE_SHARE, ITEMS, MIL_FUEL_TONS_PER_USD_M, SEABORNE_TRADE_SHARE, OIL_CONSUMPTION_MT, OIL_TONS_PER_PPP_USD_M, RATION_TONS_PER_DAY, RESOURCES, RESOURCE_SPECS, SHIPBUILDING_GT_PER_YEAR, SHIPYARD_WARSHIP_SHARE,
+  AID_FLOWS, BASELINE_SANCTIONS, CATEGORIES, DEFAULT_SEABORNE_TRADE_SHARE, ITEMS, MIL_FUEL_TONS_PER_USD_M, SEABORNE_TRADE_SHARE, OIL_CONSUMPTION_MT, OIL_TONS_PER_PPP_USD_M, RATION_TONS_PER_DAY, RESOURCES, RESOURCE_SPECS, SHIPBUILDING_GT_PER_YEAR, SHIPYARD_WARSHIP_SHARE,
   itemSpec, type AidFlow, type ItemCategory, type Resource,
 } from '../../data/industry';
 import { defenseObligations } from '../../data/nations';
@@ -72,6 +72,12 @@ const MAX_ENERGY_PRICE = 4;
 const ENERGY_BILL_SHARE = 0.04;
 const ENERGY_PRICE_PASSTHROUGH = 0.5;
 const FOOD_GDP_ELASTICITY = 0.3;
+/**
+ * Output lost per unit of chip supply short, once inventories are gone. Est., set so the shortfall a
+ * Taiwan blockade leaves the US (~30% of its chips) costs ~4% of GDP, against Bloomberg Economics'
+ * 2024 estimate of -3.3% for the US and -5% for the world in a blockade's first year.
+ */
+const SEMI_GDP_ELASTICITY = 0.15;
 /** Peacetime under-arms ceiling: standing forces plus 1% of the population as reserves (createWorld's default). */
 const BASE_RESERVE_SHARE = 0.01;
 /**
@@ -334,10 +340,19 @@ function drawSupply(e: NationEconomy, id: NationId, r: Resource, raw: number, ne
   return (raw + shortfall * covered) / need;
 }
 
-function tradeLossOf(world: World, s: Scan, n: Nation): number {
+/**
+ * Share of a nation's foreign trade lost to blockade, sanctions and war, 0..1. With `beyondBaseline`,
+ * sanctions already in force in the 2024 baseline (BASELINE_SANCTIONS) are not counted, for the
+ * output lost against a baseline GDP that already carries them.
+ */
+function tradeLossOf(world: World, s: Scan, n: Nation, beyondBaseline: boolean): number {
   let lost = 0;
   const gdpOthers = s.worldGdp - (n.stats.gdp ?? 0);
-  for (const [p, breach] of s.cut.get(n.id) ?? []) lost += ((world.nations[p]?.stats.gdp ?? 0) / gdpOthers) * (1 - STILL_ARRIVES[breach].goods);
+  const baseline = beyondBaseline ? BASELINE_SANCTIONS[n.id] : undefined;
+  for (const [p, breach] of s.cut.get(n.id) ?? []) {
+    if (breach === 'sanctions' && baseline?.includes(p)) continue;
+    lost += ((world.nations[p]?.stats.gdp ?? 0) / gdpOthers) * (1 - STILL_ARRIVES[breach].goods);
+  }
   const blocked = seaCut(world, n.id);
   return clamp01(1 - (1 - blocked) * (1 - clamp01(lost)));
 }
@@ -391,8 +406,9 @@ function stepNation(world: World, ctx: SimContext, s: Scan, n: Nation, e: Nation
     n.mobilization += (e.mobilizationTarget - n.mobilization) * lag(dtMonths, tau);
   }
   e.integrity = s.integrity.get(n.id) ?? 1;
-  e.tradeLoss = tradeLossOf(world, s, n);
-  const tradeOutput = 1 - ((n.stats.importsPctGdp ?? 30) / 100) * e.tradeLoss * IMPORT_GDP_LOSS;
+  e.tradeLoss = tradeLossOf(world, s, n, false);
+  const newTradeLoss = BASELINE_SANCTIONS[n.id] ? tradeLossOf(world, s, n, true) : e.tradeLoss;
+  const tradeOutput = 1 - ((n.stats.importsPctGdp ?? 30) / 100) * newTradeLoss * IMPORT_GDP_LOSS;
   for (const r of RESOURCES) e.supply[r] = drawSupply(e, n.id, r, rawAccess(world, s, n, r), r === 'energy' ? tradeOutput : 1, dtMonths);
   e.supply.energy *= 1 - ELECTRICITY_SHARE * (1 - (s.grid.get(n.id) ?? 1));
   announceShortages(world, ctx, n.id, e);
@@ -403,6 +419,7 @@ function stepNation(world: World, ctx: SimContext, s: Scan, n: Nation, e: Nation
     (1 - ENERGY_GDP_ELASTICITY * (1 - e.supply.energy)) *
     (1 - ENERGY_BILL_SHARE * energyImported * (world.slices.economy.energyPrice - 1) * ENERGY_PRICE_PASSTHROUGH) *
     (1 - FOOD_GDP_ELASTICITY * (1 - e.supply.food)) *
+    (1 - SEMI_GDP_ELASTICITY * (1 - e.supply.semiconductors)) *
     tradeOutput;
 
   const gdpB = ((n.stats.gdp ?? 0) / 1e9) * e.gdpIndex;
@@ -465,7 +482,7 @@ function shipAid(world: World, dtMonths: number): void {
     if (!donor || !recipient || recipient.status !== 'war' || donor.status === 'capitulated' || donor.status === 'collapsed') continue;
     if (atWar(world, donor.id, recipient.id)) continue;
     const a = (state.aid[aidKey(flow)] ??= { carry: 0, delivered: 0 });
-    const due = (flow.perYear / 12) * dtMonths + a.carry;
+    const due = (flow.perYear / 12) * dtMonths * (1 - seaCut(world, donor.id)) * (1 - seaCut(world, recipient.id)) + a.carry;
     const spec = ITEMS[flow.item];
     const sink = spec.sink;
     const fromStocks = flow.source === 'stocks';
@@ -493,7 +510,8 @@ function shipAid(world: World, dtMonths: number): void {
  * month, more by sea). A donor is a co-belligerent or a treaty ally bound to fight (commitment of
  * at least ALLY_COMMITMENT); it tops up any such partner at war whose stock per soldier is below
  * CROSS_LEVEL_SHARE of its own, releasing at most RELEASE_PER_MONTH of its stock a month in all.
- * A pair with a standing shell pipeline in AID_FLOWS ships at that observed rate instead.
+ * A pair with a standing shell pipeline in AID_FLOWS ships at that observed rate instead. A naval
+ * blockade of either end cuts what moves by the share of its trade that goes by sea, as it does aid.
  */
 const ALLY_COMMITMENT = 0.5;
 const CROSS_LEVEL_SHARE = 0.5;
@@ -517,7 +535,7 @@ function crossLevelAmmo(world: World, s: Scan, dtMonths: number): void {
   const perHead = (n: Nation) => Math.max(0, n.bulk.ammo) / Math.max(1, s.personnel.get(n.id) ?? 0);
   for (const donor of Object.values(world.nations)) {
     if (!usable(donor) || donor.bulk.ammo <= 0) continue;
-    let budget = donor.bulk.ammo * RELEASE_PER_MONTH * dtMonths;
+    let budget = donor.bulk.ammo * RELEASE_PER_MONTH * dtMonths * (1 - seaCut(world, donor.id));
     for (const [rid, foes] of enemies) {
       if (budget <= 0) break;
       const r = world.nations[rid];
@@ -525,7 +543,7 @@ function crossLevelAmmo(world: World, s: Scan, dtMonths: number): void {
       const coBelligerent = [...foes].some((f) => enemies.get(donor.id)?.has(f));
       if (!coBelligerent && !treatyAlly(donor.id, rid)) continue;
       const gap = (CROSS_LEVEL_SHARE * perHead(donor) - perHead(r)) * (s.personnel.get(rid) ?? 0);
-      const tons = Math.min(gap, budget);
+      const tons = Math.min(gap, budget) * (1 - seaCut(world, rid));
       if (tons <= 0) continue;
       budget -= tons;
       donor.bulk.ammo -= tons;

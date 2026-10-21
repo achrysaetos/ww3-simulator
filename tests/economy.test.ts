@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { Engine, relationMut } from '../src/core/engine';
 import { addFormation } from '../src/core/forces';
 import type { NationId, NodeId, SimEvent } from '../src/core/types';
-import { initialStockpiles } from '../src/data/industry';
+import { DEFAULT_SEABORNE_TRADE_SHARE, SEABORNE_TRADE_SHARE, initialStockpiles } from '../src/data/industry';
 import { economicStress, economy } from '../src/systems/economy';
 import { sanctionDecisions } from '../src/systems/ai/strategy';
 import { profiles } from '../src/data/nations';
@@ -168,6 +168,22 @@ describe('economy: blockade by geography', () => {
   });
 });
 
+describe('economy: chips', () => {
+  it('costs chip importers output once a Taiwan blockade has run down their inventories', () => {
+    const t = dailyWorld(3);
+    t.world.theater.tradeBlocked[id.nation('TWN')] = 1;
+    t.days(30);
+    const us = t.world.slices.economy.nations[USA];
+    expect(us.supply.semiconductors).toBe(1);
+    t.days(330);
+    expect(us.supply.semiconductors).toBeLessThan(0.85);
+    // Nothing else cuts US output here: its own trade and energy are untouched.
+    expect(us.tradeLoss).toBe(0);
+    expect(us.gdpIndex).toBeLessThan(0.98);
+    expect(us.gdpIndex).toBeGreaterThan(0.9);
+  });
+});
+
 describe('economy: allied ammunition', () => {
   it('tops up a treaty ally at war from a partner rich in shells, and nothing flows from states with no obligation', () => {
     const t = dailyWorld();
@@ -184,6 +200,27 @@ describe('economy: allied ammunition', () => {
     // Ten days at most 10% a month of the US stock.
     expect(allied['USA>EST']).toBeLessThanOrEqual(160_000 * 0.1 * (10 / 30.4) * 1.01);
     expect(Object.keys(allied).some((k) => k.startsWith(`${CHN}>`) || k.startsWith(`${RUS}>`))).toBe(false);
+  });
+
+  it('ships allied ammunition only through the share of trade a blockade leaves open, at either end', () => {
+    const shipped = (blocked: { donor?: number; recipient?: number }) => {
+      const t = dailyWorld();
+      const EST = id.nation('EST');
+      const est = t.world.nations[EST];
+      t.add({ nation: EST, name: 'Estonian brigade', kind: 'maneuver', echelon: 'brigade', node: est.capital, equipment: { [id.platform('t_mbt')]: 30 }, personnel: 4_000 });
+      t.war('RUS', 'EST');
+      est.bulk.ammo = 0;
+      t.world.nations[USA].bulk.ammo = 160_000;
+      t.world.theater.tradeBlocked[USA] = blocked.donor ?? 0;
+      t.world.theater.tradeBlocked[EST] = blocked.recipient ?? 0;
+      t.days(10);
+      return t.world.slices.economy.allied['USA>EST'] ?? 0;
+    };
+    const open = shipped({});
+    expect(open).toBeGreaterThan(0);
+    // Estonia trades ~20% overland, the US ~30%; a full or 80% blockade leaves that much.
+    expect(shipped({ recipient: 1 }) / open).toBeCloseTo(1 - DEFAULT_SEABORNE_TRADE_SHARE, 1);
+    expect(shipped({ donor: 0.8 }) / open).toBeCloseTo(1 - 0.8 * SEABORNE_TRADE_SHARE.USA, 1);
   });
 });
 
@@ -299,6 +336,18 @@ describe('economy: sanctions', () => {
     for (const s of bloc) t.world.pending.push({ type: 'sanction', nation: id.nation(s), target: RUS, on: false });
     t.days(2);
     expect(t.world.slices.economy.nations[RUS].supply.semiconductors).toBe(1);
+  });
+
+  it('takes no further output for sanctions the 2024 baseline GDP already carries, but does for new ones', () => {
+    const t = dailyWorld();
+    const IND = id.nation('IND');
+    for (const s of bloc) for (const target of [RUS, IND]) t.world.pending.push({ type: 'sanction', nation: id.nation(s), target, on: true });
+    t.days(5);
+    const rus = t.world.slices.economy.nations[RUS], ind = t.world.slices.economy.nations[IND];
+    expect(rus.tradeLoss).toBeGreaterThan(0.05);
+    expect(rus.gdpIndex).toBeGreaterThan(0.999);
+    expect(ind.tradeLoss).toBeGreaterThan(0.05);
+    expect(ind.gdpIndex).toBeLessThan(0.995);
   });
 });
 
