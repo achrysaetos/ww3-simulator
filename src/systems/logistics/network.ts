@@ -120,7 +120,7 @@ export function depotsOf(map: GameMap, nation: NationId): readonly number[] {
 // Copied once: module imports compile to getters under some dev loaders, which shows up in the search loop.
 const HALF_KM = DECAY_HALF_KM, RAIL_CUT = RAIL_CUT_INFRASTRUCTURE, FRONT_CAP = FRONTLINE_CAPACITY, FRONT_COST = FRONTLINE_COST, MIN_VALUE = MIN_FACTOR, AIRLIFT = AIRLIFT_FACTOR;
 const FRIENDLY = 1, ENEMY = 2;
-/** Per-node search state: not reached, waiting in the frontier, or settled with its factor in thousandths stored as SETTLED + thousandths. */
+/** Per-node search state: not reached, waiting in the frontier, or settled with its overland factor in thousandths stored as SETTLED + thousandths. */
 const UNSEEN = 0, QUEUED = 1, SETTLED = 2;
 const DRAIN = -1;
 
@@ -326,7 +326,7 @@ export interface SearchInputs {
  * the search tree routed through the changed nodes instead of starting over.
  */
 export class NetworkSearch {
-  /** UNSEEN, QUEUED, or SETTLED + factor in thousandths, per node. */
+  /** UNSEEN, QUEUED, or SETTLED + overland factor in thousandths, per node. Airlift is read live, so air control never re-opens the search. */
   private readonly state: Uint16Array;
   /** FRIENDLY or ENEMY per controller index, for members and foes. */
   private readonly side: Uint8Array;
@@ -370,7 +370,7 @@ export class NetworkSearch {
    * Starts this new search from another network's, as if that search had run with
    * this network's members and foes all along and then had its inputs changed: cells
    * whose side differs (and their neighbours, for the frontline), blocking, and sea
-   * and air control held by a nation whose foe status differs are re-opened. Settled
+   * control held by a nation whose foe status differs are re-opened. Settled
    * factors come out as a fresh search would give them, so a war that splits a bloc
    * re-searches the front, not the world.
    */
@@ -393,8 +393,8 @@ export class NetworkSearch {
     nodes.push(...resided);
     for (const n of base.blocked) if (!this.blocked.has(n)) nodes.push(n);
     for (const n of this.blocked) if (!base.blocked.has(n)) nodes.push(n);
-    for (const held of [inputs.sea, inputs.air])
-      for (const k in held) if (base.foes.has(held[k].nation) !== this.foes.has(held[k].nation)) nodes.push(Number(k));
+    const sea = inputs.sea;
+    for (const k in sea) if (base.foes.has(sea[k].nation) !== this.foes.has(sea[k].nation)) nodes.push(Number(k));
     this.state.set(base.state);
     this.count = base.count;
     this.touched = base.touched.slice(0, base.count);
@@ -410,11 +410,11 @@ export class NetworkSearch {
     this.repair(inputs, nodes, resided, [...this.blocked]);
   }
 
-  /** Factor at `node` in thousandths. */
+  /** Factor at `node` in thousandths: the better of the overland route and airlift. */
   milliAt(inputs: SearchInputs, node: number): number {
     if (this.state[node] < SETTLED) this.cover(inputs, [node]);
-    const s = this.state[node];
-    return s >= SETTLED ? s - SETTLED : Math.round(this.airlift(inputs, node) * 1000);
+    const s = this.state[node], air = Math.round(this.airlift(inputs, node) * 1000);
+    return s >= SETTLED && s - SETTLED > air ? s - SETTLED : air;
   }
 
   /**
@@ -535,7 +535,7 @@ export class NetworkSearch {
       const u = heap.pop();
       if (state[u] !== QUEUED || key !== valueOf(w, u)) continue;
       if (key < this.floor) this.floor = key;
-      state[u] = SETTLED + Math.round(Math.max(key, this.airlift(inputs, u)) * 1000);
+      state[u] = SETTLED + Math.round(key * 1000);
       relaxEdges(w, u, adjStart[u], adjStart[u + 1]);
       if (w.reopened.length) for (const x of w.reopened.splice(0)) this.reseed(w, inputs, x);
     }

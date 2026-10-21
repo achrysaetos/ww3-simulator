@@ -81,20 +81,20 @@ export function searchesOf(s: NetworkState, map: GameMap): Searches {
 /**
  * Nodes whose inputs moved by more than the tolerance, filed under the nations they
  * can matter to. A search reads control to tell members and foes apart,
- * infrastructure only on member-held cells, and sea and air control only where a foe
- * holds it.
+ * infrastructure only on member-held cells, and sea control only where a foe holds
+ * it. Air control only sets airlift, which is read live, so it moves no search.
  */
 interface Changes {
   /** Cells that changed hands, under their old and new controller: matters to networks with either as member or foe. */
   control: Map<NationId, number[]>;
   /** Infrastructure, under the cell's controller: matters to networks with it as a member. */
   infrastructure: Map<NationId, number[]>;
-  /** Sea and air control, under the old and new holder: matters to networks with either as a foe. */
+  /** Sea control, under the old and new holder: matters to networks with either as a foe. */
   contested: Map<NationId, number[]>;
 }
 
-function file(into: Map<NationId, number[]>, nation: NationId | undefined, node: number): void {
-  if (nation) (into.get(nation) ?? into.set(nation, []).get(nation)!).push(node);
+function file(into: Map<NationId, number[]> | undefined, nation: NationId | undefined, node: number): void {
+  if (into && nation) (into.get(nation) ?? into.set(nation, []).get(nation)!).push(node);
 }
 
 /** Inputs that moved since last seen; updates the snapshot and controllers to match. */
@@ -114,11 +114,11 @@ function changedInputs(world: World, seen: InputSnapshot, controllers: Controlle
       file(out.infrastructure, control[n], n);
     }
   diffRecord(world.theater.seaControl, seen.sea, out.contested);
-  diffRecord(world.theater.airControl, seen.air, out.contested);
+  diffRecord(world.theater.airControl, seen.air);
   return out;
 }
 
-function diffRecord(now: ControlRecord, seen: ControlRecord, out: Map<NationId, number[]>): void {
+function diffRecord(now: ControlRecord, seen: ControlRecord, out?: Map<NationId, number[]>): void {
   for (const k in now) {
     const a = now[k], b = seen[k];
     if (!b || a.nation !== b.nation || Math.abs(a.level - b.level) >= INPUT_TOLERANCE) {
