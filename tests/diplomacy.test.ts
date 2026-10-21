@@ -395,3 +395,19 @@ describe('who joins a war', () => {
     });
   });
 });
+
+describe('capital threat', () => {
+  /** Whether Lithuania's capital reads as threatened with a brigade of a distant enemy at the given point. */
+  function threatenedWithEnemyAt(lat: number, lon: number): boolean {
+    const t = testWorld([createDiplomacy()]);
+    t.war('FRA', 'LTU');
+    t.add({ nation: N('FRA'), name: 'Brigade', kind: 'maneuver', echelon: 'brigade', node: t.nodeAt(lat, lon), equipment: { [id.platform('t_inf')]: 60 } });
+    t.engine.step(t.world);
+    return t.world.slices.diplomacy.assessment[N('LTU')].capitalThreatened;
+  }
+
+  it('reads enemy ground forces within 200 km of the capital as a threat, however fine the cells, and not beyond', () => {
+    expect(threatenedWithEnemyAt(54.9, 23.9)).toBe(true);
+    expect(threatenedWithEnemyAt(55.7, 21.1)).toBe(false);
+  });
+});

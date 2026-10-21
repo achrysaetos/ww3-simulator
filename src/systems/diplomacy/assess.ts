@@ -1,6 +1,6 @@
 import type { GameMap } from '../../core/map';
 import { hostility, relationKey } from '../../core/engine';
-import type { NationId, World } from '../../core/types';
+import type { NationId, NodeId, World } from '../../core/types';
 import type { Assessment } from './types';
 
 /** Who is at war with whom: a copy of the tick's hostility index, so a caller may keep it past a declaration. */
@@ -20,6 +20,19 @@ function cellsPerNation(map: GameMap): Map<NationId, number> {
     homelandCells.set(map, m);
   }
   return m;
+}
+
+/** Enemy control or ground forces this close to a capital threaten it: two cells of the one-degree map the rule was set on. */
+const CAPITAL_THREAT_KM = 200;
+const nearCells = new WeakMap<GameMap, Map<NodeId, NodeId[]>>();
+
+/** Land cells within CAPITAL_THREAT_KM of a capital, the same reach on fine cells as on coarse ones. */
+function nearCapital(map: GameMap, cap: NodeId): NodeId[] {
+  let m = nearCells.get(map);
+  if (!m) nearCells.set(map, (m = new Map()));
+  let out = m.get(cap);
+  if (!out) m.set(cap, (out = map.nodesWithin(cap, CAPITAL_THREAT_KM).filter((n) => n < map.landCount)));
+  return out;
 }
 
 const landBorders = new WeakMap<GameMap, Map<NationId, Set<NationId>>>();
@@ -50,7 +63,7 @@ export interface Situation {
 
 /**
  * Territorial situation of every nation that has lost ground or is at war:
- * one pass over land cells, plus a two-ring check around each capital at war.
+ * one pass over land cells, plus a check of the land within CAPITAL_THREAT_KM of each capital at war.
  */
 export function assess(world: World, map: GameMap, enemies: Map<NationId, Set<NationId>>): Situation {
   const out: Record<NationId, Assessment> = {};
@@ -86,12 +99,7 @@ export function assess(world: World, map: GameMap, enemies: Map<NationId, Set<Na
     const cap = nation.capital;
     a.capitalLost = world.control[cap] !== n;
     const hostile = (node: number) => foes.has(world.control[node]) || (groundAt.get(node)?.some((g) => foes.has(g)) ?? false);
-    a.capitalThreatened = a.capitalLost || hostile(cap);
-    for (let k = map.adjStart[cap]; k < map.adjStart[cap + 1] && !a.capitalThreatened; k++) {
-      const m = map.adj[k];
-      if (hostile(m)) a.capitalThreatened = true;
-      for (let j = map.adjStart[m]; j < map.adjStart[m + 1] && !a.capitalThreatened; j++) if (hostile(map.adj[j])) a.capitalThreatened = true;
-    }
+    a.capitalThreatened = a.capitalLost || nearCapital(map, cap).some(hostile);
   }
   return { nations: out, lostTo, invadedBy };
 }

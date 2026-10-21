@@ -6,7 +6,11 @@ import { geography, sameWaters, seaNeighbour } from './geography';
 import type { Composition } from './state';
 import { MINE_CLOSURE } from './tables';
 
-/** Fraction of transit fuel burn spent per hour holding station (loiter on one shaft, estimate). */
+/**
+ * Fraction of transit fuel burn spent per hour holding station (loiter on one shaft, estimate).
+ * A group at its home base burns it too: it stands for a fleet steaming from its base on local
+ * exercises and patrols, which DoD operational fuel totals count (DLA Energy FY2019).
+ */
 const LOITER_BURN = 0.2;
 /**
  * Share of its fuel and stores a ship alongside at its home base takes on per day. A naval base
@@ -57,20 +61,26 @@ export function seaPath(world: World, map: GameMap, nation: NationId, from: Node
   }, 50_000);
 }
 
+/** Refill a ship alongside at its home base from the nation's bulk stocks, which hold the base's fuel farm and stores. */
+function victual(world: World, f: Formation, hours: number): void {
+  const k = BERTH_REFILL_PER_DAY * (hours / 24);
+  const bulk = world.nations[f.nation].bulk;
+  for (const r of ['food', 'fuel'] as const) {
+    const got = Math.max(0, Math.min(f.supplyCapacity[r] * k, f.supplyCapacity[r] - f.supply[r], bulk[r]));
+    f.supply[r] += got;
+    bulk[r] -= got;
+  }
+}
+
 /** Move along order.path at the slowest hull's speed, burning fuel per km so a full load lasts the platform's rated range. */
 export function advance(world: World, map: GameMap, f: Formation, comp: Composition): void {
   const hours = world.dtHours;
   const burnPerKm = Number.isFinite(comp.rangeKm) && comp.rangeKm > 0 ? f.supplyCapacity.fuel / comp.rangeKm : 0;
   const path = f.order.path;
-  if (!path?.length && f.node === f.home) {
-    const k = BERTH_REFILL_PER_DAY * (hours / 24);
-    f.supply.food = Math.min(f.supplyCapacity.food, f.supply.food + f.supplyCapacity.food * k);
-    f.supply.fuel = Math.min(f.supplyCapacity.fuel, f.supply.fuel + f.supplyCapacity.fuel * k);
-    return;
-  }
   f.supply.food = Math.max(0, f.supply.food - (f.supplyCapacity.food / comp.enduranceDays) * (hours / 24));
   if (!path?.length) {
     f.supply.fuel = Math.max(0, f.supply.fuel - burnPerKm * comp.speedKph * hours * LOITER_BURN);
+    if (f.node === f.home) victual(world, f, hours);
     return;
   }
   let budget = comp.speedKph * hours;
