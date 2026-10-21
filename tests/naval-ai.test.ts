@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { atWar } from '../src/core/engine';
 import type { NationId } from '../src/core/types';
 import { createSession } from '../src/scenarios';
+import { geography } from '../src/systems/naval/geography';
 import { recordFleetLoss } from '../src/systems/naval/state';
 
 const run = (scenario: string, days: number) => {
@@ -72,6 +73,18 @@ describe('naval AI fleet readiness', () => {
     for (let i = 0; i < 10 * perDay; i++) s.engine.step(s.world);
     expect(yard.map((f) => f.node)).toEqual(yard.map((f) => f.home));
     expect(s.map.distanceKm(ike.node, ike.home)).toBeGreaterThan(1000);
+  }, 120_000);
+});
+
+describe('naval AI coercive closure', () => {
+  it('Iran, at war with Israel and the US with US warships in the Gulf of Oman, mines and blockades the Strait of Hormuz', () => {
+    const s = createSession('gulf-2027', 1);
+    const hormuz = new Set(geography(s.map).chokepoints.find((c) => c.def.name === 'Strait of Hormuz')!.nodes);
+    for (let i = 0; i < (20 * 24) / s.world.dtHours; i++) s.engine.step(s.world);
+    const mined = [...hormuz].reduce((a, n) => a + (s.world.slices.naval.mines[n]?.['IRN' as NationId] ?? 0), 0);
+    const blockading = Object.values(s.world.formations).filter((f) => f.nation === 'IRN' && f.order.posture === 'blockade' && hormuz.has(f.order.target!));
+    expect(mined + blockading.length).toBeGreaterThan(0);
+    expect(s.world.theater.tradeBlocked['JPN' as NationId]).toBeGreaterThan(0.05);
   }, 120_000);
 });
 

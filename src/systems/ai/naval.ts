@@ -44,6 +44,26 @@ function chokepoints(map: GameMap): Choke[] {
   return c;
 }
 
+/** Own seaborne trade interdicted, and distance of an enemy warship from a strait, at which its shore state closes it. */
+const CLOSURE = { tradeBlocked: 0.25, fleetKm: 1000 };
+
+/**
+ * A shore state at war closes the passage it commands, whoever's trade runs through it, once
+ * its own exports are cut or an enemy navy operates off it: the world's shipping is its
+ * leverage. In the 1980-88 Tanker War Iran began attacking Gulf shipping after Iraq struck its
+ * oil exports at Kharg (1984) and mined the Gulf once the US Navy escorted reflagged Kuwaiti
+ * tankers (1987-88); "if Iran's oil cannot be exported, no country's oil will be" (Rouhani, July
+ * 2018; ONI, "Iran's Naval Forces", 2017). Thresholds are judgment.
+ */
+function coerciveClosure(p: Plan, c: Choke): boolean {
+  if (!c.shores.has(p.nation)) return false;
+  if ((p.world.theater.tradeBlocked[p.nation] ?? 0) >= CLOSURE.tradeBlocked) return true;
+  for (const e of p.enemies)
+    for (const f of p.index.byNation.get(e) ?? [])
+      if ((f.kind === 'surface_group' || f.kind === 'submarine') && f.status === 'active' && p.ctx.map.distanceKm(f.node, c.node) <= CLOSURE.fleetKm) return true;
+  return false;
+}
+
 const coastCache = new WeakMap<GameMap, NodeId[]>();
 /** Land cells that touch the sea: every possible beach. */
 function coast(map: GameMap): NodeId[] {
@@ -327,7 +347,9 @@ export function planNaval(p: Plan): void {
   let capitals = 0;
   const inPort = enemyFleet ? new Set<NodeId>() : batteredFleets(p, groups);
   // A belligerent may not fight in neutral waters, so it blockades only passages a party to the war borders (San Remo Manual 1994, paras 14-16).
-  const enemyChokes = chokepoints(map).filter((c) => [...c.users].some((u) => p.enemies.has(u as NationId)) && [...c.shores].some((n) => p.enemies.has(n) || p.friends.has(n)));
+  const enemyChokes = chokepoints(map).filter(
+    (c) => ([...c.users].some((u) => p.enemies.has(u as NationId)) && [...c.shores].some((n) => p.enemies.has(n) || p.friends.has(n))) || coerciveClosure(p, c),
+  );
   const claimed = new Map<NodeId, number>();
   const atWar = [...p.enemies].some((e) => isAtWar(p.world, p.nation, e));
 
