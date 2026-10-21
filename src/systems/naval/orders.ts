@@ -86,7 +86,7 @@ export function boardable(room: number, share: number): boolean {
 }
 
 /** Split `share` of a formation off as a landing team; the parent keeps the rest at the port. */
-function detach(world: World, ctx: SimContext, f: Formation, share: number): Formation {
+export function detach(world: World, ctx: SimContext, f: Formation, share: number): Formation {
   const take = <K extends string>(r: Record<K, number>): Record<K, number> => {
     const out = {} as Record<K, number>;
     for (const [k, n] of Object.entries(r) as [K, number][]) {

@@ -74,6 +74,28 @@ describe('strategic deployment', () => {
     expect(t.map.distanceKm(brigade.node, vilnius)).toBeLessThanOrEqual(200);
   }, 120_000);
 
+  it('ships a formation too big for the decks in echelons, the rest waiting at the port for the next sailing', () => {
+    const t = setup();
+    const norfolk = t.nodeAt(...NORFOLK), target = t.nodeAt(...BREMERHAVEN);
+    const division = heavyBrigade(t, 'USA', norfolk, { name: 'Armoured division', equipment: { [P('t_mbt')]: 300, [P('t_ifv')]: 130, [P('t_inf')]: 60 } });
+    division.order = { posture: 'move', target, path: [], issuedTick: 0 };
+    sealiftGroup(t, norfolk, 1);
+    const mass = landMass(t.map);
+    const parts = () => Object.values(t.world.formations).filter((f) => f.nation === N('USA') && f.kind === 'maneuver');
+    const tanks = () => parts().reduce((n, f) => n + (f.equipment[P('t_mbt')] ?? 0), 0);
+    let firstSailing: number | undefined;
+    for (let d = 0; d < 80 && !parts().every((f) => f.status === 'active' && mass[f.node] === mass[target]); d++) {
+      t.day();
+      const aboard = parts().filter((f) => f.status === 'embarked');
+      if (firstSailing === undefined && aboard.length) firstSailing = aboard.reduce((n, f) => n + (f.equipment[P('t_mbt')] ?? 0), 0);
+    }
+    expect(firstSailing).toBeGreaterThan(0);
+    expect(firstSailing).toBeLessThan(300);
+    expect(parts().length).toBeGreaterThan(1);
+    expect(parts().every((f) => f.status === 'active' && mass[f.node] === mass[target])).toBe(true);
+    expect(tanks()).toBe(300);
+  }, 120_000);
+
   it('sinks the embarked vehicles with the ships that carried them', () => {
     const t = setup();
     const norfolk = t.nodeAt(...NORFOLK);

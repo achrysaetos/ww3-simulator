@@ -8,6 +8,7 @@ import { awaitingLift, debarkation, deckSlots, landMass, liftMode, overseas } fr
 import type { TickEnv } from './env';
 import { geography } from './geography';
 import { navalDestination, seaPath } from './movement';
+import { boardable, detach } from './orders';
 import type { Composition } from './state';
 
 /**
@@ -160,20 +161,23 @@ export function sealift(env: TickEnv): void {
       const to = debark(g.nation, f.order.target!, port as NodeId);
       if (to === undefined || (voyages[g.id] && voyages[g.id].to !== to)) continue;
       const share = deckSlots(catalog, f) / comp.vehicleLift;
-      if (used > 0 && used + share > 1) {
+      // A formation too big for the decks left sails in echelons, as an armoured division does on a few RO-ROs;
+      // the rest waits at the port for the next sailing.
+      let boarding = f;
+      if (share > 1 - used + 1e-9) {
         full = true;
-        continue;
-      }
+        if (!boardable(1 - used, share)) continue;
+        boarding = detach(world, ctx, f, (1 - used) / share);
+      } else queue.splice(queue.indexOf(f), 1);
       voyages[g.id] ??= { from: port as NodeId, to, loadingSince: world.tick };
-      (voyages[g.id].onward ??= {})[f.id] = f.order.target!;
-      f.status = 'embarked';
-      f.embarkedOn = g.id;
-      f.node = g.node;
-      f.order = { posture: 'embark', targetFormation: g.id, issuedTick: world.tick };
-      (env.embarked.get(g.id) ?? env.embarked.set(g.id, []).get(g.id)!).push(f);
-      aboard.push(f);
-      queue.splice(queue.indexOf(f), 1);
-      used += share;
+      (voyages[g.id].onward ??= {})[boarding.id] = f.order.target!;
+      boarding.status = 'embarked';
+      boarding.embarkedOn = g.id;
+      boarding.node = g.node;
+      boarding.order = { posture: 'embark', targetFormation: g.id, issuedTick: world.tick };
+      (env.embarked.get(g.id) ?? env.embarked.set(g.id, []).get(g.id)!).push(boarding);
+      aboard.push(boarding);
+      used += deckSlots(catalog, boarding) / comp.vehicleLift;
     }
     const v = voyages[g.id];
     if (aboard.length && v) {
