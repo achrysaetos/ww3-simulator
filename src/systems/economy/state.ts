@@ -1,6 +1,6 @@
 import type { ItemId, Nation, NationId } from '../../core/types';
 import { DEFAULT_DRAFT_LAW, DRAFT_LAWS } from '../../data/nations/conscription';
-import { CATEGORIES, GENERIC_AMMO_SURGE_MULTIPLE, GENERIC_AMMO_TONS_PER_MFG_USD_B, ITEMS, LINES, RESOURCES, RESOURCE_SPECS, type Resource, type Stock } from '../../data/industry';
+import { CATEGORIES, GENERIC_AMMO_SURGE_MULTIPLE, GENERIC_AMMO_TONS_PER_MFG_USD_B, ITEMS, LINES, OIL_STOCK_MONTHS, RESOURCES, RESOURCE_SPECS, type Resource, type Stock } from '../../data/industry';
 
 export interface LineState {
   item: ItemId;
@@ -25,6 +25,8 @@ export interface NationEconomy {
   buffers: Record<Resource, number[]>;
   /** Share of need actually available this tick after drawing on stocks, 0..1. */
   supply: Record<Resource, number>;
+  /** Oil, split from energy because forces run on it: months of national use left in stocks, and the share of need available this tick. */
+  oil: { months: number; supply: number };
   /**
    * Population-weighted industry intact and held, relative to the scenario start. The
    * baseline GDP in stats already excludes what was occupied or ruined before the start
@@ -96,6 +98,12 @@ export function stocksOf(nation: NationId, r: Resource): Stock[] {
   return spec.tiered?.[nation] ?? [{ share: 1, months: spec.buffers?.[nation] ?? spec.bufferMonths }];
 }
 
+/** Months of national oil use a nation holds: its oil tier where stocks are split by fuel, else OIL_STOCK_MONTHS, else its energy buffer. */
+export function oilStockMonths(nation: NationId): number {
+  const spec = RESOURCE_SPECS.energy;
+  return spec.tiered?.[nation]?.[0].months ?? OIL_STOCK_MONTHS[nation] ?? spec.buffers?.[nation] ?? spec.bufferMonths;
+}
+
 export function newLine(item: ItemId, baselinePerYear: number, surgePerYear: number, rampMonths: number, maxTotal?: number): LineState {
   return {
     item,
@@ -135,6 +143,7 @@ export function newNationEconomy(nation: Nation): NationEconomy {
     lines,
     buffers: Object.fromEntries(RESOURCES.map((r) => [r, stocksOf(nation.id, r).map((s) => s.months)])) as Record<Resource, number[]>,
     supply: perResource(() => 1),
+    oil: { months: oilStockMonths(nation.id), supply: 1 },
     integrity: 1,
     baseIntegrity: 1,
     tradeLoss: 0,

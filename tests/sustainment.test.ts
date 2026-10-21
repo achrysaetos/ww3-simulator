@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { NationId, PlatformId } from '../src/core/types';
 import { createSession } from '../src/scenarios';
 import { chokepointLevel, strikeChokepoint, supplyFactor } from '../src/systems/logistics';
+import { geography } from '../src/systems/naval/geography';
 
 /** Steps a session `days` days, handing each tick's events to `on`. */
 function runDays(s: ReturnType<typeof createSession>, days: number, on?: (events: ReturnType<typeof s.engine.step>, day: number) => void): void {
@@ -175,5 +176,61 @@ describe('bridges and chokepoints (LE-4, AS-8)', () => {
     expect(chokepointLevel(world, 'chonhar')).toBe(1);
     expect(chokepointLevel(world, 'kerch')).toBeLessThan(0.4);
     expect(supplyFactor(world, map, sevastopol, rus)).toBeGreaterThan(0.35);
+  }, 120_000);
+});
+
+describe('oil blockade (LE-5)', () => {
+  // Pakistan imports about 85% of its oil by sea through Karachi and Port Qasim and holds about 20 days of it.
+  // On main a full blockade cut its oil no harder than its coal, gas and hydro, and its forces drew fuel as before.
+  it("south-asia-2027: blockading Karachi and Port Qasim drains Pakistan's military fuel once its oil stocks run out", () => {
+    const pak = 'PAK' as NationId, ind = 'IND' as NationId;
+    const fuel = (s: ReturnType<typeof createSession>) => {
+      let tons = s.world.nations[pak].bulk.fuel;
+      for (const f of Object.values(s.world.formations)) if (f.nation === pak && f.status !== 'destroyed') tons += f.supply.fuel;
+      return tons;
+    };
+    const open = createSession('south-asia-2027', 1), blockaded = createSession('south-asia-2027', 1);
+    runDays(open, 1);
+    runDays(blockaded, 1);
+    const { world, map } = blockaded;
+    expect(world.relations['IND|PAK'].atWar).toBe(true);
+    const zones = [...new Set(geography(map).ports.filter((p) => world.control[p.node] === pak).map((p) => p.zone))];
+    const fleets = Object.values(world.formations).filter((f) => f.nation === ind && (f.kind === 'surface_group' || f.kind === 'submarine') && f.status !== 'destroyed');
+    world.nations[ind].controlledBy = 'human';
+    world.pending.push({ type: 'hold', nation: ind, formations: fleets.map((f) => f.id), held: true });
+    fleets.forEach((f, i) => {
+      f.node = zones[i % zones.length];
+      world.pending.push({ type: 'order', nation: ind, formation: f.id, order: { posture: 'blockade', target: f.node } });
+    });
+
+    runDays(open, 30);
+    runDays(blockaded, 30);
+    const [open30, blockaded30] = [fuel(open), fuel(blockaded)];
+    runDays(open, 30);
+    runDays(blockaded, 30);
+    expect(world.theater.tradeBlocked[pak]).toBeGreaterThan(0.9);
+    // Stocks carry the first three weeks; after that the forces burn their depots down with little coming in.
+    expect(blockaded30).toBeGreaterThan(0.9 * open30);
+    expect(blockaded30 - fuel(blockaded)).toBeGreaterThan(3 * (open30 - fuel(open)));
+    expect(fuel(blockaded)).toBeLessThan(0.6 * fuel(open));
+  }, 240_000);
+});
+
+describe('oil export facilities (LE-6)', () => {
+  // On main a wrecked Abqaiq counted only as its cell's share of Saudi population.
+  it('gulf-2027: wrecking Abqaiq, Ghawar and Kharg takes their share of Saudi and Iranian exports off the world market', () => {
+    const s = createSession('gulf-2027', 1);
+    const { world, map } = s;
+    runDays(s, 2);
+    const before = world.slices.economy.energyExportsLost;
+    for (const [lat, lon] of [[25.94, 49.68], [25.0, 49.3], [29.24, 50.31]]) world.theater.infrastructure[map.nodeAt(lat, lon)] = 0;
+    runDays(s, 1);
+    // Saudi Arabia: 11% of world energy exports, 1 - (1 - 0.58)(1 - 0.38) of them through Abqaiq and Ghawar.
+    // Iran: 2%, 90% of them through Kharg.
+    const expected = 0.11 * (1 - 0.42 * 0.62) + 0.02 * 0.9;
+    const moved = world.slices.economy.energyExportsLost - before;
+    expect(moved).toBeGreaterThan(0.9 * expected);
+    expect(moved).toBeLessThan(1.05 * expected);
+    expect(world.slices.economy.energyPrice).toBeGreaterThan(1.4);
   }, 120_000);
 });

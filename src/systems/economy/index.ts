@@ -1,14 +1,14 @@
 import type { SimContext, System } from '../../core/engine';
 import { atWar, hostility, setSanctions } from '../../core/engine';
 import type { GameMap } from '../../core/map';
-import type { ItemId, MunitionId, Nation, NationId, PlatformId, World } from '../../core/types';
+import type { ItemId, MunitionId, Nation, NationId, NodeId, PlatformId, World } from '../../core/types';
 import {
-  AID_FLOWS, BASELINE_SANCTIONS, CATEGORIES, DEFAULT_SEABORNE_TRADE_SHARE, ITEMS, MIL_FUEL_TONS_PER_USD_M, SEABORNE_TRADE_SHARE, OIL_CONSUMPTION_MT, OIL_TONS_PER_PPP_USD_M, RATION_TONS_PER_DAY, RESOURCES, RESOURCE_SPECS, SHIPBUILDING_GT_PER_YEAR, SHIPYARD_WARSHIP_SHARE,
+  AID_FLOWS, BASELINE_SANCTIONS, CATEGORIES, DEFAULT_OIL_SEABORNE_SHARE, DEFAULT_SEABORNE_TRADE_SHARE, ENERGY_EXPORT_SITES, ESSENTIAL_CIVIL_OIL, ITEMS, MIL_FUEL_TONS_PER_USD_M, OIL_IMPORT_SHARE, OIL_SEABORNE_SHARE, SEABORNE_TRADE_SHARE, OIL_CONSUMPTION_MT, OIL_TONS_PER_PPP_USD_M, RATION_TONS_PER_DAY, RESOURCES, RESOURCE_SPECS, SHIPBUILDING_GT_PER_YEAR, SHIPYARD_WARSHIP_SHARE,
   itemSpec, type AidFlow, type ItemCategory, type Resource,
 } from '../../data/industry';
 import { defenseObligations } from '../../data/nations';
 import { recallReservists } from '../../data/nations/reserves';
-import { newLine, newNationEconomy, stocksOf, type LineState, type NationEconomy } from './state';
+import { newLine, newNationEconomy, oilStockMonths, stocksOf, type LineState, type NationEconomy } from './state';
 
 export type { EconomyState, LineState, NationEconomy } from './state';
 
@@ -221,6 +221,33 @@ function industrialIntegrity(world: World, map: GameMap): Map<NationId, number> 
   return out;
 }
 
+const siteCache = new WeakMap<GameMap, { nation: NationId; node: NodeId; share: number }[]>();
+/** Each energy export site on its land cell: the cell it stands in, else the nearest the nation owns. */
+function exportSites(map: GameMap): { nation: NationId; node: NodeId; share: number }[] {
+  let sites = siteCache.get(map);
+  if (!sites) {
+    sites = [];
+    for (const site of ENERGY_EXPORT_SITES) {
+      const at = map.nodeAt(site.lat, site.lon);
+      const own = (n: NodeId) => n < map.landCount && map.owner[n] === site.nation;
+      const node = own(at) ? at : map.nodesWithin(at, 200).filter(own).sort((a, b) => map.distanceKm(at, a) - map.distanceKm(at, b))[0];
+      if (node !== undefined) sites.push({ nation: site.nation, node, share: site.share });
+    }
+    siteCache.set(map, sites);
+  }
+  return sites;
+}
+
+/** Share of each listed exporter's energy export capacity its export sites still give, 0..1: a site lost or wrecked takes its share of what is left. */
+function exportCapacity(world: World, map: GameMap): Map<NationId, number> {
+  const out = new Map<NationId, number>();
+  for (const { nation, node, share } of exportSites(map)) {
+    const up = world.control[node] === nation ? Math.max(0, world.theater.infrastructure[node] ?? 1) : 0;
+    out.set(nation, (out.get(nation) ?? 1) * (1 - share * (1 - up)));
+  }
+  return out;
+}
+
 /**
  * Grid capacity per land cell, 0..1, absent = intact. Written by air strikes on power targets
  * (theater.power); read through this narrow view so the economy runs on worlds without it.
@@ -263,6 +290,8 @@ function tradePartners(world: World): Map<NationId, Map<NationId, Breach>> {
 
 interface Scan {
   integrity: Map<NationId, number>;
+  /** Energy export capacity left at each exporter's export sites (exportCapacity). */
+  exports: Map<NationId, number>;
   grid: Map<NationId, number>;
   cut: Map<NationId, Map<NationId, Breach>>;
   personnel: Map<NationId, number>;
@@ -287,7 +316,7 @@ function scan(world: World, ctx: SimContext): Scan {
   for (const f of Object.values(world.formations)) if (f.status !== 'destroyed') personnel.set(f.nation, (personnel.get(f.nation) ?? 0) + f.personnel);
   let worldGdp = 0;
   for (const n of Object.values(world.nations)) worldGdp += n.stats.gdp ?? 0;
-  const s: Scan = { integrity, grid: gridIntact(world, ctx.map), cut: tradePartners(world), personnel, worldGdp, openMarket: new Map() };
+  const s: Scan = { integrity, exports: exportCapacity(world, ctx.map), grid: gridIntact(world, ctx.map), cut: tradePartners(world), personnel, worldGdp, openMarket: new Map() };
   for (const r of RESOURCES) s.openMarket.set(r, importFlow(world, s, undefined, r));
   return s;
 }
@@ -300,11 +329,11 @@ function seaCut(world: World, id: NationId): number {
 }
 
 /** Share of world energy exports lost to blockade or damage. Sanctions only reroute oil, so they do not count. */
-function energyExportsLost(world: World, integrity: Map<NationId, number>): number {
+function energyExportsLost(world: World, s: Scan): number {
   let lost = 0;
   for (const [supplier, share] of Object.entries(RESOURCE_SPECS.energy.market)) {
     if (!world.nations[supplier as NationId]) continue;
-    lost += share * (1 - (1 - seaCut(world, supplier as NationId)) * (integrity.get(supplier as NationId) ?? 1));
+    lost += share * (1 - (1 - seaCut(world, supplier as NationId)) * (s.integrity.get(supplier as NationId) ?? 1) * (s.exports.get(supplier as NationId) ?? 1));
   }
   return lost;
 }
@@ -317,7 +346,8 @@ function supplierFlow(world: World, s: Scan, buyer: NationId | undefined, suppli
   if (supplier === 'other' || !world.nations[supplier as NationId]) return 1;
   const breach = buyer && s.cut.get(buyer)?.get(supplier as NationId);
   const politics = breach ? STILL_ARRIVES[breach][RESOURCE_SPECS[r].exportControlled ? 'controlled' : 'goods'] : 1;
-  return politics * (1 - seaCut(world, supplier as NationId)) * (s.integrity.get(supplier as NationId) ?? 1);
+  const sites = r === 'energy' ? s.exports.get(supplier as NationId) ?? 1 : 1;
+  return politics * (1 - seaCut(world, supplier as NationId)) * (s.integrity.get(supplier as NationId) ?? 1) * sites;
 }
 
 const selfShare = (n: Nation, r: Resource) => clamp01(RESOURCE_SPECS[r].selfSufficiency[n.id] ?? RESOURCE_SPECS[r].defaultSelf(n.stats));
@@ -363,6 +393,28 @@ function drawSupply(e: NationEconomy, id: NationId, r: Resource, raw: number, ne
     left[i] = Math.max(0, left[i] - shortfall * served * dtMonths);
   }
   return (raw + shortfall * covered) / need;
+}
+
+/**
+ * Oil available against need, after stocks: domestic output plus imports from suppliers still
+ * selling and shipping, less what a blockade of the nation's own ports stops, with its oil stocks
+ * covering the gap until they run out. `need` is demand relative to normal, as for energy.
+ */
+function drawOil(world: World, s: Scan, n: Nation, e: NationEconomy, need: number, dtMonths: number): number {
+  const imported = clamp01(OIL_IMPORT_SHARE[n.id] ?? 1 - selfShare(n, 'energy'));
+  const open = !s.cut.has(n.id) && !Object.hasOwn(RESOURCE_SPECS.energy.market, n.id);
+  const { num, den } = open ? s.openMarket.get('energy')! : importFlow(world, s, n.id, 'energy');
+  const blocked = (world.theater.tradeBlocked[n.id] ?? 0) * (OIL_SEABORNE_SHARE[n.id] ?? DEFAULT_OIL_SEABORNE_SHARE);
+  const raw = 1 - imported + imported * (den > 0 ? num / den : 1) * (1 - blocked);
+  const oil = (e.oil ??= { months: oilStockMonths(n.id), supply: 1 });
+  const shortfall = need - raw;
+  if (shortfall <= 1e-3) {
+    oil.months = Math.min(oilStockMonths(n.id), oil.months + BUFFER_REFILL_PER_MONTH * dtMonths);
+    return (oil.supply = 1);
+  }
+  const covered = Math.min(shortfall, oil.months / dtMonths);
+  oil.months = Math.max(0, oil.months - shortfall * dtMonths);
+  return (oil.supply = (raw + covered) / need);
 }
 
 /**
@@ -435,6 +487,7 @@ function stepNation(world: World, ctx: SimContext, s: Scan, n: Nation, e: Nation
   const newTradeLoss = BASELINE_SANCTIONS[n.id] ? tradeLossOf(world, s, n, true) : e.tradeLoss;
   const tradeOutput = 1 - ((n.stats.importsPctGdp ?? 30) / 100) * newTradeLoss * IMPORT_GDP_LOSS;
   for (const r of RESOURCES) e.supply[r] = drawSupply(e, n.id, r, rawAccess(world, s, n, r), r === 'energy' ? tradeOutput : 1, dtMonths);
+  const oilSupply = drawOil(world, s, n, e, tradeOutput, dtMonths);
   e.supply.energy *= 1 - ELECTRICITY_SHARE * (1 - (s.grid.get(n.id) ?? 1));
   announceShortages(world, ctx, n.id, e);
 
@@ -465,18 +518,19 @@ function stepNation(world: World, ctx: SimContext, s: Scan, n: Nation, e: Nation
   for (const line of Object.values(e.lines)) runLine(n, e, line, spendMultiple, dtMonths, unitCostOf(ctx, line.item));
 
   // Refills are the larger of what the budget buys abroad and what the state can commandeer from
-  // national oil supply, which in war far exceeds the peacetime budget. Forces are priority demand
-  // under rationing, so energy reaches them first. Depots are tanks built in peacetime:
+  // national oil supply, which in war far exceeds the peacetime budget. Forces draw on what oil is
+  // left once essential civilian use is kept, whoever pays for it. Depots are tanks built in peacetime:
   // they hold DEPOT_MONTHS of the peacetime budget's fuel whatever the mobilization, so war raises
   // the flow through them, not the stock they can keep.
   const peaceFuelPerMonth = peaceFuelPerMonthOf(world, n);
   const budgetFuelPerMonth = peaceFuelPerMonth * (1 + (FUEL_MOBILIZATION_MULTIPLE - 1) * n.mobilization);
   const oilMt = OIL_CONSUMPTION_MT[n.id];
   const oilTonsPerYear = oilMt !== undefined ? oilMt * 1e6 : ((n.stats.gdpPpp ?? n.stats.gdp ?? 0) / 1e6) * OIL_TONS_PER_PPP_USD_M;
-  const commandeeredPerMonth = (oilTonsPerYear / 12) * (MIL_OIL_SHARE_PEACE + (MIL_OIL_SHARE_FULL - MIL_OIL_SHARE_PEACE) * n.mobilization);
+  const milOilShare = MIL_OIL_SHARE_PEACE + (MIL_OIL_SHARE_FULL - MIL_OIL_SHARE_PEACE) * n.mobilization;
+  const commandeeredPerMonth = (oilTonsPerYear / 12) * milOilShare;
   const fuelPerMonth = Math.max(budgetFuelPerMonth, commandeeredPerMonth);
   const fuelBefore = n.bulk.fuel;
-  const served = Math.min(1, e.supply.energy / (RESOURCE_SPECS.energy.rationing?.priority ?? 1));
+  const served = clamp01((oilSupply - ESSENTIAL_CIVIL_OIL * (1 - milOilShare)) / milOilShare);
   n.bulk.fuel = Math.min(Math.max(n.bulk.fuel, DEPOT_MONTHS * peaceFuelPerMonth), n.bulk.fuel + fuelPerMonth * dtMonths * served);
   e.fuelDelivered += n.bulk.fuel - fuelBefore;
 
@@ -684,7 +738,7 @@ export const economy: System = {
     const dtMonths = world.dtHours / HOURS_PER_MONTH;
     const s = scan(world, ctx);
     const state = world.slices.economy;
-    state.energyExportsLost = energyExportsLost(world, s.integrity);
+    state.energyExportsLost = energyExportsLost(world, s);
     state.energyPrice = energyPrice(state.energyExportsLost);
     for (const [id, e] of Object.entries(state.nations) as [NationId, NationEconomy][]) {
       const n = world.nations[id];

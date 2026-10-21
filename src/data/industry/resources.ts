@@ -14,8 +14,45 @@ const STEEL_WORLD_MT = 1_885;
  */
 export const OIL_CONSUMPTION_MT: Record<string, number> = {
   USA: 1_010, CHN: 830, IND: 270, SAU: 200, RUS: 185, JPN: 165, KOR: 140, BRA: 160, CAN: 120, DEU: 100, IRN: 100, MEX: 90,
-  FRA: 75, GBR: 70, TWN: 50, ITA: 60, ESP: 63, TUR: 50, POL: 35, ISR: 12, UKR: 10, PRK: 1,
+  FRA: 75, GBR: 70, TWN: 50, ITA: 60, ESP: 63, TUR: 50, POL: 35, ISR: 12, UKR: 10, PRK: 1, PAK: 21,
 };
+
+/**
+ * Share of oil use met by imports, crude and products net of exports (Energy Institute Statistical
+ * Review 2024, 2023 production against consumption; est. where refining trade blurs it). Oil is
+ * split from other energy because forces run on it: a nation can burn its own coal, gas and hydro
+ * for power and still run its tanks dry. Nations not listed use their net energy import share.
+ */
+// param: tag=calibrated range=[0,1] source=Energy Institute Statistical Review 2024
+export const OIL_IMPORT_SHARE: Record<string, number> = {
+  PAK: 0.85, IND: 0.87, JPN: 1, KOR: 1, TWN: 1, PHL: 0.97, THA: 0.8, VNM: 0.6, BGD: 0.95, CHN: 0.72,
+  DEU: 0.97, FRA: 0.99, ITA: 0.92, ESP: 0.99, POL: 0.97, GBR: 0.45, TUR: 0.93, ISR: 0.98, UKR: 0.8, EGY: 0.3,
+  USA: 0, CAN: 0, RUS: 0, SAU: 0, IRN: 0, IRQ: 0, ARE: 0, KWT: 0, QAT: 0, NOR: 0, BRA: 0,
+};
+
+/**
+ * Share of a nation's oil imports that arrive by sea, so a blockade of its ports cuts them: almost
+ * all of them, except where pipelines run overland. China takes about a quarter of its crude by
+ * pipeline from Russia, Kazakhstan and Myanmar (EIA China brief 2024); Belarus all of it by
+ * Druzhba; Hungary and Slovakia most of it by Druzhba (est.).
+ */
+export const OIL_SEABORNE_SHARE: Record<string, number> = { CHN: 0.75, BLR: 0, HUN: 0.4, SVK: 0.3, CZE: 0.5, AUT: 0.5, MNG: 0, KAZ: 0 };
+export const DEFAULT_OIL_SEABORNE_SHARE = 0.95;
+
+/**
+ * Months of national oil use held in stocks, government and industry, where not given by the oil tier
+ * of RESOURCE_SPECS.energy.tiered: Pakistan about 20 days (OGRA, 2022-24), the US Strategic Petroleum
+ * Reserve and commercial stocks about 3 months of use (EIA, 2024). Others hold the energy buffer.
+ */
+export const OIL_STOCK_MONTHS: Record<string, number> = { PAK: 0.7, USA: 3 };
+
+/**
+ * Share of normal national oil use the state keeps for civilians it cannot cut off however short it
+ * runs: food distribution, power for hospitals and water, emergency services and public transport.
+ * Forces are served first from what is left. Judgment, the same floor the energy rationing keeps.
+ */
+// param: tag=estimated range=[0.3,0.6] source=judgment; IEA emergency response demand restraint
+export const ESSENTIAL_CIVIL_OIL = 0.5;
 /** World oil use (~4.5 Gt) over world GDP at PPP (~USD 185T), tons per year per USD 1M (est.). */
 export const OIL_TONS_PER_PPP_USD_M = 25;
 
