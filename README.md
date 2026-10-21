@@ -5,8 +5,8 @@ country, the real order of battle of every military, more than a thousand weapon
 systems, and the logistics, industry, diplomacy and nuclear escalation that decide
 how a war actually goes.
 
-You can play any of the 193 nations in the browser, or run scenarios headless and
-measure the outcome.
+You can play any of the 193 nations in the browser, save and resume a war from the Game
+menu, or run scenarios headless and measure the outcome.
 
 ## Quick start
 
@@ -44,9 +44,17 @@ npm run typecheck
 
 ## What is simulated
 
-- **Geography.** 16,400 one-degree land cells and 4,400 sea zones, built from Natural
-  Earth. Each cell carries terrain, population share, rail, ports and airports.
+- **Geography.** 18,250 land cells and about 4,400 sea zones, built from Natural Earth.
+  Most cells are one degree. The hot fronts (Ukraine, the Baltic and Kaliningrad, the
+  Suwalki gap, Korea and the DMZ, the Caucasus, Israel and southern Lebanon) use half- and
+  quarter-degree cells. Terrain, elevation and ruggedness come from the ETOPO 2022 relief
+  model, and each cell's population from GHS-POP 2020. Straits split the cells on either
+  shore, and bridges and tunnels such as the Channel Tunnel are explicit fixed links.
   Strategic islands such as Guam, Okinawa and Hawaii have their own cells.
+- **Weather and seasons.** Each day the weather of every 5-degree region is drawn around
+  its climate normal. Snow lies and melts, the ground freezes and thaws, and mud follows
+  the autumn rains and the spring thaw. Weather slows movement, grounds sorties, holds landing
+  craft in heavy seas, and costs troops in the open to cold.
 - **Nations.** World Bank economic data for all 193 states. Each state also has a
   government type, treaty memberships (30 treaties with their real obligations),
   opinions of other states, FAS 2025 nuclear forces, and a doctrine-based strategic
@@ -65,9 +73,10 @@ npm run typecheck
 - **Air and missile war.** Sortie generation, stealth-dependent BVR combat, AWACS and
   tankers. Integrated air defense uses salvo interception math, and interceptor stocks
   run out. Strikes, SEAD and one-way drone swarms are modelled.
-- **Naval war.** Hughes salvo combat, submarine and anti-submarine warfare, mines, ten
-  named chokepoints, blockades that cut each nation's seaborne trade, and amphibious
-  landings.
+- **Naval war.** Hughes salvo combat, layered fleet missile defence, submarine and
+  anti-submarine warfare, mines and mine clearing, ten named chokepoints, blockades that cut
+  each nation's seaborne trade, and amphibious landings. Sealift and RO-RO ships carry
+  heavy units abroad and unload at the nearest port clear of enemy shore missiles.
 - **Logistics.** Supply networks shared within each bloc run from depots over rail,
   road, sea and air. Supply decays with distance from the railhead, and pockets get
   nothing. Fronts are fed along the line of contact, and host nations supply foreign
@@ -83,10 +92,21 @@ npm run typecheck
   scaled from Glasstone and Dolan against real city populations. Fallout drifts on
   prevailing winds and decays. ASAT and orbital debris, cyber attacks, and nuclear
   winter's effect on food are included.
+- **Command, control and intelligence.** Each belligerent has a chain of command from its
+  national command authority down to army and corps HQs. Struck or overrun HQs and jammed
+  radio, satellite and GNSS links slow orders and weaken fire. Each nation sees only what
+  its sensors fix: bases, contact, airborne ISR, reconnaissance satellites and tracked
+  warships. Between fixes its picture goes stale.
+- **Civilians and home front.** Residents flee fighting, occupation, strikes and a
+  threatened capital at rates calibrated on Ukraine in 2022. Casualties, cost of living and
+  lost output move public opinion, which caps how far a government can mobilize and how
+  long a democracy keeps fighting. Autocracies answer to regime stability instead.
 - **Diplomacy and AI.** Treaty cascades with per-member reliability and delays.
-  Escalation ladders per pair of nations, war support, capitulation and peace. AI
-  commanders hold fronts, attack only at local 3:1, task air, missile and naval forces,
-  and use nuclear weapons only when their doctrine's threshold is crossed.
+  Escalation ladders per pair of nations, war support, capitulation (which needs both the
+  will and the means to fight to be gone) and peace. AI commanders hold fronts, attack only
+  at local 3:1, task air, missile and naval forces, deploy coalition forces overseas
+  through staging hosts, and use nuclear weapons only when their doctrine's threshold is
+  crossed. Any domain of a human player's nation can be delegated to the AI.
 
 ## How it is built
 
@@ -100,7 +120,8 @@ The decision trail for how this was built is in [.audit/decisions.tsv](.audit/de
 
 ## Data sources
 
-Natural Earth (public domain); World Bank WDI (CC BY 4.0); IISS Military Balance 2025;
+Natural Earth (public domain); World Bank WDI (CC BY 4.0); ETOPO 2022 relief, NOAA NCEI
+(public domain); GHS-POP R2023A, European Commission JRC (CC BY 4.0); IISS Military Balance 2025;
 SIPRI; FAS Status of World Nuclear Forces 2025; US DoD China Military Power Report; CSIS
 Missile Threat and wargame reports; RAND; CRS; Oryx; ISW. Figures recalled from these
 sources are rounded estimates and are labelled as such in the code.

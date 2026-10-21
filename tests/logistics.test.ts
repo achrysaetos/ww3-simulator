@@ -198,7 +198,7 @@ describe('logistics', () => {
     const t = setup();
     const chn = id.nation('CHN');
     t.war('CHN', 'TWN');
-    const beach = t.nodeAt(23.5, 120.5);
+    const beach = t.nodeAt(23.4, 120.15);
     const zone = [...t.map.neighbors(beach)].find((n) => t.map.isSea(n))!;
     const landing = t.brigade('CHN', beach);
     for (let i = 0; i < 2; i++) t.brigade('TWN', beach);
