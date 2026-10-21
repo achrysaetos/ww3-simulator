@@ -608,11 +608,15 @@ describe('naval movement and lift', () => {
     onStation.home = port;
     alongside.supply.food *= 0.5;
     alongside.supply.fuel *= 0.5;
+    const bulk = (t.world.nations[RUS].bulk = { fuel: 1e5, ammo: 0, food: 1e5 });
+    const short = alongside.supplyCapacity.fuel - alongside.supply.fuel;
     t.order(onStation, { posture: 'patrol', target: sea });
     t.engine.run(t.world, Math.round((10 * 24) / t.world.dtHours));
     expect(alongside.node).toBe(port);
     expect(alongside.supply.food).toBeCloseTo(alongside.supplyCapacity.food);
     expect(alongside.supply.fuel).toBeCloseTo(alongside.supplyCapacity.fuel);
+    expect(bulk.food).toBeLessThan(1e5);
+    expect(bulk.fuel).toBeLessThanOrEqual(1e5 - short);
     expect(onStation.supply.food).toBeLessThan(0.8 * onStation.supplyCapacity.food);
   });
 

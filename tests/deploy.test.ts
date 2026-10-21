@@ -26,6 +26,8 @@ function setup() {
   const t = testWorld([landMovement, navalWar]);
   nato(t);
   t.war('USA', 'RUS');
+  // Ships alongside at Norfolk refuel from the national stocks the base holds.
+  t.world.nations[N('USA')].bulk = { fuel: 1e6, ammo: 0, food: 1e5 };
   const order = (f: Formation, target: NodeId) => applyLandOrder(t.world, { type: 'order', nation: f.nation, formation: f.id, order: { posture: 'move', target } }, t.engine.context(t.world));
   const day = () => t.engine.run(t.world, Math.round(24 / t.world.dtHours));
   return { ...t, order, day };
