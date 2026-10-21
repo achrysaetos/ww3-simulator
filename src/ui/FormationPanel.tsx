@@ -1,5 +1,5 @@
 import { memo, useState } from 'react';
-import type { Formation, FormationId, FormationKind, NationId, NodeId, Order, Posture, TargetClass } from '../core/types';
+import { TARGET_CLASSES, type Formation, type FormationId, type FormationKind, type NationId, type NodeId, type Order, type Posture, type TargetClass } from '../core/types';
 import type { SimClient } from './client';
 import type { Palette } from './colors';
 import type { PlaceNamer } from './events';
@@ -31,7 +31,11 @@ export const NEEDS_TARGET: ReadonlySet<Posture> = new Set(['move', 'attack', 'st
 
 /** Postures a formation can be given: its kind's, plus an air assault for airborne troops. */
 export const posturesOf = (f: Formation): readonly Posture[] => (f.airborne ? [...POSTURES_BY_KIND[f.kind], 'air_assault'] : POSTURES_BY_KIND[f.kind]);
-const STRIKE_CLASSES: TargetClass[] = ['structure', 'hardened', 'soft', 'armor', 'ship', 'aircraft'];
+/** Every target class the engine strikes, in the player's words (BB-10: power and missile targets were missing). */
+export const STRIKE_CLASS_LABEL: Record<TargetClass, string> = {
+  structure: 'Buildings and depots', hardened: 'Hardened sites', power: 'Power grid', missile: 'Missile launchers', soft: 'Trucks and soft vehicles',
+  armor: 'Armour', infantry: 'Infantry', aircraft: 'Aircraft on the ground', helicopter: 'Helicopters', ship: 'Ships', submarine: 'Submarines',
+};
 
 /** Who commands a formation of the player's nation. */
 export type Command = 'player' | 'delegate' | 'none';
@@ -55,9 +59,11 @@ interface Props {
   onHold(held: boolean): void;
   onClose(): void;
   onFocus(node: NodeId): void;
+  /** Hours until the player's latest order reaches the unit down a degraded chain of command (CE-9). */
+  inTransitHours?: number;
 }
 
-export function FormationPanel({ client, palette, places, routes, playAs, command, domainLabel, pending, pendingLift, onPickPosture, onImmediate, onOrder, onHold, onClose, onFocus }: Props) {
+export function FormationPanel({ client, palette, places, routes, playAs, command, domainLabel, pending, pendingLift, onPickPosture, onImmediate, onOrder, onHold, onClose, onFocus, inTransitHours }: Props) {
   const detail = client.state.focusFormation;
   const [tc, setTc] = useState<TargetClass>('structure');
   if (!detail) return <div className="panel-scroll"><p className="muted">Loading formation…</p></div>;
@@ -91,6 +97,9 @@ export function FormationPanel({ client, palette, places, routes, playAs, comman
           {command === 'none' && <span><b>Awaiting your orders.</b> You have not delegated {domainLabel} to the AI.</span>}
         </div>
       )}
+      {own && inTransitHours !== undefined && (
+        <p className="in-transit" data-testid="in-transit"><i className="ww-pulse" aria-hidden="true" />Your order is in transit down a degraded chain of command. It reaches {f.name} in about {Math.max(1, Math.round(inTransitHours))} h; until then the unit follows its old order.</p>
+      )}
 
       <Section title="Situation">
         <p className="activity" data-testid="activity">{activity(detail, (n) => places.name(n), (id) => client.state.nations.get(id)?.name ?? id, client.namer.formation)}</p>
@@ -121,7 +130,7 @@ export function FormationPanel({ client, palette, places, routes, playAs, comman
             <label className="field inline">
               <span>Strike target class</span>
               <select value={tc} onChange={(e) => { setTc(e.target.value as TargetClass); if (pending === 'strike') onPickPosture('strike', e.target.value as TargetClass); }}>
-                {STRIKE_CLASSES.map((c) => <option key={c}>{c}</option>)}
+                {TARGET_CLASSES.map((c) => <option key={c} value={c}>{STRIKE_CLASS_LABEL[c]}</option>)}
               </select>
             </label>
           )}
