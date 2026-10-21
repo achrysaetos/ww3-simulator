@@ -458,3 +458,17 @@ describe('counter-space strikes', () => {
     expect(targets.has(nro.id)).toBe(false);
   }, 60_000);
 });
+
+describe('mobilization and the home front', () => {
+  it('asks no more of a public than it will bear unless the nation is invaded', () => {
+    const levels = (tolerance: number | undefined) => {
+      const t = testWorld([createAi()]);
+      t.war('USA', 'CHN');
+      if (tolerance !== undefined)
+        (t.world.slices as unknown as Record<string, unknown>).politics = { nations: { [N('USA')]: { mobilizationTolerance: tolerance } } };
+      return commandsOver(t, 8).filter((c): c is Extract<Command, { type: 'set_mobilization' }> => c.type === 'set_mobilization' && c.nation === N('USA')).map((c) => c.level);
+    };
+    expect(Math.max(...levels(undefined))).toBeGreaterThan(0.1);
+    expect(Math.max(0, ...levels(0.1))).toBeLessThanOrEqual(0.1);
+  });
+});

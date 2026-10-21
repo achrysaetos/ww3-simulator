@@ -421,7 +421,10 @@ export function planStrategy(p: Plan): void {
   for (const e of p.enemies) peak = Math.max(peak, rung(relation(p.world, p.nation, e).escalation));
   const near = neighbours(p.ctx.map, p.nation);
   const standing = Math.max(nation.mobilization, p.world.slices.economy?.nations[p.nation]?.mobilizationTarget ?? 0);
-  const mob = mobilizationTarget(d?.assessment[p.nation], [...p.enemies].some((e) => near.has(e)), peak);
+  const wanted = mobilizationTarget(d?.assessment[p.nation], [...p.enemies].some((e) => near.has(e)), peak);
+  // A government asks no more of its people than they will bear, unless the nation is invaded.
+  const bears = p.world.slices.politics?.nations[p.nation]?.mobilizationTolerance ?? 1;
+  const mob = wanted >= MOBILIZATION.existential ? wanted : Math.min(wanted, bears);
   if (mob > standing + 0.05) p.out.push({ type: 'set_mobilization', nation: p.nation, level: mob });
 
   nuclearDecision(p, d);
