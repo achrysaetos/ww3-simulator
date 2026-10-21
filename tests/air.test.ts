@@ -346,3 +346,19 @@ describe('air battle reports', () => {
     expect(battles.filter((b) => !atWar(s.world, b.attacker, b.defender)).map((b) => `${b.attacker}-${b.defender}`)).toEqual([]);
   }, 120_000);
 });
+
+describe('coastal batteries on defend', () => {
+  it('take a warship bound for a neutral shore for what it is, not for a landing', () => {
+    const t = airWorld();
+    t.war('CHN', 'USA');
+    const shore = t.node(24.15, 120.5);
+    const off = [...t.map.neighbors(shore)].find((n) => t.map.isSea(n))!;
+    const coast = t.map.nodesOf(nation('CHN')).sort((a, b) => t.map.distanceKm(a, shore) - t.map.distanceKm(b, shore))[0];
+    const battery = launchers(t, 'CHN', coast, { t_tel: 4 });
+    battery.magazine[mid('t_asm')] = 8;
+    const group = t.add({ nation: nation('USA'), name: 'US destroyers', kind: 'surface_group', echelon: 'task_group', node: off, equipment: { [pid('t_destroyer')]: 2 }, order: { posture: 'patrol', target: shore, issuedTick: 0 } });
+    expect(t.map.distanceKm(coast, shore)).toBeLessThan(250);
+    t.tick();
+    expect(battery.order.targetFormation).not.toBe(group.id);
+  });
+});
