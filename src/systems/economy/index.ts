@@ -7,6 +7,7 @@ import {
   itemSpec, type AidFlow, type ItemCategory, type Resource,
 } from '../../data/industry';
 import { defenseObligations } from '../../data/nations';
+import { recallReservists } from '../../data/nations/reserves';
 import { newLine, newNationEconomy, stocksOf, type LineState, type NationEconomy } from './state';
 
 export type { EconomyState, LineState, NationEconomy } from './state';
@@ -427,6 +428,7 @@ function stepNation(world: World, ctx: SimContext, s: Scan, n: Nation, e: Nation
   const graduates = e.inTraining * lag(dtMonths, TRAINING_MONTHS);
   e.inTraining -= graduates;
   n.reserves += graduates;
+  n.reserves += recallReservists(n, dtMonths);
 }
 
 export const aidKey = (f: AidFlow) => `${f.donor}>${f.recipient}:${f.item}`;

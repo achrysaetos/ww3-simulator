@@ -117,7 +117,7 @@ describe('player decisions in the snapshot', () => {
     w.world.slices.diplomacy = {
       wars: [{ id: 'w1', aggressor: CHN, sides: [[CHN], [TWN]], startTick: 0 }],
       joins: [{ nation: USA, war: 'w1', side: 1, dueTick: 24, treaty: 'US-TWN-TRA', kind: 'ambiguous', victim: TWN, aggressor: CHN }],
-      records: {}, assessment: {}, pressure: {}, offers: { 'CHN|USA': CHN }, ssbnFormations: [], invoked: [],
+      records: {}, assessment: {}, pressure: {}, offers: { 'CHN|USA': CHN }, ssbnFormations: [], invoked: [], umbrella: [],
     };
     w.world.relations['RUS|USA'] = { ...w.world.relations['RUS|USA'], sanctions: true };
     const d = enc.encode(w.world, w.map, { nation: USA }).focusNation!;

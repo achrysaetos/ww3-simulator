@@ -102,14 +102,9 @@ describe.each(SEEDS)('ukraine-2026 war economy, seed %i', (seed) => {
     const kh = eco(seed, 'RUS').items.kh101;
     expect(kh.stockpile[1]).toBeLessThan(kh.stockpile[0] + kh.produced);
   });
-});
 
-// Known gap outside the economy: `it.fails` documents a band the run misses today and flips
-// red when the owning systems are fixed, so the band can be promoted to `it`. It spans all seeds
-// because the runs straddle the bound: one seed passing is not the gap closing.
-it.fails('[strike] Ukraine keeps 0.85-1.02 of its 2024 GDP on every seed (IMF: +2-3% a year in 2024-25)', () => {
-  // Measured at day 120: 0.825, 0.858, 0.860 on seeds 1-3, with 1-2 cells lost and trade loss 0.02.
-  // Strikes leave 84-88% of the population-weighted infrastructure Ukraine holds
-  // (theater.infrastructure), and industrial integrity takes output down with it.
-  for (const seed of SEEDS) expect(eco(seed, 'UKR').gdpIndex).toBeGreaterThanOrEqual(0.85);
+  it('[strike, naval, land] Ukraine keeps 0.85-1.02 of its 2024 GDP (IMF: +2-3% a year in 2024-25)', () => {
+    // Measured at day 120: 0.88 on seeds 1-2 (0.84 and 0.74 on the integration base before this branch).
+    expect(eco(seed, 'UKR').gdpIndex).toBeGreaterThanOrEqual(0.85);
+  });
 });

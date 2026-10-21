@@ -28,3 +28,35 @@ export const nuclearForces: Record<string, NuclearForces> = {
   ISR: { stockpile: 90, inventory: 90, deployed: 0, doctrine: 'calculated_ambiguity' },
   PRK: { stockpile: 50, inventory: 50, deployed: 0, doctrine: 'escalate_to_deescalate' },
 };
+
+/**
+ * How fast a state with warheads held apart from its launchers can mate them once it orders an
+ * alert. `firstHours` brings `firstShare` of the stockpile to the launchers; the rest follows
+ * evenly until `fullHours`. Times are estimates from open assessments, since no state publishes
+ * them:
+ * - PAK: warheads kept unassembled near their delivery units and mated "within hours" (FAS
+ *   Nuclear Notebook 2023; Kidwai's Strategic Plans Division). 1999 Kargil and 2019 Balakot
+ *   crises reportedly saw readiness raised within a day.
+ * - IND: Agni-P and Agni-V ride in sealed canisters with the warhead mated (FAS Nuclear Notebook
+ *   2024), so a first share is ready in hours; aircraft bombs and older missiles take longer.
+ * - ISR: on 8-9 October 1973 Jericho missiles and nuclear-capable F-4s were readied within about a
+ *   day of the Golan front collapsing (Cohen, "The Worst-Kept Secret", 2010).
+ * - PRK: warheads believed stored separately from road-mobile launchers; dispersal and mating
+ *   over days (FAS Nuclear Notebook 2024; 38 North).
+ * - CHN: most warheads held in central storage under the Central Military Commission; DoD CMPR
+ *   2024 assesses a move to "early warning counterstrike" with some on high alert, the rest
+ *   loaded over days.
+ */
+export interface AlertSpec {
+  firstHours: number;
+  firstShare: number;
+  fullHours: number;
+}
+
+export const NUCLEAR_ALERT: Record<string, AlertSpec> = {
+  PAK: { firstHours: 12, firstShare: 0.25, fullHours: 72 },
+  IND: { firstHours: 6, firstShare: 0.2, fullHours: 48 },
+  ISR: { firstHours: 24, firstShare: 0.3, fullHours: 72 },
+  PRK: { firstHours: 24, firstShare: 0.2, fullHours: 96 },
+  CHN: { firstHours: 24, firstShare: 0.25, fullHours: 168 },
+};

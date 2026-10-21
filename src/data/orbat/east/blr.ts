@@ -12,15 +12,17 @@ const BAF = { readiness: 0.6, experience: 0.2 };
 
 const MECH_BDE: Kit = merge(mix(120, { t72b3: 0.6, t72b: 0.4 }), { bmp2: 100, btr82a: 30, '2s19_msta': 18, '2s3': 18, bm21_grad: 18, strela10: 6, infantry_squad: 120, truck: 450 });
 const AIRMOBILE_BDE: Kit = { btr82a: 60, bmd2: 20, '2s9': 12, d30: 12, infantry_squad: 110, truck: 200 };
-const bde = (name: string, base: Base, kit: Kit, kind: OrbatEntry['kind'] = 'maneuver'): OrbatEntry => unit(BLR, name, kind, 'brigade', base, kit, BAF);
+const bde = (name: string, base: Base, kit: Kit, kind: OrbatEntry['kind'] = 'maneuver', personnel?: number): OrbatEntry => unit(BLR, name, kind, 'brigade', base, kit, personnel ? { ...BAF, personnel } : BAF);
+/** IISS 2025: Army ~11,700 and Special Operations Forces ~5,900 active; brigades keep cadres filled on mobilisation. */
+const MECH_PERSONNEL = 3000, AIRMOBILE_PERSONNEL = 2500;
 
 export const blr: OrbatEntry[] = [
-  bde('6th Guards Mechanised Brigade', at('Grodno', 53.68, 24.1), MECH_BDE),
-  bde('11th Guards Mechanised Brigade', at('Slonim', 53.09, 25.32), MECH_BDE),
-  bde('19th Guards Mechanised Brigade', at('Zaslonovo', 54.8, 29.0), MECH_BDE),
-  bde('120th Guards Mechanised Brigade', at('Uruchye, Minsk', 53.95, 27.68), MECH_BDE),
-  bde('38th Guards Air Assault Brigade', at('Brest', 52.1, 24.1), AIRMOBILE_BDE),
-  bde('103rd Guards Airborne Brigade', at('Vitebsk', 55.19, 30.2), AIRMOBILE_BDE),
+  bde('6th Guards Mechanised Brigade', at('Grodno', 53.68, 24.1), MECH_BDE, 'maneuver', MECH_PERSONNEL),
+  bde('11th Guards Mechanised Brigade', at('Slonim', 53.09, 25.32), MECH_BDE, 'maneuver', MECH_PERSONNEL),
+  bde('19th Guards Mechanised Brigade', at('Zaslonovo', 54.8, 29.0), MECH_BDE, 'maneuver', MECH_PERSONNEL),
+  bde('120th Guards Mechanised Brigade', at('Uruchye, Minsk', 53.95, 27.68), MECH_BDE, 'maneuver', MECH_PERSONNEL),
+  bde('38th Guards Air Assault Brigade', at('Brest', 52.1, 24.1), AIRMOBILE_BDE, 'maneuver', AIRMOBILE_PERSONNEL),
+  bde('103rd Guards Airborne Brigade', at('Vitebsk', 55.19, 30.2), AIRMOBILE_BDE, 'maneuver', AIRMOBILE_PERSONNEL),
   bde('5th Spetsnaz Brigade', at('Maryina Gorka', 53.5, 28.15), { infantry_squad: 80, truck: 60 }),
   bde('51st Guards Artillery Brigade', at('Asipovichy', 53.3, 28.65), { '2s19_msta': 18, '2s7m': 12, '2a65': 18, bm27: 12, truck: 200 }, 'artillery'),
   bde('336th Rocket Artillery Brigade', at('Asipovichy rocket range', 53.32, 28.55), { polonez_launcher: 12, bm30: 6, truck: 80 }, 'artillery'),

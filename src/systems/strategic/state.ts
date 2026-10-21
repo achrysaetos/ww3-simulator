@@ -46,6 +46,15 @@ export interface SatCount {
   lost: number;
 }
 
+/** A nation's order to mate stored warheads to launchers, and how many it has mated so far. */
+export interface NuclearAlert {
+  orderedTick: number;
+  /** Warheads that were in storage when the alert was ordered: the most the alert can add. */
+  stored: number;
+  mated: number;
+  reason: string;
+}
+
 export interface StrategicState {
   salvos: Salvo[];
   /** Remaining interceptors per missile-defense system id (see BMD_SYSTEMS). */
@@ -63,6 +72,8 @@ export interface StrategicState {
   /** Soot level the climate has caught up with; lags sootTg because cooling and crop losses take a season to arrive. */
   climateTg: number;
   space: Record<NationId, Record<SatClass, SatCount>>;
+  /** Nuclear alerts ordered, by nation; an alert stands for the rest of the run. */
+  alerts: Record<NationId, NuclearAlert>;
   /** Tracked orbital debris fragments created by the war. */
   debris: number;
   totals: { detonations: number; megatons: number; deaths: number };

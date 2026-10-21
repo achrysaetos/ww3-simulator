@@ -185,6 +185,22 @@ describe('strategic profiles', () => {
   });
 });
 
+describe('military blocs', () => {
+  const share = (a: string, b: string) => profiles[a].blocs!.filter((x) => profiles[b].blocs!.includes(x));
+  it('open no doors through political or economic groupings', () => {
+    expect(share('RUS', 'PAK')).toEqual([]);
+    expect(share('RUS', 'UZB')).toEqual([]);
+    expect(share('IND', 'PAK')).toEqual([]);
+    expect(share('EGY', 'IRQ')).toEqual([]);
+    for (const p of Object.values(profiles)) for (const b of ['SCO', 'BRICS', 'AU', 'ASEAN', 'Quad']) expect(p.blocs).not.toContain(b);
+  });
+  it('keep the defence treaties', () => {
+    expect(share('RUS', 'KAZ')).toContain('CSTO');
+    expect(share('USA', 'JPN')).toContain('US-JPN');
+    expect(share('CHN', 'PRK')).toContain('CHN-PRK');
+  });
+});
+
 describe('createWorld with nation profiles', () => {
   it('seeds governments, blocs, arsenals and hostile relations', () => {
     const world = createWorld(loadMap(), { profiles });

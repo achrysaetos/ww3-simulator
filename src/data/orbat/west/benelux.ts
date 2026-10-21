@@ -37,5 +37,5 @@ export const benelux = [
   be('15th Air Transport Wing', 'logistics', 'wing', base('Melsbroek', 50.9, 4.49), { a400m: 7 }, ACTIVE),
   be('Belgian Navy frigates', 'surface_group', 'flotilla', base('Naval Base Zeebrugge', 51.33, 3.2), { ffg_karel_doorman: 2 }, { readiness: 0.55, personnel: 2 * 145 }),
 
-  lu('Luxembourg Army Reconnaissance Battalion', 'maneuver', 'battalion', base('Caserne Grand-Duc Jean, Diekirch', 49.87, 6.16), { infantry_squad: 12, truck: 40 }, { readiness: 0.6, personnel: 900 }),
+  lu('Luxembourg Army Reconnaissance Battalion', 'maneuver', 'battalion', base('Caserne Grand-Duc Jean, Diekirch', 49.87, 6.16), { infantry_squad: 12, truck: 40 }, { readiness: 0.6, personnel: 400 }), // IISS 2025: 410 active in all
 ];

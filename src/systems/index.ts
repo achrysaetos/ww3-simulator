@@ -59,7 +59,9 @@ export function warTreaties(table: readonly Alliance[], profiles: Readonly<Recor
         delayDays: Math.round(2 + (1 - reliability) * 14),
       };
     }
-    out.push({ id: a.id, kind, members, guarantors: a.nuclearGuarantors ?? [] });
+    // A guarantor extends its threshold to allies only if its doctrine says so (NuclearThreshold.coversAllies).
+    const guarantors = (a.nuclearGuarantors ?? []).filter((g) => profiles[g]?.nuclearThreshold?.coversAllies);
+    out.push({ id: a.id, kind, members, guarantors });
   }
   return out;
 }

@@ -4,6 +4,7 @@ import { assess, enemyMap } from './assess';
 import { processEvents } from './escalation';
 import { checkCapitulation, negotiatedPeace, offerPeace, updateSupport } from './support';
 import type { DiplomacyInput } from './types';
+import { openUmbrellaCases, resolveUmbrella } from './umbrella';
 import { adoptWars, declareWar, invasions, neutralEntry, resolveJoins } from './wars';
 
 export * from './types';
@@ -22,7 +23,7 @@ export function createDiplomacy(input: DiplomacyInput = {}): System {
     id: 'diplomacy',
     commands: ['declare_war', 'offer_peace'],
     init(world) {
-      world.slices.diplomacy = { wars: [], joins: [], records: {}, assessment: {}, pressure: {}, offers: {}, ssbnFormations: [], invoked: [] };
+      world.slices.diplomacy = { wars: [], joins: [], records: {}, assessment: {}, pressure: {}, offers: {}, ssbnFormations: [], invoked: [], umbrella: [] };
     },
     apply(world, cmd, ctx) {
       const s = world.slices.diplomacy;
@@ -37,6 +38,8 @@ export function createDiplomacy(input: DiplomacyInput = {}): System {
       const situation = assess(world, ctx.map, enemies);
       s.assessment = situation.nations;
       for (const [by, on] of processEvents(world, ctx, s, enemies, situation.lostTo, prevThreatened)) declareWar(world, ctx, s, alliances, by, on, `strike on ${on} territory`);
+      openUmbrellaCases(world, ctx, s, alliances);
+      resolveUmbrella(world, ctx, s);
       s.ssbnFormations = [];
       for (const f of Object.values(world.formations)) {
         if (f.status === 'destroyed' || (f.kind !== 'submarine' && f.kind !== 'strategic')) continue;

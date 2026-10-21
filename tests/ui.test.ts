@@ -129,7 +129,7 @@ describe('dashboard detail', () => {
     t.world.slices.diplomacy = {
       wars: [{ id: 'w1', aggressor: RUS, sides: [[RUS], [POL, DEU]], startTick: 0 }],
       joins: [{ nation: FRA, war: 'w1', side: 1, dueTick: 12, treaty: 'NATO', kind: 'collective_defense', victim: POL, aggressor: RUS }],
-      records: {}, assessment: {}, pressure: {}, offers: {}, ssbnFormations: [], invoked: [],
+      records: {}, assessment: {}, pressure: {}, offers: {}, ssbnFormations: [], invoked: [], umbrella: [],
     };
     enc.collect([
       { type: 'war_declared', tick: 0, by: RUS, on: POL, reason: 'NATO aggression' },

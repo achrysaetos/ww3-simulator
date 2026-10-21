@@ -8,7 +8,15 @@ export interface NationProfile {
   nuclear?: Nation['nuclear'];
   /** Opinion toward other nations, -100..100. */
   opinions?: Record<string, number>;
+  /** Trained reservists outside the active force (IISS "Reserve"); src/data/nations/reserves.ts. */
+  reservists?: number;
 }
+
+/**
+ * Reservists per active serviceman for a nation whose profile gives none: the median of the
+ * IISS-sourced rows in src/data/nations/reserves.ts.
+ */
+const RESERVE_TO_ACTIVE = 0.57;
 
 export interface WorldOptions {
   seed?: number;
@@ -37,7 +45,9 @@ export function createWorld(map: GameMap, opts: WorldOptions = {}): World {
       population,
       mobilization: 0,
       warSupport: 0.6,
-      reserves: Math.round(population * 0.01),
+      // Nobody starts with men ready to replace losses: reservists must be recalled and retrained first.
+      reserves: 0,
+      reservists: profile.reservists ?? Math.round((stats.armedForces ?? 0) * RESERVE_TO_ACTIVE),
       stockpile: {},
       bulk: { fuel: 0, ammo: 0, food: 0 },
       treasuryUsdB: 0,
