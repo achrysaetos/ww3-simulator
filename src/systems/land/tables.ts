@@ -154,6 +154,13 @@ export const ATTRITION_MAX_KM_PER_DAY = 1;
  * (~50 km in 5 days), Kursk August 2024 (~25-30 km in the first days).
  */
 export const BREAKTHROUGH_KM_PER_DAY = 25;
+/**
+ * Through an empty cell the enemy line next door still covers with drones and
+ * artillery: infiltration, not breakthrough. Russia's fastest sustained gains
+ * of the war, on the Pokrovsk, Kurakhove and Velyka Novosilka axes in autumn
+ * 2024 where Ukrainian lines had thinned, ran 1-4 km/day (ISW, DeepState).
+ */
+export const COVERED_KM_PER_DAY = 3;
 
 /**
  * Share of a formation's platforms of each class that stand where the enemy can

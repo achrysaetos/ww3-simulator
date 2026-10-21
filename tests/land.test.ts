@@ -270,6 +270,24 @@ describe('the front', () => {
     const km = r.world.slices.land.contest[PLAIN_UKR]?.km ?? 0;
     expect(km).toBeLessThan(40);
   });
+
+  it('an empty cell covered by an equal line next door is infiltrated a few km a day; a thin line is broken through', () => {
+    const NORTH_UKR = MAP.nodeAt(49.5, 37.5);
+    expect([...MAP.neighbors(PLAIN_UKR)]).toContain(NORTH_UKR);
+    const cross = (cover: number) => {
+      const s = setup();
+      s.add({ nation: UKR, name: 'cover', kind: 'maneuver', echelon: 'brigade', node: NORTH_UKR, equipment: brigade(cover) });
+      const att = s.add({ nation: RUS, name: 'att', kind: 'maneuver', echelon: 'brigade', node: PLAIN_RUS, equipment: brigade(1) });
+      s.order(att, { posture: 'attack', target: PLAIN_UKR });
+      s.days(7);
+      return { control: s.world.control[PLAIN_UKR], km: s.world.slices.land.contest[PLAIN_UKR]?.km ?? 0 };
+    };
+    const equal = cross(1);
+    expect(equal.control).toBe(UKR);
+    expect(equal.km).toBeGreaterThan(0);
+    expect(equal.km).toBeLessThan(30);
+    expect(cross(0.2).control).toBe(RUS);
+  });
 });
 
 describe('encirclement on friendly ground', () => {
