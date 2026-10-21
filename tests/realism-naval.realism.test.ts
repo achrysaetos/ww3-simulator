@@ -19,7 +19,7 @@ interface TaiwanRun {
   m: RunMetrics;
   /** The US at war with China by US_EARLY_DAYS, as in the CSIS base case. */
   usInWar: boolean;
-  /** Taiwan's 1-degree land cells (4 at this resolution) held by China at the end. */
+  /** Taiwanese ground China holds at the end, in 1-degree cells: Taiwan's quarter-degree cells count 1/16 each. */
   cellsTaken: number;
   taipeiHeld: boolean;
   start: Record<string, Partial<Record<PlatformClass, number>>>;
@@ -39,6 +39,7 @@ function fielded(world: ReturnType<typeof createSession>['world'], catalog: Retu
   return out;
 }
 
+const TAIPEI = { lat: 25.04, lon: 121.56 };
 const taiwanRuns = new Map<number, TaiwanRun>();
 function taiwan(seed: number): TaiwanRun {
   let r = taiwanRuns.get(seed);
@@ -47,13 +48,13 @@ function taiwan(seed: number): TaiwanRun {
   const start = Object.fromEntries(['CHN', 'TWN', 'USA', 'JPN'].map((n) => [n, fielded(s.world, s.catalog, n)]));
   const m = measureRun(s.engine, s.world, s.map, DAYS);
   let cellsTaken = 0;
-  for (let n = 0; n < s.map.landCount; n++) if (s.map.owner[n] === 'TWN' && s.world.control[n] === 'CHN') cellsTaken++;
+  for (let n = 0; n < s.map.landCount; n++) if (s.map.owner[n] === 'TWN' && s.world.control[n] === 'CHN') cellsTaken += (2 * s.map.halfDeg[n]) ** 2;
   const entry = (n: string) => m.wars.find((w) => [w.a, w.b].sort().join() === ['CHN', n].sort().join())?.since;
   const day = (tick: number | undefined) => (tick === undefined ? undefined : (tick * s.world.dtHours) / 24);
   const usInWar = (day(entry('USA')) ?? Infinity) <= US_EARLY_DAYS;
   const belligerent = new Set(Object.entries(s.world.relations).filter(([, x]) => x.atWar).flatMap(([k]) => k.split('|')));
   const neutralTrade = Object.fromEntries(Object.entries(s.world.theater.tradeBlocked).filter(([n]) => !belligerent.has(n)));
-  r = { m, usInWar, cellsTaken, taipeiHeld: s.world.control[s.world.nations['TWN' as NationId].capital] === 'TWN', start, neutralTrade };
+  r = { m, usInWar, cellsTaken, taipeiHeld: s.world.control[s.map.nodeAt(TAIPEI.lat, TAIPEI.lon)] === 'TWN', start, neutralTrade };
   taiwanRuns.set(seed, r);
   const lost = (n: string, c: PlatformClass) => m.nations[n]?.lossesByClass[c] ?? 0;
   console.log(`taiwan seed ${seed}: US enters day ${day(entry('USA'))}, JPN day ${day(entry('JPN'))}; first landing day ${m.nations.CHN?.naval?.firstAssaultDay}; landings ${m.nations.CHN?.naval?.assaultLandings}; ` +

@@ -103,15 +103,19 @@ export class MapRenderer {
       for (let k = map.adjStart[a]; k < map.adjStart[a + 1]; k++) {
         const b = map.adj[k];
         if (b <= a || b >= map.landCount) continue;
+        // Cells are squares of different sizes; the frontier runs along the side two squares share.
+        const ha = map.halfDeg[a], hb = map.halfDeg[b];
         const dLat = map.lat[b] - map.lat[a], dLon = ((map.lon[b] - map.lon[a] + 540) % 360) - 180;
-        if (Math.abs(dLat) < 0.01 && Math.abs(Math.abs(dLon) - 1) < 0.01) {
-          const lon = map.lon[a] + dLon / 2;
+        const latLo = Math.max(-ha, dLat - hb), latHi = Math.min(ha, dLat + hb);
+        const lonLo = Math.max(-ha, dLon - hb), lonHi = Math.min(ha, dLon + hb);
+        if (Math.abs(Math.abs(dLon) - ha - hb) < 1e-3 && latHi - latLo > 1e-3) {
+          const lon = map.lon[a] + Math.sign(dLon) * ha;
           edges.push(a, b);
-          ends.push(lon, map.lat[a] - 0.5, lon, map.lat[a] + 0.5);
-        } else if (Math.abs(dLon) < 0.01 && Math.abs(Math.abs(dLat) - 1) < 0.01) {
-          const lat = map.lat[a] + dLat / 2;
+          ends.push(lon, map.lat[a] + latLo, lon, map.lat[a] + latHi);
+        } else if (Math.abs(Math.abs(dLat) - ha - hb) < 1e-3 && lonHi - lonLo > 1e-3) {
+          const lat = map.lat[a] + Math.sign(dLat) * ha;
           edges.push(a, b);
-          ends.push(map.lon[a] - 0.5, lat, map.lon[a] + 0.5, lat);
+          ends.push(map.lon[a] + lonLo, lat, map.lon[a] + lonHi, lat);
         }
       }
     this.orthoEdges = Int32Array.from(edges);
@@ -138,7 +142,7 @@ export class MapRenderer {
     this.corners = new Float32Array(map.size * 8);
     this.center = new Float32Array(map.size * 2);
     for (let n = 0; n < map.size; n++) {
-      const half = n < map.landCount ? 0.5 : 1.5;
+      const half = map.halfDeg[n];
       const la = map.lat[n], lo = map.lon[n];
       const pts = [[lo - half, la + half], [lo + half, la + half], [lo + half, la - half], [lo - half, la - half]];
       pts.forEach(([x, y], i) => {

@@ -37,12 +37,16 @@ function runGround(scenario: string, seed: number, days: number): GroundRun {
   return r;
 }
 
-/** Cells `by` took from any of `from` between two control snapshots, net of cells it lost back to them. */
-function netGain(before: readonly (NationId | undefined)[], after: readonly (NationId | undefined)[], by: string, from: readonly string[]): number {
+/**
+ * Ground `by` took from any of `from` between two control snapshots, net of ground it lost back to them,
+ * in 1-degree cells: a finer cell (Vilnius, Kaliningrad) counts by its share of a 1-degree square.
+ */
+function netGain(map: GameMap, before: readonly (NationId | undefined)[], after: readonly (NationId | undefined)[], by: string, from: readonly string[]): number {
   let n = 0;
   for (let i = 0; i < before.length; i++) {
-    if (from.includes(before[i]!) && after[i] === by) n++;
-    if (before[i] === by && from.includes(after[i]!)) n--;
+    const cells = (2 * map.halfDeg[i]) ** 2;
+    if (from.includes(before[i]!) && after[i] === by) n += cells;
+    if (before[i] === by && from.includes(after[i]!)) n -= cells;
   }
   return n;
 }
@@ -66,8 +70,8 @@ describe.each([1, 2, 3])('ukraine-2026 seed %i, 60 days', (seed) => {
   const r = () => run('ukraine-2026', seed, 60);
 
   it('Russia nets 0-2 cells of Ukraine', () => {
-    expect(netGain(r().start, r().world.control, 'RUS', ['UKR'])).toBeGreaterThanOrEqual(0);
-    expect(netGain(r().start, r().world.control, 'RUS', ['UKR'])).toBeLessThanOrEqual(2);
+    expect(netGain(r().map, r().start, r().world.control, 'RUS', ['UKR'])).toBeGreaterThanOrEqual(0);
+    expect(netGain(r().map, r().start, r().world.control, 'RUS', ['UKR'])).toBeLessThanOrEqual(2);
   });
 
   it('Russia loses 500-2,000 personnel a day, more than Ukraine', () => {
@@ -98,7 +102,7 @@ describe.each([1, 2, 3])('ukraine-2026 seed %i, 60 days', (seed) => {
 describe.each([1, 2])('baltic-2027 seed %i, 21 days', (seed) => {
   it('Russia takes 1-6 cells of the Baltic states', () => {
     const r = run('baltic-2027', seed, 21);
-    const taken = netGain(r.start, r.world.control, 'RUS', ['EST', 'LVA', 'LTU']) + netGain(r.start, r.world.control, 'BLR', ['EST', 'LVA', 'LTU']);
+    const taken = netGain(r.map, r.start, r.world.control, 'RUS', ['EST', 'LVA', 'LTU']) + netGain(r.map, r.start, r.world.control, 'BLR', ['EST', 'LVA', 'LTU']);
     expect(taken).toBeGreaterThanOrEqual(1);
     expect(taken).toBeLessThanOrEqual(6);
   });
@@ -114,6 +118,6 @@ describe.each([1, 2])('korea-2027 seed %i, 21 days', (seed) => {
     const seoul = r.map.nodeAt(37.57, 126.98);
     expect(r.landBattles).toBeGreaterThan(0);
     for (const day of r.daily) expect(day[seoul]).toBe('KOR');
-    expect(netGain(r.daily[13], r.daily[20], 'PRK', ['KOR'])).toBeLessThanOrEqual(0);
+    expect(netGain(r.map, r.daily[13], r.daily[20], 'PRK', ['KOR'])).toBeLessThanOrEqual(0);
   });
 });
