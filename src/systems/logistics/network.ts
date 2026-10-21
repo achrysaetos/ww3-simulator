@@ -146,11 +146,7 @@ export class Controllers {
   }
 }
 
-/**
- * Full-size working arrays for whichever search is running. A search keeps only the
- * nodes it has touched, packed; to run it unpacks them here and packs them back
- * after, leaving the workspace clean for the next search.
- */
+/** Shared scratch for whichever search is running, pointed at that search's own node arrays. */
 interface Workspace {
   readonly adjStart: Int32Array;
   readonly adj: Int32Array;
@@ -159,25 +155,21 @@ interface Workspace {
   readonly roadCost: Float32Array;
   readonly railCost: Float32Array;
   readonly portCap: Float32Array;
-  readonly cap: Float64Array;
-  readonly cost: Float64Array;
-  /** Node the best route came through; -1 for a depot or an unreached node. */
-  readonly parent: Int32Array;
   readonly blocked: Uint8Array;
   readonly seaQ: Float64Array;
   /** Frontline memo, valid where frontStamp equals stamp. */
   readonly frontStamp: Int32Array;
   readonly front: Uint8Array;
   stamp: number;
-  /** Dedupes nodes while packing, valid where packStamp equals stamp. */
-  readonly packStamp: Int32Array;
   readonly heap: MaxHeap;
-  /** Nodes first reached during this run. */
-  readonly fresh: number[];
   /** Nodes reset by a reopened route, waiting to be re-seeded. */
   readonly reopened: number[];
-  /** The running search's node states and inputs. */
+  /** The running search's node arrays and inputs. */
   state: Uint16Array;
+  cap: Float64Array;
+  cost: Float64Array;
+  /** Node the best route came through; -1 for a depot or an unreached node. */
+  parent: Int32Array;
   side: Uint8Array;
   cell: Uint16Array;
   infra: readonly number[];
@@ -192,10 +184,9 @@ function workspaceFor(map: GameMap): Workspace {
     w = {
       adjStart: map.adjStart, adj: map.adj, landCount: map.landCount,
       mode: net.mode, roadCost: net.roadCost, railCost: net.railCost, portCap: net.portCap,
-      cap: new Float64Array(size), cost: new Float64Array(size), parent: new Int32Array(size).fill(-1), blocked: new Uint8Array(size),
-      seaQ: new Float64Array(size), frontStamp: new Int32Array(size), front: new Uint8Array(size), stamp: 0,
-      packStamp: new Int32Array(size), heap: new MaxHeap(), fresh: [], reopened: [],
-      state: new Uint16Array(0), side: new Uint8Array(0), cell: new Uint16Array(0), infra: [],
+      blocked: new Uint8Array(size), seaQ: new Float64Array(size), frontStamp: new Int32Array(size), front: new Uint8Array(size), stamp: 0,
+      heap: new MaxHeap(), reopened: [],
+      state: new Uint16Array(0), cap: new Float64Array(0), cost: new Float64Array(0), parent: new Int32Array(0), side: new Uint8Array(0), cell: new Uint16Array(0), infra: [],
     };
     workspaces.set(map, w);
   }
@@ -255,8 +246,7 @@ function relaxEdges(w: Workspace, u: number, from: number, to: number): void {
     const nVal = nCap / (1 + r * r);
     if (nVal < MIN_VALUE) continue;
     const st = state[v];
-    if (st === UNSEEN) w.fresh.push(v);
-    else {
+    if (st !== UNSEEN) {
       const rv = cost[v] / HALF_KM;
       if (nVal <= cap[v] / (1 + rv * rv)) continue;
       // A settled node can only be beaten after a repair; whatever was routed through it is reset.
@@ -295,18 +285,6 @@ function forget(w: Workspace, x: number): void {
 
 const NO_F64 = new Float64Array(0), NO_I32 = new Int32Array(0);
 
-function grownI32(a: Int32Array, size: number, used: number): Int32Array {
-  const b = new Int32Array(size);
-  b.set(a.subarray(0, used));
-  return b;
-}
-
-function grownF64(a: Float64Array, size: number, used: number): Float64Array {
-  const b = new Float64Array(size);
-  b.set(a.subarray(0, used));
-  return b;
-}
-
 /** The inputs a search reads, as every network last saw them, so a factor settled late agrees with one settled early. */
 export interface SearchInputs {
   control: readonly (NationId | undefined)[];
@@ -328,6 +306,10 @@ export interface SearchInputs {
 export class NetworkSearch {
   /** UNSEEN, QUEUED, or SETTLED + overland factor in thousandths, per node. Airlift is read live, so air control never re-opens the search. */
   private readonly state: Uint16Array;
+  /** Best route's capacity and road-km cost per node, and the node it came through. */
+  private readonly cap: Float64Array;
+  private readonly cost: Float64Array;
+  private readonly parent: Int32Array;
   /** FRIENDLY or ENEMY per controller index, for members and foes. */
   private readonly side: Uint8Array;
   private readonly foes: ReadonlySet<NationId>;
@@ -336,12 +318,7 @@ export class NetworkSearch {
   private seeded = false;
   /** Lowest factor settled so far. Settled nodes are all at or above it, and while the heap holds nothing above it every settled factor is final. */
   private floor = Infinity;
-  /** Touched nodes and their route labels, packed between runs, and the frontier heap. */
-  private touched: Int32Array = NO_I32;
-  private count = 0;
-  private cap: Float64Array = NO_F64;
-  private cost: Float64Array = NO_F64;
-  private parent: Int32Array = NO_I32;
+  /** The frontier heap, saved between runs. */
   private heapIds: Int32Array = NO_I32;
   private heapKeys: Float64Array = NO_F64;
   private heapSize = 0;
@@ -356,6 +333,9 @@ export class NetworkSearch {
     occupied: readonly number[],
   ) {
     this.state = new Uint16Array(map.size);
+    this.cap = new Float64Array(map.size);
+    this.cost = new Float64Array(map.size);
+    this.parent = new Int32Array(map.size).fill(-1);
     this.foes = new Set(foes);
     this.blocked = new Set(occupied);
     for (const n of [...members, ...foes]) controllers.of(n);
@@ -396,11 +376,9 @@ export class NetworkSearch {
     const sea = inputs.sea;
     for (const k in sea) if (base.foes.has(sea[k].nation) !== this.foes.has(sea[k].nation)) nodes.push(Number(k));
     this.state.set(base.state);
-    this.count = base.count;
-    this.touched = base.touched.slice(0, base.count);
-    this.cap = base.cap.slice(0, base.count);
-    this.cost = base.cost.slice(0, base.count);
-    this.parent = base.parent.slice(0, base.count);
+    this.cap.set(base.cap);
+    this.cost.set(base.cost);
+    this.parent.set(base.parent);
     this.heapIds = base.heapIds.slice(0, base.heapSize);
     this.heapKeys = base.heapKeys.slice(0, base.heapSize);
     this.heapSize = base.heapSize;
@@ -506,7 +484,6 @@ export class NetworkSearch {
     if (inputs.control[d] !== member || w.blocked[d]) return;
     const v = Math.max(0, inputs.infrastructure[d]);
     if (w.state[d] === UNSEEN ? v > 0 : v > valueOf(w, d)) {
-      if (w.state[d] === UNSEEN) w.fresh.push(d);
       w.cap[d] = v;
       w.cost[d] = 0;
       w.parent[d] = -1;
@@ -541,20 +518,17 @@ export class NetworkSearch {
     }
   }
 
-  /** Unpacks this search into the workspace with this run's inputs. */
+  /** Points the workspace at this search with this run's inputs. */
   private open(inputs: SearchInputs): Workspace {
     const w = workspaceFor(this.map);
     w.state = this.state;
+    w.cap = this.cap;
+    w.cost = this.cost;
+    w.parent = this.parent;
     w.side = this.side;
     w.cell = this.controllers.cell;
     w.infra = inputs.infrastructure;
     w.stamp++;
-    for (let i = 0; i < this.count; i++) {
-      const n = this.touched[i];
-      w.cap[n] = this.cap[i];
-      w.cost[n] = this.cost[i];
-      w.parent[n] = this.parent[i];
-    }
     for (const n of this.blocked) w.blocked[n] = 1;
     w.heap.load(this.heapIds, this.heapKeys, this.heapSize);
     w.seaQ.fill(1, w.landCount);
@@ -567,40 +541,14 @@ export class NetworkSearch {
     return w;
   }
 
-  /** Packs the touched nodes and the frontier back out of the workspace and clears it. */
+  /** Saves the frontier and clears the workspace's shared state. */
   private close(w: Workspace): void {
-    const { state, packStamp } = w;
-    const stamp = w.stamp;
+    const { state } = w;
     // Superseded entries below the floor are never popped; drop them before they pile up.
     if (w.heap.size > 2 * this.heapLive + 256) {
       w.heap.prune((n, key) => state[n] === QUEUED && key === valueOf(w, n));
       this.heapLive = w.heap.size;
     }
-    const max = this.count + w.fresh.length;
-    if (this.touched.length < max) {
-      const size = max + (max >> 1) + 16, used = this.count;
-      this.touched = grownI32(this.touched, size, used);
-      this.cap = grownF64(this.cap, size, used);
-      this.cost = grownF64(this.cost, size, used);
-      this.parent = grownI32(this.parent, size, used);
-    }
-    let i = 0;
-    const keep = (n: number) => {
-      if (state[n] === UNSEEN || packStamp[n] === stamp) return;
-      packStamp[n] = stamp;
-      this.touched[i] = n;
-      this.cap[i] = w.cap[n];
-      this.cost[i] = w.cost[n];
-      this.parent[i] = w.parent[n];
-      w.cap[n] = 0;
-      w.cost[n] = 0;
-      w.parent[n] = -1;
-      i++;
-    };
-    for (let j = 0; j < this.count; j++) keep(this.touched[j]);
-    for (const n of w.fresh) keep(n);
-    this.count = i;
-    w.fresh.length = 0;
     for (const n of this.blocked) w.blocked[n] = 0;
     [this.heapIds, this.heapKeys, this.heapSize] = w.heap.save(this.heapIds, this.heapKeys);
   }
