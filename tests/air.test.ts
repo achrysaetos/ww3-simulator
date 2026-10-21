@@ -222,7 +222,7 @@ describe('strikes', () => {
     const events = t.strikes(t.tick());
     expect(t.world.theater.infrastructure[fz]).toBeLessThan(0.99);
     expect(t.world.theater.infrastructure[busan]).toBe(1);
-    expect(events.find((e) => e.target === fz)?.damage).toMatch(/infrastructure/);
+    expect(events.find((e) => e.target === fz)?.effects).toContainEqual(expect.objectContaining({ kind: 'infrastructure' }));
   });
 
   it('never strikes beyond range: the order is refused and a forced order fires nothing', () => {

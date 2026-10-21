@@ -6,7 +6,7 @@
  */
 import type { Catalog } from '../../core/catalog';
 import type { SimContext } from '../../core/engine';
-import type { Formation, FormationId, Munition, MunitionId, NationId, NodeId, Platform, PlatformId, TargetClass, World } from '../../core/types';
+import type { Formation, FormationId, Munition, MunitionId, NationId, NodeId, Platform, PlatformId, StrikeEffect, TargetClass, World } from '../../core/types';
 import { ANTISHIP_KINDS, navalPosition, shipValue, strikeNavalGroup } from '../naval';
 import { defendRaid, envelopeExposure, hostileDefenders, overflightKm, samVsAircraft, type RaidStream } from './iads';
 import { takeLosses, type LossTally } from './losses';
@@ -291,9 +291,9 @@ function resolveRaid(world: World, ctx: SimContext, pic: AirPicture, slice: AirS
   const leaked = defendRaid(world, ctx, pic, target, attacker, streams);
   live.forEach((p, i) => {
     const flightMin = nodeDistance(ctx, p.f.node, target) / (Math.max(0.05, p.munition.speedMach) * MACH_KM_PER_MIN);
-    const { damage, effective } = applyEffect(world, ctx, pic, slice, target, attacker, p.munition, p.targetClass, leaked[i], tally, flightMin, p.f.order.targetFormation);
+    const { effects, effective } = applyEffect(world, ctx, pic, slice, target, attacker, p.munition, p.targetClass, leaked[i], tally, flightMin, p.f.order.targetFormation);
     assess(world, slice, attacker, aimKey(target, p.f.order.targetFormation, p.targetClass), effective);
-    ctx.emit({ type: 'strike', tick: world.tick, by: attacker, munition: p.munition.id, fired: p.weapons, intercepted: p.weapons - leaked[i], target, damage });
+    ctx.emit({ type: 'strike', tick: world.tick, by: attacker, munition: p.munition.id, fired: p.weapons, intercepted: p.weapons - leaked[i], target, effects });
   });
   emitBattle(world, ctx, pic, target, attacker, tally);
 }
@@ -360,7 +360,7 @@ function suppressDefenses(world: World, ctx: SimContext, pic: AirPicture, target
       const radar = (Object.keys(d.f.equipment) as PlatformId[]).find((pid) => ctx.catalog.platform(pid).engagementChannels && d.f.equipment[pid] > 0);
       if (radar && kills) takeLosses(world, ctx, d.f, radar, kills);
     });
-    ctx.emit({ type: 'strike', tick: world.tick, by: p.f.nation, munition: mid, fired: shots, intercepted: 0, target, damage: `SEAD on ${defenders.length} SAM sites` });
+    ctx.emit({ type: 'strike', tick: world.tick, by: p.f.nation, munition: mid, fired: shots, intercepted: 0, target, effects: [{ kind: 'sam_suppressed', sites: defenders.length }] });
   }
 }
 
@@ -411,37 +411,37 @@ function victims(ctx: SimContext, pic: AirPicture, target: NodeId, attacker: Nat
   return out;
 }
 
-/** Apply the weapons that got through. Returns a short damage report for the strike event, and whether anything was destroyed or damaged. */
-function applyEffect(world: World, ctx: SimContext, pic: AirPicture, slice: AirSlice, target: NodeId, attacker: NationId, m: Munition, tc: TargetClass, hits: number, tally: LossTally, flightMin: number, aimed: FormationId | undefined): { damage: string; effective: boolean } {
-  if (hits <= 0) return { damage: 'no hits', effective: false };
+/** Apply the weapons that got through. Returns what they did for the strike event, and whether anything was destroyed or damaged. */
+function applyEffect(world: World, ctx: SimContext, pic: AirPicture, slice: AirSlice, target: NodeId, attacker: NationId, m: Munition, tc: TargetClass, hits: number, tally: LossTally, flightMin: number, aimed: FormationId | undefined): { effects: StrikeEffect[]; effective: boolean } {
+  if (hits <= 0) return { effects: [{ kind: 'no_effect', why: 'all_intercepted' }], effective: false };
   if (tc === 'structure' || tc === 'hardened') {
     const owner = world.control[target];
-    if (!owner || !pic.atWar(owner, attacker)) return { damage: 'no hostile infrastructure', effective: false };
+    if (!owner || !pic.atWar(owner, attacker)) return { effects: [{ kind: 'no_effect', why: 'not_hostile' }], effective: false };
     const infra = world.theater.infrastructure;
     const before = infra[target];
     const perHit = TUNING.structurePerHit * effectPk(m, tc) * (m.warheadKg / 450) ** (2 / 3);
     infra[target] = before * (1 - Math.min(0.5, perHit)) ** hits;
-    return { damage: `infrastructure ${before.toFixed(3)} -> ${infra[target].toFixed(3)}`, effective: infra[target] < before };
+    return { effects: [{ kind: 'infrastructure', before, after: infra[target] }], effective: infra[target] < before };
   }
   if (tc === 'power') {
     const owner = world.control[target];
-    if (!owner || !pic.atWar(owner, attacker)) return { damage: 'no hostile grid', effective: false };
+    if (!owner || !pic.atWar(owner, attacker)) return { effects: [{ kind: 'no_effect', why: 'not_hostile' }], effective: false };
     const grid = (world.theater.power ??= {});
     const before = grid[target] ?? 1;
     const perHit = TUNING.powerPerHit * effectPk(m, tc) * (m.warheadKg / 450) ** (2 / 3);
     grid[target] = before * (1 - Math.min(0.5, perHit)) ** hits;
-    return { damage: `grid ${before.toFixed(3)} -> ${grid[target].toFixed(3)}`, effective: grid[target] < before };
+    return { effects: [{ kind: 'grid', before, after: grid[target] }], effective: grid[target] < before };
   }
   let cratered = false;
   let p = effectPk(m, tc) * stillThere(m, tc, flightMin);
-  const parts: string[] = [];
+  const effects: StrikeEffect[] = [];
   if (tc === 'aircraft') {
     p = (1 - TUNING.shelteredShare) * p + TUNING.shelteredShare * (m.pk.hardened ?? 0);
     if (!ctx.map.isSea(target)) {
       const r = slice.runway[target] ?? 1;
       slice.runway[target] = Math.max(0, r * (1 - TUNING.runwayPerHit * (m.pk.structure ?? 0)) ** hits);
       cratered = slice.runway[target] < r;
-      parts.push(`runway ${r.toFixed(2)} -> ${slice.runway[target].toFixed(2)}`);
+      effects.push({ kind: 'runway', before: r, after: slice.runway[target] });
     }
   }
   const pool = victims(ctx, pic, target, attacker, tc, aimed);
@@ -459,9 +459,9 @@ function applyEffect(world: World, ctx: SimContext, pic: AirPicture, slice: AirS
     }
     picked.set(pool[i], (picked.get(pool[i]) ?? 0) + 1);
   }
-  const killed: Record<string, number> = {};
+  const killed: Partial<Record<PlatformId, number>> = {};
   for (const [v, n] of picked) killed[v.pid] = (killed[v.pid] ?? 0) + takeLosses(world, ctx, v.f, v.pid, n, TUNING.damagedShare, tally);
-  const list = Object.entries(killed).map(([pid, n]) => `${pid} ${n}`);
-  parts.push(list.length ? `hit ${list.join(', ')}` : `no ${tc} targets hit`);
-  return { damage: parts.join('; '), effective: cratered || list.length > 0 };
+  const hit = Object.keys(killed).length > 0;
+  effects.push(hit ? { kind: 'losses', platforms: killed } : { kind: 'no_effect', why: 'no_targets' });
+  return { effects, effective: cratered || hit };
 }

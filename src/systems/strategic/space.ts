@@ -68,7 +68,7 @@ export function resolveAsat(world: World, ctx: SimContext, shooters: Formation[]
       world.slices.strategic.debris += FRAGMENTS_PER_KILL;
       kills++;
     }
-    ctx.emit({ type: 'strike', tick: world.tick, by: f.nation, munition, fired: shots, intercepted: shots - kills, target: target.node, damage: `${kills} satellites destroyed` });
+    ctx.emit({ type: 'strike', tick: world.tick, by: f.nation, munition, fired: shots, intercepted: shots - kills, target: target.node, effects: [{ kind: 'satellites_destroyed', count: kills }] });
   }
 }
 

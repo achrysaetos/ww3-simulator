@@ -320,7 +320,7 @@ export function fire(env: TickEnv, shooter: Formation | null, target: Formation,
       if (!left) break;
     }
   }
-  env.ctx.emit({ type: 'strike', tick: env.world.tick, by, munition: m.id, fired: n, intercepted: out.intercepted, target: target.node, damage: `${out.hits.length} hits on ${target.name}` });
+  env.ctx.emit({ type: 'strike', tick: env.world.tick, by, munition: m.id, fired: n, intercepted: out.intercepted, target: target.node, effects: [{ kind: 'ship_hits', formation: target.id, hits: out.hits.length }] });
   return out;
 }
 
