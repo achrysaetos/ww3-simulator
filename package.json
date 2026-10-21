@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit",
     "data": "tsx scripts/build-data.ts",
     "sim": "tsx src/cli/run.ts",
+    "ensemble": "tsx src/cli/ensemble.ts",
     "perf": "PERF=1 vitest run",
     "realism": "REALISM=1 vitest run"
   },

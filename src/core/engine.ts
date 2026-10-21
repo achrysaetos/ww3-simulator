@@ -1,5 +1,6 @@
 import type { Catalog } from './catalog';
 import type { GameMap } from './map';
+import { withParams } from './params';
 import { Rng } from './rng';
 import type { Command, NationId, Relation, SimEvent, World } from './types';
 
@@ -61,11 +62,17 @@ export class Engine {
 
   init(world: World): void {
     const ctx = this.context(world);
-    for (const s of this.systems) s.init?.(world, ctx);
+    withParams(world.params, () => {
+      for (const s of this.systems) s.init?.(world, ctx);
+    });
     world.rngState = ctx.rng.state;
   }
 
   step(world: World): SimEvent[] {
+    return withParams(world.params, () => this.stepWith(world));
+  }
+
+  private stepWith(world: World): SimEvent[] {
     world.events = [];
     const ctx = this.context(world);
     const queued = world.pending;

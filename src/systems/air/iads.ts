@@ -16,7 +16,7 @@ interface Shot { m: Munition; pk: number }
 
 function pkAgainst(m: Munition, cat: ThreatCategory): number {
   if (cat === 'aircraft') return m.pk.aircraft ?? 0;
-  if (cat === 'air_breathing') return m.pk.missile ?? Math.min(0.9, (m.pk.aircraft ?? 0) * (m.kind === 'aam' ? AAM_VS_DRONE_FACTOR : 0.8));
+  if (cat === 'air_breathing') return m.pk.missile ?? Math.min(0.9, (m.pk.aircraft ?? 0) * (m.kind === 'aam' ? AAM_VS_DRONE_FACTOR() : 0.8));
   return m.pk.missile ?? 0;
 }
 

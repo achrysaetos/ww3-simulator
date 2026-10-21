@@ -5,6 +5,7 @@ import { aggressor, commitment, releasable } from './deploy';
 import { isGround, issue, strength } from './forces';
 import { enemyPowerAt, landMass, stagingSector } from './fronts';
 import type { Plan, Sector } from './types';
+import { defineParam } from '../../core/params';
 
 /**
  * Force ratios. The 3:1 attacker's rule (Mearsheimer 1989, "Assessing the
@@ -13,7 +14,9 @@ import type { Plan, Sector } from './types';
  * usually fail; by the same rule a dug-in defender holds at one third of the
  * attacker's strength.
  */
-export const ATTACK_RATIO = 3;
+export const ATTACK_RATIO = defineParam({ id: 'ai.ATTACK_RATIO', value: 3, range: [2, 4], tag: 'contested',
+  source: 'The 3:1 rule (Mearsheimer 1989; Dupuy QJM) against its critics (Epstein 1989); also scales the attritional press ratio',
+  affects: 'when the AI attacks and holds' });
 const HOLD_RATIO = 3;
 /** Fraction of power kept back as an operational reserve: 30% for a cautious command, 15% for an aggressive one. */
 const reserveShare = (aggression: number) => 0.3 - 0.15 * aggression;
@@ -29,7 +32,7 @@ const RETREAT_BELOW = { strength: 0.4, supply: 0.15, morale: 0.25 };
  */
 const AGGRESSOR = 0.3;
 /** Local ratio at which line units keep assaulting: 3:1 scaled down by the command's appetite for offensive losses (Russia ~0.85:1, DPRK ~1.3:1). */
-const pressureRatio = (aggression: number, casualtyTolerance: number) => ATTACK_RATIO / (1 + 4 * aggression * casualtyTolerance);
+const pressureRatio = (aggression: number, casualtyTolerance: number) => ATTACK_RATIO() / (1 + 4 * aggression * casualtyTolerance);
 /**
  * Culminating point: offensives stall as supply lines lengthen and units wear
  * out. No attack is launched more than MAX_DRIVE_CELLS (~300 km) beyond the
@@ -37,7 +40,9 @@ const pressureRatio = (aggression: number, casualtyTolerance: number) => ATTACK_
  * Ukraine's 2022 Kharkiv and 2024 Kursk offensives reached before stalling;
  * worn or under-supplied units stop attacking.
  */
-const MAX_DRIVE_CELLS = 3;
+const MAX_DRIVE_CELLS = defineParam({ id: 'ai.MAX_DRIVE_CELLS', value: 3, range: [2, 5], tag: 'judgment',
+  source: 'Judgment, band-fitting: Russia 2022, Kharkiv 2022 and Kursk 2024 drives stalled ~300 km deep',
+  affects: 'offensive culmination depth' });
 /**
  * Most of an army a nation sends to partners' fronts. NATO's regional plans assign each ally a region and expect it to hold its own territory
  * first (Vilnius summit 2023), so half the army stays home (judgement call).
@@ -206,7 +211,7 @@ function defendHomeland(p: Plan, fit: (f: Formation) => boolean): Set<Formation>
   lost.sort((a, b) => b.enemy - a.enemy || a.n - b.n);
   for (const { n, enemy } of lost) {
     // An empty lost cell still takes a formation to retake it.
-    const need = Math.max(ATTACK_RATIO * enemy, Number.MIN_VALUE);
+    const need = Math.max(ATTACK_RATIO() * enemy, Number.MIN_VALUE);
     let got = sent.get(n) ?? 0;
     if (got >= need) continue;
     // Counter-attack only with the means to win it; short of 3:1 the screen around the cell has to hold instead.
@@ -322,7 +327,7 @@ function landPicture(p: Plan): LandPicture | undefined {
     if (!origin.length) return true;
     const seen = new Set<number>([t]);
     let ring = [t];
-    for (let hop = 0; hop <= MAX_DRIVE_CELLS; hop++) {
+    for (let hop = 0; hop <= MAX_DRIVE_CELLS(); hop++) {
       const next: number[] = [];
       for (const n of ring) {
         if (p.friends.has(origin[n])) return true;
@@ -382,7 +387,7 @@ function triage(lp: LandPicture, countering: Set<Formation>): Formation[] {
     // Staged on a host ally's ground next to the enemy (Russian troops in Belarus): that border is a front the sector picture does not cover.
     if (!p.friends.has(p.world.control[f.node]) && fit(f)) {
       const t = weakestNeighbour(f.node);
-      const ratio = attritional ? pressAt : ATTACK_RATIO;
+      const ratio = attritional ? pressAt : ATTACK_RATIO();
       if (t >= 0 && inReach(t) && friendlyPowerAt(f.node) >= ratio * enemyPowerAt(t, p.index, p.enemies)) {
         issue(p, f, { posture: 'attack', target: t as NodeId });
         continue;
@@ -604,7 +609,7 @@ function launchAttacks(a: Allocation): void {
       if (score > bestScore) { bestScore = score; target = t; targetDefence = d; }
     }
     if (target < 0) continue;
-    const required = ATTACK_RATIO * targetDefence;
+    const required = ATTACK_RATIO() * targetDefence;
     if (required > spare) continue;
     const assaulting = (f: Formation) => f.order.posture === 'attack' && f.order.target === target;
     const group: Formation[] = [];
