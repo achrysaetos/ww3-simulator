@@ -165,6 +165,24 @@ describe('economy: blockade by geography', () => {
   });
 });
 
+describe('economy: grid strikes', () => {
+  it('cuts the energy a nation gets when strikes wreck its grid, whatever fuel it holds, and restores it on repair', () => {
+    const t = dailyWorld();
+    const UKR = id.nation('UKR');
+    const cells = t.map.nodesOf(UKR);
+    for (const n of cells) t.world.theater.infrastructure[n] = 0.5;
+    t.days(2);
+    const e = t.world.slices.economy.nations[UKR];
+    // Half the grid gone takes about half of electricity, ~20% of final energy use.
+    expect(e.supply.energy).toBeGreaterThan(0.85);
+    expect(e.supply.energy).toBeLessThan(0.95);
+    expect(t.world.slices.economy.nations[RUS].supply.energy).toBe(1);
+    for (const n of cells) t.world.theater.infrastructure[n] = 1;
+    t.days(1);
+    expect(e.supply.energy).toBe(1);
+  });
+});
+
 describe('economy: energy price', () => {
   it('a Hormuz closure roughly doubles the world energy price, costing importers output and exporters none', () => {
     const t = dailyWorld();

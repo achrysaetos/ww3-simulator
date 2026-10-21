@@ -40,6 +40,13 @@ const BUFFER_REFILL_PER_MONTH = 0.25;
 const IMPORT_GDP_LOSS = 0.5;
 const ENERGY_GDP_ELASTICITY = 0.7;
 /**
+ * Electricity's share of final energy use (IEA World Energy Balances: ~20% worldwide, ~18% in
+ * Ukraine), the part strikes on the grid take away whatever fuel the nation holds. Ukraine lost
+ * about half its generating capacity to strikes in 2024 (Ukrenergo, IEA Ukraine's Energy Security
+ * and the Coming Winter 2024) and cut supply with rolling blackouts of up to 12-16 hours a day.
+ */
+const ELECTRICITY_SHARE = 0.2;
+/**
  * Short-run price elasticity of world energy supply and demand combined, with stock
  * releases. Losing ~20% of world oil exports through Hormuz then lifts prices ~2.4x,
  * inside the USD 150-200/bbl range of EIA and IEA closure scenarios from ~USD 75 (est.).
@@ -172,6 +179,23 @@ function industrialIntegrity(world: World, map: GameMap): Map<NationId, number> 
   return out;
 }
 
+/** Population-weighted infrastructure of the home cells each nation still holds, 0..1: what strikes have left of its grid. */
+function gridIntact(world: World, map: GameMap): Map<NationId, number> {
+  const idx = ownerIndex(map);
+  const intact = new Float64Array(map.nationIds.length);
+  const held = new Float64Array(map.nationIds.length);
+  const infra = world.theater.infrastructure;
+  for (let n = 0; n < map.landCount; n++) {
+    const i = idx[n];
+    if (i < 0 || world.control[n] !== map.owner[n]) continue;
+    held[i] += map.popShare[n];
+    intact[i] += map.popShare[n] * (infra[n] ?? 1);
+  }
+  const out = new Map<NationId, number>();
+  map.nationIds.forEach((id, i) => out.set(id, held[i] > 0 ? intact[i] / held[i] : 1));
+  return out;
+}
+
 /** For each nation, the partners whose trade it has lost: 0 for war, the leak share for sanctions. */
 function tradePartners(world: World): Map<NationId, Map<NationId, number>> {
   const out = new Map<NationId, Map<NationId, number>>();
@@ -192,6 +216,7 @@ function tradePartners(world: World): Map<NationId, Map<NationId, number>> {
 
 interface Scan {
   integrity: Map<NationId, number>;
+  grid: Map<NationId, number>;
   cut: Map<NationId, Map<NationId, number>>;
   personnel: Map<NationId, number>;
   worldGdp: number;
@@ -204,7 +229,7 @@ function scan(world: World, ctx: SimContext): Scan {
   for (const f of Object.values(world.formations)) if (f.status !== 'destroyed') personnel.set(f.nation, (personnel.get(f.nation) ?? 0) + f.personnel);
   let worldGdp = 0;
   for (const n of Object.values(world.nations)) worldGdp += n.stats.gdp ?? 0;
-  return { integrity, cut: tradePartners(world), personnel, worldGdp };
+  return { integrity, grid: gridIntact(world, ctx.map), cut: tradePartners(world), personnel, worldGdp };
 }
 
 // ---------------------------------------------------------------- per-nation model
@@ -327,6 +352,7 @@ function stepNation(world: World, ctx: SimContext, s: Scan, n: Nation, e: Nation
   e.tradeLoss = tradeLossOf(world, s, n);
   const tradeOutput = 1 - ((n.stats.importsPctGdp ?? 30) / 100) * e.tradeLoss * IMPORT_GDP_LOSS;
   for (const r of RESOURCES) e.supply[r] = drawSupply(e, n.id, r, rawAccess(world, s, n, r), r === 'energy' ? tradeOutput : 1, dtMonths);
+  e.supply.energy *= 1 - ELECTRICITY_SHARE * (1 - (s.grid.get(n.id) ?? 1));
   announceShortages(world, ctx, n.id, e);
 
   const energyImported = 1 - selfShare(n, 'energy');
