@@ -16,6 +16,10 @@ type OrderCommand = Extract<Command, { type: 'order' }>;
 /** Only manoeuvre formations on an attack order push into enemy-held ground; support echelons stay behind the line. */
 const canSeize = (f: Formation) => f.kind === 'maneuver' && f.order.posture === 'attack';
 const MARCHING: ReadonlySet<string> = new Set(['move', 'attack', 'defend', 'reserve']);
+const friendlyGround = (world: World, nation: NationId, node: NodeId) => {
+  const holder = world.control[node];
+  return !!holder && allied(world, nation, holder);
+};
 
 /** Sustained march speed: the slowest vehicle; dismounts ride when the formation has vehicles. 0 = immobile. */
 export function marchSpeedKph(f: Formation, catalog: Catalog): number {
@@ -136,9 +140,10 @@ function march(world: World, ctx: SimContext, f: Formation, byNode: Map<number, 
   const dtDays = world.dtHours / 24;
   const kmPerDay = marchKmPerDay(world, catalog, f);
   if (kmPerDay <= 0) return;
-  // Fighting across the cell it stands in: landCombat moves that line.
+  // Fighting across the cell it stands in: landCombat moves that line. A route back onto friendly
+  // ground breaks contact instead, as Russia pulled brigades out of Donbas to clear Kursk in 2024.
   const here = world.control[f.node];
-  if (here && atWar(world, f.nation, here)) return;
+  if (here && atWar(world, f.nation, here) && !friendlyGround(world, f.nation, path[0])) return;
 
   const hours = MARCH_HOURS_PER_DAY * dtDays;
   f.progressKm += kmPerDay * dtDays;
