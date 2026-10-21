@@ -1,10 +1,10 @@
 import { atWar, type SimContext, type System } from '../../core/engine';
 import type { GameMap } from '../../core/map';
-import type { Formation, FormationId, MunitionId, NationId, NodeId, PlatformId, World } from '../../core/types';
+import type { Formation, FormationId, MunitionId, NationId, NodeId, Platform, PlatformId, World } from '../../core/types';
 import { Controllers } from './network';
 import { refreshNetworks, snapshotInputs, type InputSnapshot, type SupplyNetwork } from './refresh';
 import {
-  FOOD_TONS_PER_PERSON_DAY, IDLE_FUEL_HOURS_PER_DAY, BEACH_CAPACITY, INFRA_REPAIR_PER_DAY, MAX_REFILL_FRACTION_PER_DAY, NODE_TONS_PER_DAY,
+  FOOD_TONS_PER_PERSON_DAY, IDLE_FUEL_HOURS_PER_DAY, BEACH_CAPACITY, INFRA_REPAIR_PER_DAY, LIFT_TONS_PER_TROOP, LIFT_TONS_PER_VEHICLE, MAX_REFILL_FRACTION_PER_DAY, NODE_TONS_PER_DAY,
   REARM_PER_DAY, REARMS_IN_PORT_ONLY, SEALIFT_CLASSES, RECONSTITUTE_DAYS, RECONSTITUTE_MIN_STRENGTH, RECONSTITUTED_KINDS, REGENERATED_CLASSES,
   REPAIR_FRACTION_PER_DAY, REPLACE_FRACTION_PER_DAY, RESERVE_REPLACE_MULTIPLIER, SUPPLY_CLASSES, type SupplyClass,
 } from './tables';
@@ -29,7 +29,7 @@ export interface LogisticsState {
   establishment: Record<FormationId, Establishment>;
   /** Tick each destroyed formation awaiting re-forming was destroyed. */
   fallen: Record<FormationId, number>;
-  /** Sealift hulls (amphibious and cargo ships) each nation fields now, and the most it has fielded; a lodgement's beach supply scales with their ratio. */
+  /** Sealift cargo tons (amphibious and cargo ships) each nation fields now, and the most it has fielded; a lodgement's beach supply scales with their ratio. */
   lift: Record<NationId, { now: number; most: number }>;
   /** Bulk classes each nation is currently short of, so a shortage is reported once per episode. */
   short: Record<NationId, SupplyClass[]>;
@@ -93,8 +93,10 @@ function activeFormations(world: World, ctx: SimContext, s: LogisticsState): For
     s.establishment[f.id] ??= { equipment: sumCounts(f.equipment, f.damaged), personnel: f.personnel };
     if (f.status !== 'embarked') out.push(f);
     if (f.kind === 'surface_group')
-      for (const pid in f.equipment)
-        if (SEALIFT_CLASSES.has(ctx.catalog.platform(pid as PlatformId).class)) lift.set(f.nation, (lift.get(f.nation) ?? 0) + f.equipment[pid as PlatformId]);
+      for (const pid in f.equipment) {
+        const p = ctx.catalog.platform(pid as PlatformId);
+        if (SEALIFT_CLASSES.has(p.class)) lift.set(f.nation, (lift.get(f.nation) ?? 0) + liftTons(p) * f.equipment[pid as PlatformId]);
+      }
   }
   for (const n in s.lift) s.lift[n as NationId].now = 0;
   for (const [n, now] of lift) {
@@ -103,6 +105,11 @@ function activeFormations(world: World, ctx: SimContext, s: LogisticsState): For
     l.most = Math.max(l.most, now);
   }
   return out;
+}
+
+function liftTons(p: Platform): number {
+  const c = p.capacity;
+  return c?.cargoTons ?? (c?.vehicles ?? 0) * LIFT_TONS_PER_VEHICLE + (c?.troops ?? 0) * LIFT_TONS_PER_TROOP;
 }
 
 /** Repair crews restore cells their controller holds, except along the front where work is under fire. */

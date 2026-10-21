@@ -103,6 +103,25 @@ describe('logistics', () => {
     expect(supplyFactor(t.world, beach, chn)).toBe(0);
   });
 
+  it('weighs sealift by cargo tons, so losing a landing ship costs a lodgement less than losing a ferry', () => {
+    const t = setup();
+    const chn = id.nation('CHN');
+    t.war('CHN', 'TWN');
+    const beach = t.nodeAt(23.5, 120.5);
+    const zone = [...t.map.neighbors(beach)].find((n) => t.map.isSea(n))!;
+    const landing = t.brigade('CHN', beach);
+    const lst = id.platform('t_lst'), ferry = id.platform('t_ferry');
+    const lift = t.add({ nation: chn, name: 'landing ships', kind: 'surface_group', echelon: 'squadron', node: zone, equipment: { [lst]: 1, [ferry]: 2 } });
+    t.drain(landing, 0.3);
+    t.engine.run(t.world, 2 * DAY);
+    const held = supplyFactor(t.world, beach, chn);
+    expect(held).toBeGreaterThan(0.05);
+    // 1,625 t of LST (50 vehicles, 500 troops) beside 10,000 t of ferries: a third of the hulls, a seventh of the tons.
+    delete lift.equipment[lst];
+    t.engine.run(t.world, 1);
+    expect(supplyFactor(t.world, beach, chn)).toBeCloseTo((held * 10_000) / 11_625, 2);
+  });
+
   it('lands no more over the beach than one beach can take, however many lodgements a nation holds', () => {
     const t = setup();
     t.war('CHN', 'TWN');

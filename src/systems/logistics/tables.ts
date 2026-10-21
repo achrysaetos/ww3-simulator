@@ -83,6 +83,14 @@ export const FULL_PORT = 3;
 export const BEACH_CAPACITY = 0.25;
 /** Ships that carry a lodgement's supplies across the beach. */
 export const SEALIFT_CLASSES: ReadonlySet<PlatformClass> = new Set(['amphibious', 'cargo_ship']);
+/**
+ * Cargo tons per vehicle lane and per troop berth, for landing ships the catalog rates
+ * in troops and vehicles rather than tons. Fitted so a Ropucha (10 vehicles, 225 troops)
+ * comes to ~450 t and a Type 074 Yuhai (2 vehicles, 250 troops) to ~250 t, their
+ * published cargo loads (Jane's Fighting Ships). Estimate.
+ */
+export const LIFT_TONS_PER_VEHICLE = 25;
+export const LIFT_TONS_PER_TROOP = 0.75;
 
 /**
  * Road cost multiplier by terrain of the cell entered. Estimates from relative
