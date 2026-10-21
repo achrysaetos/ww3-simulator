@@ -403,7 +403,8 @@ export class NetworkSearch {
    * enemy holds; a spearhead with no friendly ground next to it has outrun its road and rail net.
    * A lodgement on a coast with no friendly ground next to it is fed over the beach
    * from the adjacent sea zone, as far as sea control lets the network reach it
-   * (Normandy, Inchon); the caller scales that by the lift left to carry it.
+   * (Normandy, Inchon); the caller scales that by the lift left to carry it. So is one
+   * that has taken its beach cell while stronger defenders still fight in it.
    */
   forcesSupplyAt(inputs: SearchInputs, node: number): ForcesSupply {
     const own = this.milliAt(inputs, node);
@@ -417,7 +418,7 @@ export class NetworkSearch {
       if (v >= landCount) sea = Math.max(sea, this.milliAt(inputs, v));
       else if (side[cell[v]] === FRIENDLY) land = Math.max(land, this.milliAt(inputs, v));
     }
-    if (land >= 0 || held === FRIENDLY) return { milli: Math.round(Math.max(0, land) * LAST_MILE_CAPACITY), route: 'overland' };
+    if (land >= 0) return { milli: Math.round(land * LAST_MILE_CAPACITY), route: 'overland' };
     return { milli: Math.min(sea, Math.round(BEACH_CAPACITY * 1000)), route: 'beach' };
   }
 
