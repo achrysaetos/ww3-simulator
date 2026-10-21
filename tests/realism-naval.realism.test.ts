@@ -122,6 +122,16 @@ describe('Taiwan 2027 naval war and invasion (CSIS "The First Battle of the Next
     expect(m.nations.CHN.naval?.troopsOnEnemySoil ?? 0).toBeLessThan(80_000);
   }, 300_000);
 
+  // CSIS base case: US attack submarines do much of the killing of PLAN shipping and lose few boats. Judgement: at most
+  // 6 of the ~50 US SSNs in 30 days.
+  // Gap: 18-27 are lost. Every US SSN patrols the one zone where the whole PLAN masses. Each attack, and each approach
+  // the screen foils, leaves a datum that exposes the whole formation to the counterattack (naval/detection.ts, combat.ts).
+  it.fails('with the US in from the start, the US loses only a handful of attack submarines', () => {
+    const runs = SEEDS.map(taiwan).filter((r) => r.usInWar);
+    expect(runs.length).toBeGreaterThan(0);
+    for (const { m } of runs) expect(m.nations.USA.lossesByClass.ssn ?? 0).toBeLessThanOrEqual(6);
+  }, 900_000);
+
   // CSIS base case: the PLA gets ashore but cannot be sustained once its shipping is attrited; Taipei never falls.
   it('with the US in from the start, the landing fails or holds a small lodgement without breakout in most seeds, and Taipei holds in every seed', () => {
     const runs = SEEDS.map(taiwan).filter((r) => r.usInWar);

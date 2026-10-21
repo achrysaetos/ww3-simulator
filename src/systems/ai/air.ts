@@ -1,8 +1,8 @@
-import type { Formation, NodeId, PlatformClass, PlatformId, TargetClass } from '../../core/types';
-import { effectPk, visibility } from '../air';
+import type { Formation, Munition, MunitionId, NodeId, PlatformClass, PlatformId, TargetClass } from '../../core/types';
+import { visibility } from '../air';
 import { TUNING } from '../air/tables';
 import { dominant, issue } from './forces';
-import { arsenal, FireBudget, pickTarget, SamCover, reachKm, strikeOptions, withinKm, type StrikeTarget, type TargetGrid } from './strikes';
+import { arsenal, FireBudget, pickTarget, pkAgainst, SamCover, reachKm, strikeOptions, withinKm, type StrikeTarget, type TargetGrid } from './strikes';
 import type { Plan } from './types';
 
 type AirRole = 'fighter' | 'multirole' | 'strike' | 'support';
@@ -38,7 +38,7 @@ function roleOf(p: Plan, f: Formation): AirRole | undefined {
  * over a front in reach and strike otherwise; bombers and drones strike
  * (see strikes.ts for target order); support aircraft orbit the main front.
  */
-export function planAir(p: Plan, targets: TargetGrid, battleArea: Set<number>): void {
+export function planAir(p: Plan, targets: TargetGrid): void {
   const { map } = p.ctx;
   const km = (a: number, b: number) => map.distanceKm(a as NodeId, b as NodeId);
   const wings = (p.index.byNation.get(p.nation) ?? []).filter((f) => f.kind === 'air_wing' && f.status === 'active');
@@ -50,7 +50,7 @@ export function planAir(p: Plan, targets: TargetGrid, battleArea: Set<number>): 
   };
   const cover = new Map<NodeId, number>(keys.map((k) => [k, 0]));
   const budget = new FireBudget(p);
-  const sams = new SamCover(p, battleArea);
+  const sams = new SamCover(p);
   const fighters = wings.filter((w) => roleOf(p, w) === 'fighter').length;
   // Strike packages are planned with the tanker support the nation can lay on; the
   // air system then works out each day's actual radius from tanker sorties in range.
@@ -68,23 +68,26 @@ export function planAir(p: Plan, targets: TargetGrid, battleArea: Set<number>): 
     issue(p, w, { posture: 'air_superiority', target: best });
     return true;
   };
+  /**
+   * A strike goes in with the aircraft that carry the weapon, so each weapon reaches as far as
+   * the longest-legged type loading it, not the wing's shortest: the air system flies each type
+   * to its own radius. A naval strike brigade's H-6Js take YJ-12s past the JH-7As' reach.
+   */
   const strike = (w: Formation, radius: number): boolean => {
     const stock = arsenal(p, w);
-    const vis = visibility(Math.min(...Object.keys(w.equipment).map((id) => p.ctx.catalog.platform(id as PlatformId)).filter((pl) => AIR_ROLE[pl.class] && AIR_ROLE[pl.class] !== 'support').map((pl) => pl.protection.stealth)));
-    const standoff = new Map<string, number>();
+    const strikers = Object.entries(w.equipment).filter(([, n]) => n > 0).map(([id]) => p.ctx.catalog.platform(id as PlatformId)).filter((pl) => AIR_ROLE[pl.class] && AIR_ROLE[pl.class] !== 'support');
+    const vis = visibility(Math.min(...strikers.map((pl) => pl.protection.stealth)));
+    const legs = new Map<MunitionId, number>();
+    for (const pl of strikers) for (const l of pl.loadout) legs.set(l.munition, Math.max(legs.get(l.munition) ?? 0, pl.mobility.rangeKm * tanked));
+    const reach = (m: Munition) => (legs.get(m.id) ?? radius) + m.rangeKm;
     const canHit = (t: StrikeTarget) => {
-      let km = standoff.get(t.cls);
-      if (km === undefined) {
-        km = stock.reduce((best, m) => (effectPk(m, t.cls) > 0 ? Math.max(best, m.rangeKm) : best), hasFirepower(p, w, t.cls) ? 0 : -1);
-        standoff.set(t.cls, km);
-      }
-      return km >= 0 && withinKm(map, w.node, t.node, radius + km) && sams.clear(w.node, t.node, km, vis);
+      for (const m of stock) if (pkAgainst(m, t) > 0 && withinKm(map, w.node, t.node, reach(m)) && sams.clear(w.node, t.node, m.rangeKm, vis)) return true;
+      return hasFirepower(p, w, t.cls) && withinKm(map, w.node, t.node, radius) && sams.clear(w.node, t.node, 0, vis);
     };
-    const longest = stock.reduce((best, m) => Math.max(best, m.rangeKm), 0);
-    const t = pickTarget(targets.near(w.node, radius + longest), canHit);
+    const t = pickTarget(targets.near(w.node, stock.reduce((best, m) => Math.max(best, reach(m)), radius)), canHit);
     if (!t) return false;
     const order = { posture: 'strike' as const, target: t.node, targetClass: t.cls, targetFormation: t.formation };
-    budget.propose(w, strikeOptions(stock, t.cls).filter((m) => withinKm(map, w.node, t.node, radius + m.rangeKm)), t, order);
+    budget.propose(w, strikeOptions(stock, t).filter((m) => withinKm(map, w.node, t.node, reach(m))), t, order);
     return true;
   };
 

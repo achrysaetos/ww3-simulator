@@ -8,7 +8,7 @@ import { marchKmPerDay } from './movement';
 import { allied, cellDepthKm, destroyFormation, hostilesAt, indexByNode, landSlice } from './state';
 import { updateEncirclement } from './encirclement';
 import {
-  AIR_SUPPRESSION, AMMO_DAYS_INTENSE, ATTRITION_KM_PER_DAY, ATTRITION_MAX_KM_PER_DAY, BREAKTHROUGH_KM_PER_DAY, HOSTILE_GROUND_COST,
+  AIR_SUPPRESSION, AMMO_DAYS_INTENSE, ATTRITION_KM_PER_DAY, ATTRITION_MAX_KM_PER_DAY, BREAKTHROUGH_KM_PER_DAY, COVERED_KM_PER_DAY, HOSTILE_GROUND_COST,
   ASSAULT_EXPOSURE, DELIBERATE_ASSAULT_RATIO, FRONTAGE_PLATFORMS, WITHDRAWAL_KM, POSITIONAL_INTENSITY, AMMO_RATION_BELOW, AREA_FIRE_REF_DENSITY, CAS_BONUS, DIRECT_DENSITY_EXP, COMBAT_FUEL_DUTY, COMBINED_ARMS,
   ENGAGED_HOURS_PER_DAY, ENTRENCH_MAX_BONUS, EXPERIENCE_PER_COMBAT_DAY, FATIGUE_COMBAT_PER_DAY, INDIRECT_FIRE, RETREAT_LOSS,
   RETREAT_MORALE, ROUT_ABANDON, ROUT_MORALE, SHELL_TONS, SHELLS_PER_TUBE_DAY, TERRAIN, TUBE_ARTILLERY, exposureOf, targetClassOf,
@@ -377,23 +377,29 @@ function fortifyStandingLines(world: World, map: GameMap): void {
   }
 }
 
-/** Hostile manoeuvre units hold a cell next to `node`, so their fire covers it. */
-function underFire(world: World, map: GameMap, byNode: Map<number, Formation[]>, node: NodeId, nation: NationId): boolean {
+/** Hostile manoeuvre units in cells next to `node`, whose fire covers it. */
+function coveringFire(world: World, map: GameMap, byNode: Map<number, Formation[]>, node: NodeId, nation: NationId): Formation[] {
+  const out: Formation[] = [];
   for (const m of map.neighbors(node))
-    for (const f of byNode.get(m) ?? []) if (f.kind === 'maneuver' && f.status === 'active' && atWar(world, nation, f.nation)) return true;
-  return false;
+    for (const f of byNode.get(m) ?? []) if (f.kind === 'maneuver' && f.status === 'active' && atWar(world, nation, f.nation)) out.push(f);
+  return out;
 }
 
 /** Km/day the attacker gains across a contested cell, given who is still holding it. */
-function advanceRate(world: World, ctx: SimContext, node: NodeId, attackers: Formation[], defenders: Formation[], covered: boolean, exchange: number): number {
+function advanceRate(world: World, ctx: SimContext, node: NodeId, attackers: Formation[], defenders: Formation[], cover: Formation[], exchange: number): number {
   const moveCost = TERRAIN[ctx.map.terrain[node]].moveCost;
   const movers = attackers.filter(isPressing);
   if (!movers.length) return 0;
-  if (!defenders.length && !covered) {
+  if (!defenders.length && !cover.length) {
     // Unopposed: a road march through hostile ground (reconnaissance, obstacles, demolitions).
     return Math.max(...movers.map((f) => marchKmPerDay(world, ctx.catalog, f))) / (HOSTILE_GROUND_COST * moveCost);
   }
-  // An empty cell still under fire from the enemy line next door is crossed at breakthrough pace, not road-march pace.
+  if (!defenders.length) {
+    // An empty cell the line next door still covers: infiltration, unless that line is too thin to stop a deliberate assault.
+    const { closed } = TERRAIN[ctx.map.terrain[node]];
+    const ratio = fireRatio(summarize(world, ctx.catalog, { nation: movers[0].nation, fighters: movers, support: [] }, node, closed), summarize(world, ctx.catalog, { nation: cover[0].nation, fighters: cover, support: [] }, node, closed));
+    return (ratio >= DELIBERATE_ASSAULT_RATIO ? BREAKTHROUGH_KM_PER_DAY : COVERED_KM_PER_DAY) / moveCost;
+  }
   if (defenders.every((f) => f.status === 'routed')) return BREAKTHROUGH_KM_PER_DAY / moveCost;
   return Math.min(ATTRITION_MAX_KM_PER_DAY, ATTRITION_KM_PER_DAY * Math.max(0, Math.log(exchange)));
 }
@@ -423,8 +429,8 @@ function contestCell(world: World, ctx: SimContext, node: NodeId, invaders: Form
   }
   const holdingOn = defenders.filter((f) => f.status !== 'destroyed' && f.node === node);
   const stillIn = attackers.filter((f) => f.status !== 'destroyed' && f.node === node);
-  const covered = !holdingOn.length && underFire(world, ctx.map, byNode, node, lead);
-  contest.km += (advanceRate(world, ctx, node, stillIn, holdingOn, covered, exchange) * world.dtHours) / 24 + (yielded ? WITHDRAWAL_KM : 0);
+  const cover = holdingOn.length ? [] : coveringFire(world, ctx.map, byNode, node, lead);
+  contest.km += (advanceRate(world, ctx, node, stillIn, holdingOn, cover, exchange) * world.dtHours) / 24 + (yielded ? WITHDRAWAL_KM : 0);
   if (contest.km < cellDepthKm(ctx.map, node)) return;
 
   delete slice.contest[node];

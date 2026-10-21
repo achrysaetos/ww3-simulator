@@ -58,6 +58,13 @@ describe('ukraine-2026, 30 days', () => {
     expect(rate).toBeLessThanOrEqual(0.92);
   });
 
+  // Russia's MoD claimed hundreds of Ukrainian long-range drones downed in single nights in 2025 (337 on 11 March).
+  // The scenario fields two launch units sized for ~500 a month, so this is a floor: launch sites a few hundred
+  // km behind the line keep firing instead of falling to glide bombs in the first week.
+  it('Ukraine launches at least 300 long-range one-way drones a month', () => {
+    for (const r of runs) expect(tally(r, 'UKR', undefined, ['one_way_drone']).fired).toBeGreaterThanOrEqual(300);
+  });
+
   // UAF claims ~70-80 % of cruise missiles and far fewer ballistic ones (CSIS Missile Threat 2025). Judgment: 40-80 % overall, pooled.
   it('Ukraine downs 40-80 % of the missiles (pooled over seeds)', () => {
     const rate = pooledRate(runs, 'RUS', 'UKR', MISSILES);
@@ -105,8 +112,8 @@ describe('gulf-2027, 30 days', () => {
     for (const r of runs) expect(tally(r, 'IRN', 'ISR', ['ballistic_missile']).fired).toBeGreaterThanOrEqual(300);
   });
 
-  // Gap: Israeli strike aircraft lack the reach (no stand-off air-launched ballistic missiles in the order of battle) and there is no front to win the air over.
-  it.fails('Israeli air strikes reach Iran (October 2024, June 2025)', () => {
+  // October 2024 and June 2025: Israeli F-15I and F-35I flew 1,500-2,000 km to strike Iran with stand-off weapons.
+  it('Israeli air strikes reach Iran (October 2024, June 2025)', () => {
     for (const r of runs) expect(tally(r, 'ISR', 'IRN', ['air_ordnance', 'glide_bomb']).fired).toBeGreaterThan(0);
   });
 });

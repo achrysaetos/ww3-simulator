@@ -207,9 +207,7 @@ export function planLand(p: Plan): void {
     };
     const candidates = [...free]
       .filter((f) => post(f) !== undefined || inRange(f, s.key))
-      .map((f) => ({ f, d: post(f) !== undefined ? 0 : km(f.node, s.key) }))
-      .sort((a, b) => a.d - b.d || (a.f.id < b.f.id ? -1 : 1));
-    // Newcomers go where the enemy presses hardest relative to what already holds there.
+      .sort((a, b) => km(a.node, s.key) - km(b.node, s.key) || (a.id < b.id ? -1 : 1));
     const pressure = new Map<number, number>();
     const manned = new Map<number, number>();
     for (const n of s.nodes) {
@@ -221,28 +219,42 @@ export function planLand(p: Plan): void {
       pressure.set(n, e);
       manned.set(n, 0);
     }
-    // An unmanned cell on the line is a gap the enemy walks through, so every cell gets a screen before any is reinforced.
-    const neediest = () => {
-      let best: number = s.nodes[0], gap = -Infinity;
-      for (const n of s.nodes) {
-        const g = (manned.get(n)! > 0 ? 0 : 1e9) + pressure.get(n)! / HOLD_RATIO - manned.get(n)!;
-        if (g > gap) { gap = g; best = n; }
-      }
-      return best;
-    };
-    let got = 0, k = 0, unmanned = s.nodes.length;
-    for (const { f } of candidates) {
-      if (k > 0 && got >= req && !unmanned) break;
-      const at = post(f);
-      const stay = at !== undefined && manned.get(at)! < pressure.get(at)! / HOLD_RATIO;
-      const target = at !== undefined && (stay || !manned.get(at)) ? at : neediest();
-      if (!manned.get(target)) unmanned--;
+    let got = 0;
+    const assign = (f: Formation, target: number) => {
       manned.set(target, manned.get(target)! + power(f));
       const push = f.node === target && fit(f) ? pressureTarget(target) : -1;
       issue(p, f, push >= 0 ? { posture: 'attack', target: push as NodeId } : { posture: 'defend', target: target as NodeId });
       free.delete(f);
       got += power(f);
-      k++;
+    };
+    const short = (n: number) => manned.get(n)! < pressure.get(n)! / HOLD_RATIO;
+    // Units standing on the line hold their cells while their cell needs them.
+    for (const f of candidates) if (sectorOf.get(f.node) === s && (!manned.get(f.node) || short(f.node))) assign(f, f.node);
+    // An unmanned cell on the line is a gap the enemy walks through, so every cell gets the nearest
+    // free unit as a screen before any is reinforced; a far unit marching in leaves the cell open for days.
+    for (const n of s.nodes) {
+      if (manned.get(n)) continue;
+      let best: Formation | undefined, bestKm = Infinity;
+      for (const f of candidates) {
+        if (!free.has(f)) continue;
+        const d = km(f.node, n);
+        if (d < bestKm) { bestKm = d; best = f; }
+      }
+      if (best) assign(best, n);
+    }
+    // Then newcomers go where the enemy presses hardest relative to what already holds there.
+    for (const f of candidates) {
+      if (got >= req) break;
+      if (!free.has(f)) continue;
+      let target = post(f);
+      if (target === undefined || !short(target)) {
+        let gap = -Infinity;
+        for (const n of s.nodes) {
+          const g = pressure.get(n)! / HOLD_RATIO - manned.get(n)!;
+          if (g > gap) { gap = g; target = n; }
+        }
+      }
+      assign(f, target!);
     }
   });
 
