@@ -72,8 +72,14 @@ export const AIR_INTERDICTION = 0.6;
 
 /** Below this ammo fraction a unit rations fire linearly. */
 export const AMMO_RATION_BELOW = 0.3;
-/** Days of intense combat a basic load lasts (US Army planning: 3-5 days, FM 4-0). */
-export const AMMO_DAYS_INTENSE = 3;
+/**
+ * Days of full-intensity combat over which armed platforms other than gun artillery (tanks,
+ * IFVs, infantry, mortars, ATGMs) spend their basic load. US planning has a load last 3-5 days
+ * of mobile high-intensity combat (FM 4-0), but on a positional front the guns fire most of the
+ * tonnage. At 3 days the rest of the army drew twice the shells' tonnage in ukraine-2026 and
+ * drained Ukraine's depots by D+180; at 10 it draws about two-thirds of it (judgment).
+ */
+export const AMMO_DAYS_INTENSE = 10;
 /** Gun artillery, which fires rounds at SHELLS_PER_TUBE_DAY rather than spending a basic load. */
 export const TUBE_ARTILLERY: ReadonlySet<PlatformClass> = new Set(['sp_artillery', 'towed_artillery']);
 /** A complete 152/155 mm round with charge and packaging, tons (matches the industry model's shell weight). */
@@ -175,7 +181,7 @@ export const COVERED_KM_PER_DAY = 3;
  * against ~1,000-1,500 personnel casualties (UK MoD).
  */
 export const EXPOSURE: Partial<Record<PlatformClass, number>> = {
-  mbt: 0.4, ifv: 0.5, apc: 0.5,
+  mbt: 0.35, ifv: 0.5, apc: 0.5,
   truck: 0.05, fuel_truck: 0.05, engineer: 0.5, recon: 0.8,
   sp_artillery: 0.3, towed_artillery: 0.3, mlrs: 0.25,
   sam_long: 0.05, sam_medium: 0.15, shorad: 0.4, abm: 0.05, ew: 0.2, radar: 0.1,
@@ -227,3 +233,13 @@ export const DELIBERATE_ASSAULT_RATIO = 3;
  * roughly 10 km (FM 3-90; Ukrainian brigades held 10-20 km sectors in 2024).
  */
 export const FRONTAGE_PLATFORMS = 3000;
+/** Front length FRONTAGE_PLATFORMS holds: a 1-degree cell's ~100 km. Smaller cells (islands, city-states) need proportionally fewer. */
+export const CELL_FRONT_KM = 100;
+/**
+ * Share of the gaps in a thin line that a fully dug-in defender closes with its own obstacles,
+ * mines and pre-registered fires (FM 3-90 hasty barrier plans), as against a standing fortified
+ * belt that closes them all. Judgment, with attackers that no longer run their magazines dry in
+ * three days (AMMO_DAYS_INTENSE): a thin, dug-in NATO line in baltic-2027 gives up a few cells
+ * in three weeks without collapsing, against ~1 at the old 1 km/day cap.
+ */
+export const HASTY_BARRIER = 0.7;
