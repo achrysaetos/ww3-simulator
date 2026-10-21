@@ -87,7 +87,8 @@ function runUntil(t: ReturnType<typeof navalWorld>, done: () => boolean, maxTick
 describe('naval salvo combat', () => {
   const southChinaSea = (t: ReturnType<typeof navalWorld>) => t.nodeAt(15, 114);
 
-  it('a salvo inside the defense capacity leaks nothing and sinks nothing', () => {
+  it('a two-missile salvo at a destroyer with SAMs to spare is mostly stopped, but not always', () => {
+    let leakers = 0;
     for (let seed = 1; seed <= 8; seed++) {
       const t = navalWorld(seed);
       const at = southChinaSea(t);
@@ -97,12 +98,26 @@ describe('naval salvo combat', () => {
       us.order = { posture: 'attack', issuedTick: 0 };
       const fired = runUntil(t, () => (led(t, 'USA')?.missilesFired ?? 0) >= 2, 10);
       expect(fired).toBeGreaterThan(0);
-      const usLedger = led(t, 'USA')!;
-      expect(usLedger.leakers).toBe(0);
-      expect(led(t, 'CHN')?.hullsSunk ?? 0).toBe(0);
-      expect(led(t, 'CHN')?.hullsDamaged ?? 0).toBe(0);
+      leakers += led(t, 'USA')!.leakers;
       expect(led(t, 'CHN')!.interceptorsFired).toBeGreaterThan(0);
     }
+    expect(leakers).toBeGreaterThan(0);
+    expect(leakers).toBeLessThan(8);
+  });
+
+  it('a salvo inside the fire channels leaks only the threats both interceptors miss; one that saturates them leaks its excess', () => {
+    const t = navalWorld();
+    const hhq9: Munition = { ...t.catalog.munition(mid('t_sam')), pk: { missile: 0.7 } };
+    const harpoon: Munition = { ...t.catalog.munition(mid('t_asm')), interceptDifficulty: 0.3 };
+    const leak = (fired: number) => {
+      let n = 0;
+      for (let s = 1; s <= 100; s++) n += resolveSalvo(new Rng(s), harpoon, fired, { channels: 12, interceptors: [{ munition: hhq9, available: 200 }], pointDefense: 0, capShots: 0 }, 'ship').leakers;
+      return n / (100 * fired);
+    };
+    const small = leak(8), saturating = leak(60);
+    expect(small).toBeGreaterThan(0.02);
+    expect(small).toBeLessThan(0.15);
+    expect(saturating).toBeGreaterThan(small * 3);
   });
 
   it('a salvo that saturates the defense leaks and sinks the target', () => {
@@ -127,11 +142,11 @@ describe('naval salvo combat', () => {
       subsonic += resolveSalvo(new Rng(s), t.catalog.munition(mid('t_asm')), 6, defense(), 'ship').leakers;
       ballistic += resolveSalvo(new Rng(s), t.catalog.munition(mid('n_asbm')), 6, defense(), 'ship').leakers;
     }
-    expect(subsonic).toBe(0);
-    expect(ballistic / 20).toBeGreaterThan(3);
+    expect(subsonic / 120).toBeLessThan(0.35);
+    expect(ballistic / 120).toBeGreaterThan(0.7);
   });
 
-  it('spends about two interceptors per one-way drone, as in the Red Sea 2023-24', () => {
+  it('spends two to three interceptors per one-way drone it kills (Red Sea 2023-24: about two per engaged threat)', () => {
     const t = navalWorld();
     const sm2: Munition = { ...t.catalog.munition(mid('t_sam')), pk: { missile: 0.7 } };
     const drone: Munition = { ...t.catalog.munition(mid('t_asm')), kind: 'drone_oneway', speedMach: 0.4, interceptDifficulty: 0.25 };
@@ -141,9 +156,9 @@ describe('naval salvo combat', () => {
       used += [...out.interceptorsUsed.values()].reduce((a, b) => a + b, 0);
       killed += out.intercepted;
     }
-    expect(killed).toBe(90);
-    expect(used / killed).toBeGreaterThan(1.5);
-    expect(used / killed).toBeLessThan(2.5);
+    expect(killed).toBeGreaterThanOrEqual(81);
+    expect(used / killed).toBeGreaterThan(1.8);
+    expect(used / killed).toBeLessThan(3);
   });
 
   it('two Neptunes sink a poorly kept cruiser (Moskva) but a well-drilled crew saves the ship', () => {
