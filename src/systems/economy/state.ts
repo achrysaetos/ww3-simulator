@@ -100,13 +100,13 @@ export function newLine(item: ItemId, baselinePerYear: number, surgePerYear: num
 
 /**
  * Men in the liable age band, approximated as half the 15-64 working-age share spread
- * evenly over its 50 years, less the unavailable, standing forces, reserves and prior losses.
+ * evenly over its 50 years, less the unavailable, standing forces, reserves, reservists and prior losses.
  */
 function draftPool(nation: Nation): number {
   const law = DRAFT_LAWS[nation.id] ?? DEFAULT_DRAFT_LAW;
   const [from, to] = law.ages;
   const liable = nation.population * 0.5 * ((nation.stats.workingAgePct ?? 65) / 100) * ((Math.min(to, 64) - Math.max(from, 15)) / 50);
-  return Math.max(0, liable * (1 - law.unavailable) - (nation.stats.armedForces ?? 0) - nation.reserves - law.priorLosses);
+  return Math.max(0, liable * (1 - law.unavailable) - (nation.stats.armedForces ?? 0) - nation.reserves - nation.reservists - law.priorLosses);
 }
 
 export function newNationEconomy(nation: Nation): NationEconomy {

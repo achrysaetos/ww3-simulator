@@ -223,8 +223,10 @@ export interface Nation {
   mobilization: number;
   /** Public/elite will to keep fighting, 0..1. Below ~0.2 a nation seeks terms. */
   warSupport: number;
-  /** Trained manpower pool not yet in formations. */
+  /** Trained manpower ready to replace losses or man new formations. */
   reserves: number;
+  /** Trained reservists not yet recalled; mobilization recalls them into `reserves` after a refresher. */
+  reservists: number;
   /** Warehoused munitions and platforms not assigned to formations. */
   stockpile: Record<ItemId, number>;
   /** National bulk stocks, tons. */

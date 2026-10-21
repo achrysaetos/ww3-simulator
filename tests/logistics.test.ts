@@ -276,6 +276,7 @@ describe('logistics', () => {
     const t = setup();
     const mbt = id.platform('t_mbt');
     const pol = t.world.nations[id.nation('POL')];
+    pol.reserves = 100_000;
     const f = t.brigade('POL', t.nodeAt(52.4, 16.9), { equipment: { [mbt]: 100 } });
     t.engine.step(t.world);
     const fullCrew = f.personnel;
