@@ -30,7 +30,7 @@ export interface EconomyMetrics {
   shortageDays: Record<string, number>;
   /** Units delivered by each production line over the run. */
   produced: Record<string, number>;
-  /** Arms shipped in and out over the run, units by `donor>recipient:item` */
+  /** Arms shipped in and out over the run, units by `donor>recipient:item`; allied cross-levelling as tons under `donor>recipient:bulk_ammo_t`. */
   aid: Record<string, number>;
   /**
    * Items held by formations (magazines for munitions, equipment plus damaged for platforms) and in
@@ -68,6 +68,7 @@ export function economyProbe(world: World, catalog: Catalog) {
   const startHeld = itemsHeld(world);
   const start = new Map(Object.values(world.nations).map((n) => [n.id, { ...n.bulk }]));
   const aid0 = Object.fromEntries(Object.entries(world.slices.economy?.aid ?? {}).map(([k, a]) => [k, a.delivered]));
+  const allied0 = { ...world.slices.economy?.allied };
   const stockMonths = (id: NationId) => Object.fromEntries(RESOURCES.map((r) => [r, stocksOf(id, r).reduce((a, st, i) => a + st.share * (world.slices.economy?.nations[id]?.buffers[r][i] ?? 0), 0)]));
   const stocks0 = new Map((Object.keys(world.nations) as NationId[]).map((id) => [id, stockMonths(id)]));
   const at0 = new Map(Object.entries(world.slices.economy?.nations ?? {}).map(([id, e]) => [id, { delivered: { ...e.delivered }, recruited: e.recruited, fuelDelivered: e.fuelDelivered }]));
@@ -123,6 +124,13 @@ export function economyProbe(world: World, catalog: Catalog) {
         if (k <= 0) continue;
         aid[aidKey(f)] = k;
         aidNetTons += (f.recipient === id ? 1 : -1) * k * bulkTons(ITEMS[f.item].id);
+      }
+      for (const [k, tons] of Object.entries(world.slices.economy.allied)) {
+        const [donor, recipient] = k.split('>');
+        const t = tons - (allied0[k] ?? 0);
+        if ((donor !== id && recipient !== id) || t <= 0) continue;
+        aid[`${k}:bulk_ammo_t`] = Math.round(t);
+        aidNetTons += (recipient === id ? 1 : -1) * t;
       }
       const s = start.get(id)!;
       const fuelIn = e.fuelDelivered - before.fuelDelivered;

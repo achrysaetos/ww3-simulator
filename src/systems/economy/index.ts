@@ -6,6 +6,7 @@ import {
   AID_FLOWS, CATEGORIES, DEFAULT_SEABORNE_TRADE_SHARE, ITEMS, MIL_FUEL_TONS_PER_USD_M, SEABORNE_TRADE_SHARE, OIL_CONSUMPTION_MT, OIL_TONS_PER_PPP_USD_M, RATION_TONS_PER_DAY, RESOURCES, RESOURCE_SPECS, SHIPBUILDING_GT_PER_YEAR, SHIPYARD_WARSHIP_SHARE,
   itemSpec, type AidFlow, type ItemCategory, type Resource,
 } from '../../data/industry';
+import { defenseObligations } from '../../data/nations';
 import { newLine, newNationEconomy, stocksOf, type LineState, type NationEconomy } from './state';
 
 export type { EconomyState, LineState, NationEconomy } from './state';
@@ -456,6 +457,66 @@ function shipAid(world: World, dtMonths: number): void {
   }
 }
 
+/**
+ * Allies cross-level bulk ammunition in war, as NATO's mutual-support arrangements (STANAG 2034)
+ * provide and as the US did for Israel in 1973 (Operation Nickel Grass: ~22,000 t airlifted in a
+ * month, more by sea). A donor is a co-belligerent or a treaty ally bound to fight (commitment of
+ * at least ALLY_COMMITMENT); it tops up any such partner at war whose stock per soldier is below
+ * CROSS_LEVEL_SHARE of its own, releasing at most RELEASE_PER_MONTH of its stock a month in all.
+ * A pair with a standing shell pipeline in AID_FLOWS ships at that observed rate instead.
+ */
+const ALLY_COMMITMENT = 0.5;
+const CROSS_LEVEL_SHARE = 0.5;
+const RELEASE_PER_MONTH = 0.1;
+
+function enemiesOf(world: World): Map<NationId, Set<NationId>> {
+  const out = new Map<NationId, Set<NationId>>();
+  for (const [k, r] of Object.entries(world.relations)) {
+    if (!r.atWar) continue;
+    const [a, b] = k.split('|') as NationId[];
+    (out.get(a) ?? out.set(a, new Set()).get(a)!).add(b);
+    (out.get(b) ?? out.set(b, new Set()).get(b)!).add(a);
+  }
+  return out;
+}
+
+const PIPELINES = new Set(AID_FLOWS.filter((f) => ITEMS[f.item].sink.kind === 'bulk_ammo').map((f) => `${f.donor}>${f.recipient}`));
+
+const allyCache = new Map<string, boolean>();
+function treatyAlly(donor: NationId, recipient: NationId): boolean {
+  const key = `${donor}>${recipient}`;
+  let v = allyCache.get(key);
+  if (v === undefined) allyCache.set(key, (v = defenseObligations(donor, recipient).some((a) => a.commitment >= ALLY_COMMITMENT)));
+  return v;
+}
+
+function crossLevelAmmo(world: World, s: Scan, dtMonths: number): void {
+  const enemies = enemiesOf(world);
+  if (!enemies.size) return;
+  const state = world.slices.economy;
+  const usable = (n: Nation | undefined): n is Nation => !!n && n.status !== 'capitulated' && n.status !== 'collapsed';
+  const perHead = (n: Nation) => Math.max(0, n.bulk.ammo) / Math.max(1, s.personnel.get(n.id) ?? 0);
+  for (const donor of Object.values(world.nations)) {
+    if (!usable(donor) || donor.bulk.ammo <= 0) continue;
+    let budget = donor.bulk.ammo * RELEASE_PER_MONTH * dtMonths;
+    for (const [rid, foes] of enemies) {
+      if (budget <= 0) break;
+      const r = world.nations[rid];
+      if (rid === donor.id || !usable(r) || foes.has(donor.id) || !(s.personnel.get(rid) ?? 0) || PIPELINES.has(`${donor.id}>${rid}`)) continue;
+      const coBelligerent = [...foes].some((f) => enemies.get(donor.id)?.has(f));
+      if (!coBelligerent && !treatyAlly(donor.id, rid)) continue;
+      const gap = (CROSS_LEVEL_SHARE * perHead(donor) - perHead(r)) * (s.personnel.get(rid) ?? 0);
+      const tons = Math.min(gap, budget);
+      if (tons <= 0) continue;
+      budget -= tons;
+      donor.bulk.ammo -= tons;
+      r.bulk.ammo += tons;
+      const key = `${donor.id}>${rid}`;
+      state.allied[key] = (state.allied[key] ?? 0) + tons;
+    }
+  }
+}
+
 function report(world: World, ctx: SimContext): void {
   const state = world.slices.economy;
   if ((world.tick + 1 - state.lastReportTick) * world.dtHours < REPORT_HOURS) return;
@@ -496,7 +557,7 @@ export const economy: System = {
   commands: ['set_mobilization', 'produce', 'sanction'],
 
   init(world, ctx) {
-    world.slices.economy = { nations: {}, lastReportTick: world.tick, aid: {}, energyPrice: 1, energyExportsLost: 0 };
+    world.slices.economy = { nations: {}, lastReportTick: world.tick, aid: {}, allied: {}, energyPrice: 1, energyExportsLost: 0 };
     const integrity = industrialIntegrity(world, ctx.map);
     for (const n of Object.values(world.nations)) {
       const e = newNationEconomy(n);
@@ -531,6 +592,7 @@ export const economy: System = {
       if (n && n.status !== 'collapsed') stepNation(world, ctx, s, n, e, dtMonths);
     }
     shipAid(world, dtMonths);
+    crossLevelAmmo(world, s, dtMonths);
     report(world, ctx);
   },
 };

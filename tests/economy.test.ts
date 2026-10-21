@@ -167,6 +167,25 @@ describe('economy: blockade by geography', () => {
   });
 });
 
+describe('economy: allied ammunition', () => {
+  it('tops up a treaty ally at war from a partner rich in shells, and nothing flows from states with no obligation', () => {
+    const t = dailyWorld();
+    const EST = id.nation('EST'), CHN = id.nation('CHN');
+    const est = t.world.nations[EST];
+    t.add({ nation: EST, name: 'Estonian brigade', kind: 'maneuver', echelon: 'brigade', node: est.capital, equipment: { [id.platform('t_mbt')]: 30 }, personnel: 4_000 });
+    t.war('RUS', 'EST');
+    est.bulk.ammo = 0;
+    t.world.nations[USA].bulk.ammo = 160_000;
+    t.days(10);
+    const allied = t.world.slices.economy.allied;
+    expect(allied['USA>EST']).toBeGreaterThan(0);
+    expect(est.bulk.ammo).toBeGreaterThan(0);
+    // Ten days at most 10% a month of the US stock.
+    expect(allied['USA>EST']).toBeLessThanOrEqual(160_000 * 0.1 * (10 / 30.4) * 1.01);
+    expect(Object.keys(allied).some((k) => k.startsWith(`${CHN}>`) || k.startsWith(`${RUS}>`))).toBe(false);
+  });
+});
+
 describe('economy: grid strikes', () => {
   it('cuts the energy a nation gets when strikes wreck its grid, whatever fuel it holds, and restores it on repair', () => {
     const t = dailyWorld();
