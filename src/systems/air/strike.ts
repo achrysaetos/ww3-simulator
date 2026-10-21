@@ -227,6 +227,14 @@ export function resolveStrikes(world: World, ctx: SimContext, pic: AirPicture, s
  * anti-ship missiles were among the main killers of PLA lift; the delegation is judgment).
  */
 function engageLandings(world: World, ctx: SimContext, pic: AirPicture): void {
+  // Groups off a beach: their position lies on a land cell.
+  const landing: { g: Formation; at: NodeId }[] = [];
+  for (const g of Object.values(world.formations)) {
+    if (g.kind !== 'surface_group' || g.status !== 'active') continue;
+    const at = navalPosition(ctx.map, g);
+    if (!ctx.map.isSea(at) && world.control[at]) landing.push({ g, at });
+  }
+  if (!landing.length) return;
   for (const f of Object.values(world.formations)) {
     if (f.kind !== 'missile' || f.status !== 'active' || f.order.posture !== 'defend') continue;
     let reach = 0;
@@ -236,11 +244,8 @@ function engageLandings(world: World, ctx: SimContext, pic: AirPicture): void {
     }
     if (!reach) continue;
     let best: Formation | undefined, bestKm = reach;
-    for (const g of Object.values(world.formations)) {
-      if (g.kind !== 'surface_group' || g.status !== 'active' || !pic.atWar(g.nation, f.nation)) continue;
-      const at = navalPosition(ctx.map, g);
-      const shore = world.control[at];
-      if (ctx.map.isSea(at) || !shore || pic.atWar(shore, f.nation)) continue;
+    for (const { g, at } of landing) {
+      if (!pic.atWar(g.nation, f.nation) || pic.atWar(world.control[at], f.nation)) continue;
       const d = nodeDistance(ctx, f.node, at);
       if (d <= bestKm) { bestKm = d; best = g; }
     }
