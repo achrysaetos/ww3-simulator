@@ -136,7 +136,8 @@ const ENGAGED_KM = 400;
  * breakthrough meets a screen rather than rolling on through an empty rear, and so does an
  * empty border cell facing enemy troops mounting an assault. A quiet border is not screened:
  * holding every cell against every enemy across it would tie down an attacker's whole army,
- * Russia facing NATO from Kola to Belarus among them. Ground next to home soil already occupied
+ * Russia facing NATO from Kola to Belarus among them. It covers land borders only: a landing on
+ * an island the enemy has no soil on is fought by the ordinary front. Ground next to home soil already occupied
  * when the scenario began is the old front, where cells change hands in attrition; losing one
  * there is not a penetration. A counter-attack goes in only with the means to reach 3:1;
  * short of that the screen holds. Returns the formations so committed, which the rest of the
@@ -148,7 +149,11 @@ function defendHomeland(p: Plan, fit: (f: Formation) => boolean): Set<Formation>
   const committed = new Set<Formation>();
   const { origin } = landSlice(world);
   if (!origin.length) return committed;
-  const home = (n: number) => n < map.landCount && map.owner[n] === p.nation && origin[n] === p.nation;
+  // Only across a land border: an amphibious lodgement on an island is the naval war's and the ordinary front's business.
+  const mass = landMass(map);
+  const bordered = new Set<number>();
+  for (const e of p.enemies) for (const n of map.nodesOf(e)) bordered.add(mass[n]);
+  const home = (n: number) => n < map.landCount && map.owner[n] === p.nation && origin[n] === p.nation && bordered.has(mass[n]);
   // The nation's own soil already in enemy hands when the scenario began: the old front, where ground changes hands by inches.
   const oldFront = (n: number) => n < map.landCount && map.owner[n] === p.nation && origin[n] !== p.nation;
   const nextToOldFront = (n: number) => {
@@ -177,7 +182,6 @@ function defendHomeland(p: Plan, fit: (f: Formation) => boolean): Set<Formation>
     }
   }
   if (!lost.length && !screen.size) return committed;
-  const mass = landMass(map);
   const power = p.index.power;
   const own = (p.index.byNation.get(p.nation) ?? []).filter((f) => isGround(f) && f.kind === 'maneuver' && !map.isSea(f.node) && !needsRetreat(p, f));
   const cost = (f: Formation, n: number) => map.distanceKm(f.node, n as NodeId) + (p.enemies.has(world.control[f.node]) ? ENGAGED_KM : 0);
