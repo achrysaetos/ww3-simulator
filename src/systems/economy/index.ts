@@ -212,15 +212,18 @@ function seaCut(world: World, id: NationId): number {
   return (world.theater.tradeBlocked[id] ?? 0) * (SEABORNE_TRADE_SHARE[id] ?? DEFAULT_SEABORNE_TRADE_SHARE);
 }
 
-/** World energy price relative to normal: export capacity lost to blockade or damage, through a short-run elasticity. Sanctions only reroute oil, so they do not count. */
-function energyPrice(world: World, integrity: Map<NationId, number>): number {
+/** Share of world energy exports lost to blockade or damage. Sanctions only reroute oil, so they do not count. */
+function energyExportsLost(world: World, integrity: Map<NationId, number>): number {
   let lost = 0;
   for (const [supplier, share] of Object.entries(RESOURCE_SPECS.energy.market)) {
     if (!world.nations[supplier as NationId]) continue;
     lost += share * (1 - (1 - seaCut(world, supplier as NationId)) * (integrity.get(supplier as NationId) ?? 1));
   }
-  return Math.min(MAX_ENERGY_PRICE, Math.pow(Math.max(1e-3, 1 - lost), -1 / ENERGY_PRICE_ELASTICITY));
+  return lost;
 }
+
+/** World energy price relative to normal: lost export capacity through a short-run elasticity. */
+const energyPrice = (lost: number) => Math.min(MAX_ENERGY_PRICE, Math.pow(Math.max(1e-3, 1 - lost), -1 / ENERGY_PRICE_ELASTICITY));
 
 /** How much of a supplier's exports reach `buyer`, 0..1. */
 function supplierFlow(world: World, s: Scan, buyer: NationId, supplier: string): number {
@@ -230,9 +233,11 @@ function supplierFlow(world: World, s: Scan, buyer: NationId, supplier: string):
   return politics * (1 - seaCut(world, supplier as NationId)) * (s.integrity.get(supplier as NationId) ?? 1);
 }
 
+const selfShare = (n: Nation, r: Resource) => clamp01(RESOURCE_SPECS[r].selfSufficiency[n.id] ?? RESOURCE_SPECS[r].defaultSelf(n.stats));
+
 function rawAccess(world: World, s: Scan, n: Nation, r: Resource): number {
   const spec = RESOURCE_SPECS[r];
-  const self = clamp01(spec.selfSufficiency[n.id] ?? spec.defaultSelf(n.stats));
+  const self = selfShare(n, r);
   if (self >= 1) return 1;
   let num = 0, den = 0;
   for (const [supplier, share] of Object.entries(spec.market)) {
@@ -314,7 +319,7 @@ function stepNation(world: World, ctx: SimContext, s: Scan, n: Nation, e: Nation
   for (const r of RESOURCES) e.supply[r] = drawSupply(e, n.id, r, rawAccess(world, s, n, r), dtMonths);
   announceShortages(world, ctx, n.id, e);
 
-  const energyImported = 1 - clamp01(RESOURCE_SPECS.energy.selfSufficiency[n.id] ?? RESOURCE_SPECS.energy.defaultSelf(n.stats));
+  const energyImported = 1 - selfShare(n, 'energy');
   e.gdpIndex =
     e.integrity *
     (1 - ENERGY_GDP_ELASTICITY * (1 - e.supply.energy)) *
@@ -435,7 +440,7 @@ export const economy: System = {
   commands: ['set_mobilization', 'produce', 'sanction'],
 
   init(world, ctx) {
-    world.slices.economy = { nations: {}, lastReportTick: world.tick, aid: {}, energyPrice: 1 };
+    world.slices.economy = { nations: {}, lastReportTick: world.tick, aid: {}, energyPrice: 1, energyExportsLost: 0 };
     const integrity = industrialIntegrity(world, ctx.map);
     for (const n of Object.values(world.nations)) {
       const e = newNationEconomy(n);
@@ -462,8 +467,10 @@ export const economy: System = {
   step(world, ctx) {
     const dtMonths = world.dtHours / HOURS_PER_MONTH;
     const s = scan(world, ctx);
-    world.slices.economy.energyPrice = energyPrice(world, s.integrity);
-    for (const [id, e] of Object.entries(world.slices.economy.nations) as [NationId, NationEconomy][]) {
+    const state = world.slices.economy;
+    state.energyExportsLost = energyExportsLost(world, s.integrity);
+    state.energyPrice = energyPrice(state.energyExportsLost);
+    for (const [id, e] of Object.entries(state.nations) as [NationId, NationEconomy][]) {
       const n = world.nations[id];
       if (n && n.status !== 'collapsed') stepNation(world, ctx, s, n, e, dtMonths);
     }

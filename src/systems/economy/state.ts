@@ -69,6 +69,8 @@ export interface EconomyState {
   aid: Record<string, AidState>;
   /** World energy price relative to the start, from export capacity lost to blockade and war damage. */
   energyPrice: number;
+  /** Share of world energy exports lost to blockade and war damage this tick, 0..1; sets energyPrice. */
+  energyExportsLost: number;
 }
 
 declare module '../../core/types' {
