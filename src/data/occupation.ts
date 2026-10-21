@@ -20,10 +20,12 @@ export const OCCUPATIONS: Occupation[] = [
   {
     // Front line approximated through Kupiansk, Siversk, Kostiantynivka, Pokrovsk, Huliaipole, Orikhiv, then the Dnipro.
     // The southern edge runs out in the Sea of Azov so the coast from Mariupol through Berdiansk (held since
-    // February-March 2022) to the Kinburn spit falls inside; a centre such as 46.5,36.5 lies just offshore of Berdiansk.
+    // February-March 2022) falls inside; a centre such as 46.5,36.5 lies just offshore of Berdiansk. West of the
+    // Kakhovka reservoir it follows the left bank down to the Kinburn spit and back along the Crimean isthmus, so the
+    // whole left bank (Oleshky, Hola Prystan, Skadovsk, Chaplynka) is held, as it has been since November 2022.
     holder: 'RUS', owner: 'UKR', name: 'Occupied east and south',
     ring: [
-      [37.7, 50.4], [40.2, 49.6], [40.2, 47.1], [38.2, 46.5], [36.5, 46.0], [35.0, 45.9], [33.5, 46.4], [32.6, 46.5],
+      [37.7, 50.4], [40.2, 49.6], [40.2, 47.1], [38.2, 46.5], [36.5, 46.0], [35.0, 45.9], [33.5, 46.0], [32.0, 46.0], [31.7, 46.45], [32.6, 46.58],
       [33.0, 46.8], [34.3, 47.3], [35.6, 47.5], [36.4, 47.7], [37.1, 48.2], [37.8, 48.6], [38.0, 48.9], [37.7, 49.6],
     ],
     source: 'ISW / DeepState front-line maps, late 2025 (coarse)',

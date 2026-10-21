@@ -142,6 +142,14 @@ export const HOSTILE_GROUND_COST = defineParam({ id: 'land.HOSTILE_GROUND_COST',
   affects: 'advance speed' });
 /** Without fuel, vehicles cannot move; troops walk and tow what they can. */
 export const NO_FUEL_SPEED = 0.1;
+/**
+ * Share of its march pace a formation keeps while it breaks contact from a cell the enemy is assaulting: it pulls
+ * back by bounds behind a covering force, still under fire. FM 3-90 treats retrograde under pressure as the most
+ * dangerous operation; the Avdiivka (February 2024) and Debaltseve (February 2015) withdrawals cost heavily.
+ */
+export const BREAK_CONTACT_PACE = defineParam({ id: 'land.BREAK_CONTACT_PACE', value: 0.25, range: [0.1, 0.5], tag: 'judgment',
+  source: 'FM 3-90 retrograde; Avdiivka 2024',
+  affects: 'withdrawal under assault' });
 
 /** Per-day rates. */
 export const ENTRENCH_PER_DAY = defineParam({ id: 'land.ENTRENCH_PER_DAY', value: 0.2, range: [0.1, 0.35], tag: 'judgment',
@@ -180,11 +188,19 @@ export const POSITIONAL_INTENSITY = defineParam({ id: 'land.POSITIONAL_INTENSITY
   affects: 'positional attrition and shell use' });
 
 /**
- * Advance across a contested cell, averaged over the cell's ~100 km width.
- * Attritional assaults gain ATTRITION_KM_PER_DAY per unit of ln(defender loss
- * rate / attacker loss rate): Russian assaults in 2024-25 took ~3,500-5,000 km2
- * a year along a ~1,000 km front (ISW, DeepState), i.e. a few km of depth a
- * year averaged over the front, and 0.1-1 km/day on the active axes.
+ * The front law. Advance across a contested cell, averaged over the cell's width, is the fastest of three ways
+ * through (combat.ts advanceKm):
+ * - Attrition against a line that holds: ATTRITION_KM_PER_DAY per unit of ln(defender loss rate / attacker loss
+ *   rate), at most ATTRITION_MAX_KM_PER_DAY. Russian assaults in 2024-25 took ~3,500-5,000 km2 a year along a
+ *   ~1,000 km front (ISW, DeepState): 0.1-1 km/day on the active axes.
+ * - Manoeuvre through the gaps of a line too thin for its cell, from COVERED_KM_PER_DAY at parity to
+ *   BREAKTHROUGH_KM_PER_DAY at the deliberate-assault ratio: Pokrovsk axis autumn 2024 (1-4 km/day), Kharkiv
+ *   September 2022 (50-70 km in about 5 days against a thin, unfortified screen).
+ * - Penetration by mass beyond DELIBERATE_ASSAULT_RATIO, reaching breakthrough pace at MASSED_ASSAULT_RATIO, slowed
+ *   by a standing belt (BELT_DRAG), a city (URBAN_MANOEUVRE) and a river (RIVER_TEMPO): Kursk August 2024 (25-30 km
+ *   in 3-4 days through a fortified, thinly held border), the 1973 Bar Lev crossing (a fortified canal line broken
+ *   along its length in a day at ~5:1 or more, then 10-15 km deep), Desert Storm (VII Corps 250 km in 100 hours
+ *   against a dug-in, outclassed army), Vovchansk May 2024 (5-10 km in 3-4 days).
  */
 export const ATTRITION_KM_PER_DAY = defineParam({ id: 'land.ATTRITION_KM_PER_DAY', value: 0.15, range: [0.08, 0.3], tag: 'judgment',
   source: 'Front law, fitted to Ukraine only: Russia took 3,500-5,000 km2/yr on ~1,000 km of front in 2024-25 (ISW, DeepState)',
@@ -278,6 +294,59 @@ export const WITHDRAWAL_KM = defineParam({ id: 'land.WITHDRAWAL_KM', value: 3, r
 export const DELIBERATE_ASSAULT_RATIO = defineParam({ id: 'land.DELIBERATE_ASSAULT_RATIO', value: 3, range: [2, 4], tag: 'contested',
   source: 'The 3:1 rule (FM 3-90; Mearsheimer 1989) against its critics (Epstein 1989; Dupuy)',
   affects: 'assault intensity and breakthroughs' });
+/**
+ * Whole-force odds (every weapon counted, those waiting in depth too) at which an assault on a manned line breaks
+ * through at BREAKTHROUGH_KM_PER_DAY on the sector it masses on; from DELIBERATE_ASSAULT_RATIO up the pace rises in
+ * proportion. Soviet 1944-45 fronts massed several times the defender on narrow breakthrough sectors and broke a
+ * prepared tactical zone in one to three days (Glantz and House, When Titans Clashed, 1995); the Egyptian army
+ * crossed the canal and the Bar Lev line along its length on 6 October 1973 with a large local superiority.
+ * Estimate: at 6:1 a fortified plain cell is crossed in about a week, at 9:1 in about four days.
+ */
+export const MASSED_ASSAULT_RATIO = defineParam({ id: 'land.MASSED_ASSAULT_RATIO', value: 9, range: [6, 12], tag: 'estimated',
+  source: 'Glantz & House 1995; 1973 Bar Lev crossing; Kursk 2024',
+  affects: 'penetration of manned lines' });
+/**
+ * Share of a penetration's or an infiltration's pace that a standing belt of minefields, ditches and dragon's teeth
+ * takes away. Engineers breach lanes in hours where no garrison covers them (FM 3-90: an obstacle not covered by
+ * fire is not an obstacle), and Ukraine went through Russia's fortified, thinly held Kursk border at 8-10 km a day
+ * in August 2024 (ISW). Judgment.
+ */
+export const BELT_DRAG = defineParam({ id: 'land.BELT_DRAG', value: 0.6, range: [0.3, 0.8], tag: 'judgment',
+  source: 'FM 3-90; ISW Kursk Aug 2024',
+  affects: 'advance through fortified belts' });
+/**
+ * Share of a manoeuvre or penetration pace kept inside a city cell: every block is a strongpoint that must be
+ * cleared, and gaps do not open. Fallujah II (2004) took six weeks at about 6:1 for a city ~10 km across; Mariupol
+ * 86 days encircled; Bakhmut about ten months. Judgment for a cell that is part city, part countryside.
+ */
+export const URBAN_MANOEUVRE = defineParam({ id: 'land.URBAN_MANOEUVRE', value: 0.2, range: [0.1, 0.4], tag: 'judgment',
+  source: 'Fallujah 2004; Mariupol 2022; Bakhmut 2022-23',
+  affects: 'advance through cities' });
+/**
+ * A major river between an attacker and the cell it assaults, with no dry approach held: the defender's combat edge
+ * grows by RIVER_DEFENSE (registered fires on the crossing sites, an attacker that crosses a few vehicles at a time)
+ * and the attacker's advance runs at RIVER_TEMPO of its pace until it holds ground on the far bank. Ukraine's Krynky
+ * bridgehead (November 2023 to July 2024) never grew past a few km; a Russian battalion group lost ~70 vehicles at
+ * one Siverskyi Donets crossing at Bilohorivka in May 2022; FM 3-90.12 treats a contested wet-gap crossing as a
+ * deliberate operation of its own.
+ */
+export const RIVER_DEFENSE = defineParam({ id: 'land.RIVER_DEFENSE', value: 1.5, range: [1.2, 2], tag: 'judgment',
+  source: 'FM 3-90.12; Bilohorivka May 2022',
+  affects: 'defence of river lines' });
+export const RIVER_TEMPO = defineParam({ id: 'land.RIVER_TEMPO', value: 0.25, range: [0.1, 0.5], tag: 'judgment',
+  source: 'FM 3-90.12; Krynky 2023-24',
+  affects: 'advance across rivers' });
+/**
+ * Movement cost of a river edge: over intact bridges the crossing is a bottleneck (RIVER_BRIDGE_COST); with the
+ * bridges down, or into enemy-held ground where they are blown, the crossing waits on assault boats and pontoons
+ * (RIVER_ASSAULT_COST). A brigade's float-bridge crossing takes most of a day to set up and pass (FM 3-90.12).
+ */
+export const RIVER_BRIDGE_COST = defineParam({ id: 'land.RIVER_BRIDGE_COST', value: 1.3, range: [1.1, 1.5], tag: 'judgment',
+  source: 'FM 3-90.12 wet-gap crossing; judgment',
+  affects: 'march across bridged rivers' });
+export const RIVER_ASSAULT_COST = defineParam({ id: 'land.RIVER_ASSAULT_COST', value: 3, range: [2, 5], tag: 'judgment',
+  source: 'FM 3-90.12 wet-gap crossing; judgment',
+  affects: 'march across unbridged rivers' });
 /**
  * Exposed platforms that can bring direct fire to bear along one cell's
  * ~100 km front: a mechanised brigade (~300 platforms) holds or attacks on

@@ -4,15 +4,16 @@ import { atWar, type SimContext, type System } from '../../core/engine';
 import { platformCount, supplyCapacityOf } from '../../core/forces';
 import type { Formation, FormationId, NationId, NodeId, PlatformId, TargetClass, Terrain, World } from '../../core/types';
 import { TARGET_CLASSES } from '../../core/types';
-import { marchKmPerDay } from './movement';
+import { marchBurnPerHour, marchKmPerDay } from './movement';
 import { allied, cellDepthKm, destroyFormation, hostilesAt, indexByNode, landSlice } from './state';
 import { updateEncirclement } from './encirclement';
 import { c2FireFactor } from '../c2';
+import { groundFactorAt } from '../weather/effects';
 import {
   AIR_SUPPRESSION, AMMO_DAYS_INTENSE, ATTRITION_KM_PER_DAY, ATTRITION_MAX_KM_PER_DAY, BREAKTHROUGH_KM_PER_DAY, COVERED_KM_PER_DAY, HOSTILE_GROUND_COST,
-  ASSAULT_EXPOSURE, DELIBERATE_ASSAULT_RATIO, FRONTAGE_PLATFORMS, WITHDRAWAL_KM, POSITIONAL_INTENSITY, AMMO_RATION_BELOW, AREA_FIRE_REF_DENSITY, CAS_BONUS, DIRECT_DENSITY_EXP, COMBAT_FUEL_DUTY, COMBINED_ARMS,
-  CELL_FRONT_KM, ENGAGED_HOURS_PER_DAY, HASTY_BARRIER, ENTRENCH_MAX_BONUS, KILL_ZONE_COMMIT, NEXT_LINE_ENTRENCHMENT, EXPERIENCE_PER_COMBAT_DAY, FATIGUE_COMBAT_PER_DAY, INDIRECT_FIRE, RETREAT_LOSS,
-  RETREAT_MORALE, ROUT_ABANDON, ROUT_MORALE, SHELL_TONS, SHELLS_PER_TUBE_DAY, TERRAIN, TUBE_ARTILLERY, exposureOf, targetClassOf,
+  ASSAULT_EXPOSURE, BELT_DRAG, DELIBERATE_ASSAULT_RATIO, FRONTAGE_PLATFORMS, WITHDRAWAL_KM, POSITIONAL_INTENSITY, AMMO_RATION_BELOW, AREA_FIRE_REF_DENSITY, CAS_BONUS, DIRECT_DENSITY_EXP, COMBAT_FUEL_DUTY, COMBINED_ARMS,
+  CELL_FRONT_KM, ENGAGED_HOURS_PER_DAY, HASTY_BARRIER, ENTRENCH_MAX_BONUS, KILL_ZONE_COMMIT, MASSED_ASSAULT_RATIO, NEXT_LINE_ENTRENCHMENT, NO_FUEL_SPEED, EXPERIENCE_PER_COMBAT_DAY, FATIGUE_COMBAT_PER_DAY, INDIRECT_FIRE, RETREAT_LOSS,
+  RETREAT_MORALE, RIVER_DEFENSE, RIVER_TEMPO, ROUT_ABANDON, ROUT_MORALE, SHELL_TONS, SHELLS_PER_TUBE_DAY, TERRAIN, TUBE_ARTILLERY, URBAN_MANOEUVRE, exposureOf, targetClassOf,
 } from './tables';
 
 /** Relative weight of each target class in an opposing force; need not be normalised. */
@@ -42,11 +43,25 @@ export function ammoFactor(f: Formation): number {
 /** Share of fire a unit keeps with no fuel: guns still fire, but nothing manoeuvres to new positions. */
 const DRY_FIRE = 0.7;
 
+/** Share of a day's combat fuel burn the formation has on hand, 0..1. */
+function fuelOnHand(f: Formation): number {
+  const need = marchBurnPerHour(f) * 24 * COMBAT_FUEL_DUTY;
+  return need <= 0 ? 1 : Math.min(1, Math.max(0, f.supply.fuel) / need);
+}
+
 /** Fire kept for want of fuel, falling from 1 with a day's combat burn on hand to DRY_FIRE with none. */
 export function fuelFactor(f: Formation): number {
-  const need = (f.supplyCapacity.fuel / 72) * 24 * COMBAT_FUEL_DUTY;
-  if (need <= 0) return 1;
-  return DRY_FIRE + (1 - DRY_FIRE) * Math.min(1, Math.max(0, f.supply.fuel) / need);
+  return DRY_FIRE + (1 - DRY_FIRE) * fuelOnHand(f);
+}
+
+/**
+ * Share of its pace a pressing formation keeps: vehicles go as far as the fuel on hand carries them and past
+ * that the troops walk, but a cut-off force with dry tanks stops. Kampfgruppe Peiper halted and abandoned its
+ * vehicles for want of fuel in the Ardennes, 1944; the Kyiv convoy stalled on fuel in March 2022.
+ */
+function mobility(world: World, f: Formation): number {
+  const fuelled = fuelOnHand(f);
+  return fuelled + (1 - fuelled) * (f.id in landSlice(world).isolatedDays ? 0 : NO_FUEL_SPEED);
 }
 
 function fireModifier(f: Formation): number {
@@ -82,6 +97,8 @@ interface SideState {
   indirect: ClassVector;
   closePenalty: boolean;
   air: number;
+  /** Share of the side's direct-fire weapons that fit the cell's front; the rest wait in depth. */
+  inLine: number;
 }
 
 function summarize(world: World, catalog: Catalog, side: Side, node: NodeId, closed: boolean): SideState {
@@ -108,7 +125,7 @@ function summarize(world: World, catalog: Catalog, side: Side, node: NodeId, clo
   const ac = world.theater.airControl[node];
   const air = !ac ? 1 : allied(world, side.nation, ac.nation) ? 1 + CAS_BONUS() * ac.level : atWar(world, side.nation, ac.nation) ? 1 - AIR_SUPPRESSION() * ac.level : 1;
   const closePenalty = closed && total > 0 && count.armor / total > COMBINED_ARMS.armorShare && count.infantry / total < COMBINED_ARMS.infantryShare;
-  return { count, total, direct, indirect, closePenalty, air };
+  return { count, total, direct, indirect, closePenalty, air, inLine };
 }
 
 /**
@@ -132,11 +149,14 @@ function expectedKills(s: SideState, t: SideState, hours: number, fireMult: numb
   return out;
 }
 
-/** Fire `s` can put on `t`'s mix over the fire `t` can put on `s`'s: the raw local force ratio. */
-function fireRatio(s: SideState, t: SideState): number {
+/**
+ * Fire `s` can put on `t`'s mix over the fire `t` can put on `s`'s: the raw local force ratio. With `whole`,
+ * every weapon counts, including those waiting in depth: the whole-force ratio planners mass to (3:1, 9:1).
+ */
+function fireRatio(s: SideState, t: SideState, whole = false): number {
   const on = (x: SideState, y: SideState) => {
     let v = 0;
-    for (const c of TARGET_CLASSES) if (y.count[c]) v += (x.direct[c] + x.indirect[c]) * (y.count[c] / y.total);
+    for (const c of TARGET_CLASSES) if (y.count[c]) v += (x.direct[c] / (whole ? x.inLine : 1) + x.indirect[c]) * (y.count[c] / y.total);
     return v;
   };
   return on(s, t) / Math.max(1e-9, on(t, s));
@@ -252,10 +272,11 @@ function defensiveEdge(world: World, map: GameMap, fighters: Formation[], node: 
 
 /**
  * An assault: the attacker fights into the defender's ground, at full
- * intensity while pressing. Positional: two lines in contact, each dug in on
- * its own ground, trading fire at reduced intensity.
+ * intensity while pressing, from a bridgehead when it holds no dry approach
+ * (`river`). Positional: two lines in contact, each dug in on its own ground,
+ * trading fire at reduced intensity.
  */
-type Engagement = { kind: 'assault' } | { kind: 'positional'; attNode: NodeId };
+type Engagement = { kind: 'assault'; river: boolean } | { kind: 'positional'; attNode: NodeId };
 
 interface BattleResult {
   /** The defender's expected loss rate over the attacker's; > 1 means the attacker is winning. */
@@ -264,6 +285,10 @@ interface BattleResult {
   yielded: boolean;
   /** The attacker's fire over the defender's, the force ratio the assault was fought at. */
   ratio: number;
+  /** The same with every weapon of both sides counted, those waiting in depth too. */
+  mass: number;
+  /** Share of the attacking force inside the defender's kill zone at once, 0..1. */
+  committed: number;
   /** Share of the cell's front the defender has the platforms to hold, 0..1. */
   manned: number;
 }
@@ -272,7 +297,8 @@ function resolveBattle(world: World, ctx: SimContext, node: NodeId, att: Side, d
   const { map, catalog, rng } = ctx;
   const slice = landSlice(world);
   const terrain = TERRAIN[map.terrain[node]];
-  const defEdge = defensiveEdge(world, map, def.fighters, node);
+  // A defender behind a river fires on crossing sites it has registered, and the attacker crosses a few vehicles at a time.
+  const defEdge = defensiveEdge(world, map, def.fighters, node) * (how.kind === 'assault' && how.river ? RIVER_DEFENSE() : 1);
   const attEdge = how.kind === 'positional' ? defensiveEdge(world, map, att.fighters, how.attNode) : 1;
   const a = summarize(world, catalog, att, node, terrain.closed);
   const d = summarize(world, catalog, def, node, terrain.closed);
@@ -354,7 +380,7 @@ function resolveBattle(world: World, ctx: SimContext, node: NodeId, att: Side, d
     casualties: { [att.nation]: ledgers.att.casualties, [def.nation]: ledgers.def.casualties } as Record<NationId, number>,
     ...(winner ? { winner } : {}),
   });
-  return { exchange, yielded, ratio: fireRatio(a, d), manned: Math.min(1, d.total / (FRONTAGE_PLATFORMS() * (cellDepthKm(map, node) / CELL_FRONT_KM))) };
+  return { exchange, yielded, ratio: fireRatio(a, d), mass: fireRatio(a, d, true), committed, manned: Math.min(1, d.total / (FRONTAGE_PLATFORMS() * (cellDepthKm(map, node) / CELL_FRONT_KM))) };
 }
 
 /** Artillery formations in nodes adjacent to the battle, friendly to `nation`, not on the march, not yet firing elsewhere this tick. */
@@ -385,16 +411,20 @@ export function seize(world: World, ctx: SimContext, nation: NationId, node: Nod
 
 /**
  * Cells on either side of a standing line of occupation (territory held by a
- * nation other than its owner, bordering ground its owner still holds) start
- * fully fortified: the 2023-25 Ukrainian and Russian defensive belts, the
- * Abkhazia and South Ossetia lines. So does the rest of the border between the
+ * nation other than its owner, bordering ground its owner still holds), and the
+ * cells behind them, start fully fortified: the 2023-25 Ukrainian and Russian
+ * defensive belts, the Abkhazia and South Ossetia lines. So does the rest of the border between the
  * occupier and the occupied, which years of war have fortified too: Ukraine's
  * 2024-25 belts along the Sumy, Kharkiv and Chernihiv borders, Russia's in
  * Belgorod and Kursk. So does the Korean DMZ, held under arms since the 1953 armistice: the
  * ROK's forward barrier belts, anti-tank walls and minefields south of it, and the North's
- * fortified zone north of it.
+ * fortified zone north of it. So does the India-Pakistan border and Line of Control: India's
+ * 2003-04 LoC fence and bunker lines, Pakistan's ditch-cum-bund belts and canal defences in Punjab.
  */
-const STANDING_BORDERS: readonly (readonly [NationId, NationId])[] = [['KOR' as NationId, 'PRK' as NationId]];
+const STANDING_BORDERS: readonly (readonly [NationId, NationId])[] = [
+  ['KOR' as NationId, 'PRK' as NationId],
+  ['IND' as NationId, 'PAK' as NationId],
+];
 
 function fortifyStandingLines(world: World, map: GameMap): void {
   const { fortified } = landSlice(world);
@@ -413,6 +443,23 @@ function fortifyStandingLines(world: World, map: GameMap): void {
       fortified[m] = 1;
     }
   }
+  // Behind each line stand more belts, one cell deep here: Ukraine's 2024-25 rear lines from Pokrovsk through
+  // Kostiantynivka to Sloviansk and around Zaporizhzhia, Russia's three-belt Surovikin line, the ROK's barrier lines
+  // north of Seoul (ISW; CSIS; ROK MND).
+  for (const n of Object.keys(fortified).map(Number))
+    for (const m of map.neighbors(n as NodeId)) if (m < map.landCount && world.control[m] === world.control[n]) fortified[m] = 1;
+}
+
+/** Whether `nation`'s side reaches `node` only across a major river: it holds land next to the cell, and none of it joins the cell dry. */
+function acrossRiver(world: World, map: GameMap, node: NodeId, nation: NationId): boolean {
+  let near = false;
+  for (let k = map.adjStart[node]; k < map.adjStart[node + 1]; k++) {
+    const m = map.adj[k], holder = world.control[m];
+    if (m >= map.landCount || !holder || !allied(world, nation, holder)) continue;
+    if (!map.adjRiver[k]) return false;
+    near = true;
+  }
+  return near;
 }
 
 /** Hostile manoeuvre units in cells next to `node`, whose fire covers it. */
@@ -423,32 +470,54 @@ function coveringFire(world: World, map: GameMap, byNode: Map<number, Formation[
   return out;
 }
 
-/** Km/day the attacker gains across a contested cell, given who is still holding it and how the last battle there went. */
-function advanceRate(world: World, ctx: SimContext, node: NodeId, attackers: Formation[], defenders: Formation[], cover: Formation[], battle: BattleResult): number {
-  const moveCost = TERRAIN[ctx.map.terrain[node]].moveCost;
-  const movers = attackers.filter(isPressing);
+/** Km/day a force presses through a defence at local odds `ratio`: infiltration at parity, the pace of a breakthrough from the deliberate-assault ratio up. */
+function manoeuvreKmPerDay(ratio: number): number {
+  const odds = Math.min(1, Math.max(0, (ratio - 1) / (DELIBERATE_ASSAULT_RATIO() - 1)));
+  return COVERED_KM_PER_DAY() + (BREAKTHROUGH_KM_PER_DAY() - COVERED_KM_PER_DAY()) * odds;
+}
+
+/**
+ * Km the attacker gains across a contested cell this tick, given who is still holding it, how the last battle
+ * there went, and whether the attacker fights from a river bridgehead.
+ */
+function advanceKm(world: World, ctx: SimContext, node: NodeId, attackers: Formation[], defenders: Formation[], cover: Formation[], battle: BattleResult, river: boolean): number {
+  const { moveCost } = TERRAIN[ctx.map.terrain[node]];
+  const movers = attackers.filter((f) => isPressing(f) && mobility(world, f) > 0);
   if (!movers.length) return 0;
-  if (!defenders.length && !cover.length) {
-    // Unopposed: a road march through hostile ground (reconnaissance, obstacles, demolitions).
-    return Math.max(...movers.map((f) => marchKmPerDay(world, ctx.catalog, f))) / (HOSTILE_GROUND_COST() * moveCost);
-  }
+  const dtDays = world.dtHours / 24;
+  // Mud and deep snow slow an advance as they slow a march: the 2023 and 2024 spring offensives waited on dry ground.
+  const ground = groundFactorAt(world, ctx.map, node);
+  // Unopposed: a road march through hostile ground (reconnaissance, obstacles, demolitions).
+  const unopposed = (ground * Math.max(...movers.map((f) => marchKmPerDay(world, ctx.catalog, f)))) / (HOSTILE_GROUND_COST() * moveCost);
+  if (!defenders.length && !cover.length) return unopposed * dtDays;
+  const pace = ground * Math.max(...movers.map((f) => mobility(world, f))) * (river ? RIVER_TEMPO() : 1);
+  const fort = landSlice(world).fortified[node] ?? 0;
   if (!defenders.length) {
-    // An empty cell the line next door still covers: infiltration, unless that line is too thin to stop a deliberate assault.
-    // A standing belt of obstacles closes the gaps infiltrators use, and a deliberate assault breaches it no faster than an attritional one.
+    // An empty cell the line next door covers with fire: infiltrated at parity, broken through by a force that outweighs that line.
+    // A belt of obstacles no garrison covers only delays (FM 3-90: an obstacle not covered by fire is not an obstacle).
     const { closed } = TERRAIN[ctx.map.terrain[node]];
-    const ratio = fireRatio(summarize(world, ctx.catalog, { nation: movers[0].nation, fighters: movers, support: [] }, node, closed), summarize(world, ctx.catalog, { nation: cover[0].nation, fighters: cover, support: [] }, node, closed));
-    const fort = landSlice(world).fortified[node] ?? 0;
-    if (ratio >= DELIBERATE_ASSAULT_RATIO()) return ((1 - fort) * BREAKTHROUGH_KM_PER_DAY() + fort * ATTRITION_MAX_KM_PER_DAY()) / moveCost;
-    return ((1 - fort) * COVERED_KM_PER_DAY()) / moveCost;
+    const side = (fs: Formation[]) => summarize(world, ctx.catalog, { nation: fs[0].nation, fighters: fs, support: [] }, node, closed);
+    const ratio = fireRatio(side(movers), side(cover), true);
+    // Cover too weak to matter is no cover: from the deliberate-assault ratio to the massed one the pace climbs to the road march.
+    const exploit = Math.min(1, Math.max(0, (ratio - DELIBERATE_ASSAULT_RATIO()) / (MASSED_ASSAULT_RATIO() - DELIBERATE_ASSAULT_RATIO())));
+    const covered = (pace * manoeuvreKmPerDay(ratio)) / moveCost;
+    return Math.max(covered, (1 - exploit) * covered + exploit * pace * unopposed) * (1 - BELT_DRAG() * fort) * dtDays;
   }
-  if (defenders.every((f) => f.status === 'routed')) return BREAKTHROUGH_KM_PER_DAY() / moveCost;
+  if (defenders.every((f) => f.status === 'routed')) return ((pace * BREAKTHROUGH_KM_PER_DAY()) / moveCost) * dtDays;
   const attrition = Math.min(ATTRITION_MAX_KM_PER_DAY(), ATTRITION_KM_PER_DAY() * Math.max(0, Math.log(battle.exchange)));
   // A line too thin for its cell is bypassed through its gaps at the pace the odds allow, unless a standing belt of obstacles closes them; a unit's own dug positions and hasty obstacles close part.
   const dug = defenders.reduce((t, f) => t + f.entrenchment, 0) / defenders.length;
-  const gaps = (1 - battle.manned) * (1 - Math.max(landSlice(world).fortified[node] ?? 0, HASTY_BARRIER() * dug));
-  const odds = Math.min(1, Math.max(0, (battle.ratio - 1) / (DELIBERATE_ASSAULT_RATIO() - 1)));
-  const manoeuvre = battle.ratio > 1 ? (COVERED_KM_PER_DAY() + (BREAKTHROUGH_KM_PER_DAY() - COVERED_KM_PER_DAY()) * odds) / moveCost : 0;
-  return Math.max(attrition, gaps * manoeuvre);
+  const gaps = (1 - battle.manned) * (1 - Math.max(fort, HASTY_BARRIER() * dug));
+  const manoeuvre = battle.ratio > 1 ? manoeuvreKmPerDay(battle.ratio) : 0;
+  // Mass beyond the deliberate-assault ratio breaks even a manned line on a narrow sector and rolls it up from there. A belt slows
+  // that, a city absorbs it block by block, and a dug-in line's kill zone lets only part of the mass through at once: in 2024-25 the
+  // drone-watched front held Russia's best-massed drives to 1-4 km a day (ISW), where air superiority let 1991's armour through.
+  const breach = Math.min(1, Math.max(0, (battle.mass - DELIBERATE_ASSAULT_RATIO()) / (MASSED_ASSAULT_RATIO() - DELIBERATE_ASSAULT_RATIO())));
+  const open = (battle.committed - KILL_ZONE_COMMIT()) / (1 - KILL_ZONE_COMMIT());
+  const penetration = breach * (COVERED_KM_PER_DAY() + (BREAKTHROUGH_KM_PER_DAY() - COVERED_KM_PER_DAY()) * open) * (1 - BELT_DRAG() * fort);
+  const urban = ctx.map.terrain[node] === 'urban' ? URBAN_MANOEUVRE() : 1;
+  const rate = Math.max(attrition, (urban * Math.max(gaps * manoeuvre, penetration)) / moveCost);
+  return pace * (rate * dtDays + (battle.yielded ? WITHDRAWAL_KM() : 0));
 }
 
 /**
@@ -463,7 +532,8 @@ function contestCell(world: World, ctx: SimContext, node: NodeId, invaders: Form
   if (!contest || !allied(world, lead, contest.by)) contest = slice.contest[node] = { by: lead, km: 0 };
 
   const defenders = hostilesAt(world, byNode, node, lead);
-  let battle: BattleResult = { exchange: 1, yielded: false, ratio: 1, manned: 1 };
+  let battle: BattleResult = { exchange: 1, yielded: false, ratio: 1, mass: 1, committed: 1, manned: 1 };
+  const river = acrossRiver(world, ctx.map, node, lead);
   if (defenders.length) {
     for (const f of [...attackers, ...defenders]) {
       firing.add(f.id);
@@ -472,12 +542,12 @@ function contestCell(world: World, ctx: SimContext, node: NodeId, invaders: Form
     const defNation = defenders[0].nation;
     const att: Side = { nation: lead, fighters: attackers, support: artillerySupport(world, ctx, node, lead, byNode, firing) };
     const def: Side = { nation: defNation, fighters: defenders, support: artillerySupport(world, ctx, node, defNation, byNode, firing) };
-    battle = resolveBattle(world, ctx, node, att, def, byNode, engaged, attackers.some(isPressing) ? { kind: 'assault' } : { kind: 'positional', attNode: node });
+    battle = resolveBattle(world, ctx, node, att, def, byNode, engaged, attackers.some(isPressing) ? { kind: 'assault', river } : { kind: 'positional', attNode: node });
   }
   const holdingOn = defenders.filter((f) => f.status !== 'destroyed' && f.node === node);
   const stillIn = attackers.filter((f) => f.status !== 'destroyed' && f.node === node);
   const cover = holdingOn.length ? [] : coveringFire(world, ctx.map, byNode, node, lead);
-  contest.km += (advanceRate(world, ctx, node, stillIn, holdingOn, cover, battle) * world.dtHours) / 24 + (battle.yielded ? WITHDRAWAL_KM() : 0);
+  contest.km += advanceKm(world, ctx, node, stillIn, holdingOn, cover, battle, river);
   if (contest.km < cellDepthKm(ctx.map, node)) return;
 
   delete slice.contest[node];
@@ -526,7 +596,10 @@ export const landCombat: System = {
     const engaged = new Set<FormationId>();
     const firing = new Set<FormationId>();
 
-    for (const node of [...byNode.keys()]) {
+    // The main effort is fought first, so the guns next to it fire for it rather than for whichever fight comes up first.
+    const pressing = (node: number) => (byNode.get(node) ?? []).reduce((t, f) => t + (isPressing(f) && atWar(world, f.nation, world.control[node]) ? platformCount(f) : 0), 0);
+    const effort = [...byNode.keys()].map((node) => [node, pressing(node)]).sort((a, b) => b[1] - a[1] || a[0] - b[0]);
+    for (const [node] of effort) {
       const holder = world.control[node];
       const invaders = holder ? (byNode.get(node) ?? []).filter((f) => atWar(world, f.nation, holder)) : [];
       if (invaders.length) contestCell(world, ctx, node as NodeId, invaders, byNode, firing, engaged);

@@ -56,16 +56,20 @@ describe('coastal defence against a landing', () => {
     const s = createSession('taiwan-2027', 1);
     const battery = Object.values(s.world.formations).find((f) => f.name.startsWith('Coastal Defense Command'))!;
     const rounds = () => Object.values(battery.magazine).reduce((a, n) => a + n, 0);
-    const start = rounds();
-    let atLift = 0;
+    let atLift = 0, onLift = 0;
     for (let i = 0; i < (14 * 24) / s.world.dtHours; i++) {
+      const before = rounds();
       s.engine.step(s.world);
       const t = battery.order.targetFormation ? s.world.formations[battery.order.targetFormation] : undefined;
-      if (battery.order.posture === 'strike' && t?.nation === 'CHN' && t.kind === 'surface_group') atLift++;
+      if (battery.order.posture === 'strike' && t?.nation === 'CHN' && t.kind === 'surface_group') {
+        atLift++;
+        onLift += before - rounds();
+      }
     }
     expect(atLift).toBeGreaterThan(0);
     // The 120 HF-3s reach the lift where it stages, 300-400 km out; HF-2s (160 km) only once it closes the beach.
-    expect(start - rounds()).toBeGreaterThanOrEqual(100);
+    // Counted at the lift alone, so rounds spent later on shore targets do not stand in for them.
+    expect(onLift).toBeGreaterThanOrEqual(80);
   }, 120_000);
 });
 

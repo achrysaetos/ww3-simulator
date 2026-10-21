@@ -4,13 +4,13 @@ import type { GameMap } from '../../core/map';
 import { findPath } from '../../core/path';
 import type { Formation, NationId, NodeId, Order, PlatformId, World } from '../../core/types';
 import type { OrderCommand, OrderOutcome } from '../orders';
-import { allied, canEnter, indexByNode, isLandFormation, landSlice } from './state';
+import { allied, canEnter, hostilesAt, indexByNode, isLandFormation, landSlice } from './state';
 import { cannotDrop, insert, supplyAirheads } from './airborne';
 import { airlift, embarkation, liftMode, overseas } from './strategic';
 import { exposureLosses, groundFactorAt } from '../weather/effects';
 import {
-  AIR_INTERDICTION, DISMOUNTS, ENTRENCH_PER_DAY, FATIGUE_MARCH_PER_DAY, FATIGUE_RECOVERY_PER_DAY, HOSTILE_GROUND_COST,
-  MARCH_HOURS_PER_DAY, MARCH_SPEED_FACTOR, MORALE_RECOVERY_PER_DAY, NO_FUEL_SPEED, RAIL_BOOST_MAX, RAIL_KM_FULL, RALLY_MORALE, TERRAIN,
+  AIR_INTERDICTION, BREAK_CONTACT_PACE, DISMOUNTS, ENTRENCH_PER_DAY, FATIGUE_MARCH_PER_DAY, FATIGUE_RECOVERY_PER_DAY, HOSTILE_GROUND_COST,
+  MARCH_HOURS_PER_DAY, MARCH_SPEED_FACTOR, MORALE_RECOVERY_PER_DAY, NO_FUEL_SPEED, RAIL_BOOST_MAX, RAIL_KM_FULL, RALLY_MORALE, RIVER_ASSAULT_COST, RIVER_BRIDGE_COST, TERRAIN,
 } from './tables';
 
 
@@ -42,13 +42,22 @@ function railBoost(world: World, map: GameMap, nation: NationId, node: NodeId): 
   return 1 + RAIL_BOOST_MAX * Math.min(1, map.railKm[node] / RAIL_KM_FULL) * world.theater.infrastructure[node];
 }
 
-/** Effective km of entering `to`: terrain friction, hostile ground, minus rail boost, and today's mud or snow there. Infinity when closed to this nation. */
-function edgeKm(world: World, map: GameMap, f: Formation, to: NodeId, km: number, seize = canSeize(f)): number {
+/** Cost multiplier of crossing a major river into `to`: its bridges are a bottleneck while they stand, and the enemy blows them. */
+function riverCost(world: World, map: GameMap, from: NodeId, to: NodeId, hostile: boolean): number {
+  if (!map.riverBetween(from, to)) return 1;
+  const bridges = hostile ? 0 : world.theater.infrastructure[to];
+  return RIVER_BRIDGE_COST() + (RIVER_ASSAULT_COST() - RIVER_BRIDGE_COST()) * (1 - bridges);
+}
+
+/** Effective km of entering `to` from `from`: terrain friction, hostile ground, rivers, minus rail boost, and today's mud or snow there. Infinity when closed to this nation. */
+function edgeKm(world: World, map: GameMap, f: Formation, from: NodeId, to: NodeId, km: number, seize = canSeize(f)): number {
   if (!canEnter(world, map, f.nation, to)) return Infinity;
   const holder = world.control[to];
   const hostile = !!holder && atWar(world, f.nation, holder);
   if (hostile && !seize) return Infinity;
-  return (km * TERRAIN[map.terrain[to]].moveCost * (hostile ? HOSTILE_GROUND_COST() : 1)) / railBoost(world, map, f.nation, to) / groundFactorAt(world, map, to);
+  // Into enemy ground the march only carries the column to the cell's edge, half the way between centres; landCombat's contest then measures the push across the cell.
+  const reach = hostile ? 0.5 * HOSTILE_GROUND_COST() : 1;
+  return (km * TERRAIN[map.terrain[to]].moveCost * reach * riverCost(world, map, from, to, hostile)) / railBoost(world, map, f.nation, to) / groundFactorAt(world, map, to);
 }
 
 /**
@@ -83,7 +92,7 @@ export function applyLandOrder(world: World, cmd: OrderCommand, ctx: SimContext)
   const seize = posture === 'attack' && f.kind === 'maneuver';
   const path = route(world, ctx.map, f, goal, seize);
   if (!path) return { ok: false, code: 'no_route', reason: `no land route to node ${target}` };
-  const km = path.reduce((sum, n, i) => sum + edgeKm(world, ctx.map, f, n, ctx.map.distanceKm(i ? path[i - 1] : f.node, n), seize), 0);
+  const km = path.reduce((sum, n, i) => sum + edgeKm(world, ctx.map, f, i ? path[i - 1] : f.node, n, ctx.map.distanceKm(i ? path[i - 1] : f.node, n), seize), 0);
   const kmPerDay = marchKmPerDay(world, ctx.catalog, f);
   return commit(f, { ...order, path }, kmPerDay > 0 ? (km / kmPerDay) * 24 : undefined);
 }
@@ -97,7 +106,7 @@ function commit(f: Formation, order: Order, etaHours?: number): OrderOutcome {
 /** Cheapest land route for this formation. The heuristic is straight-line km, so edge costs are scaled until the cheapest (full rail) edge never undercuts it. */
 function route(world: World, map: GameMap, f: Formation, to: NodeId, seize: boolean): NodeId[] | null {
   const scale = 1 + RAIL_BOOST_MAX;
-  return findPath(map, f.node, to, (_a, b, km) => edgeKm(world, map, f, b, km, seize) * scale);
+  return findPath(map, f.node, to, (a, b, km) => edgeKm(world, map, f, a, b, km, seize) * scale);
 }
 
 function rest(f: Formation, dtDays: number, isolated: boolean, engaged: boolean): void {
@@ -140,14 +149,15 @@ function march(world: World, ctx: SimContext, f: Formation, byNode: Map<number, 
   if (here && atWar(world, f.nation, here) && !friendlyGround(world, f.nation, path[0])) return;
 
   const hours = MARCH_HOURS_PER_DAY * dtDays;
-  f.progressKm += kmPerDay * dtDays;
+  const pressed = hostilesAt(world, byNode, f.node, f.nation).some((g) => g.kind === 'maneuver' && g.status === 'active' && g.order.posture === 'attack');
+  f.progressKm += kmPerDay * dtDays * (pressed ? BREAK_CONTACT_PACE() : 1);
   f.supply.fuel = Math.max(0, f.supply.fuel - marchBurnPerHour(f) * hours);
   f.fatigue = Math.min(1, f.fatigue + FATIGUE_MARCH_PER_DAY * dtDays);
   f.entrenchment = 0;
 
   while (path.length) {
     const next = path[0];
-    const cost = edgeKm(world, map, f, next, map.distanceKm(f.node, next));
+    const cost = edgeKm(world, map, f, f.node, next, map.distanceKm(f.node, next));
     if (!Number.isFinite(cost)) {
       f.order = { posture: 'defend', issuedTick: world.tick };
       f.progressKm = 0;
