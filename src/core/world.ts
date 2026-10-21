@@ -38,10 +38,10 @@ export function createWorld(map: GameMap, opts: WorldOptions = {}): World {
     nations[id] = {
       id,
       name: raw.name,
-      stats,
+      stats: { ...stats },
       capital: capitals.get(id) as NodeId,
       government: profile.government ?? 'hybrid',
-      blocs: profile.blocs ?? [],
+      blocs: [...(profile.blocs ?? [])],
       population,
       mobilization: 0,
       warSupport: 0.6,
@@ -51,7 +51,8 @@ export function createWorld(map: GameMap, opts: WorldOptions = {}): World {
       stockpile: {},
       bulk: { fuel: 0, ammo: 0, food: 0 },
       treasuryUsdB: 0,
-      nuclear: profile.nuclear ?? { warheads: 0, deployed: 0, doctrine: 'none' },
+      // Copied: profiles are module-level data shared by every world built in this process.
+      nuclear: { ...(profile.nuclear ?? { warheads: 0, deployed: 0, doctrine: 'none' }) },
       controlledBy: 'ai',
       status: 'peace',
     };
