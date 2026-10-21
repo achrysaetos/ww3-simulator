@@ -579,30 +579,50 @@ async function main() {
     }
     return out;
   });
+  const nearestZone = (lat: number, lon: number, withinDeg = Infinity) => {
+    let best = -1, bestD = withinDeg ** 2;
+    seaZones.forEach((z, j) => {
+      const d = (z.lat - lat) ** 2 + ((((z.lon - lon + 540) % 360) - 180) * Math.cos((lat * Math.PI) / 180)) ** 2;
+      if (d < bestD) [best, bestD] = [j, d];
+    });
+    return best;
+  };
   // A coastal cell links to the sea zone of an open-water square next to it at its own size, else to the zone
-  // over water inside its own square (Copenhagen on the Oresund). A cell with no land neighbour is an island
-  // and always gets its nearest zone, so every cell can be reached.
+  // over water inside its own square (Copenhagen on the Oresund). Water in a bay too narrow for a zone of its
+  // own (Tallinn Bay, the Gulf of Finland) opens onto the nearest zone. A cell with no land neighbour is an
+  // island and always gets its nearest zone, so every cell can be reached.
   const coastZone = cellList.map(({ lat, lon, half }, n) => {
+    const water: [number, number][] = [];
     for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
       if (!dy && !dx) continue;
       const la = lat + dy * 2 * half, lo = lon + dx * 2 * half;
       if (isLand(la, lo)) continue;
       const z = seaZoneAt(la, lo);
       if (z >= 0) return z;
+      water.push([la, lo]);
     }
     for (let j = 0; j < 3; j++) for (let i = 0; i < 3; i++) {
       const la = lat + (j - 1) * half * 0.8, lo = lon + (i - 1) * half * 0.8;
       const z = raster.ownerAt(la, lo) < 0 ? seaZoneAt(la, lo) : -1;
       if (z >= 0) return z;
     }
-    if (landAdj[n].size) return -1;
-    let best = -1, bestD = Infinity;
-    seaZones.forEach((z, j) => {
-      const d = (z.lat - lat) ** 2 + ((((z.lon - lon + 540) % 360) - 180) * Math.cos((lat * Math.PI) / 180)) ** 2;
-      if (d < bestD) [best, bestD] = [j, d];
-    });
-    return best;
+    for (const [la, lo] of water) {
+      const z = nearestZone(la, lo, SZ);
+      if (z >= 0) return z;
+    }
+    return landAdj[n].size ? -1 : nearestZone(lat, lon);
   });
+  // A port whose point fell in an inland cell (a harbour on an estuary or a narrow bay) moves to the nearest
+  // coastal cell of the same nation next to it, where ships can reach it.
+  for (const [n, count] of [...portCount]) {
+    if (coastZone[n] >= 0) continue;
+    const c = cellList[n];
+    const to = [...landAdj[n]].filter((m) => coastZone[m] >= 0 && cellList[m].iso3 === c.iso3)
+      .sort((a, b) => Math.hypot(cellList[a].lat - c.lat, cellList[a].lon - c.lon) - Math.hypot(cellList[b].lat - c.lat, cellList[b].lon - c.lon))[0];
+    if (to === undefined) continue;
+    portCount.delete(n);
+    portCount.set(to, (portCount.get(to) ?? 0) + count);
+  }
 
   // nations
   const iso3s = [...new Set(cellList.map((c) => c.iso3))].sort();
