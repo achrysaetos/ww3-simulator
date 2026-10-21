@@ -280,4 +280,21 @@ describe('counter-space strikes', () => {
     // SC-19 and Nudol top out near 1,000-1,500 km; only the DN-3 climbs to GPS at 20,200 km.
     expect(Object.keys(kills).filter((k) => k.endsWith('@gps') && !k.startsWith('dn3'))).toEqual([]);
   }, 180_000);
+
+  it('moves its interceptors off a constellation shot down to its last satellite', () => {
+    const s = createSession('ww3-2027', 1);
+    const fs = Object.values(s.world.formations);
+    const nro = fs.find((f) => f.name.startsWith('NRO imaging'))!;
+    const brigade = fs.find((f) => f.nation === 'CHN' && f.name.includes('ASAT'))!;
+    nro.equipment = { [id.platform('kh11')]: 1 };
+    const r = relationMut(s.world, N('CHN'), N('USA'));
+    Object.assign(r, { atWar: true, escalation: 'conventional', warSince: s.world.tick });
+    s.world.nations[N('CHN')].status = s.world.nations[N('USA')].status = 'war';
+    const targets = new Set<string>();
+    s.engine.run(s.world, 4, (w) => {
+      for (const c of w.pending) if (c.type === 'order' && c.formation === brigade.id && c.order.targetFormation) targets.add(c.order.targetFormation);
+    });
+    expect(targets.size).toBeGreaterThan(0);
+    expect(targets.has(nro.id)).toBe(false);
+  }, 60_000);
 });

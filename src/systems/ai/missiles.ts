@@ -16,25 +16,28 @@ import type { Plan } from './types';
 const SATELLITE_WORTH: Partial<Record<PlatformClass, number>> = { recon_satellite: 1, nav_satellite: 0.8, comms_satellite: 0.2 };
 
 /**
- * Direct-ascent ASAT units engage the enemy space formation most worth a kill with the interceptor
- * that reaches it: a formation's worth is the chance a kill takes out a satellite that matters, as
- * the strategic system picks the victim at random among the satellites below the interceptor's
- * ceiling. The cheaper interceptor wins a tie.
+ * Direct-ascent ASAT units engage the enemy space formation where a salvo is worth most, with the
+ * interceptor that reaches it. The strategic system fires one interceptor per launcher, at most one
+ * per satellite below the ceiling, and picks each victim at random among those satellites; so a
+ * salvo is worth its shots times the mean worth of the satellites in reach. A constellation shot
+ * down to its last imager is worth less than a full one. The cheaper interceptor wins a tie.
  */
 function planAsat(p: Plan, f: Formation, stock: readonly Munition[]): void {
+  const { catalog } = p.ctx;
   let best: { t: Formation; m: Munition; worth: number } | undefined;
   for (const e of p.enemies)
     for (const t of p.index.byNation.get(e) ?? []) {
       if (t.kind !== 'space' || t.status !== 'active') continue;
       for (const m of stock) {
-        let worth = 0, sats = 0;
+        let worth = 0, sats = 0, launchers = 0;
         for (const [pid, n] of Object.entries(t.equipment)) {
           if (n <= 0 || (ORBIT_KM[pid] ?? 0) > m.rangeKm) continue;
           sats += n;
-          worth += n * (SATELLITE_WORTH[p.ctx.catalog.platform(pid as PlatformId).class] ?? 0);
+          worth += n * (SATELLITE_WORTH[catalog.platform(pid as PlatformId).class] ?? 0);
         }
         if (!sats) continue;
-        worth /= sats;
+        for (const [pid, n] of Object.entries(f.equipment)) if (n > 0 && catalog.platform(pid as PlatformId).loadout.some((l) => l.munition === m.id)) launchers += n;
+        worth *= Math.min(launchers, sats) / sats;
         if (!best || worth > best.worth || (worth === best.worth && m.unitCostUsdM < best.m.unitCostUsdM)) best = { t, m, worth };
       }
     }
