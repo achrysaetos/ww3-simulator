@@ -29,10 +29,12 @@ export function navalDestination(world: World, map: GameMap, nation: NationId, t
   return seaNeighbour(map, target);
 }
 
-/** Whether `f` can be sent toward `target` at all: a destination exists and open water joins it (orders refuse the rest). */
+/** Whether `f` can be sent toward `target` at all: a destination exists and open water joins it, past any hostile minefield (orders refuse the rest). */
 export function sailable(world: World, map: GameMap, f: Formation, target: NodeId): boolean {
   const dest = navalDestination(world, map, f.nation, target);
-  return dest !== undefined && sameWaters(map, f.node, dest);
+  if (dest === undefined || !sameWaters(map, f.node, dest)) return false;
+  for (const n in world.slices.naval.mines) if (minedClosed(world, Number(n), f.nation)) return seaPath(world, map, f.nation, f.node, dest) !== null;
+  return true;
 }
 
 /** A* over sea zones, canals, and the start/end port. Hostile minefields are impassable except as the destination. */

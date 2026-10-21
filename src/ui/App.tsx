@@ -18,7 +18,7 @@ import type { Overlays } from './renderer';
 
 const SPEEDS = [0, 1, 5, 20] as const;
 type Speed = (typeof SPEEDS)[number];
-const OVERLAY_LABELS: Record<keyof Overlays, string> = { air: 'Air control', sea: 'Sea control', infra: 'Infrastructure damage', fallout: 'Fallout', cities: 'Cities', seaZones: 'Sea zones' };
+const OVERLAY_LABELS: Record<keyof Overlays, string> = { air: 'Air control', sea: 'Sea control', infra: 'Infrastructure damage', fallout: 'Fallout', weather: 'Weather', cities: 'Cities', seaZones: 'Sea zones' };
 const TABS = [['nation', 'Nation'], ['forces', 'Forces'], ['log', 'Log']] as const;
 type Tab = (typeof TABS)[number][0];
 /** Ticks to watch for the engine refusing an order the player just gave. */
@@ -52,7 +52,7 @@ function Command({ client, palette, initialNation }: { client: SimClient; palett
   const [tab, setTab] = useState<Tab>('forces');
   const speed = client.ticksPerSec as Speed;
   const setSpeed = (s: Speed) => client.setSpeed(s);
-  const [overlays, setOverlays] = useState<Overlays>({ air: true, sea: true, infra: true, fallout: true, cities: true, seaZones: true });
+  const [overlays, setOverlays] = useState<Overlays>({ air: true, sea: true, infra: true, fallout: true, weather: true, cities: true, seaZones: true });
   const [toast, setToast] = useState<Toast | null>(null);
   const watch = useRef<Watch | null>(null);
   const lastSeq = () => client.feed.newest(new Set(), null, 1)[0]?.seq ?? -1;
@@ -328,6 +328,9 @@ function Command({ client, palette, initialNation }: { client: SimClient; palett
           <span><i className="lg-air" /> Air control</span>
           <span><i className="lg-infra" /> Infra damage</span>
           <span><i className="lg-fallout" /> Fallout</span>
+          <span><i className="lg-mud" /> Mud</span>
+          <span><i className="lg-snow" /> Snow</span>
+          <span><i className="lg-sea" /> Rough sea</span>
         </div>
         {d && <Decisions client={client} d={d} onCommand={sendCommand} />}
         {targeting && <div className={`target-banner ${targeting}`}><button className="small-btn" onClick={() => { setPending(null); setNuclearPick(false); }} data-testid="cancel-target">Cancel</button> {targeting === 'nuclear' ? 'Select nuclear aim point' : pending?.lift ? `Select destination overseas: deploy by ${pending.lift === 'air' ? 'airlift' : 'sealift'}` : `Select target: ${pending?.posture.replace(/_/g, ' ')}`} · Esc to cancel</div>}

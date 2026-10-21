@@ -6,10 +6,12 @@
  * control map is sent only when some node changed hands. With the full world
  * (~2,500 formations, 193 nations) a tick costs about 25 KB plus events.
  */
-import { enemiesOf } from '../core/engine';
+import { currentDate, enemiesOf } from '../core/engine';
 import { platformCount } from '../core/forces';
 import type { GameMap } from '../core/map';
 import type { Catalog } from '../core/catalog';
+import { greenfieldCeilingPerMonth } from '../systems/economy';
+import { NUCLEAR_ALERT } from '../data/nations';
 import { BMD_SYSTEMS } from '../systems/strategic/tables';
 import { supplyFactor } from '../systems/logistics';
 import { cellDepthKm } from '../systems/land/state';
@@ -21,6 +23,10 @@ import { isSealift } from '../systems/naval/sealift';
 import { airliftTonsPerDay, airPortable, airTons, awaitingLift, deckSlots, liftMode, overseas } from '../systems/land/strategic';
 import { authority } from '../systems/orders';
 import { deliveryReachKm, isLive } from '../systems/strategic/nuclear';
+import { hostedBy } from '../systems/civil/state';
+import type { ElectionResult, OpinionDrivers } from '../systems/politics/state';
+import { ELECTIONS } from '../data/politics/elections';
+import { conditionsAt, type Conditions, packWeather } from '../systems/weather/effects';
 import type {
   Command, CommandDomain, Echelon, Formation, FormationId, FormationKind, ItemId, MunitionId, MunitionKind, Nation, NationId, NodeId, PlatformId, Posture, SimEvent, World,
 } from '../core/types';
@@ -186,6 +192,33 @@ export interface EconomyView {
   lines: { item: ItemId; perMonth: number; ordered: number | null; built: number }[];
   /** Every line's output now and the most it can surge to, per month, keyed by item. */
   capacity: Record<string, { perMonth: number; surge: number }>;
+  /** Most a new line can reach per month, for each item the nation can build but has no line for. */
+  greenfield: Record<string, number>;
+}
+
+/** Civilians and domestic politics. */
+export interface HomeFrontView {
+  /** Its people displaced inside the country and sheltering abroad. */
+  idps: number;
+  refugees: number;
+  /** Refugees from other nations it shelters. */
+  sheltering: number;
+  civiliansKilled: number;
+  civiliansInjured: number;
+  /** Its people living under enemy occupation. */
+  underOccupation: number;
+  /** Partisan sabotage acts against it as an occupier. */
+  sabotage: number;
+  /** Shift domestic politics adds to war support, and its parts. */
+  supportShift: number;
+  drivers: OpinionDrivers | null;
+  mobilizationTolerance: number | null;
+  stability: number | null;
+  protesting: boolean;
+  /** Arms aid it gives: whether a package is funded, and the backing for it. */
+  aid: { support: number; continues: boolean } | null;
+  nextElection: { date: string; kind: string } | null;
+  lastElection: ElectionResult | null;
 }
 
 /** A treaty call waiting on a human nation's answer. */
@@ -218,6 +251,7 @@ export interface NationDetail {
   formations: number;
   personnel: number;
   economy: EconomyView | null;
+  homeFront: HomeFrontView;
   munitions: MunitionStock[];
   wars: WarView[];
   nuclear: {
@@ -230,7 +264,20 @@ export interface NationDetail {
     satellites: number;
     /** Nuclear rounds on launchers, by weapon: where each launching formation stands and how far it reaches. */
     weapons: NuclearWeapon[];
+    alert: NuclearAlertView;
   };
+}
+
+/** Stored warheads are not on launchers until the leadership orders an alert; mating then follows the state's timeline. */
+export interface NuclearAlertView {
+  /** The nation has an alert timeline and warheads still in storage, and has not ordered one. */
+  canOrder: boolean;
+  /** Warheads in storage, not mated to launchers. */
+  stored: number;
+  /** Warheads mated to launchers (the ceiling on release). */
+  mated: number;
+  /** The standing alert: when ordered, how many of its stored warheads are mated so far. */
+  ordered: { tick: number; of: number; mated: number; reason: string } | null;
 }
 
 export interface NuclearWeapon {
@@ -254,6 +301,8 @@ export interface FormationDetail {
   lifts: LiftOption[];
   /** For a surface group: the formations it carries. */
   aboard: { id: FormationId; name: string }[];
+  /** Today's weather where it stands; null in a world without weather. */
+  weather: Conditions | null;
   /** For a ground formation: what strategic deployment overseas can use. */
   deploy: DeployView | null;
 }
@@ -314,6 +363,8 @@ export interface Snapshot {
   fallout: Float32Array;
   /** Flat (node, nationIndex, share) triples: cells an enemy is pushing into, and how far across it has got, 0..1. */
   contest: Float32Array;
+  /** Today's weather per region (weather/effects.ts packWeather), sent when the day changes. */
+  weather?: Uint8Array;
   focusNation?: NationDetail;
   focusFormation?: FormationDetail;
 }
@@ -327,6 +378,7 @@ export class SnapshotEncoder {
   private readonly nationIndex: Map<NationId, number>;
   private events: SimEvent[] = [];
   private dropped = 0;
+  private weatherDay?: number;
   /** First war_declared that put each nation into each war, keyed `nation|enemy`. */
   private readonly entries = new Map<string, WarEntry>();
 
@@ -370,6 +422,10 @@ export class SnapshotEncoder {
     };
     this.events = [];
     this.dropped = 0;
+    if (world.slices.weather && world.slices.weather.day !== this.weatherDay) {
+      this.weatherDay = world.slices.weather.day;
+      snap.weather = packWeather(world);
+    }
 
     const prev = this.lastControl;
     if (!prev) snap.control = control;
@@ -536,8 +592,10 @@ export class SnapshotEncoder {
             buffers: Object.fromEntries(Object.entries(eco.buffers).map(([r, tiers]) => [r, tiers.reduce((a, m) => a + m, 0)])), supply: eco.supply, short: eco.short,
             lines: productionLines(Object.values(eco.lines)),
             capacity: Object.fromEntries(Object.values(eco.lines).map((l) => [l.item, { perMonth: l.capacityPerMonth, surge: l.surgePerMonth }])),
+            greenfield: this.greenfield(n, eco.lines),
           }
         : null,
+      homeFront: homeFront(world, id),
       munitions: [...groups.values()].filter((g) => g.warehoused || g.loaded || g.perMonth),
       wars: this.warViews(world, id),
       nuclear: {
@@ -547,8 +605,19 @@ export class SnapshotEncoder {
         bmd: bmdOf(strategic?.interceptors ?? {}, id),
         satellites: space ? Object.values(space).reduce((a, s) => a + s.alive, 0) : 0,
         weapons: [...weapons.values()],
+        alert: nuclearAlert(n, id, strategic?.alerts[id]),
       },
     };
+  }
+
+  private greenfield(n: Nation, lines: Record<string, unknown>): Record<string, number> {
+    const out: Record<string, number> = {};
+    for (const [id, e] of [...this.catalog.platforms, ...this.catalog.munitions] as [ItemId, { producers: NationId[]; unitCostUsdM: number }][]) {
+      if (lines[id] || !e.producers.includes(n.id)) continue;
+      const ceiling = greenfieldCeilingPerMonth(n, e.unitCostUsdM, id);
+      if (ceiling > 0) out[id] = ceiling;
+    }
+    return out;
   }
 
   private warViews(world: World, id: NationId): WarView[] {
@@ -575,7 +644,41 @@ export class SnapshotEncoder {
   }
 }
 
+function nuclearAlert(n: Nation, id: NationId, alert: { orderedTick: number; stored: number; mated: number; reason: string } | undefined): NuclearAlertView {
+  const stored = Math.max(0, n.nuclear.warheads - n.nuclear.deployed);
+  return {
+    canOrder: !alert && stored > 0 && id in NUCLEAR_ALERT,
+    stored,
+    mated: n.nuclear.deployed,
+    ordered: alert ? { tick: alert.orderedTick, of: alert.stored, mated: alert.mated, reason: alert.reason } : null,
+  };
+}
+
 const TOP_LINES = 12;
+
+function homeFront(world: World, id: NationId): HomeFrontView {
+  const c = world.slices.civil?.nations[id];
+  const p = world.slices.politics?.nations[id];
+  const now = currentDate(world).getTime();
+  const next = ELECTIONS.filter((e) => e.nation === id && Date.parse(e.date) >= now).sort((a, b) => a.date.localeCompare(b.date))[0];
+  return {
+    idps: c?.idps ?? 0,
+    refugees: c?.refugees ?? 0,
+    sheltering: world.slices.civil ? (hostedBy(world.slices.civil).get(id) ?? 0) : 0,
+    civiliansKilled: c?.killed ?? 0,
+    civiliansInjured: c?.injured ?? 0,
+    underOccupation: c?.underOccupation ?? 0,
+    sabotage: c?.sabotage ?? 0,
+    supportShift: p?.supportShift ?? 0,
+    drivers: p ? { ...p.drivers } : null,
+    mobilizationTolerance: p?.mobilizationTolerance ?? null,
+    stability: p?.stability ?? null,
+    protesting: p?.protesting ?? false,
+    aid: p?.aid ? { support: p.aid.support, continues: p.aid.continues } : null,
+    nextElection: next ? { date: next.date, kind: next.kind } : null,
+    lastElection: p?.elections.at(-1) ?? null,
+  };
+}
 
 function productionLines(lines: readonly { item: ItemId; capacityPerMonth: number; orderPerMonth: number | null; built: number }[]): EconomyView['lines'] {
   const view = lines.map((l) => ({ item: l.item, perMonth: l.capacityPerMonth, ordered: l.orderPerMonth, built: l.built })).sort((a, b) => b.perMonth - a.perMonth);
@@ -654,6 +757,7 @@ function formationDetail(world: World, map: GameMap, catalog: Catalog, f: Format
     lifts,
     aboard,
     deploy: canShip ? deployView(world, map, catalog, f) : null,
+    weather: conditionsAt(world, map, f.node) ?? null,
   };
 }
 
@@ -722,6 +826,7 @@ export interface ClientState {
   infra: Float32Array;
   fallout: Float32Array;
   contest: Float32Array;
+  weather: Uint8Array;
   focusNation?: NationDetail;
   focusFormation?: FormationDetail;
   /** Events from the latest snapshot only. */
@@ -732,7 +837,7 @@ export function emptyClientState(size: number): ClientState {
   return {
     tick: 0, date: '', control: new Uint16Array(size).fill(NO_NATION), controlVersion: 0,
     formations: [], rosterVersion: 0, nations: new Map(), wars: [], warsKey: '',
-    air: new Float32Array(0), sea: new Float32Array(0), infra: new Float32Array(0), fallout: new Float32Array(0), contest: new Float32Array(0),
+    air: new Float32Array(0), sea: new Float32Array(0), infra: new Float32Array(0), fallout: new Float32Array(0), contest: new Float32Array(0), weather: new Uint8Array(0),
     latestEvents: [],
   };
 }
@@ -784,6 +889,7 @@ export function applySnapshot(state: ClientState, snap: Snapshot, nationIds: rea
   state.infra = snap.infra;
   state.fallout = snap.fallout;
   state.contest = snap.contest;
+  if (snap.weather) state.weather = snap.weather;
   state.focusNation = snap.focusNation;
   state.focusFormation = snap.focusFormation;
   state.latestEvents = snap.events;

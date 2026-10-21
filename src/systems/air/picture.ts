@@ -5,6 +5,8 @@
 import type { SimContext } from '../../core/engine';
 import type { GameMap } from '../../core/map';
 import type { Formation, FormationId, Munition, NationId, NodeId, Platform, PlatformId, World } from '../../core/types';
+import { sortieFactorAt } from '../weather/effects';
+import { radarFactor } from '../c2';
 import { combatRadiusKm } from './combat';
 import { AIRFRAME, OFFENSIVE_POSTURES, RECEIVER_ROLES, TUNING, type AirframeProfile } from './tables';
 
@@ -63,13 +65,13 @@ export function buildPicture(world: World, ctx: SimContext, runway: Record<numbe
 
     if (AIR_DEFENSE_KINDS.has(f.kind)) {
       const d = defenderOf(f, ctx);
-      if (d) defenders.push(d);
+      if (d) defenders.push(Object.assign(d, { channels: d.channels * radarFactor(world, f.node, f.nation) }));
     }
     if (f.kind !== 'air_wing') continue;
 
     const base = baseCapacity(world, ctx, f, runway);
     const surge = OFFENSIVE_POSTURES.has(f.order.posture);
-    const tempo = f.order.posture === 'reserve' ? 0 : f.readiness * (1 - 0.5 * f.fatigue) * base * dayShare;
+    const tempo = f.order.posture === 'reserve' ? 0 : f.readiness * (1 - 0.5 * f.fatigue) * base * dayShare * sortieFactorAt(world, map, f.node);
     const fg: AirGroup[] = [];
     for (const [pid, n] of Object.entries(f.equipment) as [PlatformId, number][]) {
       const platform = catalog.platform(pid);

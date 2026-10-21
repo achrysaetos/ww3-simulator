@@ -1,14 +1,16 @@
 import { atWar, relation } from '../../core/engine';
 import type { GameMap } from '../../core/map';
 import { platformCount } from '../../core/forces';
-import type { Command, MunitionId, Nation, NationId, NodeId, World } from '../../core/types';
-import { strategicProfile, type NuclearThreshold } from '../../data/nations';
+import type { Command, Nation, NationId, NodeId, PlatformId, World } from '../../core/types';
+import { NUCLEAR_ALERT, strategicProfile, type NuclearAnswer, type NuclearThreshold } from '../../data/nations';
 import { neighbours } from '../diplomacy/assess';
+import { CITY_POP_SHARE } from '../diplomacy/escalation';
 import type { Assessment, DiplomacyState, WarRecord } from '../diplomacy/types';
 import { rung } from '../diplomacy/wars';
-import { nuclearLaunchers, weaponFor } from '../strategic/targeting';
+import { aiMayIssue } from '../orders';
+import { launcherFor, nuclearLaunchers, targetList } from '../strategic/targeting';
 import { isGround } from './forces';
-import type { Objective, Plan } from './types';
+import type { NuclearLadder, Objective, Plan } from './types';
 
 // ---------------------------------------------------------------- war aims
 
@@ -107,8 +109,39 @@ const DOCTRINE_THRESHOLD: Record<Nation['nuclear']['doctrine'], NuclearThreshold
   calculated_ambiguity: { firstUse: true, coreLossShare: 0.3, forceLossShare: null, economicLossShare: null, onStrategicAttack: false, onChemBio: false, coversAllies: false },
   none: { firstUse: false, coreLossShare: null, forceLossShare: null, economicLossShare: null, onStrategicAttack: false, onChemBio: false, coversAllies: false },
 };
+const DEFAULT_ANSWER: NuclearAnswer = { scale: 'tailored', targets: 'counterforce' };
 /** Enemy-held homeland this close to the capital puts the leadership in danger: two cells, one day's advance. */
 const CAPITAL_DANGER_KM = 200;
+
+/**
+ * Signalling rungs below first use, as shares of the doctrine threshold. Any enemy-held homeland
+ * draws a public warning (Russia's "not a bluff" statement of September 2022 after the Kharkiv
+ * rout; Pakistan's threats in the 1999 Kargil crisis); half the threshold draws an alert and a
+ * non-strategic exercise (Russia's May-June 2024 drill). Estimates of where on the ladder each sits.
+ */
+const SIGNAL = { warn: 0.25, alert: 0.5 } as const;
+/**
+ * A warning stands at least this long before first use, so no state goes from silence to release
+ * in one step. Estimate: a day, the shortest gap between a public threat and action in the crises
+ * above.
+ */
+const WARNING_HOURS = 24;
+
+/**
+ * Rungs of the exchange above first use, as (targets, warheads per target):
+ * - limited: one low-yield weapon on enemy forces, the "de-escalation" strike;
+ * - answer: a tailored reply in kind, a weapon or two on the attacker's forces in the theatre;
+ * - theatre: several weapons on forces across the theatre, once the exchange has begun;
+ * - general: the enemy homeland, its nuclear forces and command or its cities by doctrine, with
+ *   up to GENERAL_SHARE of the deployed arsenal.
+ * Sizes are estimates; the ordering follows Kahn's escalation ladder ("On Escalation", 1965) and
+ * the limited / theatre / general distinction of US and Russian planning.
+ */
+const RUNG = { limited: { targets: 1, warheads: 1 }, answer: { targets: 1, warheads: 2 }, theatre: { targets: 3, warheads: 2 }, general: { targets: 12, warheads: 2 } } as const;
+type StrikeSize = (typeof RUNG)[keyof typeof RUNG];
+const GENERAL_SHARE = 0.25;
+/** Theatre strikes stay within this distance of the fighting (estimate: the span of Europe or Northeast Asia). */
+const THEATRE_KM = 2000;
 
 function thresholdOf(p: Plan): NuclearThreshold {
   return strategicProfile[p.nation]?.nuclearThreshold ?? DOCTRINE_THRESHOLD[p.world.nations[p.nation].nuclear.doctrine];
@@ -127,6 +160,28 @@ function forcesLost(p: Plan): number {
   return base > 0 ? lost / base : 0;
 }
 
+/** How far the fleet's losses have gone toward the naval criteria: the larger of the SSBN, attack-submarine and cruiser ratios. */
+function navalLost(p: Plan, t: NonNullable<NuclearThreshold['navalLoss']>): number {
+  const base = { ssbn: 0, ssn: 0 }, lost = { ssbn: 0, ssn: 0 };
+  let cruisers = 0;
+  for (const f of Object.values(p.world.formations)) {
+    if (f.nation !== p.nation || (f.kind !== 'submarine' && f.kind !== 'surface_group' && f.kind !== 'strategic')) continue;
+    for (const [pid, now] of Object.entries(f.equipment) as [PlatformId, number][]) {
+      const cls = p.ctx.catalog.platform(pid).class;
+      const k = cls === 'ssbn' ? 'ssbn' : cls === 'ssn' || cls === 'ssgn' ? 'ssn' : cls === 'cruiser' ? 'cruiser' : undefined;
+      if (!k) continue;
+      const b = (p.ai.baseStrength[`${f.id}/${pid}`] ??= now);
+      if (k === 'cruiser') cruisers += Math.max(0, b - now);
+      else {
+        base[k] += b;
+        lost[k] += Math.max(0, b - now);
+      }
+    }
+  }
+  const share = (k: 'ssbn' | 'ssn') => (base[k] > 0 ? lost[k] / base[k] : 0);
+  return Math.max(share('ssbn') / t.ssbnShare, share('ssn') / t.ssnShare, cruisers / t.cruisers);
+}
+
 /** A conventional attack has destroyed launchers of the nation's strategic forces. */
 function strategicForcesHit(p: Plan, rec: WarRecord | undefined): boolean {
   if ((rec?.ssbnLost ?? 0) > 0) return true;
@@ -138,97 +193,166 @@ function strategicForcesHit(p: Plan, rec: WarRecord | undefined): boolean {
   return false;
 }
 
-function capitalInDanger(p: Plan): boolean {
+/** Distance from the capital to the nearest homeland cell an enemy holds; Infinity when it holds none. */
+function enemyDepthKm(p: Plan, a: Assessment): number {
+  if (a.areaLost <= 0) return Infinity;
+  const { map } = p.ctx;
   const cap = p.world.nations[p.nation].capital;
-  return p.ctx.map.nodesWithin(cap, CAPITAL_DANGER_KM).some((n) => p.ctx.map.owner[n] === p.nation && p.enemies.has(p.world.control[n]));
+  let best = Infinity;
+  for (const n of map.nodesOf(p.nation)) if (p.enemies.has(p.world.control[n])) best = Math.min(best, map.distanceKm(cap, n));
+  return best;
 }
 
 /**
  * How far past its first-use threshold the war has pushed a nation: 0 short of it, 1 at it, 2 at
  * twice it. Each sourced condition counts on its own (Kidwai's space, military and economic
- * thresholds for Pakistan; the Russian core-loss and force-loss levels), the strongest decides.
- * The capital lost is existential for every state that keeps the option of first use.
+ * thresholds for Pakistan; the Russian core-loss, force-loss and naval levels), the strongest
+ * decides. The capital lost is existential for every state that keeps the option of first use.
+ * For a state that treats attacks on its strategic core as a threshold, enemy-held homeland
+ * presses in proportion to how close it stands to the capital, reaching the threshold at
+ * CAPITAL_DANGER_KM; any enemy-held homeland at all reaches the warning rung.
  */
-function nuclearPressure(p: Plan, a: Assessment | undefined, rec: WarRecord | undefined): number {
-  const t = thresholdOf(p);
+function nuclearPressure(p: Plan, t: NuclearThreshold, a: Assessment | undefined, rec: WarRecord | undefined): number {
   if (!t.firstUse || !a) return 0;
   let pressure = a.capitalLost ? 2 : 0;
   if (t.coreLossShare !== null) pressure = Math.max(pressure, a.popLost / t.coreLossShare);
   if (t.forceLossShare !== null) pressure = Math.max(pressure, forcesLost(p) / t.forceLossShare);
+  if (t.navalLoss) pressure = Math.max(pressure, navalLost(p, t.navalLoss));
   const gdp = p.world.slices.economy?.nations[p.nation]?.gdpIndex;
   if (t.economicLossShare !== null && gdp !== undefined) pressure = Math.max(pressure, (1 - gdp) / t.economicLossShare);
-  if (pressure < 1 && t.onStrategicAttack && (capitalInDanger(p) || strategicForcesHit(p, rec))) pressure = 1;
+  if (a.areaLost > 0) pressure = Math.max(pressure, SIGNAL.warn);
+  if (t.onStrategicAttack && pressure < 1) {
+    if (strategicForcesHit(p, rec)) pressure = 1;
+    else pressure = Math.max(pressure, Math.min(1, CAPITAL_DANGER_KM / enemyDepthKm(p, a)));
+  }
   return pressure;
 }
 
 /** Rungs of the first-use ladder: 1 at the threshold, one more for each further half of it. */
 const ladderRung = (pressure: number) => (pressure < 1 ? 0 : Math.floor(2 * pressure) - 1);
 
-/** Enemy ground concentrations, heaviest first, optionally only those on `onSoilOf`'s homeland. */
-function concentrations(p: Plan, of: Set<NationId>, onSoilOf?: NationId): NodeId[] {
-  const at = new Map<NodeId, number>();
-  for (const e of of)
-    for (const f of p.index.byNation.get(e) ?? []) {
-      if (!isGround(f) || p.ctx.map.isSea(f.node)) continue;
-      if (onSoilOf && p.ctx.map.owner[f.node] !== onSoilOf) continue;
-      at.set(f.node, (at.get(f.node) ?? 0) + p.index.power(f));
-    }
-  return [...at].sort((a, b) => b[1] - a[1] || a[0] - b[0]).map(([n]) => n);
-}
-
-/** The first candidate some launcher holding a nuclear warhead reaches, with the warhead it would use. */
-function firstReachable(p: Plan, candidates: Iterable<NodeId>, prefer: 'smallest' | 'largest'): { target: NodeId; munition: MunitionId } | undefined {
-  const launchers = nuclearLaunchers(p.world, p.ctx.catalog, p.nation);
-  if (!launchers.length) return undefined;
-  for (const target of candidates) {
-    const munition = weaponFor(launchers, p.ctx.map, target, prefer);
-    if (munition) return { target, munition };
-  }
+/** Why the leadership orders its stored warheads mated now; undefined while nothing warrants it. */
+function alertReason(p: Plan, t: NuclearThreshold, pressure: number, a: Assessment | undefined, rec: WarRecord | undefined): string | undefined {
+  if (rec?.nuclearStruckBy.length) return `nuclear attack by ${rec.nuclearStruckBy[0]}`;
+  for (const e of p.enemies) if (p.world.nations[e].nuclear.warheads > 0) return `war with nuclear-armed ${e}`;
+  if (a?.capitalThreatened) return 'capital threatened';
+  if (pressure >= SIGNAL.alert) return 'first-use threshold approaching';
+  if (t.onStrategicAttack && strategicForcesHit(p, rec)) return 'conventional attack on its strategic forces';
   return undefined;
 }
 
 /**
- * Release decisions follow a ladder, not a clock. Retaliation answers each new nuclear attack,
- * near certainly. First use is weighed once at each rung: when the war first crosses the doctrine
- * threshold and again each time it worsens by half of it. A leadership that holds, or that no
- * launcher can serve, waits for the next rung. The chance of use grows with the pressure and the
- * leadership's risk tolerance. First use is a single low-yield weapon on enemy forces, on home
- * soil if possible: the battlefield or "de-escalation" strike of the Russian literature and of
- * Pakistan's Nasr. Targets are only those a launcher holding a warhead reaches, so every decision
- * is one the forces can carry out.
+ * The signalling rungs: a public warning once the war reaches SIGNAL.warn, and an alert that
+ * mates stored warheads when doctrine calls for it. The warning stands before any first use.
+ */
+function signal(p: Plan, t: NuclearThreshold, ladder: NuclearLadder, pressure: number, a: Assessment | undefined, rec: WarRecord | undefined): void {
+  const { world } = p;
+  if (t.firstUse && pressure >= SIGNAL.warn && ladder.warnedTick === undefined) {
+    ladder.warnedTick = world.tick;
+    if (aiMayIssue(world, { type: 'nuclear_alert', nation: p.nation }))
+      p.ctx.emit({ type: 'message', tick: world.tick, nation: p.nation, text: `${p.nation} warns ${p.enemies.size > 3 ? 'its enemies' : [...p.enemies].sort().join(', ')} that it will use nuclear weapons if the attack on its territory goes on` });
+  }
+  const nuclear = world.nations[p.nation].nuclear;
+  if (!NUCLEAR_ALERT[p.nation] || nuclear.warheads <= nuclear.deployed || world.slices.strategic?.alerts[p.nation]) return;
+  const reason = alertReason(p, t, pressure, a, rec);
+  if (reason) p.out.push({ type: 'nuclear_alert', nation: p.nation, reason });
+}
+
+/**
+ * Cells worth a weapon below the general rung: the heaviest concentrations of `foes`' ground forces
+ * (within THEATRE_KM of `centre` when given), on the nation's own soil first, then on ground an enemy holds.
+ * Never a city, and never ground a third party holds, whoever stands on it.
+ */
+function theatreTargets(p: Plan, foes: Set<NationId>, centre?: NodeId): NodeId[] {
+  const { map } = p.ctx;
+  const at = new Map<NodeId, number>();
+  for (const e of foes)
+    for (const f of p.index.byNation.get(e) ?? []) {
+      if (!isGround(f) || map.isSea(f.node) || map.popShare[f.node] >= CITY_POP_SHARE) continue;
+      if (map.owner[f.node] !== p.nation && !p.enemies.has(p.world.control[f.node])) continue;
+      if (centre !== undefined && map.distanceKm(f.node, centre) > THEATRE_KM) continue;
+      at.set(f.node, (at.get(f.node) ?? 0) + p.index.power(f));
+    }
+  const own = (n: NodeId) => (map.owner[n] === p.nation ? 0 : 1);
+  return [...at].sort((x, y) => own(x[0]) - own(y[0]) || y[1] - x[1] || x[0] - y[0]).map(([n]) => n);
+}
+
+/** The enemy homeland by doctrine: its cities first for a countervalue state, else its nuclear forces and command first. */
+function generalTargets(p: Plan, foe: NationId, mode: NuclearAnswer['targets']): NodeId[] {
+  const forces = targetList(p.world, p.ctx, p.nation, foe, 'counterforce').map((t) => t.node);
+  const cities = targetList(p.world, p.ctx, p.nation, foe, 'countervalue').map((t) => t.node);
+  return mode === 'countervalue' ? [...cities, ...forces] : [...forces, ...cities];
+}
+
+/** Order releases on the first `size.targets` candidates some launcher holding a nuclear warhead reaches. */
+function strike(p: Plan, candidates: Iterable<NodeId>, size: StrikeSize, prefer: 'smallest' | 'largest', budget = Infinity): void {
+  const launchers = nuclearLaunchers(p.world, p.ctx.catalog, p.nation);
+  let deployed = Math.min(p.world.nations[p.nation].nuclear.deployed, budget), hit = 0;
+  for (const target of candidates) {
+    if (hit >= size.targets || deployed <= 0) break;
+    const launcher = launcherFor(launchers, p.ctx.map, target, prefer);
+    if (!launcher) continue;
+    const warheads = Math.min(size.warheads, deployed, launcher.count);
+    launcher.count -= warheads;
+    p.out.push({ type: 'nuclear_release', nation: p.nation, target, munition: launcher.munition, warheads });
+    deployed -= warheads;
+    hit++;
+  }
+  if (hit) p.ai.nuclear[p.nation].strikes = (p.ai.nuclear[p.nation].strikes ?? 0) + 1;
+}
+
+/**
+ * Answer each new nuclear attack, near certainly. A state whose doctrine promises massive
+ * retaliation, or one whose homeland the attacker hit with a strategic weapon, answers at the general rung against
+ * the attacker's homeland. Otherwise the answer is tailored: in kind, on the attacker's forces in
+ * the theatre of the attack, one weapon pair at first and theatre-wide once the exchange is under way.
+ */
+function retaliate(p: Plan, t: NuclearThreshold, ladder: NuclearLadder, rec: WarRecord, striker: NationId): void {
+  const attacks = rec.nuclearHits + rec.nuclearStruckBy.length;
+  if (attacks <= ladder.answered) return;
+  ladder.answered = attacks;
+  if (!p.ctx.rng.chance(0.9)) return;
+  const answer = t.answer ?? DEFAULT_ANSWER;
+  const nuclear = p.world.nations[p.nation].nuclear;
+  if (answer.scale === 'massive' || rec.strategicStruckBy?.includes(striker)) {
+    strike(p, generalTargets(p, striker, answer.targets), RUNG.general, 'largest', Math.max(RUNG.general.warheads, Math.round(GENERAL_SHARE * nuclear.deployed)));
+    return;
+  }
+  const centre = rec.lastNuclearNode ?? p.world.nations[p.nation].capital;
+  strike(p, theatreTargets(p, new Set([striker]), centre), (ladder.strikes ?? 0) > 0 ? RUNG.theatre : RUNG.answer, 'smallest');
+}
+
+/**
+ * Release decisions follow a ladder, not a clock. Each turn the leadership first signals: a
+ * warning, then an alert, as the war worsens. Retaliation answers each new nuclear attack (see
+ * retaliate). First use is weighed once at each rung: when the war first crosses the doctrine
+ * threshold and again each time it worsens by half of it, and only once a warning has stood for
+ * WARNING_HOURS. The chance of use grows with the pressure and the leadership's risk tolerance. The
+ * first use is a single low-yield weapon on enemy forces, on home soil if possible: the
+ * "de-escalation" strike of the Russian literature and of Pakistan's Nasr. A later rung strikes
+ * theatre-wide. Targets are only those a launcher holding a warhead reaches.
  */
 export function nuclearDecision(p: Plan, d: DiplomacyState | undefined): void {
   const nation = p.world.nations[p.nation];
-  if (!d || nation.nuclear.deployed <= 0 || nation.nuclear.doctrine === 'none') return;
+  if (!d || nation.nuclear.warheads <= 0 || nation.nuclear.doctrine === 'none') return;
   const ladder = (p.ai.nuclear[p.nation] ??= { rung: 0, answered: 0 });
   const rec = d.records[p.nation];
-  const striker = rec?.nuclearStruckBy.find((s) => p.enemies.has(s));
+  const a = d.assessment[p.nation];
+  const t = thresholdOf(p);
+  const pressure = nuclearPressure(p, t, a, rec);
+  signal(p, t, ladder, pressure, a, rec);
+  if (nation.nuclear.deployed <= 0) return;
 
-  let option: { target: NodeId; munition: MunitionId } | undefined, warheads = 1;
-  if (striker) {
-    const attacks = rec.nuclearHits + rec.nuclearStruckBy.length;
-    if (attacks <= ladder.answered) return;
-    ladder.answered = attacks;
-    if (!p.ctx.rng.chance(0.9)) return;
-    const foe = p.world.nations[striker];
-    if (relation(p.world, p.nation, striker).escalation === 'strategic_nuclear') {
-      const cities = p.ctx.map.cities.filter((c) => c.nation === striker).sort((a, b) => b.pop - a.pop).map((c) => c.node);
-      option = firstReachable(p, [foe.capital, ...cities], 'largest');
-    } else {
-      option = firstReachable(p, [...concentrations(p, new Set([striker])), foe.capital], 'smallest');
-    }
-    warheads = 2;
-  } else {
-    const pressure = nuclearPressure(p, d.assessment[p.nation], rec);
-    const rung = ladderRung(pressure);
-    if (rung <= ladder.rung) return;
-    ladder.rung = rung;
-    const willing = 0.1 + 0.5 * p.profile.riskTolerance;
-    if (!p.ctx.rng.chance(1 - (1 - willing) ** pressure)) return;
-    option = firstReachable(p, [...concentrations(p, p.enemies, p.nation), ...concentrations(p, p.enemies)], 'smallest');
-  }
-  if (!option) return;
-  p.out.push({ type: 'nuclear_release', nation: p.nation, ...option, warheads: Math.min(warheads, nation.nuclear.deployed) });
+  const striker = rec?.nuclearStruckBy.find((s) => p.enemies.has(s));
+  if (striker) return retaliate(p, t, ladder, rec, striker);
+
+  const rung = ladderRung(pressure);
+  if (rung <= ladder.rung) return;
+  if (ladder.warnedTick === undefined || (p.world.tick - ladder.warnedTick) * p.world.dtHours < WARNING_HOURS) return;
+  ladder.rung = rung;
+  const willing = 0.1 + 0.5 * p.profile.riskTolerance;
+  if (!p.ctx.rng.chance(1 - (1 - willing) ** pressure)) return;
+  strike(p, theatreTargets(p, p.enemies), (ladder.strikes ?? 0) > 0 ? RUNG.theatre : RUNG.limited, 'smallest');
 }
 
 // ---------------------------------------------------------------- sanctions
@@ -297,7 +421,10 @@ export function planStrategy(p: Plan): void {
   for (const e of p.enemies) peak = Math.max(peak, rung(relation(p.world, p.nation, e).escalation));
   const near = neighbours(p.ctx.map, p.nation);
   const standing = Math.max(nation.mobilization, p.world.slices.economy?.nations[p.nation]?.mobilizationTarget ?? 0);
-  const mob = mobilizationTarget(d?.assessment[p.nation], [...p.enemies].some((e) => near.has(e)), peak);
+  const wanted = mobilizationTarget(d?.assessment[p.nation], [...p.enemies].some((e) => near.has(e)), peak);
+  // A government asks no more of its people than they will bear, unless the nation is invaded.
+  const bears = p.world.slices.politics?.nations[p.nation]?.mobilizationTolerance ?? 1;
+  const mob = wanted >= MOBILIZATION.existential ? wanted : Math.min(wanted, bears);
   if (mob > standing + 0.05) p.out.push({ type: 'set_mobilization', nation: p.nation, level: mob });
 
   nuclearDecision(p, d);

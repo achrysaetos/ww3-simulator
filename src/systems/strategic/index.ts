@@ -5,8 +5,8 @@
  */
 import type { SimContext, System } from '../../core/engine';
 import type { Formation, NationId, PlatformId, World } from '../../core/types';
-import { NUCLEAR_ALERT, strategicProfile } from '../../data/nations';
-import { stepAlerts, type AlertDoctrine } from './alert';
+import { NUCLEAR_ALERT, type AlertSpec } from '../../data/nations';
+import { orderAlert, stepAlerts } from './alert';
 import { stepClimate } from './climate';
 import { stepCyber } from './cyber';
 import { stepFallout } from './fallout';
@@ -16,7 +16,7 @@ import type { NuclearPosture, StrategicState } from './state';
 import { BMD_SYSTEMS, DEFAULT_POSTURE } from './tables';
 
 export type { Burst, LaunchWarning, NuclearAlert, NuclearPosture, ReleaseRequest, StrategicState } from './state';
-export { matedShare, type AlertDoctrine } from './alert';
+export { matedShare } from './alert';
 export type { LaunchOnWarningHook } from './nuclear';
 export { release, detonate, interceptSalvo } from './nuclear';
 export { nuclearLaunchers, targetList, weaponFor, type NuclearLauncher, type Target, type TargetKind, type TargetMode } from './targeting';
@@ -28,13 +28,9 @@ export { cyberCapability } from './tables';
 export interface StrategicOptions {
   /** Consulted when a launch-on-warning nation detects a counterforce strike. Without it nobody launches on warning. */
   onWarning?: LaunchOnWarningHook;
-  /** States that hold warheads apart from launchers and alert per doctrine. Default: src/data/nations. */
-  alerts?: Readonly<Record<string, AlertDoctrine>>;
+  /** How each state that holds warheads apart from its launchers mates them on an alert order. Default: src/data/nations. */
+  alerts?: Readonly<Record<string, AlertSpec>>;
 }
-
-const DEFAULT_ALERTS: Record<string, AlertDoctrine> = Object.fromEntries(
-  Object.entries(NUCLEAR_ALERT).map(([id, spec]) => [id, { spec, threshold: strategicProfile[id]?.nuclearThreshold ?? null }]),
-);
 
 function initialState(world: World): StrategicState {
   const posture: Record<NationId, NuclearPosture> = {};
@@ -61,15 +57,16 @@ export function setNuclearPosture(world: World, nation: NationId, posture: Nucle
 }
 
 export function createStrategic(opts: StrategicOptions = {}): System {
-  const alerts = opts.alerts ?? DEFAULT_ALERTS;
+  const alerts = opts.alerts ?? NUCLEAR_ALERT;
   return {
     id: 'strategic',
-    commands: ['nuclear_release'],
+    commands: ['nuclear_release', 'nuclear_alert'],
     init(world) {
       world.slices.strategic = initialState(world);
     },
     apply(world, cmd, ctx) {
       if (cmd.type === 'nuclear_release') release(world, ctx, cmd);
+      else if (cmd.type === 'nuclear_alert') orderAlert(world, ctx, alerts, cmd.nation, cmd.reason ?? 'ordered by the national command authority');
     },
     step(world, ctx) {
       stepAlerts(world, ctx, alerts);

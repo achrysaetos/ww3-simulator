@@ -16,6 +16,17 @@ describe('orders of battle against the catalog', () => {
     expect(report.placed).toBeGreaterThan(3000);
   });
 
+  it('starts every land-based formation ashore, the 25th Infantry Division on Oahu among them: only ships, submarines and deterrent patrols start at sea', () => {
+    const map = loadMap();
+    const world = createWorld(map);
+    placeOrbat(world, map, loadCatalog(), allOrbat(map), ALIASES);
+    const afloat = Object.values(world.formations).filter((f) => map.isSea(f.node) && !['surface_group', 'submarine', 'strategic'].includes(f.kind));
+    expect(afloat.map((f) => `${f.nation} ${f.name}`)).toEqual([]);
+    const schofield = Object.values(world.formations).find((f) => f.name === '2nd Brigade Combat Team, 25th Infantry Division')!;
+    expect(world.control[schofield.node]).toBe('USA');
+    expect(map.distanceKm(schofield.node, map.nodeAt(21.3, -157.9))).toBeLessThan(150);
+  });
+
   it('never aliases to a missing catalog id', () => {
     const catalog = loadCatalog();
     const dangling = Object.entries(ALIASES).filter(([, to]) => !catalog.platforms.has(to as never) && !catalog.munitions.has(to as never));

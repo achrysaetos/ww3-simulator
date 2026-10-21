@@ -53,6 +53,8 @@ export interface NationEconomy {
   recruited: number;
   /** Bulk fuel delivered to national depots since the run began, tons. */
   fuelDelivered: number;
+  /** Treasury paid for ordered output beyond what the defence budget buys, USD B since the run began. */
+  orderSpendUsdB: number;
 }
 
 export interface AidState {
@@ -139,5 +141,6 @@ export function newNationEconomy(nation: Nation): NationEconomy {
     delivered: {},
     recruited: 0,
     fuelDelivered: 0,
+    orderSpendUsdB: 0,
   };
 }

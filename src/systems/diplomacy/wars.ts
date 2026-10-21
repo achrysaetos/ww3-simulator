@@ -251,7 +251,8 @@ export function resolveJoins(world: World, ctx: SimContext, s: DiplomacyState, a
  * 1945 (Schweller, "Bandwagoning for Profit", 1994), so a foe must be
  * collapsing. Nobody opts into a war against a nuclear-armed state: NATO armed
  * Ukraine for years without fighting Russia, and no state has entered a war
- * against a nuclear power on another's behalf without a treaty since 1945.
+ * against a nuclear power on another's behalf without a treaty since 1945. A human who kept
+ * strategic decisions chooses its own wars.
  */
 export function neutralEntry(world: World, ctx: SimContext, s: DiplomacyState, alliances: readonly AllianceTreaty[], profiles: Readonly<Record<string, StrategicProfile>>): void {
   for (const war of [...s.wars]) {
@@ -261,7 +262,7 @@ export function neutralEntry(world: World, ctx: SimContext, s: DiplomacyState, a
     const deterred = war.sides.map((side) => side.some((m) => world.nations[m].nuclear.warheads > 0));
     for (const [n, profile] of Object.entries(profiles) as [NationId, StrategicProfile][]) {
       const nation = world.nations[n];
-      if (!nation || nation.status !== 'peace' || sideOf(war, n) !== -1) continue;
+      if (!nation || nation.status !== 'peace' || sideOf(war, n) !== -1 || !delegated(world, n, 'strategic')) continue;
       if (s.joins.some((j) => j.nation === n && j.war === war.id)) continue;
       const lean = meanOpinion(world, n, war.sides[0]) - meanOpinion(world, n, war.sides[1]);
       if (Math.abs(lean) < 100) continue;

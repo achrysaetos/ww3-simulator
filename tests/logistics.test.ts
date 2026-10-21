@@ -5,7 +5,9 @@ import { loadMap } from '../src/data/load';
 
 const MAP = loadMap();
 import { logistics, supplyFactor } from '../src/systems/logistics';
-import { BEACH_CAPACITY, LAST_MILE_CAPACITY, NODE_TONS_PER_DAY } from '../src/systems/logistics/tables';
+import { airWar } from '../src/systems/air';
+import { DEFAULT_DELEGATION } from '../src/systems/orders';
+import { BEACH_CAPACITY, HOST_SUPPORT, LAST_MILE_CAPACITY, NODE_TONS_PER_DAY } from '../src/systems/logistics/tables';
 
 const PLENTY = { fuel: 1e7, ammo: 1e7, food: 1e7 };
 const DAY = 4; // ticks at the default 6 h
@@ -67,6 +69,23 @@ describe('logistics', () => {
     expect(t.world.nations[id.nation('UKR')].bulk.food).toBe(bulkBefore);
   });
 
+  it('reloads a missile brigade from national stocks only where the supply chain reaches it', () => {
+    const t = testWorld([logistics, airWar]);
+    const ukr = id.nation('UKR');
+    for (const n of Object.values(t.world.nations)) n.bulk = { ...PLENTY };
+    t.world.nations[ukr].stockpile[id.munition('t_srbm')] = 1_000;
+    const pocket = t.nodeAt(49.5, 33.5);
+    for (const n of t.map.neighbors(pocket)) t.world.control[n] = id.nation('RUS');
+    t.war('UKR', 'RUS');
+    const brigade = (node: NodeId) => t.add({ nation: ukr, name: 'missile brigade', kind: 'missile', echelon: 'brigade', node, equipment: { [id.platform('t_tel')]: 10 } });
+    const cut = brigade(pocket), rear = brigade(t.nodeAt(49.8, 24));
+    cut.magazine = {};
+    rear.magazine = {};
+    t.engine.run(t.world, 2 * DAY);
+    expect(rear.magazine[id.munition('t_srbm')] ?? 0).toBeGreaterThan(0);
+    expect(cut.magazine[id.munition('t_srbm')] ?? 0).toBe(0);
+  });
+
   it('feeds forces fighting in an enemy-held cell across the line from friendly ground, at the last-mile share, but not a spearhead two cells deep', () => {
     const t = setup();
     t.war('RUS', 'UKR');
@@ -84,6 +103,39 @@ describe('logistics', () => {
     expect(across).toBeCloseTo(LAST_MILE_CAPACITY * best, 3);
     expect(t.fill(assault, 'ammo')).toBeGreaterThan(0.31);
     expect(supplyFactor(t.world, t.map, spearhead.node, rus)).toBe(0);
+  });
+
+  it('feeds an assault along the line of contact when the enemy outnumbers it in the own cell behind it', () => {
+    const t = setup();
+    t.war('RUS', 'UKR');
+    const rus = id.nation('RUS');
+    const contested = t.nodeAt(49.5, 36.5); // Kharkiv
+    const behind = [...t.map.neighbors(contested)].filter((n) => n < t.map.landCount && t.world.control[n] === rus);
+    expect(behind.length).toBeGreaterThan(0);
+    const assault = t.brigade('RUS', contested);
+    for (const n of behind) for (let i = 0; i < 3; i++) t.brigade('UKR', n as NodeId);
+    t.drain(assault, 0.3);
+    t.engine.run(t.world, 2 * DAY);
+    const s = t.world.slices.logistics;
+    expect(behind.every((n) => s.networks[s.networkOf[rus]].occupied.includes(n))).toBe(true);
+    const fedBehind = behind.map((v) =>
+      Math.max(0, ...[...t.map.neighbors(v)].filter((w) => w < t.map.landCount && t.world.control[w] === rus && !s.networks[s.networkOf[rus]].occupied.includes(w)).map((w) => supplyFactor(t.world, t.map, w as NodeId, rus))),
+    );
+    const across = supplyFactor(t.world, t.map, contested, rus);
+    expect(across).toBeGreaterThan(0);
+    expect(across).toBeCloseTo(LAST_MILE_CAPACITY * LAST_MILE_CAPACITY * Math.max(...fedBehind), 2);
+    expect(t.fill(assault, 'ammo')).toBeGreaterThan(0.31);
+  });
+
+  it('lets a host nation supply foreign forces based on its ground in peacetime', () => {
+    const t = setup();
+    const udeid = t.nodeAt(25.12, 51.32);
+    expect(t.world.control[udeid]).toBe(id.nation('QAT'));
+    const wing = t.brigade('USA', udeid);
+    t.drain(wing, 0.3);
+    t.engine.run(t.world, 2 * DAY);
+    expect(supplyFactor(t.world, t.map, udeid, id.nation('USA'))).toBeCloseTo(HOST_SUPPORT * t.world.theater.infrastructure[udeid], 2);
+    expect(t.fill(wing, 'fuel')).toBeGreaterThan(0.31);
   });
 
   it('lets intruders cut the roads through a cell only while they outnumber its defenders', () => {
@@ -200,12 +252,13 @@ describe('logistics', () => {
     expect(t.fill(f, 'ammo')).toBeLessThan(0.36); // the open route would have refilled it past 0.5
   });
 
-  it('supplies forces abroad through allied depots and ports only when they share a bloc', () => {
+  it('supplies forces abroad through allied depots and ports only when they share a bloc, and by host support otherwise', () => {
     const t = setup();
     const lublin = t.nodeAt(51.2, 22.6);
     const f = t.brigade('USA', lublin);
     t.engine.step(t.world);
-    expect(supplyFactor(t.world, t.map, lublin, f.nation)).toBe(0);
+    // Outside a bloc only the host feeds them.
+    expect(supplyFactor(t.world, t.map, lublin, f.nation)).toBeLessThanOrEqual(HOST_SUPPORT);
 
     t.world.nations[id.nation('USA')].blocs = ['NATO'];
     t.world.nations[id.nation('POL')].blocs = ['NATO'];
@@ -362,6 +415,46 @@ describe('logistics', () => {
     expect(f.equipment[inf]).toBe(est[inf]);
     expect(pol.stockpile[mbt]).toBe(200 - est[mbt]);
     expect(pol.reserves).toBeLessThanOrEqual(crew);
+  });
+
+  it('raises new brigades from surplus trained reserves at war, one a month, keeping a replacement reserve back', () => {
+    const t = setup();
+    const ukr = id.nation('UKR');
+    const nation = t.world.nations[ukr];
+    t.war('UKR', 'RUS');
+    const infantry = { [id.platform('t_inf')]: 400, [id.platform('t_mbt')]: 30 };
+    const template = t.brigade('UKR', nation.capital, { equipment: infantry, personnel: 4_000 });
+    nation.stockpile[id.platform('t_mbt')] = 0;
+    nation.reserves = 4_000 * 3 + 0.1 * 4_000;
+    const raised = () => Object.values(t.world.formations).filter((f) => f.nation === ukr && f !== template);
+    t.engine.run(t.world, 15 * DAY);
+    expect(raised().length).toBe(1);
+    t.engine.run(t.world, 20 * DAY);
+    // Each manned from reserves, with rifle squads only: there are no tanks in the stockpile.
+    expect(raised().length).toBe(2);
+    for (const f of raised()) {
+      expect(f.personnel).toBe(4_000);
+      expect(f.equipment[id.platform('t_inf')]).toBe(400);
+      expect(f.equipment[id.platform('t_mbt')]).toBeUndefined();
+      expect(f.order.posture).toBe('reserve');
+    }
+    expect(nation.reserves).toBeCloseTo(4_000 + 400, 6);
+    t.engine.run(t.world, 60 * DAY);
+    // The last 4,400 men stay as replacements: the buffer is a tenth of the 12,000 now fielded.
+    expect(raised().length).toBe(2);
+  });
+
+  it('leaves raising brigades to a human player who has not delegated the home front', () => {
+    const t = setup();
+    const ukr = id.nation('UKR');
+    const nation = t.world.nations[ukr];
+    nation.controlledBy = 'human';
+    t.world.slices.command = { [ukr]: { ai: { ...DEFAULT_DELEGATION, homefront: false }, held: {}, answers: {} } };
+    t.war('UKR', 'RUS');
+    t.brigade('UKR', nation.capital, { equipment: { [id.platform('t_inf')]: 400 }, personnel: 4_000 });
+    nation.reserves = 100_000;
+    t.engine.run(t.world, 15 * DAY);
+    expect(Object.values(t.world.formations).filter((f) => f.nation === ukr).length).toBe(1);
   });
 
   it('reloads a warship from the national stockpile in port but not at sea', () => {

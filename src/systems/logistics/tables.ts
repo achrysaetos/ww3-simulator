@@ -157,6 +157,14 @@ export const FRONTLINE_COST = 1.5;
 export const LAST_MILE_CAPACITY = 0.5;
 
 /**
+ * Supply factor a host nation gives foreign forces stationed on its ground, times the cell's
+ * infrastructure: fuel, food and transport under host-nation support agreements (NATO AJP-4.5)
+ * and local contracts, as at Al Udeid, Bahrain, Djibouti or Gyumri. Judgment: half a full cell,
+ * the same as feeding across a contact line.
+ */
+export const HOST_SUPPORT = 0.5;
+
+/**
  * Best supply an airfield can get by airlift alone. Calibration: the Stalingrad
  * airlift averaged about 100 t/day against 700 t/day needed (~15%); Demyansk
  * did better with a smaller pocket. Enemy air control scales it down.
@@ -247,5 +255,15 @@ export const REGENERATED_CLASSES: ReadonlySet<PlatformClass> = new Set(['infantr
 export const RECONSTITUTE_DAYS = 90;
 /** A re-formed formation must field at least this share of its establishment platforms. */
 export const RECONSTITUTE_MIN_STRENGTH = 0.5;
+/**
+ * Days between new brigades a nation at war raises from surplus reserves: Ukraine formed ~10-14 new
+ * brigades in 2024 (the 150-155th and others; ISW, RUSI), about one a month, bound by cadres, staff
+ * and kit rather than men.
+ */
+export const RAISE_EVERY_DAYS = 30;
+/** Trained reserves kept back to replace losses, as a share of the troops a nation fields (judgment: ~2 months of heavy losses). */
+export const RESERVE_BUFFER_SHARE = 0.1;
+/** Smallest establishment counted as a brigade to copy when raising one; smaller entries are battalions or cadres. */
+export const MIN_BRIGADE_PERSONNEL = 2_000;
 /** Kinds that are re-formed after destruction. Lost ships and air wings are not rebuilt this way. */
 export const RECONSTITUTED_KINDS: ReadonlySet<FormationKind> = new Set(['maneuver', 'artillery', 'air_defense', 'missile']);

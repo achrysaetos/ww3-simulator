@@ -14,6 +14,7 @@
 import type { System } from '../../core/engine';
 import type { GameMap } from '../../core/map';
 import type { Formation, FormationId, FormationKind, NationId, NodeId, PlatformClass, PlatformId, World } from '../../core/types';
+import { isrJammed } from '../c2';
 
 export type IntelSource = 'base' | 'territory' | 'contact' | 'airborne' | 'satellite' | 'naval';
 
@@ -169,7 +170,7 @@ export const intel: System = {
         for (const n of watchers.get(f.node) ?? []) see(n, 'contact');
       }
       if (f.kind !== 'submarine')
-        for (const s of isr) if (!seen.has(s.nation) && observers.has(s.nation) && map.distanceKm(s.node, f.node) <= AIRBORNE_ISR_KM) see(s.nation, 'airborne');
+        for (const s of isr) if (!seen.has(s.nation) && observers.has(s.nation) && map.distanceKm(s.node, f.node) <= AIRBORNE_ISR_KM && !isrJammed(world, f.node, s.nation, f.id)) see(s.nation, 'airborne');
       const vis = SAT_VISIBILITY[f.kind] ?? 0;
       if (vis > 0) for (const [n, p] of sats) if (observers.has(n) && !seen.has(n) && draw(f.id, world.tick, n) < p * vis) see(n, 'satellite');
       for (const n of tracks[f.id] ?? []) see(n, 'naval');

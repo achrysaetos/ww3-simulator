@@ -2,7 +2,7 @@ import type { Catalog } from '../../core/catalog';
 import { platformCount } from '../../core/forces';
 import type { Formation, NationId, NodeId, Order, PlatformId, World } from '../../core/types';
 import { atBase, estimate, picture } from '../intel';
-import type { AiState, ForceIndex, Plan } from './types';
+import type { AiState, ForceIndex, Plan, SentOrder } from './types';
 
 /** Contacts older than this confidence are not planned against: a stale fix is somewhere else by now (intel STALENESS). */
 const MIN_CONFIDENCE = 0.25;
@@ -87,10 +87,32 @@ export function strength(ai: AiState, f: Formation): number {
   return base > 0 ? now / base : 0;
 }
 
-/** Queue an order unless the formation already has it, so planning every tick does not reset movement. */
+/** A refused order is offered again after this long even if nothing visible changed (judgment: a staff re-checks a standing request every few days). */
+const RETRY_DAYS = 3;
+
+/** Whether `held` is the order `sent` as the engine stores it: an escort's node is filled in from its ward. */
+const carries = (held: Order, sent: SentOrder) => held.posture === sent.posture && held.targetFormation === sent.targetFormation && (sent.target === undefined || held.target === sent.target);
+
+/**
+ * Whether the engine refused the order sent at `last.tick`, applied the tick after: the formation
+ * still holds an older order (air and naval refusals leave it be), or holds another one given that
+ * very tick (a land formation with no route is halted to defend).
+ */
+const refused = (f: Formation, last: SentOrder) => f.order.issuedTick <= last.tick || (f.order.issuedTick === last.tick + 1 && !carries(f.order, last));
+
+/**
+ * Queue an order unless the formation already has it, so planning every tick does not reset
+ * movement. An order the engine refused is not sent again while the formation stands where it
+ * stood, until a front changes or RETRY_DAYS pass.
+ */
 export function issue(p: Plan, f: Formation, order: Omit<Order, 'issuedTick'>): void {
   const o = f.order;
   if (o.posture === order.posture && o.target === order.target && o.targetFormation === order.targetFormation) return;
+  const { tick, dtHours } = p.world;
+  const last = p.ai.sent[f.id];
+  const same = last?.posture === order.posture && last.target === order.target && last.targetFormation === order.targetFormation;
+  if (same && last.node === f.node && refused(f, last) && tick < last.tick + (RETRY_DAYS * 24) / dtHours) return;
+  p.ai.sent[f.id] = { posture: order.posture, target: order.target, targetFormation: order.targetFormation, node: f.node, tick };
   p.out.push({ type: 'order', nation: f.nation, formation: f.id, order });
 }
 

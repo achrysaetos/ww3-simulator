@@ -70,12 +70,15 @@ npm run typecheck
   landings.
 - **Logistics.** Supply networks shared within each bloc run from depots over rail,
   road, sea and air. Supply decays with distance from the railhead, and pockets get
-  nothing. Repair, replacement from national stockpiles, and infrastructure damage and
-  repair are modelled.
+  nothing. Fronts are fed along the line of contact, and host nations supply foreign
+  bases. Repair, replacement from national stockpiles, new brigades raised from surplus
+  reserves, and infrastructure damage and repair are modelled.
 - **Economy and industry.** Wartime mobilization with realistic ramp-up lags.
   Production lines for shells, missiles, aircraft and ships run at sourced peacetime
   and surge rates. Imports of energy, chips, rare earths and explosives, sanctions,
-  blockade shocks, deficits and the training pipeline are modelled.
+  blockade shocks, deficits and the training pipeline are modelled. A production order
+  beyond what the defence budget buys is paid from the treasury, and a new line takes
+  years to reach the plant a nation can build.
 - **Strategic war.** Nuclear release, missile defense, and blast and thermal effects
   scaled from Glasstone and Dolan against real city populations. Fallout drifts on
   prevailing winds and decays. ASAT and orbital debris, cyber attacks, and nuclear

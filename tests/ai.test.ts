@@ -3,8 +3,11 @@ import { atWar, relationMut, type System } from '../src/core/engine';
 import type { Command, MunitionId, NationId, NodeId, SimEvent } from '../src/core/types';
 import { createSession } from '../src/scenarios';
 import { createAi } from '../src/systems/ai';
+import { indexForces } from '../src/systems/ai/forces';
+import { stagingSector } from '../src/systems/ai/fronts';
 import { landSlice } from '../src/systems/land';
 import { createDiplomacy } from '../src/systems/diplomacy';
+import { DEFAULT_DELEGATION } from '../src/systems/orders';
 import { isrFactor, strategic } from '../src/systems/strategic';
 import { id, testWorld } from '../src/testkit';
 import { airWorld, wing } from './air.fixture';
@@ -111,6 +114,18 @@ describe('operational AI', () => {
       expect(count).toBeGreaterThanOrEqual(3 * (estAt(target) + 0.5 * support));
     }
   });
+
+  it('stages only from a host that consented: Russia from Belarus, never Turkey from Azerbaijan on the strength of a defence pact', () => {
+    const t = testWorld([createAi()]);
+    t.war('TUR', 'RUS');
+    t.war('RUS', 'UKR');
+    for (const n of ['TUR', 'AZE']) t.world.nations[N(n)].blocs = ['TUR-AZE'];
+    for (const n of ['RUS', 'BLR']) t.world.nations[N(n)].blocs = ['RUS-BLR'];
+    const index = indexForces(t.world, t.catalog);
+    expect(stagingSector(t.world, t.map, N('TUR'), new Set([N('TUR')]), new Set([N('RUS')]), index)).toBeUndefined();
+    const belarus = stagingSector(t.world, t.map, N('RUS'), new Set([N('RUS')]), new Set([N('UKR'), N('TUR')]), index);
+    expect(belarus?.nodes.every((n) => t.world.control[n] === 'BLR')).toBe(true);
+  });
 });
 
 describe('nuclear release', () => {
@@ -140,6 +155,14 @@ describe('nuclear release', () => {
   const bold = { casualtyTolerance: 0.5, interventionism: 0.5, riskTolerance: 1, aggression: 0.5 };
   const refusals = (events: SimEvent[]) => events.filter((e) => e.type === 'message' && e.text.startsWith('nuclear release refused'));
   const releases = (cmds: Command[], nation: string) => cmds.filter((c) => c.type === 'nuclear_release' && c.nation === nation);
+  /** Each release `nation` orders over `ticks`, with the tick it was ordered on. */
+  const releasesOver = (t: T, ticks: number, nation: string) => {
+    const out: (Extract<Command, { type: 'nuclear_release' }> & { tick: number })[] = [];
+    t.engine.run(t.world, ticks, (w) => {
+      for (const c of w.pending) if (c.type === 'nuclear_release' && c.nation === nation) out.push({ ...c, tick: w.tick });
+    });
+    return out;
+  };
 
   it('a no-first-use state facing defeat does not release until it has been struck by nuclear weapons', () => {
     let struck: NodeId = 0 as NodeId;
@@ -157,8 +180,12 @@ describe('nuclear release', () => {
     expect(t.world.slices.diplomacy.assessment[N('CHN')].capitalThreatened).toBe(true);
     expect(releases(before, 'CHN')).toEqual([]);
     // One attack draws one answer, not a salvo every few days for the rest of the war.
-    const after = commandsOver(t, 120);
-    expect(releases(after, 'CHN')).toHaveLength(1);
+    const after = releasesOver(t, 120, 'CHN');
+    expect(new Set(after.map((r) => r.tick)).size).toBe(1);
+    // China's answer is massive and countervalue: Russian cities, several at once, never ground Russia does not hold.
+    expect(after.length).toBeGreaterThan(2);
+    for (const r of after) expect(t.world.control[r.target]).toBe('RUS');
+    expect(after.some((r) => t.map.cities.some((c) => c.node === r.target && c.nation === 'RUS'))).toBe(true);
   });
 
   it('an escalate-to-deescalate state releases once its doctrine threshold is crossed, and not before', () => {
@@ -199,8 +226,66 @@ describe('nuclear release', () => {
     // A month at the threshold with nothing changing: one decision, whatever it was.
     expect(releases(commandsOver(t, 120), 'RUS').length).toBeLessThanOrEqual(1);
     take(t, 'RUS', 'UKR', 0.2);
-    expect(releases(commandsOver(t, 12), 'RUS')).toHaveLength(1);
+    const next = releasesOver(t, 12, 'RUS');
+    expect(next.length).toBeGreaterThan(0);
+    expect(new Set(next.map((r) => r.tick)).size).toBe(1);
     expect(releases(commandsOver(t, 120), 'RUS')).toEqual([]);
+  });
+
+  it('answers a nuclear attack only on ground the attacker holds, never on the forces of a third party fighting it', () => {
+    const t: T = testWorld([
+      emitter(1, (tick) => ({ type: 'nuclear_detonation', tick, by: N('RUS'), node: t.nodeAt(52.2, 21), yieldKt: 10, casualties: 500 })),
+      strategic, createDiplomacy(), createAi({ USA: bold }),
+    ]);
+    t.world.nations[N('USA')].nuclear = { warheads: 500, deployed: 500, doctrine: 'calculated_ambiguity' };
+    t.world.nations[N('RUS')].nuclear = { warheads: 500, deployed: 500, doctrine: 'escalate_to_deescalate' };
+    t.add({ nation: N('USA'), name: 'Strategic forces', kind: 'strategic', echelon: 'division', node: t.nodeAt(47.5, -111), equipment: { [id.platform('t_icbm')]: 20 } });
+    t.war('RUS', 'UKR');
+    t.war('RUS', 'USA');
+    // Russia's heaviest concentration stands in a cell Ukraine holds, alongside Ukrainian troops; a lighter one inside Russia.
+    const ukrHeld = t.map.nodesOf(N('UKR')).find((n) => t.map.popShare[n] < 0.02)!;
+    for (let i = 0; i < 6; i++) brigade(t, 'RUS', ukrHeld);
+    brigade(t, 'UKR', ukrHeld);
+    const rusHeld = t.map.nodesOf(N('RUS')).find((n) => t.map.popShare[n] < 0.005 && t.map.distanceKm(n, ukrHeld) < 800)!;
+    brigade(t, 'RUS', rusHeld);
+    brigade(t, 'USA', t.nodeAt(52.2, 21));
+    const answer = releasesOver(t, 12, 'USA');
+    expect(answer.length).toBeGreaterThan(0);
+    for (const r of answer) expect(t.world.control[r.target]).toBe('RUS');
+    expect(atWar(t.world, N('USA'), N('UKR'))).toBe(false);
+  });
+
+  it('warns before first use: a war that jumps past the threshold in one step draws a warning, and release only a day later', () => {
+    const t = testWorld([createDiplomacy(), createAi({ RUS: bold })]);
+    t.world.nations[N('RUS')].nuclear = { warheads: 1500, deployed: 1500, doctrine: 'escalate_to_deescalate' };
+    t.war('RUS', 'UKR');
+    losing(t, 'RUS', 'UKR', 0.15);
+    const events: SimEvent[] = [];
+    const fired: number[] = [];
+    t.engine.run(t.world, 24, (w, e) => {
+      events.push(...e);
+      for (const c of w.pending) if (c.type === 'nuclear_release' && c.nation === 'RUS') fired.push(w.tick);
+    });
+    const warning = events.find((e) => e.type === 'message' && e.nation === 'RUS' && /warns/.test(e.text));
+    expect(warning).toBeDefined();
+    expect(fired.length).toBeGreaterThan(0);
+    expect((fired[0] - warning!.tick) * t.world.dtHours).toBeGreaterThanOrEqual(24);
+  });
+
+  it('Russia warns once any of its homeland is held and alerts as the enemy closes on Moscow, short of first use', () => {
+    const t = testWorld([strategic, createDiplomacy(), createAi({ RUS: bold })]);
+    t.world.nations[N('RUS')].nuclear = { warheads: 4000, deployed: 1500, doctrine: 'escalate_to_deescalate' };
+    t.war('RUS', 'UKR');
+    const moscow = t.world.nations[N('RUS')].capital;
+    const at = (km: number) => t.map.nodesOf(N('RUS')).filter((n) => t.map.popShare[n] < 0.01).sort((a, b) => Math.abs(t.map.distanceKm(a, moscow) - km) - Math.abs(t.map.distanceKm(b, moscow) - km))[0];
+    t.world.control[at(700)] = N('UKR');
+    const early = commandsOver(t, 8);
+    expect(t.world.history.some((e) => e.type === 'message' && e.nation === 'RUS' && /warns/.test(e.text))).toBe(true);
+    expect(early.some((c) => c.type === 'nuclear_alert')).toBe(false);
+    t.world.control[at(260)] = N('UKR');
+    const later = commandsOver(t, 8);
+    expect(later.some((c) => c.type === 'nuclear_alert' && c.nation === 'RUS')).toBe(true);
+    expect(releases(later, 'RUS')).toEqual([]);
   });
 
   it('Pakistan holds while Indian forces stand near Islamabad and uses first once a Kidwai threshold is crossed', () => {
@@ -225,8 +310,9 @@ describe('nuclear release', () => {
 
 describe('strikes on a neutral host', () => {
   /** Strike orders China's missile brigade aims at a US air wing based at Yonaguni, Japan, ~150 km from Taiwan. */
-  const strikesOnJapan = (japanOpinionOfChina: number) => {
+  const strikesOnJapan = (japanOpinionOfChina: number, setup: (t: T) => void = () => {}) => {
     const t = testWorld([createDiplomacy(), createAi()]);
+    setup(t);
     const base = t.map.nodeAt(24.45, 123.0);
     const launch = t.map.nodesOf(N('CHN')).sort((a, b) => t.map.distanceKm(a, base) - t.map.distanceKm(b, base))[0];
     t.add({ nation: N('USA'), name: 'US air wing', kind: 'air_wing', echelon: 'wing', node: base, equipment: { [id.platform('t_fighter')]: 24 } });
@@ -245,6 +331,14 @@ describe('strikes on a neutral host', () => {
 
   it('leaves them alone on a host that is not hostile', () => {
     expect(strikesOnJapan(20)).toEqual([]);
+  });
+
+  it("leaves them alone when the striker is a player's delegate and the player kept strategic decisions", () => {
+    const keepStrategic = (t: T) => {
+      t.world.nations[N('CHN')].controlledBy = 'human';
+      t.world.slices.command = { [N('CHN')]: { ai: { ...DEFAULT_DELEGATION, strategic: false }, held: {}, answers: {} } };
+    };
+    expect(strikesOnJapan(-55, keepStrategic)).toEqual([]);
   });
 });
 
@@ -430,5 +524,19 @@ describe('strike target value', () => {
     t.world.nations[N('UKR')].stockpile[id.munition('t_cruise')] = 10_000;
     const aimed = commandsOver(t, 8).flatMap((c) => (c.type === 'order' && c.nation === 'UKR' && c.order.posture === 'strike' ? [c.order.target] : []));
     expect(aimed).toContain(bombers.node);
+  });
+});
+
+describe('mobilization and the home front', () => {
+  it('asks no more of a public than it will bear unless the nation is invaded', () => {
+    const levels = (tolerance: number | undefined) => {
+      const t = testWorld([createAi()]);
+      t.war('USA', 'CHN');
+      if (tolerance !== undefined)
+        (t.world.slices as unknown as Record<string, unknown>).politics = { nations: { [N('USA')]: { mobilizationTolerance: tolerance } } };
+      return commandsOver(t, 8).filter((c): c is Extract<Command, { type: 'set_mobilization' }> => c.type === 'set_mobilization' && c.nation === N('USA')).map((c) => c.level);
+    };
+    expect(Math.max(...levels(undefined))).toBeGreaterThan(0.1);
+    expect(Math.max(0, ...levels(0.1))).toBeLessThanOrEqual(0.1);
   });
 });

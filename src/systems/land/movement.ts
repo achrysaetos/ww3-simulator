@@ -6,6 +6,7 @@ import type { Command, Formation, NationId, NodeId, PlatformId, World } from '..
 import { allied, canEnter, indexByNode, isLandFormation, landSlice } from './state';
 import { cannotDrop, insert, supplyAirheads } from './airborne';
 import { airlift, embarkation, liftMode, overseas } from './strategic';
+import { exposureLosses, groundFactorAt } from '../weather/effects';
 import {
   AIR_INTERDICTION, DISMOUNTS, ENTRENCH_PER_DAY, FATIGUE_MARCH_PER_DAY, FATIGUE_RECOVERY_PER_DAY, HOSTILE_GROUND_COST,
   MARCH_HOURS_PER_DAY, MARCH_SPEED_FACTOR, MORALE_RECOVERY_PER_DAY, NO_FUEL_SPEED, RAIL_BOOST_MAX, RAIL_KM_FULL, RALLY_MORALE, TERRAIN,
@@ -41,13 +42,13 @@ function railBoost(world: World, map: GameMap, nation: NationId, node: NodeId): 
   return 1 + RAIL_BOOST_MAX * Math.min(1, map.railKm[node] / RAIL_KM_FULL) * world.theater.infrastructure[node];
 }
 
-/** Effective km of entering `to`: terrain friction, hostile ground, minus rail boost. Infinity when closed to this nation. */
+/** Effective km of entering `to`: terrain friction, hostile ground, minus rail boost, and today's mud or snow there. Infinity when closed to this nation. */
 function edgeKm(world: World, map: GameMap, f: Formation, to: NodeId, km: number): number {
   if (!canEnter(world, map, f.nation, to)) return Infinity;
   const holder = world.control[to];
   const hostile = !!holder && atWar(world, f.nation, holder);
   if (hostile && !canSeize(f)) return Infinity;
-  return (km * TERRAIN[map.terrain[to]].moveCost * (hostile ? HOSTILE_GROUND_COST : 1)) / railBoost(world, map, f.nation, to);
+  return (km * TERRAIN[map.terrain[to]].moveCost * (hostile ? HOSTILE_GROUND_COST : 1)) / railBoost(world, map, f.nation, to) / groundFactorAt(world, map, to);
 }
 
 /**
@@ -192,6 +193,7 @@ export const landMovement: System = {
     const dtDays = world.dtHours / 24;
     for (const f of Object.values(world.formations)) {
       if (!isLandFormation(f, ctx.map)) continue;
+      f.personnel -= exposureLosses(world, ctx.map, f);
       const moving = MARCHING.has(f.order.posture) && f.order.path?.length && f.status === 'active';
       if (moving) march(world, ctx, f, byNode);
       else rest(f, dtDays, f.id in isolated, f.id in engaged);

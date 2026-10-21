@@ -3,7 +3,7 @@ import type { Formation, FormationId, NationId, NodeId, World } from '../../core
 import { alliances } from '../../data/nations';
 import { debarkation, landMass, overseas } from '../land/strategic';
 import { isGround, issue } from './forces';
-import type { Plan, Sector } from './types';
+import type { Plan } from './types';
 
 /**
  * Readiness to deploy beyond the nation's own borders. The NATO Force Model (Madrid
@@ -60,19 +60,38 @@ export function commitment(nation: NationId, host: NationId | undefined): number
 
 /** Share of a nation's home-based ground power kept at home for homeland defence (estimate; US doctrine keeps a homeland reserve). */
 const HOME_RESERVE = 0.25;
-/** A unit bound for a port this close to a sector counts toward that sector. */
-const INBOUND_KM = 800;
-/** Defensive force ratio, as in land.ts. */
-const HOLD_RATIO = 3;
+/** Ground forces this close to a sector, on its land mass, are the forces that fight there (judgment: a corps sector and its depth). */
+const THEATRE_KM = 400;
+
+/**
+ * The share of the enemy's ground power a nation's war plans want the coalition to match in a
+ * theatre, by the enemy fighting there, where its strategy says so; parity elsewhere. The US
+ * 2022 National Defense Strategy names China the pacing challenge and Russia the acute threat,
+ * and North Korea and Iran persistent threats to deter together with allies, whose own armies
+ * hold those fronts (the share is a judgment).
+ */
+const PRIORITY: Readonly<Partial<Record<string, Readonly<Partial<Record<string, number>>>>>> = { USA: { PRK: 0.5, IRN: 0.5 } };
 
 const deploying = (p: Plan, f: Formation) => f.status === 'embarked' || (f.order.posture === 'move' && f.order.target !== undefined && overseas(p.ctx.map, f.node, f.order.target));
 
+/** A front strategic deployment can send forces to: the ground power on both sides around it and the port it lands at. */
+interface Theatre {
+  port: NodeId;
+  enemy: number;
+  /** The whole coalition's: allies' armies, the nation's own forces there and those bound for it. */
+  friendly: number;
+  /** Treaty commitment to the holder times the nation's priority for the enemy there: the coalition strength wanted per unit of enemy. */
+  weight: number;
+}
+
 /**
- * Strategic deployment: a nation at war whose homeland is quiet ships and flies its
- * ready ground forces to friendly ports in the theatres where its coalition is fighting
- * (reception, staging and onward movement happen on arrival, under planLand). Forces are
- * shared out by treaty commitment times threat; a homeland reserve and all territorial
- * forces stay home.
+ * Strategic deployment: a nation at war whose homeland is quiet ships and flies its ready
+ * ground forces to friendly ports in the theatres where its coalition is fighting (reception,
+ * staging and onward movement happen on arrival, under planLand). The whole coalition's forces
+ * count: each formation goes first where the coalition falls furthest short of the strength the
+ * nation's treaties and stated priorities want against the enemy there, then, once every front
+ * has it, where the enemy most outweighs the coalition. So forces flow to the fronts allies hold
+ * thinly, not to the biggest enemy army. A homeland reserve and all territorial forces stay home.
  */
 export function planDeploy(p: Plan): void {
   const { map } = p.ctx;
@@ -83,17 +102,9 @@ export function planDeploy(p: Plan): void {
   const own = p.index.byNation.get(p.nation) ?? [];
   const power = p.index.power;
 
-  const inbound = new Map<Sector, number>();
-  const nearest = (port: NodeId) => {
-    let best: Sector | undefined, bestKm = INBOUND_KM;
-    for (const s of p.sectors) {
-      const km = mass[s.key] === mass[port] ? map.distanceKm(s.key, port) : Infinity;
-      if (km < bestKm) { bestKm = km; best = s; }
-    }
-    return best;
-  };
   // Home-based ground power, and how much of it is already abroad or on its way.
   let total = 0, sent = 0;
+  const inbound: { port: NodeId; power: number }[] = [];
   for (const [id, port] of Object.entries(p.ai.deployments) as [FormationId, NodeId][]) {
     const f = world.formations[id];
     if (!f || f.status === 'destroyed' || !deploying(p, f)) {
@@ -101,47 +112,68 @@ export function planDeploy(p: Plan): void {
       continue;
     }
     if (f.status === 'embarked') { total += power(f); sent += power(f); }
-    const s = nearest(port);
-    if (s) inbound.set(s, (inbound.get(s) ?? 0) + power(f));
+    inbound.push({ port, power: power(f) });
   }
   const homeBased = own.filter((f) => isGround(f) && f.status === 'active' && !theatres.has(mass[f.home]));
   for (const f of homeBased) {
     total += power(f);
     if (theatres.has(mass[f.node]) || deploying(p, f)) sent += power(f);
   }
-  const home = homeBased
-    .filter((f) => !map.isSea(f.node) && !theatres.has(mass[f.node]) && !f.territorial && !deploying(p, f))
+  const ready = homeBased
+    .filter((f) => !map.isSea(f.node) && !theatres.has(mass[f.node]) && !deploying(p, f) && releasable(p, f))
     .sort((a, b) => b.readiness - a.readiness || (a.id < b.id ? -1 : 1));
   let budget = (1 - HOME_RESERVE) * total - sent;
-  if (budget <= 0 || !home.length) return;
+  if (budget <= 0 || !ready.length) return;
 
-  // The nation's own forces already in each sector or bound for it.
-  const committed = new Map<Sector, number>();
-  for (const s of p.sectors) {
-    let v = inbound.get(s) ?? 0;
-    for (const n of s.nodes) for (const g of p.index.groundAt.get(n) ?? []) if (g.nation === p.nation) v += power(g);
-    committed.set(s, v);
-  }
-  // Each formation goes where treaty weight times threat, discounted by what the nation already sends there, is largest:
-  // forces flow to theatres in proportion to the stakes, not only to plug today's gaps, as US war plans for Europe and Korea do.
-  const score = (s: Sector) => (commitment(p.nation, world.control[s.key]) * s.threat) / (1 + (HOLD_RATIO * committed.get(s)!) / Math.max(1e-9, s.threat));
-  const ports = new Map<Sector, NodeId | undefined>();
-  const open = new Set(p.sectors.filter((s) => s.threat > 0));
-  for (const f of home) {
-    if (budget <= 0 || !open.size) break;
-    if (!releasable(p, f)) continue;
-    let best: Sector | undefined, bestScore = 0;
-    for (const s of open) if (score(s) > bestScore) { bestScore = score(s); best = s; }
-    if (!best) break;
-    if (!ports.has(best)) ports.set(best, debarkation(world, map, p.nation, best.key, 'sea'));
-    const port = ports.get(best);
-    if (port === undefined) {
-      open.delete(best);
-      continue;
+  const open = theatresOf(p, inbound);
+  const want = (t: Theatre) => t.weight * t.enemy;
+  for (const f of ready) {
+    if (budget <= 0) break;
+    // Fronts below the strength the nation's plans want come first, the largest shortfall first; past that, the thinnest.
+    const short = open.some((t) => want(t) > t.friendly);
+    let best: Theatre | undefined, bestScore = 0;
+    for (const t of open) {
+      const score = short ? want(t) - t.friendly : want(t) / Math.max(t.friendly, 1e-9);
+      if (score > bestScore) { bestScore = score; best = t; }
     }
-    issue(p, f, { posture: 'move', target: port });
-    p.ai.deployments[f.id] = port;
-    committed.set(best, committed.get(best)! + power(f));
+    if (!best) break;
+    issue(p, f, { posture: 'move', target: best.port });
+    p.ai.deployments[f.id] = best.port;
+    best.friendly += power(f);
     budget -= power(f);
   }
+}
+
+/** The coalition's sectors that face an enemy army and have a friendly port, each with the ground balance around it. */
+function theatresOf(p: Plan, inbound: readonly { port: NodeId; power: number }[]): Theatre[] {
+  const { map } = p.ctx;
+  const { world } = p;
+  const mass = landMass(map);
+  const armies: { node: NodeId; friendly: number; enemy: number }[] = [];
+  for (const [n, gs] of p.index.groundAt) {
+    if (map.isSea(n as NodeId)) continue;
+    let friendly = 0, enemy = 0;
+    for (const g of gs) {
+      if (p.friends.has(g.nation)) friendly += p.index.power(g);
+      else if (p.enemies.has(g.nation)) enemy += p.index.power(g);
+    }
+    if (friendly || enemy) armies.push({ node: n as NodeId, friendly, enemy });
+  }
+  const out: Theatre[] = [];
+  for (const s of p.sectors) {
+    if (s.threat <= 0) continue;
+    let enemy = 0, friendly = 0;
+    for (const a of armies) {
+      if (mass[a.node] !== mass[s.key] || map.distanceKm(a.node, s.key) > THEATRE_KM) continue;
+      enemy += a.enemy;
+      friendly += a.friendly;
+    }
+    if (enemy <= 0) continue;
+    const port = debarkation(world, map, p.nation, s.key, 'sea');
+    if (port === undefined) continue;
+    for (const i of inbound) if (mass[i.port] === mass[s.key] && map.distanceKm(i.port, s.key) <= THEATRE_KM) friendly += i.power;
+    const weight = commitment(p.nation, world.control[s.key]) * (PRIORITY[p.nation]?.[world.control[s.enemyNodes[0]]] ?? 1);
+    out.push({ port, enemy, friendly, weight });
+  }
+  return out;
 }

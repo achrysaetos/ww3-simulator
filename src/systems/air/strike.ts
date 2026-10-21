@@ -14,6 +14,7 @@ import { nodeDistance, type AirGroup, type AirPicture } from './picture';
 import { visibility } from './combat';
 import { emitBattle, hasSupport } from './superiority';
 import { spaceSupport } from '../strategic/space';
+import { jammedHits } from '../c2';
 import { AIRFRAME, ATTRITABLE_COST_USD_M, DRONE_SITE_LAUNCHES_PER_DAY, isRoundOnRail, LAUNCHER, MOBILE_TARGETS, NON_STRIKE_KINDS, STRIKE_ROLES, TARGET_OF_CLASS, TUNING } from './tables';
 
 export interface AirSlice {
@@ -471,6 +472,7 @@ function victims(ctx: SimContext, pic: AirPicture, target: NodeId, attacker: Nat
 /** Apply the weapons that got through. Returns what they did for the strike event, and whether anything was destroyed or damaged. */
 function applyEffect(world: World, ctx: SimContext, pic: AirPicture, slice: AirSlice, target: NodeId, attacker: NationId, m: Munition, tc: TargetClass, hits: number, tally: LossTally, flightMin: number, aimed: FormationId | undefined): { effects: StrikeEffect[]; effective: boolean } {
   if (hits <= 0) return { effects: [{ kind: 'no_effect', why: 'all_intercepted' }], effective: false };
+  hits = jammedHits(world, target, attacker, m, hits);
   if (tc === 'structure' || tc === 'hardened') {
     const owner = world.control[target];
     if (!owner || !pic.atWar(owner, attacker)) return { effects: [{ kind: 'no_effect', why: 'not_hostile' }], effective: false };

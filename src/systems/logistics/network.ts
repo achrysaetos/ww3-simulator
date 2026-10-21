@@ -1,7 +1,7 @@
 import type { GameMap } from '../../core/map';
 import type { NationId, World } from '../../core/types';
 import {
-  AIRLIFT_FACTOR, BEACH_CAPACITY, DECAY_HALF_KM, DEPOT_POP_SHARE, FRONTLINE_CAPACITY, FRONTLINE_COST, FULL_PORT, LAST_MILE_CAPACITY, MAX_DEPOTS, MIN_FACTOR, MIN_RAIL_KM,
+  AIRLIFT_FACTOR, BEACH_CAPACITY, DECAY_HALF_KM, DEPOT_POP_SHARE, FRONTLINE_CAPACITY, FRONTLINE_COST, FULL_PORT, HOST_SUPPORT, LAST_MILE_CAPACITY, MAX_DEPOTS, MIN_FACTOR, MIN_RAIL_KM,
   PORT_HANDLING_KM, RAIL_COST_PER_KM, RAIL_CUT_INFRASTRUCTURE, SEA_COST_PER_KM, TERRAIN_ROAD_COST,
 } from './tables';
 
@@ -399,26 +399,46 @@ export class NetworkSearch {
    * How forces at `node` are fed. Forces in a cell the network cannot enter (enemy-held,
    * or their own with stronger enemy forces in it) fight at its near edge, ~100 km from
    * the far one, and are fed across the contact line from the best adjacent cell their
-   * side holds, at LAST_MILE_CAPACITY of that cell's factor, never through a cell the
-   * enemy holds; a spearhead with no friendly ground next to it has outrun its road and rail net.
+   * side holds, at LAST_MILE_CAPACITY of what reaches that cell, never through a cell the
+   * enemy holds. An adjacent own cell the enemy outnumbers them in still passes on what
+   * its own neighbours feed it, so an interlocked front is fed along the line of contact;
+   * a spearhead with no friendly ground next to it has outrun its road and rail net.
    * A lodgement on a coast with no friendly ground next to it is fed over the beach
    * from the adjacent sea zone, as far as sea control lets the network reach it
    * (Normandy, Inchon); the caller scales that by the lift left to carry it.
+   * Forces on the ground of a nation outside the network and not its enemy (a base
+   * abroad, a ceasefire line) are fed like that or by the host, whichever is better.
    */
   forcesSupplyAt(inputs: SearchInputs, node: number): ForcesSupply {
     const own = this.milliAt(inputs, node);
     const { landCount, adjStart, adj } = this.map;
+    if (own > 0 || node >= landCount) return { milli: own, route: 'network' };
     const { side } = this, cell = this.controllers.cell;
     const held = side[cell[node]];
-    if (own > 0 || node >= landCount || !(held === ENEMY || (held === FRIENDLY && this.blocked.has(node)))) return { milli: own, route: 'network' };
+    const host = held !== ENEMY && held !== FRIENDLY && cell[node] !== 0;
+    if (!(held === ENEMY || host || (held === FRIENDLY && this.blocked.has(node)))) return { milli: own, route: 'network' };
     let sea = 0, land = -1;
     for (let k = adjStart[node]; k < adjStart[node + 1]; k++) {
       const v = adj[k];
       if (v >= landCount) sea = Math.max(sea, this.milliAt(inputs, v));
-      else if (side[cell[v]] === FRIENDLY) land = Math.max(land, this.milliAt(inputs, v));
+      else if (side[cell[v]] === FRIENDLY) land = Math.max(land, this.contactMilli(inputs, v));
     }
-    if (land >= 0 || held === FRIENDLY) return { milli: Math.round(Math.max(0, land) * LAST_MILE_CAPACITY), route: 'overland' };
+    const overland = Math.round(Math.max(0, land) * LAST_MILE_CAPACITY);
+    if (host) return { milli: Math.max(overland, Math.round(HOST_SUPPORT * Math.max(0, inputs.infrastructure[node]) * 1000)), route: 'overland' };
+    if (land >= 0 || held === FRIENDLY) return { milli: overland, route: 'overland' };
     return { milli: Math.min(sea, Math.round(BEACH_CAPACITY * 1000)), route: 'beach' };
+  }
+
+  /** What reaches own cell `v` for onward carriage across the contact line: its network factor, or, where the enemy outnumbers us in it, what its own neighbours feed it. */
+  private contactMilli(inputs: SearchInputs, v: number): number {
+    if (this.passable(v)) return this.milliAt(inputs, v);
+    const { landCount, adjStart, adj } = this.map;
+    let best = 0;
+    for (let k = adjStart[v]; k < adjStart[v + 1]; k++) {
+      const w = adj[k];
+      if (w < landCount && this.passable(w)) best = Math.max(best, this.milliAt(inputs, w));
+    }
+    return Math.round(best * LAST_MILE_CAPACITY);
   }
 
   /** Searches on until every node in `nodes` has its factor. */

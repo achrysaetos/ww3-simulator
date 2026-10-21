@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { COMMAND_DOMAINS, type Command, type CommandDomain, type ItemId, type NationId } from '../core/types';
 import type { SimClient } from './client';
 import type { Palette } from './colors';
-import type { EconomyView, MunitionGroup, NationDetail, WarEntry, WarView } from './snapshot';
+import type { EconomyView, HomeFrontView, NuclearAlertView, MunitionGroup, NationDetail, WarEntry, WarView } from './snapshot';
 import type { Objective } from './briefing';
 import { ObjectiveList } from './GameFlow';
 import { Bar, Section, Stat, fmtNum, fmtUsdB } from './widgets';
@@ -103,6 +103,8 @@ export function NationPanel({ client, palette, playAs, objectives, onCommand, on
         {eco && <Bar label="Foreign trade lost" value={eco.tradeLoss} tone={eco.tradeLoss > 0.4 ? 'bad' : 'warn'} />}
       </Section>
 
+      {d && <HomeFront h={d.homeFront} />}
+
       {eco && (
         <Section title="Strategic resources" right={eco.short.length ? <span className="chip enemy">short: {eco.short.length}</span> : undefined}>
           <table className="tbl" data-testid="resources">
@@ -168,6 +170,7 @@ export function NationPanel({ client, palette, playAs, objectives, onCommand, on
           {d && <Stat label="Strategic launchers">{fmtNum(d.nuclear.launchers)}</Stat>}
           {d && <Stat label="Satellites">{fmtNum(d.nuclear.satellites)}</Stat>}
         </div>
+        {d && <NuclearAlert alert={d.nuclear.alert} nation={n.id} dtHours={client.meta?.dtHours ?? 6} tick={client.state.tick} onCommand={onCommand} />}
         {d && Object.keys(d.nuclear.bmd).length > 0 && (
           <table className="tbl">
             <thead><tr><th>Missile defence</th><th className="num">Interceptors</th></tr></thead>
@@ -214,6 +217,42 @@ export function NationPanel({ client, palette, playAs, objectives, onCommand, on
   );
 }
 
+const DRIVER_LABEL: Record<string, string> = {
+  economy: 'Cost of living', losses: 'Casualty rate', rally: 'Rally after strikes', refugees: 'Refugee burden',
+  mobilization: 'Mobilisation strain', unrest: 'Elite defection', election: 'Election verdict',
+};
+
+function HomeFront({ h }: { h: HomeFrontView }) {
+  const drivers = Object.entries(h.drivers ?? {}).filter(([, v]) => Math.abs(v) >= 0.005);
+  return (
+    <Section title="Home front" right={h.protesting ? <span className="chip enemy">protests</span> : undefined}>
+      <div className="stat-grid" data-testid="home-front">
+        <Stat label="Displaced at home">{fmtNum(h.idps)}</Stat>
+        <Stat label="Refugees abroad">{fmtNum(h.refugees)}</Stat>
+        <Stat label="Sheltering">{fmtNum(h.sheltering)}</Stat>
+        <Stat label="Under occupation">{fmtNum(h.underOccupation)}</Stat>
+        <Stat label="Civilians killed">{fmtNum(h.civiliansKilled)}</Stat>
+        <Stat label="Civilians injured">{fmtNum(h.civiliansInjured)}</Stat>
+        {h.sabotage > 0 && <Stat label="Partisan sabotage">{fmtNum(h.sabotage)}</Stat>}
+        {h.aid && <Stat label="Arms aid">{h.aid.continues ? 'funded' : 'lapsed'} · {Math.round(h.aid.support * 100)}% back it</Stat>}
+        {h.nextElection && <Stat label="Next election">{h.nextElection.date.slice(0, 10)} ({h.nextElection.kind})</Stat>}
+        {h.lastElection && <Stat label="Last election">{h.lastElection.incumbentWon ? 'government held' : 'government lost'}</Stat>}
+      </div>
+      {h.mobilizationTolerance !== null && <Bar label="Mobilisation the public bears" value={h.mobilizationTolerance} tone="warn" />}
+      {h.stability !== null && <Bar label="Regime stability" value={h.stability} tone="auto" />}
+      {drivers.length > 0 && (
+        <table className="tbl">
+          <tbody>
+            {drivers.map(([k, v]) => (
+              <tr key={k}><td>{DRIVER_LABEL[k] ?? k}</td><td className="num">{v > 0 ? '+' : ''}{Math.round(v * 100)} pts</td></tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </Section>
+  );
+}
+
 function Delegation({ d, onCommand }: { d: NationDetail; onCommand: Props['onCommand'] }) {
   // A change takes effect on the next tick; show it at once and drop the draft when the World agrees.
   const [draft, setDraft] = useState<Partial<Record<CommandDomain, boolean>>>({});
@@ -251,6 +290,25 @@ function Delegation({ d, onCommand }: { d: NationDetail; onCommand: Props['onCom
   );
 }
 
+function NuclearAlert({ alert, nation, tick, dtHours, onCommand }: { alert: NuclearAlertView; nation: NationId; tick: number; dtHours: number; onCommand: Props['onCommand'] }) {
+  const { stored, mated, ordered } = alert;
+  if (!ordered && stored <= 0) return null;
+  return (
+    <div className="alert-status small" data-testid="nuclear-alert">
+      <p className="muted" data-testid="alert-status">
+        {fmtNum(mated)} warheads mated to launchers, {fmtNum(stored)} in storage.
+        {ordered && ` Alert ordered ${Math.max(0, Math.floor(((tick - ordered.tick) * dtHours) / 24))}d ago: ${fmtNum(ordered.mated)} of ${fmtNum(ordered.of)} stored warheads mated so far.`}
+        {!ordered && !alert.canOrder && ' No alert timeline is on record for this state.'}
+      </p>
+      {alert.canOrder && (
+        <button className="danger" onClick={() => onCommand({ type: 'nuclear_alert', nation }, 'Nuclear alert ordered: stored warheads are being mated')} data-testid="nuclear-alert-order">
+          Order nuclear alert
+        </button>
+      )}
+    </div>
+  );
+}
+
 function Production({ client, nation, eco, treasuryUsdB, onCommand }: { client: SimClient; nation: NationId; eco: EconomyView | null | undefined; treasuryUsdB: number; onCommand: Props['onCommand'] }) {
   const [item, setItem] = useState('');
   const [rate, setRate] = useState(10);
@@ -264,7 +322,8 @@ function Production({ client, nation, eco, treasuryUsdB, onCommand }: { client: 
   }, [meta, nation]);
   if (!options) return <p className="muted small">No domestic arms industry: this nation cannot open production lines.</p>;
   const line = item ? eco?.capacity[item] : undefined;
-  const max = line ? Math.max(0, Math.floor(line.surge)) : undefined;
+  const ceiling = item && !line ? eco?.greenfield[item] : undefined;
+  const max = line ? Math.max(0, Math.floor(line.surge)) : ceiling !== undefined ? Math.max(0, Math.floor(ceiling)) : undefined;
   const ordered = max === undefined ? rate : Math.min(rate, max);
   const unitUsdM = meta?.platforms[item]?.costUsdM ?? meta?.munitions[item]?.costUsdM ?? 0;
   const monthlyB = (ordered * unitUsdM) / 1000;
@@ -291,7 +350,7 @@ function Production({ client, nation, eco, treasuryUsdB, onCommand }: { client: 
           <p className="muted">
             {line
               ? `Your line makes ${fmtNum(line.perMonth)} a month now and can surge to ${fmtNum(line.surge)}; the order raises it toward that over months.`
-              : 'No line builds this yet. A new line takes months to tool up, and its size is limited by your industry.'}
+              : `No line builds this yet. A new line takes months to tool up${ceiling !== undefined ? ` and can reach at most ${fmtNum(ceiling)} a month, set by your industry` : ', and its size is limited by your industry'}.`}
           </p>
         </div>
       )}

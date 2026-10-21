@@ -139,6 +139,57 @@ describe('peace offers', () => {
   it('wait for a human who kept strategic decisions', () => {
     expect(offerToExhaustedHuman(false)).toBe(true);
   });
+
+  it('stay on the table and are taken once the war turns against the AI that refused them', () => {
+    const t = testWorld([createDiplomacy()]);
+    t.world.pending.push({ type: 'declare_war', nation: N('RUS'), target: N('UKR') });
+    t.engine.step(t.world);
+    t.world.pending.push({ type: 'offer_peace', nation: N('UKR'), target: N('RUS') });
+    t.engine.step(t.world);
+    expect(atWar(t.world, N('RUS'), N('UKR'))).toBe(true);
+    t.world.slices.diplomacy.records[N('RUS')].baseline = 0.2;
+    t.engine.run(t.world, days(2));
+    expect(atWar(t.world, N('RUS'), N('UKR'))).toBe(false);
+  });
+
+  it('an exhausted AI enemy offers a human who kept strategic decisions an armistice instead of imposing one', () => {
+    const t = testWorld([createDiplomacy()]);
+    t.world.nations[N('UKR')].controlledBy = 'human';
+    t.world.slices.command = { [N('UKR')]: { ai: { ...DEFAULT_DELEGATION, strategic: false }, held: {}, answers: {} } };
+    t.world.pending.push({ type: 'declare_war', nation: N('RUS'), target: N('UKR') });
+    t.engine.step(t.world);
+    for (const n of ['RUS', 'UKR']) t.world.slices.diplomacy.records[N(n)].baseline = 0.1;
+    t.engine.run(t.world, days(40));
+    expect(atWar(t.world, N('RUS'), N('UKR'))).toBe(true);
+    expect(t.world.slices.diplomacy.offers['RUS|UKR']).toBe('RUS');
+  });
+});
+
+describe('war support under nuclear attack', () => {
+  /** Support of `victim` after two 150 kt weapons kill 460k people next to its capital, and whether it holds warheads. */
+  const struck = (victim: string, armed: boolean) => {
+    const t = testWorld([
+      emitter((tick) => (tick === 2 ? [0, 1].map(() => ({ type: 'nuclear_detonation' as const, tick, by: N('PRK'), node: t.world.nations[N(victim)].capital, yieldKt: 150, casualties: 230_000 })) : [])),
+      createDiplomacy(),
+    ]);
+    t.world.nations[N(victim)].nuclear = armed ? { warheads: 1700, deployed: 1700, doctrine: 'calculated_ambiguity' } : { warheads: 0, deployed: 0, doctrine: 'none' };
+    t.war('PRK', victim);
+    t.engine.run(t.world, 2);
+    const before = t.world.nations[N(victim)].warSupport;
+    t.engine.run(t.world, days(2));
+    return { before, after: t.world.nations[N(victim)].warSupport, status: t.world.nations[N(victim)].status };
+  };
+
+  it('a nuclear-armed state struck at its capital rallies behind retaliation instead of collapsing', () => {
+    const us = struck('USA', true);
+    expect(us.after).toBeGreaterThanOrEqual(us.before);
+    expect(us.status).toBe('war');
+  });
+
+  it('a state without nuclear weapons loses support under the same attack', () => {
+    const jp = struck('JPN', false);
+    expect(jp.after).toBeLessThan(jp.before - 0.1);
+  });
 });
 
 describe('capitulation', () => {
@@ -163,6 +214,37 @@ describe('capitulation', () => {
     expect(t.world.nations[N('UKR')].status).toBe('capitulated');
     expect(atWar(t.world, N('RUS'), N('UKR'))).toBe(false);
     expect(t.map.nodesOf(N('UKR')).every((n) => t.world.control[n] === 'RUS')).toBe(true);
+  });
+
+  const brigade = (t: ReturnType<typeof testWorld>, nation: string, node: NodeId) =>
+    t.add({ nation: N(nation), name: `${nation} brigade at ${node}`, kind: 'maneuver', echelon: 'brigade', node, equipment: { [id.platform('t_inf')]: 400 } });
+
+  it('a nation whose army still stands fights on after losing its capital and most of its people', () => {
+    const t = testWorld([createDiplomacy()]);
+    t.war('CHN', 'TWN');
+    const cells = t.map.nodesOf(N('TWN')).filter((n) => n !== t.world.nations[N('TWN')].capital);
+    for (const n of cells.slice(0, 20)) brigade(t, 'TWN', n);
+    t.engine.step(t.world);
+    occupy(t, N('TWN'), N('CHN'), 0.6);
+    t.engine.run(t.world, days(3));
+    expect(t.world.history.some((e) => e.type === 'capitulation')).toBe(false);
+    expect(atWar(t.world, N('CHN'), N('TWN'))).toBe(true);
+  });
+
+  it('occupation terms hand over only the cells the capitulating state no longer holds with troops', () => {
+    const t = testWorld([createDiplomacy()]);
+    t.war('CHN', 'TWN');
+    const far = t.map.nodesOf(N('TWN')).sort((a, b) => t.map.distanceKm(b, t.world.nations[N('TWN')].capital) - t.map.distanceKm(a, t.world.nations[N('TWN')].capital));
+    const garrison = far[0];
+    t.world.nations[N('TWN')].government = 'liberal_democracy';
+    const army = Array.from({ length: 20 }, () => brigade(t, 'TWN', garrison));
+    t.engine.step(t.world);
+    for (const f of army.slice(1)) f.status = 'destroyed';
+    occupy(t, N('TWN'), N('CHN'), 0.6);
+    const events = t.engine.step(t.world);
+    expect(events).toContainEqual(expect.objectContaining({ type: 'capitulation', nation: 'TWN' }));
+    expect(t.world.control[garrison]).toBe('TWN');
+    expect(t.map.nodesOf(N('TWN')).filter((n) => n !== garrison).every((n) => t.world.control[n] === 'CHN')).toBe(true);
   });
 
   it('losing only the capital region is not enough', () => {
@@ -255,6 +337,14 @@ describe('who joins a war', () => {
 
     it('a neighbour piles onto a collapsing victim', () => {
       expect(entries(collapse)).toBeGreaterThanOrEqual(7);
+    });
+
+    it('but a human player who kept strategic decisions is never taken into the war by its AI', () => {
+      expect(entries((t) => {
+        collapse(t);
+        t.world.nations[N('BLR')].controlledBy = 'human';
+        t.world.slices.command = { [N('BLR')]: { ai: { ...DEFAULT_DELEGATION, strategic: false }, held: {}, answers: {} } };
+      })).toBe(0);
     });
 
     it('but not onto a victim that is holding', () => {
