@@ -56,6 +56,8 @@ export const fra = [
   u('Force d’action navale, Brest', 'surface_group', 'flotilla', brest, { ffg_fremm: 2, ffg_la_fayette: 1, ffg_fdi: 1 }, { readiness: 0.7, personnel: 1000 }),
   u('Frégates de surveillance outre-mer (Floréal class)', 'surface_group', 'flotilla', base('Fort-de-France, Martinique', 14.6, -61.07), { ffg_floreal: 6 }, { readiness: 0.7, personnel: 6 * 90 }),
   u('Flottille 23F/21F (Atlantique 2)', 'air_wing', 'wing', base('BAN Lann-Bihoué', 47.76, -3.44), { atlantique2: 18 }, ACTIVE),
+  // France moves heavy equipment overseas on chartered RO-RO ships under standing strategic-freight contracts.
+  u('Affrètement stratégique (chartered RO-RO)', 'surface_group', 'task_group', toulon, { military_roro: 2 }, { readiness: 0.6, personnel: 2 * 20 }),
   u('Escadrille des sous-marins nucléaires d’attaque', 'submarine', 'flotilla', toulon, { ssn_suffren: 3, ssn_rubis: 2 }, { readiness: 0.7, personnel: 5 * 65 }),
   u('Force océanique stratégique, SSBN on deterrent patrol', 'strategic', 'flotilla', base('North-east Atlantic patrol area', 47, -15), { ssbn_triomphant: 1 }, { readiness: 1, personnel: 111 }),
   u('Force océanique stratégique, SSBNs at Île Longue', 'strategic', 'flotilla', ileLongue, { ssbn_triomphant: 3 }, { readiness: 0.4, personnel: 3 * 111 }),
