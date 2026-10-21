@@ -7,7 +7,7 @@ import { allied } from '../land/state';
 import { awaitingLift, debarkation, deckSlots, landMass, liftMode, overseas } from '../land/strategic';
 import type { TickEnv } from './env';
 import { geography } from './geography';
-import { navalDestination, seaPath } from './movement';
+import { navalDestination, seaPath, shoreThreat } from './movement';
 import { boardable, detach } from './orders';
 import type { Composition } from './state';
 
@@ -22,7 +22,7 @@ import type { Composition } from './state';
  * unloads at the destination port (naval/amphibious.ts landings) and returns home. The
  * formations it carried then march on to where they were sent.
  *
- * Convoys keep out of the enemy's shore-based anti-ship reach: they unload at the friendly
+ * Convoys keep out of the enemy's shore-based anti-ship reach (movement.ts shoreThreat): they unload at the friendly
  * port nearest the destination that a route clear of that reach joins, and march the rest
  * (REFORGER's ports of debarkation were Bremerhaven, Rotterdam and Antwerp, not the Baltic).
  * Only when no such port exists do they sail into the threat.
@@ -52,11 +52,6 @@ const SAIL_LOAD = 0.9;
 /** Nor does a part-loaded group wait longer than this for formations still marching to the port (estimate). */
 const MAX_WAIT_HOURS = 5 * 24;
 
-/**
- * Reach of shore-based anti-ship missiles a convoy routes around, km: Bastion-P's P-800 (~450 km)
- * and the YJ-12 and Noor batteries are of this order (judgment).
- */
-const SHORE_THREAT_KM = 450;
 /** Debarkation ports tried, nearest the destination first, before falling back to the nearest one regardless of threat. */
 const DEBARK_SHORTLIST = 8;
 /** A port is a gateway to the destination only if the road march from it is at most this much longer than the great circle, plus MARCH_SLACK_KM. */
@@ -107,8 +102,7 @@ export function sealift(env: TickEnv): void {
   for (const list of waiting.values()) list.sort((a, b) => a.order.issuedTick - b.order.issuedTick || (a.id < b.id ? -1 : 1));
   const days = new Map<NationId, number>();
   const ports = new Map<string, NodeId | undefined>();
-  const threat = new Map<NationId, (zone: number) => boolean>();
-  const threatOf = (nation: NationId) => threat.get(nation) ?? threat.set(nation, shoreThreat(world, map, nation)).get(nation)!;
+  const threatOf = (nation: NationId) => shoreThreat(world, map, nation);
   const debark = (nation: NationId, target: NodeId, from: NodeId) => {
     const k = `${nation}|${target}|${from}`;
     if (!ports.has(k)) ports.set(k, safeDebarkation(world, map, nation, target, from, threatOf(nation)) ?? debarkation(world, map, nation, target, 'sea'));
@@ -198,22 +192,6 @@ function marchOn(world: World, ctx: SimContext, v: SealiftState['voyages'][Forma
     if (!f || f.status !== 'active' || f.node !== v.to || f.node === target) continue;
     applyLandOrder(world, { type: 'order', nation: f.nation, formation: f.id, order: { posture: 'move', target } }, ctx);
   }
-}
-
-/** Sea zones within SHORE_THREAT_KM of a coast held by an enemy of `nation`. */
-function shoreThreat(world: World, map: GameMap, nation: NationId): (zone: number) => boolean {
-  const coast: NodeId[] = [];
-  for (let n = 0; n < map.landCount; n++) {
-    const c = world.control[n];
-    if (!c || !atWar(world, nation, c)) continue;
-    for (const m of map.neighbors(n as NodeId)) if (map.isSea(m)) { coast.push(n as NodeId); break; }
-  }
-  const memo = new Map<number, boolean>();
-  return (zone) => {
-    let hit = memo.get(zone);
-    if (hit === undefined) memo.set(zone, (hit = coast.some((n) => map.distanceKm(n, zone as NodeId) <= SHORE_THREAT_KM)));
-    return hit;
-  };
 }
 
 /**

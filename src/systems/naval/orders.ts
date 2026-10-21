@@ -3,7 +3,7 @@ import type { Command, Formation, NodeId, PlatformId, World } from '../../core/t
 import { engages } from '../air/tables';
 import { canBoard, liftShare, liftUsed } from './amphibious';
 import { tickEnv } from './env';
-import { navalDestination, seaPath } from './movement';
+import { navalDestination, transitPath } from './movement';
 import { isNavalFormation } from './state';
 import { INTERCEPTOR_KINDS } from './tables';
 
@@ -67,7 +67,7 @@ export function applyNavalOrder(world: World, cmd: OrderCommand, ctx: SimContext
     return;
   }
   const dest = navalDestination(world, ctx.map, f.nation, goal);
-  const path = dest === undefined ? null : seaPath(world, ctx.map, f.nation, f.node, dest);
+  const path = dest === undefined ? null : transitPath(world, ctx.map, f.nation, f.node, dest);
   if (!path) return refuse(`no sea route to node ${goal}`);
   f.order = { ...order, target: goal, path };
   f.progressKm = 0;
@@ -146,7 +146,7 @@ export function refreshOrders(world: World, ctx: SimContext, f: Formation, track
 
 function repath(world: World, ctx: SimContext, f: Formation, goal: NodeId): void {
   const dest = navalDestination(world, ctx.map, f.nation, goal);
-  const path = dest === undefined ? null : seaPath(world, ctx.map, f.nation, f.node, dest);
+  const path = dest === undefined ? null : transitPath(world, ctx.map, f.nation, f.node, dest);
   if (!path) return;
   f.order.target = goal;
   f.order.path = path;
