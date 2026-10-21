@@ -15,7 +15,7 @@ import { supplyFactor } from '../systems/logistics';
 import { geography } from '../systems/naval/geography';
 import { isNavalFormation, liftDemand } from '../systems/naval/state';
 import { authority } from '../systems/orders';
-import { conditionsAt, type Conditions, weatherLayer } from '../systems/weather/effects';
+import { conditionsAt, type Conditions, packWeather } from '../systems/weather/effects';
 import type {
   Command, CommandDomain, Echelon, Formation, FormationId, FormationKind, ItemId, MunitionKind, Nation, NationId, NodeId, PlatformId, Posture, SimEvent, World,
 } from '../core/types';
@@ -268,8 +268,8 @@ export interface Snapshot {
   /** Flat (node, value) pairs for nodes with infrastructure < 1. */
   infra: Float32Array;
   fallout: Float32Array;
-  /** Flat (node, code) pairs of operational weather (weather/effects.ts weatherLayer), sent when the day changes. */
-  weather?: Float32Array;
+  /** Today's weather per region (weather/effects.ts packWeather), sent when the day changes. */
+  weather?: Uint8Array;
   focusNation?: NationDetail;
   focusFormation?: FormationDetail;
 }
@@ -328,7 +328,7 @@ export class SnapshotEncoder {
     this.dropped = 0;
     if (world.slices.weather && world.slices.weather.day !== this.weatherDay) {
       this.weatherDay = world.slices.weather.day;
-      snap.weather = weatherLayer(world, map);
+      snap.weather = packWeather(world);
     }
 
     const prev = this.lastControl;
@@ -626,7 +626,7 @@ export interface ClientState {
   sea: Float32Array;
   infra: Float32Array;
   fallout: Float32Array;
-  weather: Float32Array;
+  weather: Uint8Array;
   focusNation?: NationDetail;
   focusFormation?: FormationDetail;
   /** Events from the latest snapshot only. */
@@ -637,7 +637,7 @@ export function emptyClientState(size: number): ClientState {
   return {
     tick: 0, date: '', control: new Uint16Array(size).fill(NO_NATION), controlVersion: 0,
     formations: [], rosterVersion: 0, nations: new Map(), wars: [], warsKey: '',
-    air: new Float32Array(0), sea: new Float32Array(0), infra: new Float32Array(0), fallout: new Float32Array(0), weather: new Float32Array(0),
+    air: new Float32Array(0), sea: new Float32Array(0), infra: new Float32Array(0), fallout: new Float32Array(0), weather: new Uint8Array(0),
     latestEvents: [],
   };
 }

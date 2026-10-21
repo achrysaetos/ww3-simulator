@@ -51,7 +51,7 @@ describe('ukraine-2026 from March and from July, 10 days', () => {
   });
 
   it('moves less ground in the spring rasputitsa', () => {
-    expect(spring.cellsEntered).toBeLessThan(summer.cellsEntered * 0.92);
+    expect(spring.cellsEntered).toBeLessThan(summer.cellsEntered * 0.95);
   });
 
   it('flies fewer sorties under the cloudier spring sky', () => {

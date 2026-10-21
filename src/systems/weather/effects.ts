@@ -205,21 +205,37 @@ function hash(s: string, n: number): number {
 /** Layer codes for the map: the integer part is the kind, the fraction its severity. */
 export const LAYER = { mud: 1, snow: 2, roughSea: 3, cyclone: 4 } as const;
 
+/** Bytes per region in packWeather: mud x255, snow depth in cm, wave height in decimetres, cyclone flag. */
+const PACKED = 4;
+
+/** Today's weather per region in PACKED bytes, about 10 KB, for the client to expand with weatherLayer. */
+export function packWeather(world: World): Uint8Array {
+  const s = world.slices.weather;
+  const out = new Uint8Array(s.mud.length * PACKED);
+  for (let r = 0; r < s.mud.length; r++) {
+    out[r * PACKED] = Math.round(s.mud[r] * 255);
+    out[r * PACKED + 1] = Math.min(255, Math.round(s.snowMm[r] * SNOW_DEPTH_PER_MM));
+    out[r * PACKED + 2] = Math.min(255, Math.round(s.waveM[r] * 10));
+    out[r * PACKED + 3] = s.cyclone[r];
+  }
+  return out;
+}
+
 /**
  * Flat (node, code) pairs for nodes where the weather matters to operations today: mud past 0.3,
  * snow past 15 cm, seas too rough for landing craft (past 2 m), and tropical cyclones.
  */
-export function weatherLayer(world: World, map: GameMap): Float32Array {
-  const s = world.slices.weather;
-  if (!s) return new Float32Array(0);
+export function weatherLayer(map: GameMap, packed: Uint8Array): Float32Array {
+  if (packed.length === 0) return new Float32Array(0);
   const out: number[] = [];
   for (let n = 0 as NodeId; n < map.size; n++) {
-    const r = regionOf(map.lat[n], map.lon[n]);
-    if (s.cyclone[r] === 1) out.push(n, LAYER.cyclone);
+    const r = regionOf(map.lat[n], map.lon[n]) * PACKED;
+    const waveM = packed[r + 2] / 10;
+    if (packed[r + 3] === 1) out.push(n, LAYER.cyclone);
     else if (map.isSea(n)) {
-      if (s.waveM[r] > 2) out.push(n, LAYER.roughSea + Math.min(0.99, (s.waveM[r] - 2) / 4));
+      if (waveM > 2) out.push(n, LAYER.roughSea + Math.min(0.99, (waveM - 2) / 4));
     } else {
-      const mud = s.mud[r] * MUD_SUSCEPTIBILITY[map.terrain[n]], snowCm = s.snowMm[r] * SNOW_DEPTH_PER_MM;
+      const mud = (packed[r] / 255) * MUD_SUSCEPTIBILITY[map.terrain[n]], snowCm = packed[r + 1];
       if (mud > 0.3) out.push(n, LAYER.mud + Math.min(0.99, mud));
       else if (snowCm > 15) out.push(n, LAYER.snow + Math.min(0.99, snowCm / 100));
     }

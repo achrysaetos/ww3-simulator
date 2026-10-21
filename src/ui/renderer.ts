@@ -8,7 +8,7 @@ import type { GeoPermissibleObjects } from 'd3-geo';
 import type { GameMap } from '../core/map';
 import type { FormationId, NodeId, SimEvent } from '../core/types';
 import { rgba, type Palette } from './colors';
-import { LAYER } from '../systems/weather/effects';
+import { LAYER, weatherLayer } from '../systems/weather/effects';
 import { eventNode } from './events';
 import { NO_NATION, type ClientState, type FormationView } from './snapshot';
 import { clusterStacks, gridSize, indexByNode, type Stack } from './stacks';
@@ -89,6 +89,7 @@ export class MapRenderer {
   private front = new Path2D();
   private builtFor = { control: -1, wars: '', size: '' };
   private flashes: Flash[] = [];
+  private weatherFor: { packed: Uint8Array | null; pairs: Float32Array } = { packed: null, pairs: new Float32Array(0) };
   private airPatterns = new Map<number, CanvasPattern>();
   private sortedCities: GameMap['cities'] | null = null;
   private readonly sprites = new CounterSprites();
@@ -195,6 +196,12 @@ export class MapRenderer {
     };
     this.borders = mk(this.topo.borders);
     this.coast = mk(this.topo.land);
+  }
+
+  /** The per-node weather layer, expanded once per day from the packed per-region snapshot. */
+  private weatherPairs(packed: Uint8Array): Float32Array {
+    if (this.weatherFor.packed !== packed) this.weatherFor = { packed, pairs: weatherLayer(this.map, packed) };
+    return this.weatherFor.pairs;
   }
 
   private quad(p: Path2D, n: number) {
@@ -380,7 +387,7 @@ export class MapRenderer {
     }
     if (overlays.infra) this.fillPairs(ctx, state.infra, (v) => `rgba(255,110,40,${Math.min(0.85, (1 - v) * 1.1)})`);
     if (overlays.fallout) this.fillPairs(ctx, state.fallout, (v) => `rgba(190,255,60,${Math.min(0.75, v * 0.8)})`);
-    if (overlays.weather) this.fillPairs(ctx, state.weather, weatherStyle);
+    if (overlays.weather) this.fillPairs(ctx, this.weatherPairs(state.weather), weatherStyle);
 
     if (this.coast) {
       ctx.strokeStyle = 'rgba(150,185,220,0.45)';
