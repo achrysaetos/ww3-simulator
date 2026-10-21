@@ -16,6 +16,7 @@ import { logistics } from './logistics';
 import { applyNavalOrder, isNavalOrder, navalWar } from './naval';
 import { createOrderRouter } from './orders';
 import { strategic } from './strategic';
+import { weather } from './weather';
 
 /** Collapse a nation's doctrine-level profile to the four knobs diplomacy and AI read. */
 export function decisionProfile(p: NationStrategy): StrategicProfile {
@@ -83,12 +84,13 @@ const orders = createOrderRouter([
 
 /**
  * Tick order. Commands are applied first (by whichever system owns each type),
- * then every system steps in this order: the air picture is settled before
- * ground and sea combat read it, combat before logistics refills, economy before
+ * then every system steps in this order: today's weather first, since everything else reads it;
+ * the air picture is settled before ground and sea combat read it, combat before logistics refills, economy before
  * diplomacy reads economic stress, intelligence after every sensor has moved, and AI last so
  * its orders queue for next tick.
  */
 export const SYSTEMS: System[] = [
+  weather,
   orders,
   strategic,
   airWar,

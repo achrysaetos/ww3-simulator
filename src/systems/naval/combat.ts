@@ -1,5 +1,6 @@
 import { atWar } from '../../core/engine';
 import type { Formation, FormationId, Munition, MunitionId, NationId, PlatformId, TargetClass } from '../../core/types';
+import { smallCraftFactorAt } from '../weather/effects';
 import { tracked } from './detection';
 import type { TickEnv } from './env';
 import { resolveSalvo, type SalvoDefense, type SalvoOutcome } from './salvo';
@@ -145,7 +146,7 @@ function usvAttack(env: TickEnv, tracks: Tracks, f: Formation, queue: Queue): vo
   const { lastFired } = env.world.slices.naval;
   if ((env.world.tick - (lastFired[f.id] ?? -Infinity)) * env.world.dtHours < USV_RAID_HOURS) return;
   const target = pickTarget(env, tracks, f, (t) => !env.comp(t).submerged && env.ctx.map.distanceKm(f.node, t.node) <= USV_STRIKE.rangeKm, env.naval);
-  if (!target) return;
+  if (!target || smallCraftFactorAt(env.world, env.ctx.map, target.node) < 0.5) return;
   lastFired[f.id] = env.world.tick;
   let launched = 0;
   for (const b of boats) {
