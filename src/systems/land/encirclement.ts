@@ -17,7 +17,7 @@ class Encirclement {
   constructor(private readonly world: World, private readonly map: GameMap, private readonly nation: NationId) {}
 
   private supplied(node: NodeId): boolean {
-    return supplyFactor(this.world, node, this.nation) > 0;
+    return supplyFactor(this.world, this.map, node, this.nation) > 0;
   }
 
   /** Ground the nation's own supply network runs over: its own and that of bloc partners it is not fighting (logistics' networkMembers). */

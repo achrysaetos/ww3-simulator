@@ -145,15 +145,6 @@ export const MIN_FACTOR = 0.01;
 export const DEPOT_POP_SHARE = 0.5;
 export const MAX_DEPOTS = 12;
 
-/**
- * Networks refreshed per tick after their inputs change, oldest first; new ones
- * always compute at once. Each refresh re-searches only what the changed inputs
- * reach in one network's search, a small part of searching it afresh. With
- * up to 16 networks every change is picked up within a day of 6 h ticks;
- * formations carry three days of supply, so that lag changes little.
- */
-export const MAX_REFRESHES_PER_TICK = 4;
-
 /** Infrastructure, sea- or air-control change smaller than this does not trigger a network refresh. */
 export const INPUT_TOLERANCE = 0.05;
 

@@ -519,7 +519,7 @@ function bmdOf(interceptors: Record<string, number>, id: NationId): Record<strin
 const GROUND: ReadonlySet<FormationKind> = new Set(['maneuver', 'artillery', 'air_defense', 'missile', 'logistics']);
 
 function formationDetail(world: World, map: GameMap, catalog: Catalog, f: Formation): FormationDetail {
-  const flow = world.slices.logistics?.networkOf[f.nation] ? supplyFactor(world, f.node, f.nation) : undefined;
+  const flow = world.slices.logistics?.networkOf[f.nation] ? supplyFactor(world, map, f.node, f.nation) : undefined;
   const zone = geography(map).portZone.get(f.node);
   const lifts: LiftOption[] = [];
   const aboard: FormationDetail['aboard'] = [];

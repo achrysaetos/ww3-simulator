@@ -93,9 +93,9 @@ describe('Taiwan 2027 naval war and invasion (CSIS "The First Battle of the Next
 
   // CSIS base case over the whole campaign: China ~138 major ships, the US 2 carriers and 7-20 major surface
   // warships. A 30-day run covers most of the decisive fighting; bands are widened for that (judgement).
-  it.each(SEEDS)('with the US in from the start, the PLAN loses dozens of major ships including amphibious lift, and the US loses 0-3 carriers and a band of surface combatants (seed %i)', (seed) => {
+  it.for(SEEDS)('with the US in from the start, the PLAN loses dozens of major ships including amphibious lift, and the US loses 0-3 carriers and a band of surface combatants (seed %i)', { timeout: 300_000 }, (seed, { skip }) => {
     const { m, usInWar } = taiwan(seed);
-    if (!usInWar) return;
+    if (!usInWar) skip(`the US entered after day ${US_EARLY_DAYS}`);
     const chn = m.nations.CHN, usa = m.nations.USA;
     expect(chn.naval?.majorShipsLost ?? 0).toBeGreaterThanOrEqual(20);
     expect(chn.naval?.majorShipsLost ?? 0).toBeLessThanOrEqual(160);
@@ -104,24 +104,29 @@ describe('Taiwan 2027 naval war and invasion (CSIS "The First Battle of the Next
     const usSurface = (usa.lossesByClass.cruiser ?? 0) + (usa.lossesByClass.destroyer ?? 0) + (usa.lossesByClass.frigate ?? 0);
     expect(usSurface).toBeGreaterThanOrEqual(3);
     expect(usSurface).toBeLessThanOrEqual(25);
-  }, 300_000);
+  });
 
   // CSIS base case: allied submarines, bombers and Taiwan's shore batteries sink most of the PLAN's amphibious
   // fleet in the first weeks. Judgement: at least half the amphibious hulls by day 30.
-  it.each(SEEDS)('with the US in from the start, the PLAN loses most of its amphibious fleet (seed %i)', (seed) => {
+  it.for(SEEDS)('with the US in from the start, the PLAN loses most of its amphibious fleet (seed %i)', { timeout: 300_000 }, (seed, { skip }) => {
     const { m, start, usInWar } = taiwan(seed);
-    if (!usInWar) return;
+    if (!usInWar) skip(`the US entered after day ${US_EARLY_DAYS}`);
     expect((m.nations.CHN.lossesByClass.amphibious ?? 0) / (start.CHN.amphibious ?? 1)).toBeGreaterThanOrEqual(0.5);
-  }, 300_000);
+  });
 
   // CSIS base case: China gets about 30,000 troops ashore, who are cut off once its shipping is sunk.
   // Judgement: fewer than 80,000 PLA troops on Taiwan at day 30.
-  it.each(SEEDS)('with the US in from the start, the PLA has tens of thousands ashore, not hundreds of thousands (seed %i)', (seed) => {
+  it.for(SEEDS)('with the US in from the start, the PLA has tens of thousands ashore, not hundreds of thousands (seed %i)', { timeout: 300_000 }, (seed, { skip }) => {
     const { m, usInWar } = taiwan(seed);
-    if (!usInWar) return;
+    if (!usInWar) skip(`the US entered after day ${US_EARLY_DAYS}`);
     expect(m.nations.CHN.naval?.troopsOnEnemySoil ?? 0).toBeGreaterThan(5_000);
     expect(m.nations.CHN.naval?.troopsOnEnemySoil ?? 0).toBeLessThan(80_000);
-  }, 300_000);
+  });
+
+  // The three bands above skip a seed where the US comes in late; without this, a model where it never does would pass them all.
+  it('the US is in from the start in at least one seed, so the US-in bands assert something', () => {
+    expect(SEEDS.filter((seed) => taiwan(seed).usInWar).length).toBeGreaterThan(0);
+  }, 900_000);
 
   // CSIS base case: US attack submarines do much of the killing of PLAN shipping and lose few boats. Judgement: at most
   // 6 of the ~50 US SSNs in 30 days.

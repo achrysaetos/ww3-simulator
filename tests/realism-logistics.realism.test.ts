@@ -122,7 +122,7 @@ function runTaiwan(seed: number, days: number): TaiwanRun {
   for (let i = 0; i < Math.round((days * 24) / world.dtHours); i++) {
     for (const e of engine.step(world)) if (e.type === 'message' && e.nation === 'CHN' && e.text.includes('surrendered after')) out.plaSurrenders++;
     if (Object.values(world.formations).some((f) => f.nation === 'USA' && f.node === okinawa && f.status !== 'destroyed'))
-      out.okinawaSupply = Math.min(out.okinawaSupply, supplyFactor(world, okinawa, 'USA' as NationId));
+      out.okinawaSupply = Math.min(out.okinawaSupply, supplyFactor(world, map, okinawa, 'USA' as NationId));
   }
   return out;
 }

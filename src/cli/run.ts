@@ -1,10 +1,13 @@
 /**
- * Headless run: npm run sim -- --scenario ww3-2027 --days 30 [--seed 1] [--quiet]
+ * Headless run: npm run sim -- --scenario ww3-2027 --days 30 [--seed 1] [--quiet] [--save run.json]
+ * Resume a saved run: npm run sim -- --resume run.json --days 30 [--save later.json]
  * Prints notable events as they happen and a daily line per belligerent.
  */
+import { readFileSync, writeFileSync } from 'node:fs';
 import { currentDate } from '../core/engine';
 import type { NationId, SimEvent, World } from '../core/types';
 import { createSession, SCENARIOS } from '../scenarios';
+import { resumeRun, saveRun } from '../scenarios/save';
 
 const args = new Map<string, string>();
 for (let i = 2; i < process.argv.length; i++) {
@@ -15,15 +18,30 @@ if (args.has('list')) {
   for (const s of SCENARIOS) console.log(`${s.id.padEnd(18)} ${s.name}: ${s.summary}`);
   process.exit(0);
 }
-const scenarioId = args.get('scenario') ?? 'ww3-2027';
 const days = Number(args.get('days') ?? 30);
 const quiet = args.has('quiet');
+const resumeFrom = args.get('resume'), saveTo = args.get('save');
+for (const [flag, path] of [['resume', resumeFrom], ['save', saveTo]])
+  if (path === 'true') {
+    console.error(`--${flag} needs a file path`);
+    process.exit(1);
+  }
 
 const t0 = performance.now();
-const { engine, world, map, placement } = createSession(scenarioId, Number(args.get('seed') ?? 1));
-console.log(`${scenarioId}: ${placement.placed} formations placed in ${((performance.now() - t0) / 1000).toFixed(1)} s`);
-const unknown = Object.keys(placement.unknownPlatforms);
-if (unknown.length) console.log(`  ${unknown.length} ORBAT equipment ids not in catalog: ${unknown.slice(0, 20).join(' ')}${unknown.length > 20 ? ' ...' : ''}`);
+const { engine, world, map, scenarioId } = start();
+function start() {
+  if (resumeFrom) {
+    const r = resumeRun(readFileSync(resumeFrom, 'utf8'));
+    console.log(`${r.scenario.id}: resumed ${resumeFrom} at ${currentDate(r.world).toISOString().slice(0, 13)} (tick ${r.world.tick}) in ${((performance.now() - t0) / 1000).toFixed(1)} s`);
+    return { ...r, scenarioId: r.scenario.id };
+  }
+  const scenarioId = args.get('scenario') ?? 'ww3-2027';
+  const s = createSession(scenarioId, Number(args.get('seed') ?? 1));
+  console.log(`${scenarioId}: ${s.placement.placed} formations placed in ${((performance.now() - t0) / 1000).toFixed(1)} s`);
+  const unknown = Object.keys(s.placement.unknownPlatforms);
+  if (unknown.length) console.log(`  ${unknown.length} ORBAT equipment ids not in catalog: ${unknown.slice(0, 20).join(' ')}${unknown.length > 20 ? ' ...' : ''}`);
+  return { ...s, scenarioId };
+}
 
 const name = (n: NationId) => world.nations[n]?.name ?? n;
 function describe(e: SimEvent): string | null {
@@ -87,7 +105,11 @@ for (let day = 1; day <= days; day++) {
         const dTerr = territory(world, n) - (startTerritory.get(n) ?? 0);
         return `${n} sup ${(nat.warSupport * 100).toFixed(0)}% mob ${(nat.mobilization * 100).toFixed(0)}%${dTerr ? ` terr ${dTerr > 0 ? '+' : ''}${dTerr}` : ''}${b ? ` lost ${Math.round(b.lost)} cas ${Math.round(b.kia)}` : ''}`;
       });
-    console.log(`day ${day} ${currentDate(world).toISOString().slice(0, 10)} | ${rows.join(' | ') || 'no wars'}`);
+    console.log(`day ${world.tick / ticksPerDay} ${currentDate(world).toISOString().slice(0, 10)} | ${rows.join(' | ') || 'no wars'}`);
   }
+}
+if (saveTo) {
+  writeFileSync(saveTo, saveRun(scenarioId, world));
+  console.log(`saved tick ${world.tick} to ${saveTo}; continue with --resume ${saveTo}`);
 }
 console.log(`ran ${days} days: mean tick ${(stepMs / (days * ticksPerDay)).toFixed(1)} ms, worst ${worst.toFixed(1)} ms, ${Object.keys(world.formations).length} formations`);
