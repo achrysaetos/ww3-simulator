@@ -23,6 +23,10 @@ type ControlRecord = Record<number, { nation: NationId; level: number }>;
 export interface InputSnapshot {
   control: NationId[];
   infrastructure: number[];
+  /** Cells taken in war whose railway is not yet rebuilt, sorted: road only. */
+  captured: number[];
+  /** Open share of damaged chokepoints by id. */
+  chokepoints: Record<string, number>;
   sea: ControlRecord;
   air: ControlRecord;
 }
@@ -35,12 +39,16 @@ export interface NetworkState {
   networkOf: Record<NationId, string>;
   /** Network inputs as last seen, for change detection. Searches read these, not the live World. */
   seen: InputSnapshot;
+  /** Cells taken in war whose demolished infrastructure is not yet rebuilt, by the tick they were taken. Written by logistics. */
+  captured: Record<number, number>;
 }
 
 export function snapshotInputs(world: World): InputSnapshot {
   return {
     control: [...world.control],
     infrastructure: [...world.theater.infrastructure],
+    captured: Object.keys(world.slices.logistics?.captured ?? {}).map(Number).sort((a, b) => a - b),
+    chokepoints: { ...world.theater.chokepoints },
     sea: copyRecord(world.theater.seaControl),
     air: copyRecord(world.theater.airControl),
   };
@@ -99,7 +107,8 @@ function file(into: Map<NationId, number[]> | undefined, nation: NationId | unde
 }
 
 /** Inputs that moved since last seen; updates the snapshot and controllers to match. */
-function changedInputs(world: World, seen: InputSnapshot, controllers: Controllers): Changes {
+function changedInputs(world: World, map: GameMap, s: NetworkState, controllers: Controllers): Changes {
+  const seen = s.seen;
   const out: Changes = { control: new Map(), infrastructure: new Map(), contested: new Map() };
   const control = world.control, infra = world.theater.infrastructure;
   for (let n = 0; n < control.length; n++)
@@ -114,6 +123,22 @@ function changedInputs(world: World, seen: InputSnapshot, controllers: Controlle
       seen.infrastructure[n] = infra[n];
       file(out.infrastructure, control[n], n);
     }
+  const captured = Object.keys(s.captured).map(Number).sort((a, b) => a - b);
+  const was = new Set(seen.captured ?? []), now = new Set(captured);
+  for (const n of captured) if (!was.has(n)) file(out.infrastructure, control[n], n);
+  for (const n of was) if (!now.has(n)) file(out.infrastructure, control[n], n);
+  seen.captured = captured;
+  const open = world.theater.chokepoints ?? {}, seenOpen = (seen.chokepoints ??= {});
+  for (const cp of map.chokepoints) {
+    const now = open[cp.id] ?? 1, was = seenOpen[cp.id] ?? 1;
+    if (now === was || (Math.abs(now - was) < INPUT_TOLERANCE && now > 0 && was > 0 && now < 1)) continue;
+    for (const [a, b] of cp.edges) {
+      file(out.infrastructure, control[a], a);
+      file(out.infrastructure, control[b], b);
+    }
+    if (now >= 1) delete seenOpen[cp.id];
+    else seenOpen[cp.id] = now;
+  }
   diffRecord(world.theater.seaControl, seen.sea, out.contested);
   diffRecord(world.theater.airControl, seen.air);
   return out;
@@ -236,7 +261,7 @@ export function refreshNetworks(world: World, map: GameMap, s: NetworkState, for
   }
 
   const seen = s.seen;
-  const changes = changedInputs(world, seen, controllers);
+  const changes = changedInputs(world, map, s, controllers);
   // Every search is read before any moves, so a new network adopting an old one's search re-opens what changed under it.
   const known = new Map(Object.entries(s.networks));
   const reached = new Map<string, Reached>();

@@ -43,6 +43,8 @@ const enum Mode { Road, Rail, Port, Sea, Closed }
 /** Per-map facts the search reuses every run: edge modes and base costs, and each nation's depots. */
 interface StaticNet {
   mode: Uint8Array; // per adjacency entry
+  /** Per adjacency entry: 1 + the index in map.chokepoints of the chokepoint carrying it, or 0. */
+  link: Int16Array;
   railCost: Float32Array;
   roadCost: Float32Array;
   portCap: Float32Array; // per node
@@ -84,6 +86,13 @@ function staticNet(map: GameMap): StaticNet {
       }
     }
 
+  const link = new Int16Array(E);
+  map.chokepoints.forEach((cp, i) => {
+    for (const [a, b] of cp.edges)
+      for (const [u, v] of [[a, b], [b, a]])
+        for (let k = map.adjStart[u]; k < map.adjStart[u + 1]; k++) if (map.adj[k] === v) link[k] = i + 1;
+  });
+
   const depots = new Map<NationId, Int32Array>();
   const cells = new Map<NationId, number[]>();
   for (let n = 0; n < map.landCount; n++) {
@@ -102,7 +111,7 @@ function staticNet(map: GameMap): StaticNet {
     }
     depots.set(id, Int32Array.from(chosen));
   }
-  const net = { mode, railCost, roadCost, portCap, depots };
+  const net = { mode, link, railCost, roadCost, portCap, depots };
   staticCache.set(map, net);
   return net;
 }
@@ -152,10 +161,15 @@ interface Workspace {
   readonly adj: Int32Array;
   readonly landCount: number;
   readonly mode: Uint8Array;
+  readonly link: Int16Array;
+  /** Open share of each chokepoint while a search runs, by index in map.chokepoints. */
+  readonly linkQ: Float64Array;
   readonly roadCost: Float32Array;
   readonly railCost: Float32Array;
   readonly portCap: Float32Array;
   readonly blocked: Uint8Array;
+  /** 1 on cells whose railway is closed (SearchInputs.captured) while a search runs. */
+  readonly unrailed: Uint8Array;
   readonly seaQ: Float64Array;
   /** Frontline memo, valid where frontStamp equals stamp. */
   readonly frontStamp: Int32Array;
@@ -183,8 +197,8 @@ function workspaceFor(map: GameMap): Workspace {
     const size = map.size, net = staticNet(map);
     w = {
       adjStart: map.adjStart, adj: map.adj, landCount: map.landCount,
-      mode: net.mode, roadCost: net.roadCost, railCost: net.railCost, portCap: net.portCap,
-      blocked: new Uint8Array(size), seaQ: new Float64Array(size), frontStamp: new Int32Array(size), front: new Uint8Array(size), stamp: 0,
+      mode: net.mode, link: net.link, linkQ: new Float64Array(map.chokepoints.length).fill(1), roadCost: net.roadCost, railCost: net.railCost, portCap: net.portCap,
+      blocked: new Uint8Array(size), unrailed: new Uint8Array(size), seaQ: new Float64Array(size), frontStamp: new Int32Array(size), front: new Uint8Array(size), stamp: 0,
       heap: new MaxHeap(), reopened: [],
       state: new Uint16Array(0), cap: new Float64Array(0), cost: new Float64Array(0), parent: new Int32Array(0), side: new Uint8Array(0), cell: new Uint16Array(0), infra: [],
     };
@@ -205,7 +219,7 @@ const valueOf = (w: Workspace, x: number): number => {
  * are cheap and the last truck leg from the railhead dominates.
  */
 function relaxEdges(w: Workspace, u: number, from: number, to: number): void {
-  const { adj, adjStart, landCount, mode, roadCost, railCost, portCap, cap, cost, parent, blocked, seaQ, frontStamp, front, stamp, heap, state, side, cell, infra } = w;
+  const { adj, adjStart, landCount, mode, link, linkQ, roadCost, railCost, portCap, cap, cost, parent, blocked, unrailed, seaQ, frontStamp, front, stamp, heap, state, side, cell, infra } = w;
   const capU = cap[u], costU = cost[u];
   for (let k = from; k < to; k++) {
     const v = adj[k];
@@ -228,7 +242,13 @@ function relaxEdges(w: Workspace, u: number, from: number, to: number): void {
       default: {
         if (side[cell[v]] !== FRIENDLY) continue;
         q = infra[v];
-        const rail = mode[k] === Mode.Rail && infra[u] >= RAIL_CUT && q >= RAIL_CUT;
+        let rail = mode[k] === Mode.Rail && infra[u] >= RAIL_CUT && q >= RAIL_CUT && !unrailed[u] && !unrailed[v];
+        if (link[k]) {
+          const open = linkQ[link[k] - 1];
+          if (open <= 0) continue;
+          if (open < q) q = open;
+          rail &&= open >= RAIL_CUT;
+        }
         c = (rail ? railCost[k] : roadCost[k]) / (0.25 + 0.75 * q);
         if (frontStamp[v] !== stamp) {
           frontStamp[v] = stamp;
@@ -289,6 +309,10 @@ const NO_F64 = new Float64Array(0), NO_I32 = new Int32Array(0);
 export interface SearchInputs {
   control: readonly (NationId | undefined)[];
   infrastructure: readonly number[];
+  /** Cells whose railway is closed until rebuilt, so traffic moves by road. */
+  captured?: readonly number[];
+  /** Open share of damaged chokepoints by id; absent ones are intact. */
+  chokepoints?: Readonly<Record<string, number>>;
   sea: Readonly<Record<number, { nation: NationId; level: number }>>;
   air: Readonly<Record<number, { nation: NationId; level: number }>>;
 }
@@ -551,6 +575,12 @@ export class NetworkSearch {
     w.infra = inputs.infrastructure;
     w.stamp++;
     for (const n of this.blocked) w.blocked[n] = 1;
+    for (const n of inputs.captured ?? []) w.unrailed[n] = 1;
+    if (w.linkQ.length) {
+      w.linkQ.fill(1);
+      const open = inputs.chokepoints;
+      if (open) this.map.chokepoints.forEach((cp, i) => (w.linkQ[i] = open[cp.id] ?? 1));
+    }
     w.heap.load(this.heapIds, this.heapKeys, this.heapSize);
     w.seaQ.fill(1, w.landCount);
     const sea = inputs.sea;
@@ -571,6 +601,7 @@ export class NetworkSearch {
       this.heapLive = w.heap.size;
     }
     for (const n of this.blocked) w.blocked[n] = 0;
+    w.unrailed.fill(0);
     [this.heapIds, this.heapKeys, this.heapSize] = w.heap.save();
   }
 }

@@ -1,6 +1,6 @@
 import type { ItemId, Nation, NationId } from '../../core/types';
 import { DEFAULT_DRAFT_LAW, DRAFT_LAWS } from '../../data/nations/conscription';
-import { CATEGORIES, GENERIC_AMMO_SURGE_MULTIPLE, GENERIC_AMMO_TONS_PER_MFG_USD_B, ITEMS, LINES, RESOURCES, RESOURCE_SPECS, type Resource, type Stock } from '../../data/industry';
+import { CATEGORIES, GENERIC_AMMO_SURGE_MULTIPLE, GENERIC_AMMO_TONS_PER_MFG_USD_B, ITEMS, LINES, OIL_STOCK_MONTHS, RESOURCES, RESOURCE_SPECS, type Resource, type Stock } from '../../data/industry';
 
 export interface LineState {
   item: ItemId;
@@ -25,6 +25,8 @@ export interface NationEconomy {
   buffers: Record<Resource, number[]>;
   /** Share of need actually available this tick after drawing on stocks, 0..1. */
   supply: Record<Resource, number>;
+  /** Oil, split from energy because forces run on it: months of national use left in stocks, and the share of need available this tick. */
+  oil: { months: number; supply: number };
   /**
    * Population-weighted industry intact and held, relative to the scenario start. The
    * baseline GDP in stats already excludes what was occupied or ruined before the start
@@ -55,6 +57,12 @@ export interface NationEconomy {
   fuelDelivered: number;
   /** Treasury paid for ordered output beyond what the defence budget buys, USD B since the run began. */
   orderSpendUsdB: number;
+  /**
+   * What the nation stood at on the first tick, which the baseline stats already carry: its
+   * mobilization (scenarios set a war footing after setup), the reservists it had left, and the
+   * men under arms. Absent until the economy first steps.
+   */
+  opening?: { mobilization: number; reservists: number; underArms: number };
 }
 
 export interface AidState {
@@ -90,6 +98,12 @@ export function stocksOf(nation: NationId, r: Resource): Stock[] {
   return spec.tiered?.[nation] ?? [{ share: 1, months: spec.buffers?.[nation] ?? spec.bufferMonths }];
 }
 
+/** Months of national oil use a nation holds: its oil tier where stocks are split by fuel, else OIL_STOCK_MONTHS, else its energy buffer. */
+export function oilStockMonths(nation: NationId): number {
+  const spec = RESOURCE_SPECS.energy;
+  return spec.tiered?.[nation]?.[0].months ?? OIL_STOCK_MONTHS[nation] ?? spec.buffers?.[nation] ?? spec.bufferMonths;
+}
+
 export function newLine(item: ItemId, baselinePerYear: number, surgePerYear: number, rampMonths: number, maxTotal?: number): LineState {
   return {
     item,
@@ -119,7 +133,7 @@ export function newNationEconomy(nation: Nation): NationEconomy {
   const lines: Record<ItemId, LineState> = {};
   const mfgB = (nation.stats.manufacturing ?? (nation.stats.gdp ?? 0) * 0.12) / 1e9;
   const ammoPerYear = mfgB * GENERIC_AMMO_TONS_PER_MFG_USD_B;
-  if (ammoPerYear > 0) lines[ITEMS.ammo_generic.id] = newLine(ITEMS.ammo_generic.id, ammoPerYear, ammoPerYear * GENERIC_AMMO_SURGE_MULTIPLE, CATEGORIES.bulk_ammo.rampMonths);
+  if (ammoPerYear > 0) lines[ITEMS.ammo_generic.id] = newLine(ITEMS.ammo_generic.id, ammoPerYear, ammoPerYear * GENERIC_AMMO_SURGE_MULTIPLE, CATEGORIES.shell.rampMonths);
   for (const l of LINES[nation.id] ?? []) {
     const spec = ITEMS[l.item];
     lines[spec.id] = newLine(spec.id, l.baselinePerYear, l.surgePerYear, CATEGORIES[spec.category].rampMonths, l.maxTotal);
@@ -129,6 +143,7 @@ export function newNationEconomy(nation: Nation): NationEconomy {
     lines,
     buffers: Object.fromEntries(RESOURCES.map((r) => [r, stocksOf(nation.id, r).map((s) => s.months)])) as Record<Resource, number[]>,
     supply: perResource(() => 1),
+    oil: { months: oilStockMonths(nation.id), supply: 1 },
     integrity: 1,
     baseIntegrity: 1,
     tradeLoss: 0,

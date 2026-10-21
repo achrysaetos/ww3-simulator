@@ -129,7 +129,20 @@ function goalNode(world: World, target?: NodeId, targetFormation?: Formation['id
 
 const ON_STATION = new Set(['attack', 'patrol', 'blockade', 'escort']);
 
-/** Keep escorts and hunters on their moving target, and send home groups that ran out of stores or weapons. */
+/**
+ * Share of fuel capacity at which a group heads home: planners keep a return reserve, and only an
+ * oiler alongside refills a group at sea (logistics). Judgment.
+ */
+// param: tag=estimated range=[0.2,0.4] source=judgment, return-fuel reserve
+const BINGO_FUEL = 0.3;
+/**
+ * Share of a group's hulls damaged at which it goes home for yard repair: battle damage is fixed
+ * alongside, not at sea (USS Stark about a year, USS Cole 14 months). Judgment.
+ */
+// param: tag=estimated range=[0.3,0.7] source=judgment
+const DAMAGED_RTB = 0.5;
+
+/** Keep escorts and hunters on their moving target, and send home groups that ran out of stores, fuel or weapons, or are mostly damaged. */
 export function refreshOrders(world: World, ctx: SimContext, f: Formation, tracked: boolean): void {
   const o = f.order;
   if (o.posture === 'reserve' && f.node !== f.home && !o.path?.length) repath(world, ctx, f, f.home);
@@ -137,10 +150,18 @@ export function refreshOrders(world: World, ctx: SimContext, f: Formation, track
     const t = world.formations[o.targetFormation];
     if (t?.status === 'active' && t.node !== o.target && (o.posture === 'escort' || tracked)) repath(world, ctx, f, t.node);
   }
-  if (f.node !== f.home && o.posture !== 'reserve' && (f.supply.food <= 0 || (ON_STATION.has(o.posture) && outOfWeapons(ctx, f)))) {
+  const spent = f.supply.food <= 0 || f.supply.fuel < BINGO_FUEL * f.supplyCapacity.fuel || mostlyDamaged(f);
+  if (f.node !== f.home && o.posture !== 'reserve' && (spent || (ON_STATION.has(o.posture) && outOfWeapons(ctx, f)))) {
     o.posture = 'reserve';
     repath(world, ctx, f, f.home);
   }
+}
+
+function mostlyDamaged(f: Formation): boolean {
+  let damaged = 0, fit = 0;
+  for (const k in f.damaged) damaged += f.damaged[k as PlatformId];
+  for (const k in f.equipment) fit += f.equipment[k as PlatformId];
+  return damaged > 0 && damaged >= DAMAGED_RTB * (damaged + fit);
 }
 
 function repath(world: World, ctx: SimContext, f: Formation, goal: NodeId): void {

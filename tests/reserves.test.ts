@@ -25,17 +25,25 @@ describe('national reserves', () => {
 
   it('reach units weeks after a full mobilization, and never in peacetime', () => {
     const twn = { ...nation('TWN') };
+    let called = 0;
     const step = (days: number) => {
       let ready = 0;
-      for (let t = 0; t < days * 4; t++) ready += recallReservists(twn, 6 / (24 * 30.4));
+      for (let t = 0; t < days * 4; t++) ready += recallReservists(twn, 6 / (24 * 30.4), 1_657_000, called);
       return ready;
     };
     expect(step(30)).toBe(0);
-    twn.mobilization = 1;
+    called = 1;
     const firstWeek = step(7);
     const byTwoMonths = firstWeek + step(53);
     expect(firstWeek / 1_657_000).toBeLessThan(0.15);
     expect(byTwoMonths / 1_657_000).toBeGreaterThan(0.55);
     expect(twn.reservists + byTwoMonths).toBeCloseTo(1_657_000, 0);
+  });
+
+  it('recall only the share a call-up names', () => {
+    const twn = { ...nation('TWN') };
+    let ready = 0;
+    for (let t = 0; t < 3 * 365 * 4; t++) ready += recallReservists(twn, 6 / (24 * 30.4), 1_657_000, 0.25);
+    expect(ready).toBeCloseTo(0.25 * 1_657_000, -2);
   });
 });

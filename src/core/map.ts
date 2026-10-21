@@ -1,3 +1,4 @@
+import { chokepointsOf, type Chokepoint } from '../data/geo/chokepoints';
 import type { NationId, NodeId, Terrain } from './types';
 import { TERRAINS } from './types';
 import { RIVER_NAMES, riverCrossings } from '../data/geo/rivers';
@@ -108,6 +109,8 @@ export class GameMap {
   readonly cities: City[];
   /** Land edges that cross water by bridge or tunnel (the Channel Tunnel, the Crimean Bridge), for capacity limits. */
   readonly fixedLinks: { name: string; a: NodeId; b: NodeId }[];
+  /** Bridges, tunnels and isthmuses that strikes can close (src/data/geo/chokepoints.ts); their state is `theater.chokepoints`. */
+  readonly chokepoints: Chokepoint[];
   readonly nationIds: NationId[];
   private readonly cellIndex: SquareIndex;
   private readonly seaIndex: Map<number, number>;
@@ -187,6 +190,7 @@ export class GameMap {
     this.adjRiver = riverCrossings(this.lat, this.lon, this.adjStart, this.adj, L);
     this.fixedLinks = data.fixedLinks.map((l) => ({ name: l.name, a: l.a as NodeId, b: l.b as NodeId }));
     this.cities = data.cities.map((c) => ({ name: c.name, nation: this.nationIds[c.nation], node: c.cell as NodeId, pop: c.pop, capital: c.capital, lat: c.lat, lon: c.lon }));
+    this.chokepoints = chokepointsOf(this);
   }
 
   isSea(n: NodeId): boolean {

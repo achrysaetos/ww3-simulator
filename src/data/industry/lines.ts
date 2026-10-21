@@ -128,8 +128,13 @@ export const LINES: Record<string, LineSpec[]> = {
  * at mobilization 0. Est.: puts the US at ~50 kt/yr, about twice its 155 mm tonnage.
  */
 export const GENERIC_AMMO_TONS_PER_MFG_USD_B = 20;
-/** Generic ammunition surge multiple at full mobilization; est. from WWII small-arms ammo growth (US ~10x 1940-43). */
-export const GENERIC_AMMO_SURGE_MULTIPLE = 8;
+/**
+ * Generic ammunition surge multiple at full mobilization. Artillery fires it as shells, so it
+ * surges like the shell lines above (1.5-3x; US 155 mm about 14k to 40k a month over 2022-25,
+ * US Army), not like WWII small-arms ammunition (US about 10x 1940-43, from a peacetime trickle).
+ */
+// param: tag=estimated range=[2,4] source=US Army 155 mm production 2022-25; shell lines in this file
+export const GENERIC_AMMO_SURGE_MULTIPLE = 3;
 
 /**
  * Merchant shipbuilding capacity, gross tons per year. ONI 2023 briefing slide:
