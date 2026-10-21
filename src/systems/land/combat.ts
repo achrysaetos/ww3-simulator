@@ -390,11 +390,16 @@ export function seize(world: World, ctx: SimContext, nation: NationId, node: Nod
  * Abkhazia and South Ossetia lines. So does the rest of the border between the
  * occupier and the occupied, which years of war have fortified too: Ukraine's
  * 2024-25 belts along the Sumy, Kharkiv and Chernihiv borders, Russia's in
- * Belgorod and Kursk.
+ * Belgorod and Kursk. So does the Korean DMZ, held under arms since the 1953 armistice: the
+ * ROK's forward barrier belts, anti-tank walls and minefields south of it, and the North's
+ * fortified zone north of it.
  */
+const STANDING_BORDERS: readonly (readonly [NationId, NationId])[] = [['KOR' as NationId, 'PRK' as NationId]];
+
 function fortifyStandingLines(world: World, map: GameMap): void {
   const { fortified } = landSlice(world);
   const lines = new Set<string>();
+  for (const [a, b] of STANDING_BORDERS) lines.add(`${a}|${b}`).add(`${b}|${a}`);
   for (let n = 0; n < map.landCount; n++) {
     const holder = world.control[n];
     if (holder && holder !== map.owner[n]) lines.add(`${holder}|${map.owner[n]}`).add(`${map.owner[n]}|${holder}`);
@@ -429,9 +434,12 @@ function advanceRate(world: World, ctx: SimContext, node: NodeId, attackers: For
   }
   if (!defenders.length) {
     // An empty cell the line next door still covers: infiltration, unless that line is too thin to stop a deliberate assault.
+    // A standing belt of obstacles closes the gaps infiltrators use, and a deliberate assault breaches it no faster than an attritional one.
     const { closed } = TERRAIN[ctx.map.terrain[node]];
     const ratio = fireRatio(summarize(world, ctx.catalog, { nation: movers[0].nation, fighters: movers, support: [] }, node, closed), summarize(world, ctx.catalog, { nation: cover[0].nation, fighters: cover, support: [] }, node, closed));
-    return (ratio >= DELIBERATE_ASSAULT_RATIO ? BREAKTHROUGH_KM_PER_DAY : COVERED_KM_PER_DAY) / moveCost;
+    const fort = landSlice(world).fortified[node] ?? 0;
+    if (ratio >= DELIBERATE_ASSAULT_RATIO) return ((1 - fort) * BREAKTHROUGH_KM_PER_DAY + fort * ATTRITION_MAX_KM_PER_DAY) / moveCost;
+    return ((1 - fort) * COVERED_KM_PER_DAY) / moveCost;
   }
   if (defenders.every((f) => f.status === 'routed')) return BREAKTHROUGH_KM_PER_DAY / moveCost;
   const attrition = Math.min(ATTRITION_MAX_KM_PER_DAY, ATTRITION_KM_PER_DAY * Math.max(0, Math.log(battle.exchange)));
