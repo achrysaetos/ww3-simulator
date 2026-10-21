@@ -301,7 +301,7 @@ const OobRow = memo(function OobRow({ id, name, color, posture, place, strength,
   id: FormationId; name: string; color: string; posture: string; place: string; strength: number; command: Command; node: NodeId; onSelect(f: FormationId, node: NodeId): void;
 }) {
   return (
-    <li onClick={() => onSelect(id, node)} data-testid="oob-item">
+    <li onClick={() => onSelect(id, node)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(id, node); } }} tabIndex={0} role="button" data-testid="oob-item">
       <span className="swatch sm" style={{ background: color }} />
       <span className="oob-name">{name}<span className={`cmd-tag ${command}`} title={COMMAND_TITLE[command]}>{COMMAND_TAG[command]}</span></span>
       <span className="oob-meta">{posture} · {place}</span>
@@ -310,31 +310,55 @@ const OobRow = memo(function OobRow({ id, name, color, posture, place, strength,
   );
 });
 
+/** Order-of-battle groups, by the domain that commands them. */
+const OOB_GROUPS: { label: string; kinds: readonly FormationKind[] }[] = [
+  { label: 'Land', kinds: ['maneuver', 'artillery', 'air_defense', 'missile', 'logistics'] },
+  { label: 'Air', kinds: ['air_wing'] },
+  { label: 'Naval', kinds: ['surface_group', 'submarine'] },
+  { label: 'Strategic and space', kinds: ['strategic', 'space'] },
+];
+
 export function FormationList({ client, palette, places, playAs, commandOf, onSelect, onReleaseAll }: ListProps) {
+  const [query, setQuery] = useState('');
   const mine = client.state.formations.filter((f) => f.entry.nation === playAs && f.status !== 'destroyed');
   const held = mine.filter((f) => commandOf(f.entry.id, f.entry.kind) === 'player').length;
   const color = palette.of(playAs).css;
+  const q = query.trim().toLowerCase();
+  const shown = q ? mine.filter((f) => f.entry.name.toLowerCase().includes(q) || places.name(f.node).toLowerCase().includes(q) || f.posture.replace(/_/g, ' ').includes(q)) : mine;
   return (
     <div className="panel-scroll">
       <Section title={`Order of battle · ${mine.length}`} right={held > 0 ? <button className="small-btn" onClick={onReleaseAll} data-testid="release-all">Hand {held} to AI</button> : undefined}>
         {!mine.length && <p className="muted">This nation fields no formations in the scenario. Pick another nation, or watch the war unfold.</p>}
-        <ul className="oob">
-          {mine.map((f) => (
-            <OobRow
-              key={f.entry.id}
-              id={f.entry.id}
-              name={f.entry.name}
-              color={color}
-              posture={f.posture.replace(/_/g, ' ')}
-              place={places.name(f.node)}
-              strength={Math.round(f.strength * 100)}
-              command={commandOf(f.entry.id, f.entry.kind)}
-              node={f.node}
-              onSelect={onSelect}
-            />
-          ))}
-        </ul>
-        <p className="muted small">Click a counter on the map, or a row here, to inspect and command it.</p>
+        {mine.length > 0 && (
+          <input className="oob-search" type="search" placeholder="Search by name, place or order…" value={query} onChange={(e) => setQuery(e.target.value)} data-testid="oob-search" aria-label="Search the order of battle" />
+        )}
+        {OOB_GROUPS.map((g) => {
+          const rows = shown.filter((f) => g.kinds.includes(f.entry.kind));
+          if (!rows.length) return null;
+          return (
+            <details key={g.label} className="oob-group" open={!!q || g.label === 'Land' || rows.length <= 40} data-testid={`oob-group-${g.label.split(' ')[0].toLowerCase()}`}>
+              <summary>{g.label} <span className="muted">· {rows.length}</span></summary>
+              <ul className="oob">
+                {rows.map((f) => (
+                  <OobRow
+                    key={f.entry.id}
+                    id={f.entry.id}
+                    name={f.entry.name}
+                    color={color}
+                    posture={f.posture.replace(/_/g, ' ')}
+                    place={places.name(f.node)}
+                    strength={Math.round(f.strength * 100)}
+                    command={commandOf(f.entry.id, f.entry.kind)}
+                    node={f.node}
+                    onSelect={onSelect}
+                  />
+                ))}
+              </ul>
+            </details>
+          );
+        })}
+        {q && !shown.length && <p className="muted small">No formation matches “{query}”.</p>}
+        <p className="muted small">Click a counter on the map, or a row here (Tab and Enter work too), to inspect and command it.</p>
       </Section>
     </div>
   );
