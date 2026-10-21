@@ -7,6 +7,7 @@ import { TARGET_CLASSES } from '../../core/types';
 import { marchKmPerDay } from './movement';
 import { allied, cellDepthKm, destroyFormation, hostilesAt, indexByNode, landSlice } from './state';
 import { updateEncirclement } from './encirclement';
+import { c2FireFactor } from '../c2';
 import {
   AIR_SUPPRESSION, AMMO_DAYS_INTENSE, ATTRITION_KM_PER_DAY, ATTRITION_MAX_KM_PER_DAY, BREAKTHROUGH_KM_PER_DAY, COVERED_KM_PER_DAY, HOSTILE_GROUND_COST,
   ASSAULT_EXPOSURE, DELIBERATE_ASSAULT_RATIO, FRONTAGE_PLATFORMS, WITHDRAWAL_KM, POSITIONAL_INTENSITY, AMMO_RATION_BELOW, AREA_FIRE_REF_DENSITY, CAS_BONUS, DIRECT_DENSITY_EXP, COMBAT_FUEL_DUTY, COMBINED_ARMS,
@@ -91,7 +92,7 @@ function summarize(world: World, catalog: Catalog, side: Side, node: NodeId, clo
       count[targetClassOf(cls)] += n * exposureOf(cls);
     }
   for (const f of [...side.fighters, ...side.support]) {
-    const m = fireModifier(f);
+    const m = fireModifier(f) * c2FireFactor(world, f);
     if (!m) continue;
     for (const [pid, n] of Object.entries(f.equipment)) {
       const p = catalog.platform(pid as PlatformId);

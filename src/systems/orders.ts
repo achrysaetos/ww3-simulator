@@ -1,5 +1,6 @@
 import type { SimContext, System } from '../core/engine';
 import type { Command, CommandDomain, FormationId, FormationKind, NationId, World } from '../core/types';
+import { holdOrder } from './c2';
 
 export type OrderCommand = Extract<Command, { type: 'order' }>;
 /** Returns true when it took the order; false passes it to the next handler. */
@@ -114,6 +115,7 @@ export function createOrderRouter(handlers: readonly OrderHandler[]): System {
         case 'order': {
           const f = world.formations[cmd.formation];
           if (!f || f.nation !== cmd.nation || f.status === 'destroyed') return;
+          if (holdOrder(world, cmd)) return;
           if (handlers.some((h) => h(world, cmd, ctx))) return;
           f.order = { ...cmd.order, issuedTick: world.tick };
           return;

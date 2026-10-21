@@ -6,6 +6,7 @@ import { createAi } from './ai';
 import { airWar, applyAirOrder } from './air';
 import { civil } from './civil';
 import { politics } from './politics';
+import { c2 } from './c2';
 import { createDiplomacy } from './diplomacy';
 import { shiftOdds } from './diplomacy/wars';
 import type { AllianceTreaty, StrategicProfile, TreatyMember } from './diplomacy/types';
@@ -86,8 +87,9 @@ const orders = createOrderRouter([
  * Tick order. Commands are applied first (by whichever system owns each type),
  * then every system steps in this order: today's weather first, since everything else reads it;
  * the air picture is settled before ground and sea combat read it, combat before logistics refills, economy before
- * diplomacy reads economic stress, intelligence after every sensor has moved, and AI last so
- * its orders queue for next tick.
+ * diplomacy reads economic stress, intelligence after every sensor has moved, command and
+ * control once the tick's strikes and captures have hit its HQs, and AI last so its orders
+ * queue for next tick.
  */
 export const SYSTEMS: System[] = [
   weather,
@@ -103,6 +105,7 @@ export const SYSTEMS: System[] = [
   politics,
   createDiplomacy({ alliances: warTreaties(alliances, strategicProfile), profiles: decision }),
   intel,
+  c2,
   createAi(decision),
 ];
 
