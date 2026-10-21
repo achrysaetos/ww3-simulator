@@ -3,7 +3,10 @@ import { at, merge, mix, unit, type Base, type Kit } from './build';
 
 /*
  * Korean People's Army, 2025. Totals per IISS Military Balance 2025 (MBT 3,500+; artillery
- * ~21,600 incl. ~5,500 MRL; ~545 combat-capable aircraft; ~71 submarines). Nuclear stockpile
+ * ~21,600, of which ~8,600 towed and self-propelled guns, ~5,500 MRL and ~7,500 mortars;
+ * ~545 combat-capable aircraft; ~71 submarines). Mortars are not modelled, so the corps hold
+ * about 14,000 guns and rocket launchers between them; D-30 and Grad stand in for the KPA's
+ * 122-152 mm tube and rocket types. Nuclear stockpile
  * ~50 warheads (SIPRI Yearbook 2025); missile TEL counts are estimates from CSIS Missile
  * Threat and 38 North, as no official figures exist. Corps garrisons are approximate.
  * Squad counts stand in for the ~1.1 million-strong infantry-heavy ground force.
@@ -15,9 +18,9 @@ const KPA = { readiness: 0.5, experience: 0.2 };
 const OLD_TANKS: Kit = { chonma_ho: 0.5, t55: 0.4, t62m: 0.1 };
 const NEW_TANKS: Kit = { pokpung_ho: 0.45, chonma_ho: 0.35, chonma_20: 0.1, t55: 0.1 };
 
-const FORWARD_CORPS: Kit = merge(mix(150, OLD_TANKS), { vtt323: 80, koksan: 40, mrl_240mm: 24, bm21_grad: 90, d30: 180, infantry_squad: 3500, truck: 1500 });
-const REAR_CORPS: Kit = merge(mix(120, OLD_TANKS), { vtt323: 40, bm21_grad: 54, d30: 120, infantry_squad: 3000, truck: 1000 });
-const MECH_CORPS: Kit = merge(mix(400, NEW_TANKS), { vtt323: 300, koksan: 24, bm21_grad: 54, d30: 72, infantry_squad: 900, truck: 1200 });
+const FORWARD_CORPS: Kit = merge(mix(150, OLD_TANKS), { vtt323: 80, koksan: 120, mrl_240mm: 72, bm21_grad: 400, d30: 800, infantry_squad: 3000, truck: 1500 });
+const REAR_CORPS: Kit = merge(mix(120, OLD_TANKS), { vtt323: 40, bm21_grad: 220, d30: 500, infantry_squad: 2600, truck: 1000 });
+const MECH_CORPS: Kit = merge(mix(400, NEW_TANKS), { vtt323: 300, koksan: 48, bm21_grad: 200, d30: 300, infantry_squad: 900, truck: 1200 });
 
 const corps = (name: string, base: Base, kit: Kit): OrbatEntry => unit(PRK, name, 'maneuver', 'corps', base, kit, KPA);
 
@@ -36,7 +39,7 @@ const ground: OrbatEntry[] = [
   corps('806th Mechanised Corps', at('Yonsan', 38.87, 126.25), MECH_CORPS),
   corps('815th Mechanised Corps', at('Hwangju', 38.67, 125.75), MECH_CORPS),
   corps('820th Tank Corps', at('Sariwon', 38.5, 125.76), merge(mix(550, NEW_TANKS), { vtt323: 200, koksan: 24, bm21_grad: 36, infantry_squad: 400, truck: 900 })),
-  corps('Pyongyang Defence Command', at('Pyongyang', 39.03, 125.75), merge(mix(150, NEW_TANKS), { vtt323: 100, bm21_grad: 36, d30: 72, infantry_squad: 2000, truck: 800 })),
+  corps('Pyongyang Defence Command', at('Pyongyang', 39.03, 125.75), merge(mix(150, NEW_TANKS), { vtt323: 100, bm21_grad: 150, d30: 300, infantry_squad: 2000, truck: 800 })),
   unit(PRK, '11th Storm Corps', 'maneuver', 'corps', at('Tokchon', 39.75, 126.3), { infantry_squad: 4000, truck: 400 }, { readiness: 0.65, experience: 0.3 }),
   // Deployed to Russia from October 2024; ~4,000 casualties by spring 2025 (South Korean NIS).
   unit(PRK, 'KPA Expeditionary Force (Kursk)', 'maneuver', 'division', at('Kursk oblast (KPA)', 51.45, 35.6), { infantry_squad: 900, koksan: 30, mrl_240mm: 15, truck: 150 }, { readiness: 0.6, experience: 0.6 }),
@@ -44,7 +47,7 @@ const ground: OrbatEntry[] = [
 
 // Long-range artillery able to reach Seoul from hardened sites north of the DMZ.
 const artillery: OrbatEntry[] = [
-  unit(PRK, '620th Artillery Corps', 'artillery', 'corps', at('Kaesong', 38.1, 126.55), { koksan: 300, mrl_240mm: 200, kn09_tel: 30, infantry_squad: 300, truck: 900 }, KPA),
+  unit(PRK, '620th Artillery Corps', 'artillery', 'corps', at('Kaesong', 38.1, 126.55), { koksan: 500, mrl_240mm: 400, kn09_tel: 30, infantry_squad: 300, truck: 900 }, KPA),
   unit(PRK, 'Forward Artillery Group East', 'artillery', 'corps', at('Chorwon north', 38.4, 127.2), { koksan: 150, mrl_240mm: 100, kn25_tel: 16, infantry_squad: 150, truck: 400 }, KPA),
   unit(PRK, 'Forward Artillery Group West', 'artillery', 'corps', at('Kaepung', 38.1, 126.4), { koksan: 150, mrl_240mm: 100, kn25_tel: 16, infantry_squad: 150, truck: 400 }, KPA),
 ];

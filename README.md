@@ -15,6 +15,8 @@ npm install
 npm run dev                                         # browser UI at http://localhost:5173
 npm run sim -- --list                               # list scenarios
 npm run sim -- --scenario taiwan-2027 --days 30     # run headless and print events
+npm run sim -- --scenario taiwan-2027 --days 10 --save run.json  # save the run at the end
+npm run sim -- --resume run.json --days 20          # carry on from a save, tick for tick
 npx tsx scripts/realism.ts ukraine-2026 30 1 RUS,UKR  # measured outcomes as JSON
 ```
 

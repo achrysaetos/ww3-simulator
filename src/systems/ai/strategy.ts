@@ -1,6 +1,6 @@
-import { relation } from '../../core/engine';
+import { atWar, relation } from '../../core/engine';
 import type { GameMap } from '../../core/map';
-import type { MunitionId, Nation, NationId, NodeId } from '../../core/types';
+import type { Command, MunitionId, Nation, NationId, NodeId, World } from '../../core/types';
 import { neighbours } from '../diplomacy/assess';
 import type { Assessment, DiplomacyState, WarRecord } from '../diplomacy/types';
 import { rung } from '../diplomacy/wars';
@@ -180,6 +180,58 @@ export function nuclearDecision(p: Plan, d: DiplomacyState | undefined): void {
   if (target === undefined || !munition) return;
   p.ai.lastNuclear[p.nation] = p.world.tick;
   p.out.push({ type: 'nuclear_release', nation: p.nation, target, warheads: Math.min(warheads, nation.nuclear.deployed), munition });
+}
+
+// ---------------------------------------------------------------- sanctions
+
+/**
+ * Opinion at or below which a state sanctions a nation it watches wage war. In 2022 the US, UK,
+ * Canada, Japan, South Korea, Australia, Norway and the EU sanctioned Russia; India, Turkey,
+ * Brazil and the Gulf states, on cordial or neutral terms with Moscow, did not.
+ */
+const SANCTION_OPINION = -30;
+/**
+ * Blocs with one trade policy. The EU imposes sanctions by Council decision for all members, so a
+ * member follows once those holding most of the bloc's GDP are hostile: Italy, Spain and Hungary
+ * applied every Russia package from 2022 on.
+ */
+const TRADE_BLOCS = ['EU'];
+
+function hostile(world: World, from: NationId, to: NationId): boolean {
+  return relation(world, from, to).opinion <= SANCTION_OPINION;
+}
+
+function blocHostile(world: World, bloc: string, to: NationId): boolean {
+  let gdp = 0, against = 0;
+  for (const m of Object.values(world.nations)) {
+    if (!m.blocs.includes(bloc) || m.id === to) continue;
+    gdp += m.stats.gdp ?? 0;
+    if (hostile(world, m.id, to)) against += m.stats.gdp ?? 0;
+  }
+  return gdp > 0 && against > gdp / 2;
+}
+
+/**
+ * Sanctions every AI nation imposes this pass: on each nation at war, by every AI state not
+ * fighting it that is hostile to it, alone or through its trade bloc. Sanctions are not lifted
+ * here; Western sanctions on Russia from 2014 and 2022 outlasted every ceasefire.
+ */
+export function sanctionDecisions(world: World): Command[] {
+  const belligerents = new Set<NationId>();
+  for (const [k, r] of Object.entries(world.relations)) if (r.atWar) for (const n of k.split('|')) belligerents.add(n as NationId);
+  const out: Command[] = [];
+  if (!belligerents.size) return out;
+  const blocs = new Map<string, boolean>();
+  for (const target of belligerents) {
+    blocs.clear();
+    for (const n of Object.values(world.nations)) {
+      if (n.id === target || n.controlledBy !== 'ai' || n.status === 'capitulated' || n.status === 'collapsed') continue;
+      if (atWar(world, n.id, target) || relation(world, n.id, target).sanctions) continue;
+      const viaBloc = () => n.blocs.some((b) => TRADE_BLOCS.includes(b) && (blocs.get(b) ?? blocs.set(b, blocHostile(world, b, target)).get(b)!));
+      if (hostile(world, n.id, target) || viaBloc()) out.push({ type: 'sanction', nation: n.id, target, on: true });
+    }
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------- strategy pass

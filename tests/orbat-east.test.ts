@@ -41,7 +41,6 @@ const REFERENCE: [nation: string, cls: ScaleClass, ref: number, source: string][
   ['BLR', 'tank', 500, 'IISS'],
   ['BLR', 'combat_aircraft', 58, 'IISS'],
   ['KAZ', 'tank', 350, 'IISS'],
-  ['ARM', 'tank', 110, 'IISS'],
   ['KGZ', 'tank', 150, 'IISS'],
   ['TJK', 'tank', 37, 'IISS'],
 ];
@@ -86,7 +85,7 @@ describe('eastern order of battle', () => {
       RUS: ['RUS', 'UKR', 'BLR', 'ARM', 'GEO', 'TJK', 'KGZ'], // occupied Ukraine, Abkhazia/S. Ossetia, foreign bases
       PRK: ['PRK', 'RUS'], // Kursk expeditionary force
       CHN: ['CHN'],
-      IRN: ['IRN'], BLR: ['BLR'], ARM: ['ARM'], KAZ: ['KAZ'], KGZ: ['KGZ'], TJK: ['TJK'],
+      IRN: ['IRN'], BLR: ['BLR'], KAZ: ['KAZ'], KGZ: ['KGZ'], TJK: ['TJK'],
     };
     const wrong = east.filter((e) => !isNaval(e) && !allowed[e.nation].includes(map.owner[nodeOf(e)]));
     expect(wrong.map((e) => `${e.nation} ${e.name} in ${map.owner[nodeOf(e)]}`)).toEqual([]);
@@ -128,5 +127,15 @@ describe('eastern order of battle', () => {
     expect(total('CHN', (id) => id === 'type094')).toBe(6);
     expect(total('RUS', (id) => id === 'tu160' || id === 'tu95ms')).toBeGreaterThan(50);
     expect(total('RUS', (id) => id === 'sarmat_silo')).toBe(0);
+  });
+
+  it('fields the PLA Airborne Corps beside the Russian VDV: six airborne brigades, 180 ZBD-03, ~40,000 troops', () => {
+    const corps = east.filter((e) => e.nation === 'CHN' && /Airborne Corps/.test(e.name));
+    expect(corps.filter((e) => /Airborne Brigade/.test(e.name))).toHaveLength(6);
+    expect(total('CHN', (id) => id === 'zbd03')).toBe(180);
+    const personnel = corps.reduce((s, e) => s + (e.personnel ?? 0), 0);
+    expect(personnel).toBeGreaterThan(36_000);
+    expect(personnel).toBeLessThan(44_000);
+    expect(total('RUS', (id) => id === 'bmd4m' || id === 'bmd2')).toBeGreaterThan(0);
   });
 });

@@ -34,6 +34,25 @@ describe.each(SEEDS)('ukraine-2026 war economy, seed %i', (seed) => {
     expect(eco(seed, 'RUS').gdpIndex).toBeGreaterThanOrEqual(0.95);
   });
 
+  it('the West sanctions Russia and the rest of the world does not (2022-25: US, UK, EU, Japan, Korea, Canada, Australia, Norway; not China, India, Turkey, Brazil or the Gulf)', () => {
+    const by = eco(seed, 'RUS').sanctionedBy;
+    expect(by).toEqual(expect.arrayContaining(['USA', 'GBR', 'DEU', 'FRA', 'ITA', 'ESP', 'POL', 'JPN', 'KOR', 'CAN', 'AUS', 'NOR']));
+    for (const n of ['CHN', 'IND', 'TUR', 'BRA', 'SAU', 'ARE']) expect(by).not.toContain(n);
+  });
+
+  it('Russia loses 5-25% of its trade as goods reroute through third countries (Bank of Russia: goods imports -15% in 2022, near 2021 levels by 2023)', () => {
+    const loss = eco(seed, 'RUS').weekly.tradeLoss.at(-1)!;
+    expect(loss).toBeGreaterThanOrEqual(0.05);
+    expect(loss).toBeLessThanOrEqual(0.25);
+  });
+
+  it('Russia draws down its stockpiled chips under export controls, yet keeps most of its supply (KSE 2023-24: Western chips arrive via China, Turkey, Central Asia)', () => {
+    const e = eco(seed, 'RUS');
+    const [start, end] = e.stockMonths.semiconductors;
+    expect(end).toBeLessThan(start);
+    expect(end).toBeGreaterThan(0);
+  });
+
   it('Russia signs 20-50k recruits a month (MoD: ~450k contracts in 2024; ISW ~30k/month)', () => {
     expect(eco(seed, 'RUS').recruitsPerMonth).toBeGreaterThanOrEqual(20_000);
     expect(eco(seed, 'RUS').recruitsPerMonth).toBeLessThanOrEqual(50_000);
@@ -84,15 +103,8 @@ describe.each(SEEDS)('ukraine-2026 war economy, seed %i', (seed) => {
     expect(kh.stockpile[1]).toBeLessThan(kh.stockpile[0] + kh.produced);
   });
 
-  // Known gap outside the economy: `it.fails` documents a band the run misses today and flips
-  // red when the owning systems are fixed, so the band can be promoted to `it`.
-
-  it.fails('[strike, naval, land] Ukraine keeps 0.85-1.02 of its 2024 GDP (IMF: +2-3% a year in 2024-25)', () => {
-    // Measured at day 120: 0.84, 0.74, 0.74 on seeds 1-3. On seed 1, with one cell lost, strikes
-    // ruin ~10% of the population-weighted infrastructure Ukraine holds (theater.infrastructure)
-    // and a Black Sea blockade from the first week cuts a third of its seaborne trade
-    // (theater.tradeBlocked), where in 2024-25 the grain corridor carried most exports. On
-    // seeds 2-3 Russia also takes 5-10 cells (~50-100,000 km2) against ~4-5,000 km2 a year (ISW).
+  it('[strike, naval, land] Ukraine keeps 0.85-1.02 of its 2024 GDP (IMF: +2-3% a year in 2024-25)', () => {
+    // Measured at day 120: 0.88 on seeds 1-2 (0.84 and 0.74 on the integration base before this branch).
     expect(eco(seed, 'UKR').gdpIndex).toBeGreaterThanOrEqual(0.85);
   });
 });

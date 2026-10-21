@@ -29,8 +29,8 @@ const STRATEGIC_CONVENTIONAL_AT = 6;
  * strategic warheads (W76-2 aside, 100-800 kt); 2% of national population in
  * one cell is roughly a large metropolitan area.
  */
-const STRATEGIC_YIELD_KT = 150;
-const CITY_POP_SHARE = 0.02;
+export const STRATEGIC_YIELD_KT = 150;
+export const CITY_POP_SHARE = 0.02;
 
 function addPressure(s: DiplomacyState, a: NationId, b: NationId, amount: number): void {
   const k = relationKey(a, b);

@@ -1,10 +1,12 @@
 /**
- * Strategic system: nuclear forces and their effects, missile defense against ballistic missiles, space (satellites,
+ * Strategic system: nuclear forces (alerting stored warheads, release) and their effects, missile defense against ballistic missiles, space (satellites,
  * ASAT, debris), cyber, and nuclear-winter climate. Sole writer of theater.fallout; also writes
  * theater.infrastructure for detonations, EMP and cyber attacks.
  */
 import type { SimContext, System } from '../../core/engine';
 import type { Formation, NationId, PlatformId, World } from '../../core/types';
+import { NUCLEAR_ALERT, strategicProfile } from '../../data/nations';
+import { stepAlerts, type AlertDoctrine } from './alert';
 import { stepClimate } from './climate';
 import { stepCyber } from './cyber';
 import { stepFallout } from './fallout';
@@ -13,11 +15,12 @@ import { countSatellites, resolveAsat, stepDebris } from './space';
 import type { NuclearPosture, StrategicState } from './state';
 import { BMD_SYSTEMS, DEFAULT_POSTURE } from './tables';
 
-export type { Burst, LaunchWarning, NuclearPosture, ReleaseRequest, StrategicState } from './state';
+export type { Burst, LaunchWarning, NuclearAlert, NuclearPosture, ReleaseRequest, StrategicState } from './state';
+export { matedShare, type AlertDoctrine } from './alert';
 export type { LaunchOnWarningHook } from './nuclear';
 export { release, detonate, interceptSalvo } from './nuclear';
 export { targetList, type Target, type TargetKind, type TargetMode } from './targeting';
-export { isrFactor, cepFactor } from './space';
+export { isrFactor, cepFactor, spaceSupport } from './space';
 export { globalFoodShock, globalCoolingC } from './climate';
 export { falloutDenied } from './fallout';
 export { cyberCapability } from './tables';
@@ -25,7 +28,13 @@ export { cyberCapability } from './tables';
 export interface StrategicOptions {
   /** Consulted when a launch-on-warning nation detects a counterforce strike. Without it nobody launches on warning. */
   onWarning?: LaunchOnWarningHook;
+  /** States that hold warheads apart from launchers and alert per doctrine. Default: src/data/nations. */
+  alerts?: Readonly<Record<string, AlertDoctrine>>;
 }
+
+const DEFAULT_ALERTS: Record<string, AlertDoctrine> = Object.fromEntries(
+  Object.entries(NUCLEAR_ALERT).map(([id, spec]) => [id, { spec, threshold: strategicProfile[id]?.nuclearThreshold ?? null }]),
+);
 
 function initialState(world: World): StrategicState {
   const posture: Record<NationId, NuclearPosture> = {};
@@ -41,6 +50,7 @@ function initialState(world: World): StrategicState {
     sootTg: 0,
     climateTg: 0,
     space: {},
+    alerts: {},
     debris: 0,
     totals: { detonations: 0, megatons: 0, deaths: 0 },
   };
@@ -51,6 +61,7 @@ export function setNuclearPosture(world: World, nation: NationId, posture: Nucle
 }
 
 export function createStrategic(opts: StrategicOptions = {}): System {
+  const alerts = opts.alerts ?? DEFAULT_ALERTS;
   return {
     id: 'strategic',
     commands: ['nuclear_release'],
@@ -61,6 +72,7 @@ export function createStrategic(opts: StrategicOptions = {}): System {
       if (cmd.type === 'nuclear_release') release(world, ctx, cmd);
     },
     step(world, ctx) {
+      stepAlerts(world, ctx, alerts);
       const { space, asat, byNation } = partition(world, ctx);
       countSatellites(world, ctx, space);
       resolveAsat(world, ctx, asat);
