@@ -189,8 +189,15 @@ export const REPAIR_FRACTION_PER_DAY = 0.1;
 export const REPLACE_FRACTION_PER_DAY = 0.02;
 export const RESERVE_REPLACE_MULTIPLIER = 3;
 
-/** Infrastructure restored per day by repair crews on friendly, non-front cells. Ukrzaliznytsia restored most cut lines in days to weeks in 2022. */
+/** Infrastructure restored per day by repair crews on friendly cells away from the front. Ukrzaliznytsia restored most cut lines in days to weeks in 2022. */
 export const INFRA_REPAIR_PER_DAY = 0.03;
+/**
+ * Share of that rate kept on a cell next to enemy-held ground. Repair went on under fire there:
+ * Kharkiv, 30 km from the border, kept its rail junction, power and water running through the
+ * 2024 glide-bomb campaign, while nothing was rebuilt in the strip under artillery and drone
+ * observation, the last 20-30 km of a 1-degree cell's ~100. Judgment: half the rate.
+ */
+export const FRONT_REPAIR_SHARE = 0.5;
 
 /** Formation kinds that occupy ground and block enemy supply through their cell. */
 export const LAND_KINDS: ReadonlySet<FormationKind> = new Set(['maneuver', 'artillery', 'air_defense', 'missile', 'logistics', 'strategic']);

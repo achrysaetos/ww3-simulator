@@ -7,7 +7,7 @@ import { NAVAL_KINDS } from '../naval/state';
 import type { NetworkSearch } from './network';
 import { refreshNetworks, searchesOf, snapshotInputs, type NetworkState } from './refresh';
 import {
-  FOOD_TONS_PER_PERSON_DAY, BEACH_CAPACITY, INFRA_REPAIR_PER_DAY, LIFT_TONS_PER_TROOP, LIFT_TONS_PER_VEHICLE, MAX_REFILL_FRACTION_PER_DAY, NODE_TONS_PER_DAY,
+  FOOD_TONS_PER_PERSON_DAY, BEACH_CAPACITY, FRONT_REPAIR_SHARE, INFRA_REPAIR_PER_DAY, LIFT_TONS_PER_TROOP, LIFT_TONS_PER_VEHICLE, MAX_REFILL_FRACTION_PER_DAY, NODE_TONS_PER_DAY,
   READINESS_HOURS_PER_DAY, REARM_PER_DAY, REARMS_IN_PORT_ONLY, SEALIFT_CLASSES, RECONSTITUTE_DAYS, RECONSTITUTE_MIN_STRENGTH, RECONSTITUTED_KINDS, REGENERATED_CLASSES,
   REPAIR_FRACTION_PER_DAY, REPLACE_FRACTION_PER_DAY, RESERVE_REPLACE_MULTIPLIER, SUPPLY_CLASSES, type SupplyClass,
 } from './tables';
@@ -108,7 +108,7 @@ function liftTons(p: Platform): number {
   return c?.cargoTons ?? (c?.vehicles ?? 0) * LIFT_TONS_PER_VEHICLE + (c?.troops ?? 0) * LIFT_TONS_PER_TROOP;
 }
 
-/** Repair crews restore cells their controller holds, except along the front where work is under fire. */
+/** Repair crews restore cells their controller holds, at FRONT_REPAIR_SHARE of the rate along the front where work is under fire. */
 function repairInfrastructure(world: World, ctx: SimContext, dtDays: number): void {
   const infra = world.theater.infrastructure, map = ctx.map, control = world.control;
   const step = INFRA_REPAIR_PER_DAY * dtDays;
@@ -121,7 +121,7 @@ function repairInfrastructure(world: World, ctx: SimContext, dtDays: number): vo
       const o = control[map.adj[k]];
       front = !!o && atWar(world, o, c);
     }
-    if (!front) infra[n] = Math.min(1, infra[n] + step);
+    infra[n] = Math.min(1, infra[n] + (front ? FRONT_REPAIR_SHARE * step : step));
   }
 }
 
