@@ -151,6 +151,21 @@ describe('integrated air defense', () => {
     expect(raids(false).length).toBeGreaterThan(2);
   });
 
+  it('a raid on the power grid cuts the grid serving the cell and leaves its other infrastructure alone; the grid then mends', () => {
+    const t = airWorld(5);
+    t.war('RUS', 'UKR');
+    const kyiv = t.node(...KYIV);
+    const infra = t.world.theater.infrastructure[kyiv];
+    launchers(t, 'RUS', t.node(53.9, 27.6), { x_cruise_tel: 4 }, { posture: 'strike', target: kyiv, targetClass: 'power' });
+    expect(t.strikes(t.tick()).length).toBeGreaterThan(0);
+    const cut = t.world.theater.power?.[kyiv] ?? 1;
+    expect(cut).toBeLessThan(0.95);
+    expect(t.world.theater.infrastructure[kyiv]).toBe(infra);
+    for (const f of Object.values(t.world.formations)) if (f.nation === 'RUS') f.order = { posture: 'defend' };
+    t.tick(40);
+    expect(t.world.theater.power?.[kyiv] ?? 1).toBeGreaterThan(cut);
+  });
+
   it('runs interceptor stocks down until only the counter-drone belt stops drones', () => {
     const t = airWorld();
     t.war('RUS', 'UKR');

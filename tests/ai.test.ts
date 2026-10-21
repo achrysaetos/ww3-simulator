@@ -207,3 +207,14 @@ describe('strike wing basing', () => {
     expect(firedAbroad).toBeGreaterThan(0);
   }, 120_000);
 });
+
+describe('grid campaign', () => {
+  it("Russia's strikes cut the grid serving Ukraine's largest cities; Ukraine, with no such doctrine, leaves Russia's grid alone", () => {
+    const s = createSession('ukraine-2026', 1);
+    s.engine.run(s.world, (21 * 24) / s.world.dtHours);
+    const grid = s.world.theater.power ?? {};
+    const cities = s.map.cities.filter((c) => c.nation === 'UKR').sort((a, b) => b.pop - a.pop).slice(0, 3);
+    expect(cities.filter((c) => (grid[c.node] ?? 1) < 0.9).length).toBeGreaterThanOrEqual(2);
+    expect(Object.keys(grid).filter((n) => s.world.control[Number(n)] === 'RUS')).toEqual([]);
+  }, 120_000);
+});

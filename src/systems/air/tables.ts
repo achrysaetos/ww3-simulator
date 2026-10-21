@@ -272,6 +272,16 @@ export const TUNING = {
    * capacity concentrated in ~30 cells, i.e. ~0.5 % per hit (estimate).
    */
   structurePerHit: 0.005,
+  /**
+   * Grid capacity a cell loses per 450 kg-class hit aimed at its power plants and substations
+   * (the 'power' class). Russia's 2022-23 and 2024 campaigns: roughly a quarter of ~1,000-2,000
+   * missiles and Shaheds got through, onto ~30 grid cells, and took out 40-50 % of Ukraine's
+   * generation (Ukrenergo; UN HRMMU 2024: ~9 of 18 GW by summer 2024), ~8 leaked hits a cell,
+   * so ~6 % per hit (estimate).
+   */
+  powerPerHit: 0.06,
+  /** Share of a cell's lost grid capacity restored per day: Ukraine got most supply back over the spring after each winter campaign (judgment). */
+  powerRepairPerDay: 0.02,
   /** Runway capacity cut per cratering hit, and rapid runway repair per day (USAF RADR: ~8 h to restore a MOS). */
   runwayPerHit: 0.08,
   runwayRepairPerDay: 1,

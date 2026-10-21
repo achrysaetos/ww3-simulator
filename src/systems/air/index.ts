@@ -56,6 +56,12 @@ function recover(world: World, slice: AirSlice) {
     const delta = OFFENSIVE_POSTURES.has(f.order.posture) ? TUNING.surgeFatiguePerDay * days : -TUNING.restRecoveryPerDay * days;
     f.fatigue = Math.max(0, Math.min(1, f.fatigue + delta));
   }
+  const grid = world.theater.power ?? {};
+  for (const [node, g] of Object.entries(grid)) {
+    const next = g + (1 - g) * Math.min(1, TUNING.powerRepairPerDay * days);
+    if (next >= 0.999) delete grid[Number(node)];
+    else grid[Number(node)] = next;
+  }
   for (const [node, r] of Object.entries(slice.runway)) {
     const next = r + TUNING.runwayRepairPerDay * days;
     if (next >= 1) delete slice.runway[Number(node)];

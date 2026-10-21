@@ -175,6 +175,6 @@ function forwardDeploy(p: Plan, w: Formation, targets: TargetGrid, airfields: ()
 
 /** Organic weapons (guns, rockets) able to hit `cls`, for aircraft without a suitable missile or bomb. */
 function hasFirepower(p: Plan, w: Formation, cls: TargetClass): boolean {
-  for (const [id, n] of Object.entries(w.equipment)) if (n > 0 && (p.ctx.catalog.platform(id as PlatformId).firepower[cls] ?? 0) > 0) return true;
+  for (const [id, n] of Object.entries(w.equipment)) if (n > 0 && (p.ctx.catalog.platform(id as PlatformId).firepower[cls === 'power' ? 'structure' : cls] ?? 0) > 0) return true;
   return false;
 }

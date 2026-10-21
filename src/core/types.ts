@@ -24,7 +24,7 @@ export type Terrain = (typeof TERRAINS)[number];
 export type Domain = 'land' | 'air' | 'sea' | 'subsurface' | 'space';
 
 /** What a weapon is shooting at. Kill probabilities and firepower are keyed by this. */
-export const TARGET_CLASSES = ['infantry', 'soft', 'armor', 'aircraft', 'helicopter', 'ship', 'submarine', 'missile', 'structure', 'hardened'] as const;
+export const TARGET_CLASSES = ['infantry', 'soft', 'armor', 'aircraft', 'helicopter', 'ship', 'submarine', 'missile', 'structure', 'hardened', 'power'] as const;
 export type TargetClass = (typeof TARGET_CLASSES)[number];
 
 export type PlatformClass =
@@ -325,4 +325,9 @@ export interface Theater {
   tradeBlocked: Record<NationId, number>;
   /** Writer: strategic. Radiation/fallout intensity per node, decays over time. */
   fallout: Record<number, number>;
+  /**
+   * Writer: air (strikes on the 'power' target class, and repair). Generation and grid capacity
+   * serving each land cell, 0..1; absent = intact. Absent in older saves.
+   */
+  power?: Record<number, number>;
 }

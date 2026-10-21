@@ -40,8 +40,8 @@ export interface Assessment {
 export const BDA = { futileRaids: 2, reassessDays: 3 };
 
 /** The key a strike's aim is assessed under: the formation it aims at, else the cell. */
-export function aimKey(target: NodeId, formation?: FormationId): string {
-  return formation ?? `n${target}`;
+export function aimKey(target: NodeId, formation?: FormationId, tc?: TargetClass): string {
+  return formation ?? `${tc === 'power' ? 'g' : 'n'}${target}`;
 }
 
 /** Whether `nation`'s assessment of an aim says to stop striking it now. */
@@ -71,7 +71,7 @@ interface Package {
 
 /** The pk that matters for a target class. Airbase attacks kill parked aircraft as soft targets. */
 export function effectPk(m: Munition, tc: TargetClass): number {
-  return (tc === 'aircraft' ? m.pk.soft ?? m.pk.structure : m.pk[tc]) ?? 0;
+  return (tc === 'aircraft' ? m.pk.soft ?? m.pk.structure : tc === 'power' ? m.pk.power ?? m.pk.structure : m.pk[tc]) ?? 0;
 }
 
 export function isStrikeMunition(m: Munition): boolean {
@@ -204,7 +204,7 @@ export function resolveStrikes(world: World, ctx: SimContext, pic: AirPicture, s
   const raids = new Map<string, Package[]>();
   for (const f of Object.values(world.formations)) {
     if (f.status !== 'active' || f.order.posture !== 'strike' || !hostileTarget(world, pic, f)) continue;
-    if (futileAim(world, f.nation, aimKey(f.order.target!, f.order.targetFormation), f.order.issuedTick)) continue;
+    if (futileAim(world, f.nation, aimKey(f.order.target!, f.order.targetFormation, f.order.targetClass), f.order.issuedTick)) continue;
     const p = planPackage(world, ctx, pic, f);
     if (!p) continue;
     const key = `${f.order.target}|${f.nation}`;
@@ -292,7 +292,7 @@ function resolveRaid(world: World, ctx: SimContext, pic: AirPicture, slice: AirS
   live.forEach((p, i) => {
     const flightMin = nodeDistance(ctx, p.f.node, target) / (Math.max(0.05, p.munition.speedMach) * MACH_KM_PER_MIN);
     const { damage, effective } = applyEffect(world, ctx, pic, slice, target, attacker, p.munition, p.targetClass, leaked[i], tally, flightMin, p.f.order.targetFormation);
-    assess(world, slice, attacker, aimKey(target, p.f.order.targetFormation), effective);
+    assess(world, slice, attacker, aimKey(target, p.f.order.targetFormation, p.targetClass), effective);
     ctx.emit({ type: 'strike', tick: world.tick, by: attacker, munition: p.munition.id, fired: p.weapons, intercepted: p.weapons - leaked[i], target, damage });
   });
   emitBattle(world, ctx, target, attacker, world.control[target] || attacker, tally);
@@ -422,6 +422,15 @@ function applyEffect(world: World, ctx: SimContext, pic: AirPicture, slice: AirS
     const perHit = TUNING.structurePerHit * effectPk(m, tc) * (m.warheadKg / 450) ** (2 / 3);
     infra[target] = before * (1 - Math.min(0.5, perHit)) ** hits;
     return { damage: `infrastructure ${before.toFixed(3)} -> ${infra[target].toFixed(3)}`, effective: infra[target] < before };
+  }
+  if (tc === 'power') {
+    const owner = world.control[target];
+    if (!owner || !pic.atWar(owner, attacker)) return { damage: 'no hostile grid', effective: false };
+    const grid = (world.theater.power ??= {});
+    const before = grid[target] ?? 1;
+    const perHit = TUNING.powerPerHit * effectPk(m, tc) * (m.warheadKg / 450) ** (2 / 3);
+    grid[target] = before * (1 - Math.min(0.5, perHit)) ** hits;
+    return { damage: `grid ${before.toFixed(3)} -> ${grid[target].toFixed(3)}`, effective: grid[target] < before };
   }
   let cratered = false;
   let p = effectPk(m, tc) * stillThere(m, tc, flightMin);

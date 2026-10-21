@@ -49,6 +49,15 @@ const SHIP_WORTH = { min: 0.5, max: 3 };
 const FRONT_FORCES = { value: 2, cls: 'armor' as TargetClass };
 const RAIL_HUB = { value: 1.5, cls: 'structure' as TargetClass, minRailKm: 50 };
 const CAPITAL = { value: 2.5, cls: 'structure' as TargetClass };
+/**
+ * Nations whose doctrine strikes the enemy's power grid as a campaign of its own. Russia did it
+ * from October 2022: waves of Kh-101, Kalibr, Iskander and Shaheds on thermal and hydro plants and
+ * the substations serving Kyiv, Kharkiv, Odesa, Dnipro and Lviv, about a third of its long-range
+ * launches in the winter of 2022-23 and again from March 2024 (Ukrenergo; UN HRMMU). The grid
+ * serving each of the enemy's largest cities is a target worth what is still standing (judgment).
+ */
+const GRID_CAMPAIGN: ReadonlySet<NationId> = new Set(['RUS' as NationId]);
+const GRID = { value: 5, cls: 'power' as TargetClass, cities: 12 };
 /** Leadership willing to risk deep strikes on a nuclear power's homeland before the ladder sanctions them. */
 const DEEP_STRIKE_RISK = 0.7;
 
@@ -145,6 +154,7 @@ export function strikeTargets(p: Plan, battleArea: Set<number>): TargetGrid {
   for (const e of p.enemies) {
     const cap = p.world.nations[e].capital;
     if (p.world.control[cap] === e) out.push({ node: cap, cls: CAPITAL.cls, value: CAPITAL.value, assigned: 0 });
+    if (GRID_CAMPAIGN.has(p.nation)) for (const n of gridNodes(p, e)) out.push({ node: n, cls: GRID.cls, value: GRID.value * (p.world.theater.power?.[n] ?? 1), assigned: 0 });
   }
   const deep = new Map<NationId, boolean>();
   const allowed = (t: StrikeTarget) => {
@@ -157,8 +167,18 @@ export function strikeTargets(p: Plan, battleArea: Set<number>): TargetGrid {
     return ok && (p.enemies.has(owner) || nearEnemyCapital(p, t.node));
   };
   // Aims recent raids could not touch wait for reassessment (air BDA).
-  const live = (t: StrikeTarget) => !futileAim(p.world, p.nation, aimKey(t.node, t.formation));
+  const live = (t: StrikeTarget) => !futileAim(p.world, p.nation, aimKey(t.node, t.formation, t.cls));
   return new TargetGrid(out.filter((t) => allowed(t) && live(t)).sort((a, b) => b.value - a.value || a.node - b.node), map);
+}
+
+/** The cells holding the enemy's largest cities it still controls, largest first. */
+function gridNodes(p: Plan, e: NationId): NodeId[] {
+  const nodes = new Set<NodeId>();
+  for (const c of [...p.ctx.map.cities].filter((c) => c.nation === e && p.world.control[c.node] === e).sort((a, b) => b.pop - a.pop)) {
+    nodes.add(c.node);
+    if (nodes.size === GRID.cities) break;
+  }
+  return [...nodes];
 }
 
 /**
