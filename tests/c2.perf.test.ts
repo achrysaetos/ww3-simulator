@@ -19,10 +19,10 @@ describe('c2 performance', () => {
       s.engine.step(s.world);
       tickMs.push(performance.now() - t);
     }
-    // Fastest runs, so other processes on a loaded machine do not decide the verdict.
+    // Fastest runs, and a share of the same run's tick rather than a fixed ms figure, so a
+    // loaded machine slows both sides alike and does not decide the verdict.
     const c2Best = Math.min(...c2Ms), tickBest = Math.min(...tickMs);
     console.log(`c2 step: ${c2Best.toFixed(2)} ms of a ${tickBest.toFixed(0)} ms ww3-2027 tick`);
-    expect(c2Best).toBeLessThan(15);
     expect(c2Best).toBeLessThan(0.05 * tickBest);
   });
 });
