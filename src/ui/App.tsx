@@ -168,6 +168,11 @@ function Command({ client, palette, initialNation }: { client: SimClient; palett
   const hours = client.state.tick * (client.meta?.dtHours ?? 6);
   const selectedView = selected ? client.state.formations.find((f) => f.entry.id === selected) : undefined;
   const targeting = nuclearPick ? 'nuclear' : pending ? 'order' : null;
+  const centre = useRef<HTMLElement>(null);
+  // On a phone the panel sits below the map: bring the map back into view to pick the target.
+  useEffect(() => {
+    if (targeting && matchMedia('(max-width: 760px)').matches) centre.current?.scrollIntoView({ block: 'start' });
+  }, [targeting]);
   const delegatedNames = COMMAND_DOMAINS.filter((k) => ai[k]).map((k) => DOMAIN_LABEL[k].name);
   const keptNames = COMMAND_DOMAINS.filter((k) => !ai[k]).map((k) => DOMAIN_LABEL[k].name);
 
@@ -220,7 +225,7 @@ function Command({ client, palette, initialNation }: { client: SimClient; palett
         <NationPanel client={client} palette={palette} playAs={playAs} onCommand={sendCommand} onNuclear={() => { setPending(null); setNuclearPick(true); }} />
       </aside>
 
-      <main className="center">
+      <main className="center" ref={centre}>
         <MapView
           client={client}
           palette={palette}
