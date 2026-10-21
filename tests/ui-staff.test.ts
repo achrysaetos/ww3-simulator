@@ -64,7 +64,9 @@ describe('advisor cards: the recommended button issues the command, and the answ
     const g = start('ww3-2027', 'USA');
     g.step();
     const calls = g.desk.cards.filter((c) => c.key.startsWith('treaty|'));
-    expect(calls.length).toBeGreaterThanOrEqual(3);
+    const aggressors = g.state.focusNation!.treatyCalls.map((c) => c.aggressor);
+    // A treaty calls only on a war inside its area (A4), so how many arrive on day one is the scenario's, not the card's.
+    expect(calls.length).toBeGreaterThan(0);
     for (const c of calls) {
       expect(advisorOf(N('USA'), c.role!).title).toBe('Foreign Minister');
       expect(c.urgent).toBe(true);
@@ -82,7 +84,7 @@ describe('advisor cards: the recommended button issues the command, and the answ
     expect(g.desk.recent.filter((e) => e.type === 'command_result' && e.command === 'answer_treaty')).toHaveLength(calls.length);
     expect(g.desk.cards.some((c) => calls.some((x) => x.key === c.key))).toBe(false);
     g.step(4);
-    expect(g.state.focusNation!.enemies, 'the engine took the United States into the war').toContain('RUS');
+    for (const a of aggressors) expect(g.state.focusNation!.enemies, 'the engine took the United States into each war it answered').toContain(a);
   }, 300_000);
 
   it('a build-up (ukraine-2026 as Ukraine): Reinforce moves the nearest reserve brigade, and its order answer shows', () => {
@@ -101,7 +103,9 @@ describe('advisor cards: the recommended button issues the command, and the answ
     const result = g.desk.recent.find((e) => e.type === 'command_result' && e.formation === cmd.formation && e.code !== 'relayed');
     expect(result).toMatchObject({ command: 'order', nation: 'UKR', byPlayer: true });
     expect(s.answer!.ok).toBe(result!.type === 'command_result' && result!.ok);
-    if (s.answer!.ok) expect(g.world.formations[cmd.formation].order).toMatchObject({ posture: 'move', target: card!.node });
+    const f = g.world.formations[cmd.formation];
+    // On the way, or already there and dug in: a reserve one cell back can arrive inside a tick.
+    if (s.answer!.ok) expect(f.node === card!.node ? f.order.posture : f.order).toEqual(f.node === card!.node ? 'defend' : expect.objectContaining({ posture: 'move', target: card!.node }));
     expect(shown(g, s)).toContain(s.answer!.text.replace(/&/g, '&amp;'));
   }, 300_000);
 

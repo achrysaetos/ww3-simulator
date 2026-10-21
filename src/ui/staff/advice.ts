@@ -484,5 +484,7 @@ export function answerOf(cmd: Command, sentTick: number, s: Pick<Situation, 'me'
       const hit = after.find((e) => (e.type === 'nuclear_detonation' && e.by === s.me) || (e.type === 'strike' && e.by === s.me && e.munition === cmd.munition));
       return hit ? { ok: true, text: 'Launch confirmed', final: true } : null;
     }
+    case 'grant_access': case 'set_aid': case 'raise_formation':
+      return null;
   }
 }
