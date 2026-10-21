@@ -429,9 +429,12 @@ function advanceRate(world: World, ctx: SimContext, node: NodeId, attackers: For
   }
   if (!defenders.length) {
     // An empty cell the line next door still covers: infiltration, unless that line is too thin to stop a deliberate assault.
+    // A standing belt of obstacles closes the gaps infiltrators use, and a deliberate assault breaches it no faster than an attritional one.
     const { closed } = TERRAIN[ctx.map.terrain[node]];
     const ratio = fireRatio(summarize(world, ctx.catalog, { nation: movers[0].nation, fighters: movers, support: [] }, node, closed), summarize(world, ctx.catalog, { nation: cover[0].nation, fighters: cover, support: [] }, node, closed));
-    return (ratio >= DELIBERATE_ASSAULT_RATIO ? BREAKTHROUGH_KM_PER_DAY : COVERED_KM_PER_DAY) / moveCost;
+    const fort = landSlice(world).fortified[node] ?? 0;
+    if (ratio >= DELIBERATE_ASSAULT_RATIO) return ((1 - fort) * BREAKTHROUGH_KM_PER_DAY + fort * ATTRITION_MAX_KM_PER_DAY) / moveCost;
+    return ((1 - fort) * COVERED_KM_PER_DAY) / moveCost;
   }
   if (defenders.every((f) => f.status === 'routed')) return BREAKTHROUGH_KM_PER_DAY / moveCost;
   const attrition = Math.min(ATTRITION_MAX_KM_PER_DAY, ATTRITION_KM_PER_DAY * Math.max(0, Math.log(battle.exchange)));
