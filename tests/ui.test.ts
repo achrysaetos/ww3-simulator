@@ -129,9 +129,15 @@ describe('dashboard detail', () => {
     const enc = new SnapshotEncoder(t.map.nationIds, t.catalog, t.map.size);
     const [RUS, POL, DEU, FRA] = ['RUS', 'POL', 'DEU', 'FRA'].map(nation);
     t.world.slices.diplomacy = {
-      wars: [{ id: 'w1', aggressor: RUS, sides: [[RUS], [POL, DEU]], startTick: 0 }],
+      wars: [{
+        id: 'w1', name: 'RUS-POL war', since: 0,
+        sides: [
+          { leader: RUS, members: { [RUS]: { joined: 0, via: 'declared' } } },
+          { leader: POL, members: { [POL]: { joined: 0, via: 'attacked' }, [DEU]: { joined: 8, via: 'NATO', defends: POL } } },
+        ],
+      }],
       joins: [{ nation: FRA, war: 'w1', side: 1, dueTick: 12, treaty: 'NATO', kind: 'collective_defense', victim: POL, aggressor: RUS }],
-      records: {}, assessment: {}, pressure: {}, offers: {}, ssbnFormations: [], invoked: [], umbrella: [],
+      records: {}, assessment: {}, pressure: {}, offers: {}, access: {}, aid: {}, rev: 0, ssbnFormations: [], invoked: [], umbrella: [],
     };
     enc.collect([
       { type: 'war_declared', tick: 0, by: RUS, on: POL, reason: 'NATO aggression' },

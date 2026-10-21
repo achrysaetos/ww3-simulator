@@ -1,5 +1,5 @@
 import type { NationId } from '../../core/types';
-import type { Alliance } from './types';
+import type { AirDefencePledge, Alliance, PeaceTreaty } from './types';
 
 const ids = (s: string) => s.split(' ') as NationId[];
 
@@ -11,6 +11,11 @@ const AU = ids(
   'DZA AGO BEN BWA BFA BDI CPV CMR CAF TCD COM COD COG CIV DJI EGY GNQ ERI SWZ ETH GAB GMB GHA GIN GNB KEN LSO LBR LBY MDG ' +
     'MWI MLI MRT MUS MAR MOZ NAM NER NGA RWA STP SEN SYC SLE SOM ZAF SSD SDN TZA TGO TUN UGA ZMB ZWE',
 );
+/**
+ * "The Pacific area" of the US treaties in Asia, which none of them bounds. Judgment: East and
+ * Southeast Asia, Oceania and the Pacific Ocean to the US west coast, Alaska and Hawaii.
+ */
+const PACIFIC = [{ lonMin: 95 }, { lonMax: -115 }];
 const ARAB_LEAGUE = ids('DZA BHR COM DJI EGY IRQ JOR KWT LBN LBY MRT MAR OMN PSE QAT SAU SOM SDN SYR TUN ARE YEM');
 
 /**
@@ -22,8 +27,9 @@ export const alliances: Alliance[] = [
   {
     id: 'NATO', name: 'North Atlantic Treaty Organization', members: NATO, obligation: 'collective_defense',
     triggers: ['attack_on_territory', 'attack_on_forces'], commitment: 0.85, nuclearGuarantors: ids('USA GBR FRA'),
-    // Art. 6 limits Art. 5 to Europe, North America, Turkey and islands north of the Tropic of Cancer.
-    northOfLat: 23.44,
+    // Art. 6 limits Art. 5 to members' territory and forces in Europe, North America, Turkey, the Mediterranean
+    // and the North Atlantic north of the Tropic of Cancer: not Hawaii, Guam or the Gulf.
+    area: { boxes: [{ latMin: 23.44, lonMax: 45 }] },
     source: 'North Atlantic Treaty Arts. 4-6; Finland joined Apr 2023, Sweden Mar 2024',
   },
   {
@@ -69,23 +75,32 @@ export const alliances: Alliance[] = [
     id: 'US-JPN', name: 'US-Japan Treaty of Mutual Cooperation and Security', members: ids('USA JPN'),
     obligation: 'bilateral_defense', triggers: ['attack_on_territory'], commitment: 0.85, nuclearGuarantors: ids('USA'),
     // Art. V covers "territories under the administration of Japan", which US presidents have said includes the Senkakus.
+    // Japan owes nothing for an attack on the US elsewhere: its 2015 security laws allow collective self-defence only
+    // in a "survival-threatening situation", decided case by case.
+    protectedOnly: ids('JPN'),
     source: '1960 treaty Art. V; Obama 2014 and Biden 2022 Senkaku statements',
   },
   {
     id: 'US-KOR', name: 'US-ROK Mutual Defense Treaty', members: ids('USA KOR'), obligation: 'bilateral_defense',
     triggers: ['attack_on_territory', 'attack_on_forces'], commitment: 0.85, nuclearGuarantors: ids('USA'),
+    // Art. III: "an armed attack in the Pacific area on either of the Parties".
+    area: { boxes: PACIFIC },
     source: '1953 treaty Art. III; Washington Declaration 2023 (Nuclear Consultative Group); ~28,500 US troops',
   },
   {
     id: 'US-PHL', name: 'US-Philippines Mutual Defense Treaty', members: ids('USA PHL'), obligation: 'bilateral_defense',
     // Art. IV/V cover public vessels, aircraft and coast guard "anywhere in the South China Sea" (2019, 2023 US statements).
     triggers: ['attack_on_territory', 'attack_on_forces'], commitment: 0.7, nuclearGuarantors: ids('USA'),
+    // Art. V: the metropolitan territory of either party, its Pacific islands, and its forces in the Pacific.
+    area: { homeland: true, boxes: PACIFIC },
     source: '1951 treaty Arts. IV-V; Pompeo 2019, Blinken 2023; EDCA sites',
   },
   {
     id: 'ANZUS', name: 'ANZUS Treaty', members: ids('AUS USA'), obligation: 'bilateral_defense',
     // US obligations to New Zealand have been suspended since 1986, so NZL is not a party here.
     triggers: ['attack_on_territory', 'attack_on_forces'], commitment: 0.85, nuclearGuarantors: ids('USA'),
+    // Art. V: the metropolitan territory of either party (so 9/11 counted), its Pacific islands, and its forces in the Pacific.
+    area: { homeland: true, boxes: PACIFIC },
     source: 'ANZUS 1951 Arts. IV-V; invoked by Australia Sept 2001',
   },
   {
@@ -188,3 +203,28 @@ export function defenseObligations(nation: NationId, ally: NationId): Alliance[]
       a.members.includes(nation) && a.members.includes(ally) && nation !== ally && !a.protectedOnly?.includes(nation),
   );
 }
+
+const pair = (s: string) => ids(s) as [NationId, NationId];
+
+/** Peace treaties and normalisation agreements that keep a party out of alliance wars against the other. */
+export const peaceTreaties: PeaceTreaty[] = [
+  { between: pair('EGY ISR'), source: 'Egypt-Israel Peace Treaty, 26 Mar 1979; Egypt stayed out of the 1982, 2006 and 2023-25 wars' },
+  { between: pair('JOR ISR'), source: 'Israel-Jordan Treaty of Peace (Wadi Araba), 26 Oct 1994' },
+  { between: pair('ARE ISR'), source: 'Abraham Accords, 15 Sep 2020' },
+  { between: pair('BHR ISR'), source: 'Abraham Accords, 15 Sep 2020' },
+  { between: pair('MAR ISR'), source: 'Israel-Morocco normalisation, 22 Dec 2020' },
+  { between: pair('SDN ISR'), source: 'Sudan signed the Abraham Accords declaration, 6 Jan 2021' },
+];
+
+/**
+ * Air defence given to a state under attack without joining its war. On 13-14 Apr 2024 the US,
+ * the UK, France and Jordan intercepted most of about 300 Iranian drones and missiles aimed at
+ * Israel, none of them at war with Iran (US DoD and UK MoD statements, 14 Apr 2024); US forces did
+ * so again on 1 Oct 2024. Jordan engaged what crossed its own airspace.
+ */
+export const airDefencePledges: AirDefencePledge[] = [
+  { donor: 'USA' as NationId, recipient: 'ISR' as NationId, source: 'CENTCOM intercepts, 13-14 Apr and 1 Oct 2024' },
+  { donor: 'GBR' as NationId, recipient: 'ISR' as NationId, source: 'RAF Typhoons from Akrotiri, 13-14 Apr 2024 (UK MoD)' },
+  { donor: 'FRA' as NationId, recipient: 'ISR' as NationId, source: 'French air force intercepts, 13-14 Apr 2024 (Elysee)' },
+  { donor: 'JOR' as NationId, recipient: 'ISR' as NationId, source: 'Jordanian air force over Jordan, 13-14 Apr 2024 (Jordanian government)' },
+];

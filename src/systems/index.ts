@@ -1,6 +1,6 @@
 import type { System } from '../core/engine';
 import type { NationId } from '../core/types';
-import { alliances, strategicProfile } from '../data/nations';
+import { airDefencePledges, alliances, peaceTreaties, strategicProfile } from '../data/nations';
 import type { Alliance, StrategicProfile as NationStrategy } from '../data/nations';
 import { createAi } from './ai';
 import { airWar, applyAirOrder } from './air';
@@ -9,7 +9,7 @@ import { politics } from './politics';
 import { c2 } from './c2';
 import { createDiplomacy } from './diplomacy';
 import { shiftOdds } from './diplomacy/wars';
-import type { AllianceTreaty, StrategicProfile, TreatyMember } from './diplomacy/types';
+import type { AllianceTreaty, StrategicProfile, TreatyMember, TreatyTrigger } from './diplomacy/types';
 import { economy } from './economy';
 import { intel } from './intel';
 import { applyLandOrder, landCombat, landMovement } from './land';
@@ -36,6 +36,12 @@ const KIND: Partial<Record<Alliance['obligation'], AllianceTreaty['kind']>> = {
   collective_defense: 'collective_defense',
   bilateral_defense: 'bilateral_defense',
   ambiguous: 'ambiguous',
+};
+
+/** Threats short of armed attack call only for consultation, which never brings a member into a war. */
+const TRIGGER: Partial<Record<Alliance['triggers'][number], TreatyTrigger>> = {
+  attack_on_territory: 'territory',
+  attack_on_forces: 'forces',
 };
 
 /** Log-odds shift per unit of member reliability away from the 0.5 midpoint. Estimate: spans HUN (0.4) to SWE (0.85) by ~2.5x odds. */
@@ -66,7 +72,8 @@ export function warTreaties(table: readonly Alliance[], profiles: Readonly<Recor
     }
     // A guarantor extends its threshold to allies only if its doctrine says so (NuclearThreshold.coversAllies).
     const guarantors = (a.nuclearGuarantors ?? []).filter((g) => profiles[g]?.nuclearThreshold?.coversAllies);
-    out.push({ id: a.id, kind, members, guarantors });
+    const triggers = a.triggers.flatMap((t) => TRIGGER[t] ?? []);
+    out.push({ id: a.id, kind, members, triggers, ...(a.area ? { area: a.area } : {}), guarantors });
   }
   return out;
 }
@@ -103,7 +110,7 @@ export const SYSTEMS: System[] = [
   economy,
   civil,
   politics,
-  createDiplomacy({ alliances: warTreaties(alliances, strategicProfile), profiles: decision }),
+  createDiplomacy({ alliances: warTreaties(alliances, strategicProfile), profiles: decision, peace: peaceTreaties, aid: airDefencePledges }),
   intel,
   c2,
   createAi(decision),

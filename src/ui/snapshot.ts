@@ -22,6 +22,7 @@ import { boardable } from '../systems/naval/orders';
 import { isSealift } from '../systems/naval/sealift';
 import { airliftTonsPerDay, airPortable, airTons, awaitingLift, deckSlots, liftMode, overseas } from '../systems/land/strategic';
 import { authority } from '../systems/orders';
+import { members, sideOf } from '../systems/diplomacy/wars';
 import { deliveryReachKm, isLive } from '../systems/strategic/nuclear';
 import { hostedBy } from '../systems/civil/state';
 import type { ElectionResult, OpinionDrivers } from '../systems/politics/state';
@@ -624,20 +625,22 @@ export class SnapshotEncoder {
     const d = world.slices.diplomacy;
     if (!d) return [];
     return d.wars
-      .filter((w) => w.sides[0].includes(id) || w.sides[1].includes(id))
+      .filter((w) => sideOf(w, id) !== -1)
       .map((w) => {
+        const sides = [members(w.sides[0]), members(w.sides[1])];
+        const aggressor = sides[0][0];
         const entry = (m: NationId, side: 0 | 1): WarEntry => {
-          for (const e of w.sides[1 - side]) {
+          for (const e of sides[1 - side]) {
             const found = this.entries.get(`${m}|${e}`);
             if (found) return found;
           }
-          return { nation: m, reason: m === w.aggressor ? 'aggressor' : 'scenario start', tick: w.startTick };
+          return { nation: m, reason: m === aggressor ? 'aggressor' : 'scenario start', tick: w.since };
         };
         return {
           id: w.id,
-          aggressor: w.aggressor,
-          startTick: w.startTick,
-          sides: [w.sides[0].map((m) => entry(m, 0)), w.sides[1].map((m) => entry(m, 1))],
+          aggressor,
+          startTick: w.since,
+          sides: [sides[0].map((m) => entry(m, 0)), sides[1].map((m) => entry(m, 1))],
           pending: d.joins.filter((j) => j.war === w.id).map((j) => ({ nation: j.nation, treaty: j.treaty, side: j.side, dueTick: j.dueTick })),
         };
       });

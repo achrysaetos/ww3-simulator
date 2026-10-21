@@ -10,6 +10,7 @@ const member = (delayDays: number, reliability = 1) => ({ role: 'mutual' as cons
 const NATO: AllianceTreaty = {
   id: 'NATO',
   kind: 'collective_defense',
+  triggers: ['territory', 'forces'],
   members: { [N('POL')]: member(1), [N('USA')]: member(3), [N('DEU')]: member(10), [N('EST')]: member(1) },
 };
 
@@ -18,11 +19,21 @@ function emitter(events: (tick: number) => SimEvent[]): System {
   return { id: 'emitter', step: (world, ctx) => events(world.tick).forEach((e) => ctx.emit(e)) };
 }
 
+/** A stand-in for ground combat: while at war, `by` attacks `victim`'s capital every tick, the armed attack that calls treaties. */
+function assault(by: string, victim: string): System {
+  return {
+    id: `assault ${by} ${victim}`,
+    step: (world, ctx) => {
+      if (atWar(world, N(by), N(victim))) ctx.emit({ type: 'battle', tick: world.tick, node: world.nations[N(victim)].capital, attacker: N(by), defender: N(victim), losses: {}, casualties: {} });
+    },
+  };
+}
+
 const days = (d: number) => d * 4;
 
 describe('alliances', () => {
   it('NATO members join an attacked member after their own delay; a non-member stays out', () => {
-    const t = testWorld([createDiplomacy({ alliances: [NATO] })]);
+    const t = testWorld([assault('RUS', 'POL'), createDiplomacy({ alliances: [NATO] })]);
     t.world.pending.push({ type: 'declare_war', nation: N('RUS'), target: N('POL') });
     t.engine.step(t.world);
     expect(atWar(t.world, N('RUS'), N('POL'))).toBe(true);
@@ -43,7 +54,7 @@ describe('alliances', () => {
   });
 
   it('does not trigger when the member is the aggressor', () => {
-    const t = testWorld([createDiplomacy({ alliances: [NATO] })]);
+    const t = testWorld([assault('POL', 'RUS'), assault('RUS', 'POL'), createDiplomacy({ alliances: [NATO] })]);
     t.world.pending.push({ type: 'declare_war', nation: N('POL'), target: N('RUS') });
     t.engine.run(t.world, days(20));
     expect(atWar(t.world, N('RUS'), N('POL'))).toBe(true);
@@ -53,13 +64,13 @@ describe('alliances', () => {
 
   it('an ambiguous commitment is honoured by an interventionist guarantor and mostly not by a reluctant one', () => {
     const treaty: AllianceTreaty = {
-      id: 'TRA', kind: 'ambiguous',
+      id: 'TRA', kind: 'ambiguous', triggers: ['territory'],
       members: { [N('USA')]: { role: 'guarantor', reliability: 0, delayDays: 2 }, [N('TWN')]: { role: 'protected', reliability: 0, delayDays: 0 } },
     };
     const joins = (profile: StrategicProfile, opinionTwn: number, opinionChn: number) => {
       let n = 0;
       for (let seed = 1; seed <= 10; seed++) {
-        const t = testWorld([createDiplomacy({ alliances: [treaty], profiles: { USA: profile } })], seed);
+        const t = testWorld([assault('CHN', 'TWN'), createDiplomacy({ alliances: [treaty], profiles: { USA: profile } })], seed);
         relationMut(t.world, N('USA'), N('TWN')).opinion = opinionTwn;
         relationMut(t.world, N('USA'), N('CHN')).opinion = opinionChn;
         t.world.pending.push({ type: 'declare_war', nation: N('CHN'), target: N('TWN') });
@@ -259,8 +270,8 @@ describe('capitulation', () => {
 });
 
 describe('who joins a war', () => {
-  const CSTO: AllianceTreaty = { id: 'CSTO', kind: 'collective_defense', members: { [N('RUS')]: member(1), [N('KAZ')]: member(1) } };
-  const UKR_FRIENDS: AllianceTreaty = { id: 'UKR-POL', kind: 'collective_defense', members: { [N('UKR')]: member(1), [N('POL')]: member(1) } };
+  const CSTO: AllianceTreaty = { id: 'CSTO', kind: 'collective_defense', triggers: ['territory'], members: { [N('RUS')]: member(1), [N('KAZ')]: member(1) } };
+  const UKR_FRIENDS: AllianceTreaty = { id: 'UKR-POL', kind: 'collective_defense', triggers: ['territory'], members: { [N('UKR')]: member(1), [N('POL')]: member(1) } };
   /** Hand `share` of `nation`'s homeland population to `by`, least populous cells first and far from the capital. */
   const invade = (t: ReturnType<typeof testWorld>, nation: NationId, by: NationId, share: number) => {
     const cap = t.world.nations[nation].capital;
@@ -275,7 +286,7 @@ describe('who joins a war', () => {
   };
 
   it("the aggressor's allies stay out when the victim's friends join it, and come in only once the aggressor is seriously invaded", () => {
-    const t = testWorld([createDiplomacy({ alliances: [CSTO, UKR_FRIENDS] })]);
+    const t = testWorld([assault('RUS', 'UKR'), createDiplomacy({ alliances: [CSTO, UKR_FRIENDS] })]);
     t.world.pending.push({ type: 'declare_war', nation: N('RUS'), target: N('UKR') });
     t.engine.run(t.world, days(5));
     expect(atWar(t.world, N('POL'), N('RUS'))).toBe(true);
@@ -293,12 +304,12 @@ describe('who joins a war', () => {
 
   it('a guarantor or a frontline member honours a shaky commitment far more often than a distant member', () => {
     const shaky: AllianceTreaty = {
-      id: 'PACT', kind: 'collective_defense', guarantors: [N('USA')],
+      id: 'PACT', kind: 'collective_defense', triggers: ['territory'], guarantors: [N('USA')],
       members: { [N('EST')]: member(1), [N('USA')]: member(1, 0.5), [N('FIN')]: member(1, 0.5), [N('PRT')]: member(1, 0.5) },
     };
     const count = { USA: 0, FIN: 0, PRT: 0 };
     for (let seed = 1; seed <= 30; seed++) {
-      const t = testWorld([createDiplomacy({ alliances: [shaky] })], seed);
+      const t = testWorld([assault('RUS', 'EST'), createDiplomacy({ alliances: [shaky] })], seed);
       t.world.pending.push({ type: 'declare_war', nation: N('RUS'), target: N('EST') });
       t.engine.run(t.world, days(2));
       for (const m of ['USA', 'FIN', 'PRT'] as const) if (atWar(t.world, N(m), N('RUS'))) count[m]++;
@@ -309,8 +320,8 @@ describe('who joins a war', () => {
   });
 
   it('a member that declines looks again a week later, once', () => {
-    const reluctant: AllianceTreaty = { id: 'PACT', kind: 'collective_defense', members: { [N('EST')]: member(1), [N('PRT')]: member(1, 0) } };
-    const t = testWorld([createDiplomacy({ alliances: [reluctant] })]);
+    const reluctant: AllianceTreaty = { id: 'PACT', kind: 'collective_defense', triggers: ['territory'], members: { [N('EST')]: member(1), [N('PRT')]: member(1, 0) } };
+    const t = testWorld([assault('RUS', 'EST'), createDiplomacy({ alliances: [reluctant] })]);
     t.world.pending.push({ type: 'declare_war', nation: N('RUS'), target: N('EST') });
     t.engine.run(t.world, days(30));
     const declines = t.world.history.filter((e) => e.type === 'message' && e.text.startsWith('PRT declines'));

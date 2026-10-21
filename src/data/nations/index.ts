@@ -7,7 +7,7 @@ import { IISS_RESERVES } from './reserves';
 import { strategicProfiles } from './strategic';
 
 export type * from './types';
-export { alliances, allianceById, defenseObligations } from './alliances';
+export { airDefencePledges, alliances, allianceById, defenseObligations, peaceTreaties } from './alliances';
 export { NUCLEAR_ALERT, nuclearForces, type AlertSpec } from './nuclear';
 export { opinions } from './opinions';
 export { recallReservists } from './reserves';

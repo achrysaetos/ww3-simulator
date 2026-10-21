@@ -22,6 +22,37 @@ export type AllianceTrigger =
   /** Coercion, blockade or threat short of armed attack (consultation clauses). */
   | 'threat_to_security';
 
+/** A latitude/longitude box; an absent bound is open. Longitudes run -180..180, so an area across the antimeridian takes two boxes. */
+export interface GeoBox {
+  latMin?: number;
+  latMax?: number;
+  lonMin?: number;
+  lonMax?: number;
+}
+
+/**
+ * Where an armed attack must land for a treaty to apply. `homeland`: anywhere on a member's
+ * metropolitan territory (not its overseas territories). `boxes`: anywhere inside them, on a
+ * member's territory or its forces.
+ */
+export interface TreatyArea {
+  homeland?: boolean;
+  boxes: readonly GeoBox[];
+}
+
+/** Two states at peace by treaty or normalisation: neither answers an alliance call to fight the other. */
+export interface PeaceTreaty {
+  between: readonly [NationId, NationId];
+  source: string;
+}
+
+/** A standing commitment to help defend another state's skies without joining its war. */
+export interface AirDefencePledge {
+  donor: NationId;
+  recipient: NationId;
+  source: string;
+}
+
 export interface Alliance {
   id: string;
   name: string;
@@ -36,8 +67,8 @@ export interface Alliance {
   commitment: number;
   /** Nations whose nuclear forces back the guarantee (extended deterrence). */
   nuclearGuarantors?: NationId[];
-  /** Treaty area limit: territory south of this latitude is outside it (NATO Art. 6: Tropic of Cancer). */
-  northOfLat?: number;
+  /** Where an armed attack must land to call the treaty; absent, anywhere. */
+  area?: TreatyArea;
   /** Members the guarantee protects without being bound to defend others (TRA covers TWN; COFA covers FSM/MHL/PLW). */
   protectedOnly?: NationId[];
   source: string;
