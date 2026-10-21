@@ -3,6 +3,8 @@ import { atWar, relationMut, type System } from '../src/core/engine';
 import type { Command, MunitionId, NationId, NodeId, SimEvent } from '../src/core/types';
 import { createSession } from '../src/scenarios';
 import { createAi } from '../src/systems/ai';
+import { indexForces } from '../src/systems/ai/forces';
+import { stagingSector } from '../src/systems/ai/fronts';
 import { landSlice } from '../src/systems/land';
 import { createDiplomacy } from '../src/systems/diplomacy';
 import { isrFactor, strategic } from '../src/systems/strategic';
@@ -108,6 +110,18 @@ describe('operational AI', () => {
       const support = [...t.map.neighbors(target as NodeId)].filter((m) => t.world.control[m] === 'EST').reduce((s, m) => s + estAt(m), 0);
       expect(count).toBeGreaterThanOrEqual(3 * (estAt(target) + 0.5 * support));
     }
+  });
+
+  it('stages only from a host that consented: Russia from Belarus, never Turkey from Azerbaijan on the strength of a defence pact', () => {
+    const t = testWorld([createAi()]);
+    t.war('TUR', 'RUS');
+    t.war('RUS', 'UKR');
+    for (const n of ['TUR', 'AZE']) t.world.nations[N(n)].blocs = ['TUR-AZE'];
+    for (const n of ['RUS', 'BLR']) t.world.nations[N(n)].blocs = ['RUS-BLR'];
+    const index = indexForces(t.world, t.catalog);
+    expect(stagingSector(t.world, t.map, N('TUR'), new Set([N('TUR')]), new Set([N('RUS')]), index)).toBeUndefined();
+    const belarus = stagingSector(t.world, t.map, N('RUS'), new Set([N('RUS')]), new Set([N('UKR'), N('TUR')]), index);
+    expect(belarus?.nodes.every((n) => t.world.control[n] === 'BLR')).toBe(true);
   });
 });
 
