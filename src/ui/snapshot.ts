@@ -292,6 +292,8 @@ export interface Snapshot {
   /** Flat (node, nationIndex) pairs applied on top of the previous control array. */
   controlDiff?: Uint32Array;
   roster?: RosterEntry[];
+  /** Formations new since the last snapshot, appended to the roster (formations are never removed, only added). */
+  rosterAdd?: RosterEntry[];
   fNode: Uint16Array;
   /** Operational platforms divided by the count first seen, scaled to 0..255. */
   fStrength: Uint8Array;
@@ -382,10 +384,12 @@ export class SnapshotEncoder {
 
     const fs = Object.values(world.formations);
     for (const f of fs) if (!this.initial.has(f.id)) this.initial.set(f.id, Math.max(1, platformCount(f)));
-    if (fs.length !== this.lastIds.length || fs.some((f, i) => f.id !== this.lastIds[i])) {
-      snap.roster = fs.map((f) => ({ id: f.id, name: f.name, nation: f.nation, kind: f.kind, echelon: f.echelon, platforms: this.initial.get(f.id)! }));
-      this.lastIds = fs.map((f) => f.id);
-    }
+    const entry = (f: Formation): RosterEntry => ({ id: f.id, name: f.name, nation: f.nation, kind: f.kind, echelon: f.echelon, platforms: this.initial.get(f.id)! });
+    const prevIds = this.lastIds;
+    const kept = fs.length >= prevIds.length && prevIds.every((id, i) => fs[i].id === id);
+    if (!kept) snap.roster = fs.map(entry);
+    else if (fs.length > prevIds.length) snap.rosterAdd = fs.slice(prevIds.length).map(entry);
+    if (!kept || fs.length > prevIds.length) this.lastIds = fs.map((f) => f.id);
     const n = fs.length;
     snap.fNode = new Uint16Array(n);
     snap.fStrength = new Uint8Array(n);
@@ -747,6 +751,9 @@ export function applySnapshot(state: ClientState, snap: Snapshot, nationIds: rea
   let roster = state.formations.map((f) => f.entry);
   if (snap.roster) {
     roster = snap.roster;
+    state.rosterVersion++;
+  } else if (snap.rosterAdd) {
+    roster = [...roster, ...snap.rosterAdd];
     state.rosterVersion++;
   }
   state.formations = roster.map((entry, i) => ({
