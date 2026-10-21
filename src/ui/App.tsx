@@ -48,6 +48,10 @@ function Command({ client, palette, initialNation }: { client: SimClient; palett
   const [toast, setToast] = useState<Toast | null>(null);
   const watch = useRef<{ name: string; untilTick: number; seenSeq: number } | null>(null);
 
+  const nationOptions = useMemo(
+    () => [...client.nationCards.values()].sort((a, b) => a.name.localeCompare(b.name)).map((n) => <option key={n.id} value={n.id}>{n.name}</option>),
+    [client.nationCards],
+  );
   const d = client.state.focusNation?.id === playAs ? client.state.focusNation : undefined;
   const ai = d?.authority.ai ?? DEFAULT_DELEGATION;
   const heldKey = d?.authority.held.join(',') ?? '';
@@ -162,7 +166,6 @@ function Command({ client, palette, initialNation }: { client: SimClient; palett
 
   const date = client.state.date ? new Date(client.state.date) : null;
   const hours = client.state.tick * (client.meta?.dtHours ?? 6);
-  const nations = [...client.state.nations.values()].sort((a, b) => a.name.localeCompare(b.name));
   const selectedView = selected ? client.state.formations.find((f) => f.entry.id === selected) : undefined;
   const targeting = nuclearPick ? 'nuclear' : pending ? 'order' : null;
   const delegatedNames = COMMAND_DOMAINS.filter((k) => ai[k]).map((k) => DOMAIN_LABEL[k].name);
@@ -202,7 +205,7 @@ function Command({ client, palette, initialNation }: { client: SimClient; palett
         <div className="play-as">
           <span>Playing</span>
           <select value={playAs} onChange={(e) => choose(e.target.value as NationId)} data-testid="play-as">
-            {nations.map((n) => <option key={n.id} value={n.id}>{n.name}</option>)}
+            {nationOptions}
           </select>
         </div>
       </header>

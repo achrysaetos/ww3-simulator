@@ -71,6 +71,7 @@ export function MapView(props: MapViewProps) {
     let raf = 0;
     const loop = (now: number) => {
       if (dirty.current || r.animating) {
+        const changed = dirty.current;
         dirty.current = false;
         const p = propsRef.current;
         r.render({
@@ -81,7 +82,7 @@ export function MapView(props: MapViewProps) {
           hoverNode: hoverRef.current,
           targeting: p.targeting,
           overlays: p.overlays,
-        }, now);
+        }, now, changed);
       }
       raf = requestAnimationFrame(loop);
     };

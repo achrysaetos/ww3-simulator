@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { COMMAND_DOMAINS, type Command, type CommandDomain, type ItemId, type NationId } from '../core/types';
 import type { SimClient } from './client';
 import type { Palette } from './colors';
@@ -45,12 +45,18 @@ export function NationPanel({ client, palette, playAs, onCommand, onNuclear }: P
   const d = client.state.focusNation?.id === playAs ? client.state.focusNation : undefined;
   const [target, setTarget] = useState<NationId | ''>('');
   const [mobDraft, setMobDraft] = useState<number | null>(null);
+  // Option lists are rebuilt only when their labels change, not on every tick.
+  const tagsKey = `${d?.enemies.join() ?? ''}|${d?.sanctions.join() ?? ''}`;
+  const targetOptions = useMemo(() => {
+    const [enemies, sanctions] = tagsKey.split('|').map((l) => l.split(','));
+    return [...nations.values()].filter((o) => o.id !== playAs).sort((a, b) => a.name.localeCompare(b.name))
+      .map((o) => <option key={o.id} value={o.id}>{o.name}{enemies.includes(o.id) ? ' (at war)' : sanctions.includes(o.id) ? ' (sanctioned)' : ''}</option>);
+  }, [client.meta, playAs, tagsKey]);
   if (!n) return null;
 
   const name = (id: NationId) => nations.get(id)?.name ?? id;
   const enemies = d?.enemies ?? [];
   const atWarWithTarget = target !== '' && enemies.includes(target);
-  const sortedNations = [...nations.values()].filter((o) => o.id !== n.id).sort((a, b) => a.name.localeCompare(b.name));
   const eco = d?.economy;
   const sanctions = d?.sanctions ?? [];
   const sanctioned = target !== '' && sanctions.includes(target);
@@ -177,7 +183,7 @@ export function NationPanel({ client, palette, playAs, onCommand, onNuclear }: P
           <span>Diplomacy</span>
           <select value={target} onChange={(e) => setTarget(e.target.value as NationId)} data-testid="diplo-target">
             <option value="">Select a nation…</option>
-            {sortedNations.map((o) => <option key={o.id} value={o.id}>{o.name}{enemies.includes(o.id) ? ' (at war)' : sanctions.includes(o.id) ? ' (sanctioned)' : ''}</option>)}
+            {targetOptions}
           </select>
         </label>
         <div className="row gap">
@@ -230,11 +236,14 @@ function Production({ client, nation, lines, onCommand }: { client: SimClient; n
   const [item, setItem] = useState('');
   const [rate, setRate] = useState(10);
   const meta = client.meta;
-  if (!meta) return null;
-  const buildable = (rec: Record<string, { name: string; producers: NationId[] }>) =>
-    Object.entries(rec).filter(([, v]) => v.producers.includes(nation)).sort((a, b) => a[1].name.localeCompare(b[1].name));
-  const platforms = buildable(meta.platforms), munitions = buildable(meta.munitions);
-  if (!platforms.length && !munitions.length) return <p className="muted small">No domestic arms industry: this nation cannot open production lines.</p>;
+  const options = useMemo(() => {
+    if (!meta) return null;
+    const buildable = (rec: Record<string, { name: string; producers: NationId[] }>) =>
+      Object.entries(rec).filter(([, v]) => v.producers.includes(nation)).sort((a, b) => a[1].name.localeCompare(b[1].name)).map(([id, v]) => <option key={id} value={id}>{v.name}</option>);
+    const platforms = buildable(meta.platforms), munitions = buildable(meta.munitions);
+    return platforms.length || munitions.length ? { platforms, munitions } : null;
+  }, [meta, nation]);
+  if (!options) return <p className="muted small">No domestic arms industry: this nation cannot open production lines.</p>;
   const current = lines.find((l) => l.item === item);
   return (
     <div className="production" data-testid="production">
@@ -242,8 +251,8 @@ function Production({ client, nation, lines, onCommand }: { client: SimClient; n
         <span>Order production</span>
         <select value={item} onChange={(e) => setItem(e.target.value)} data-testid="produce-item">
           <option value="">Choose a platform or munition…</option>
-          <optgroup label="Platforms">{platforms.map(([id, v]) => <option key={id} value={id}>{v.name}</option>)}</optgroup>
-          <optgroup label="Munitions">{munitions.map(([id, v]) => <option key={id} value={id}>{v.name}</option>)}</optgroup>
+          <optgroup label="Platforms">{options.platforms}</optgroup>
+          <optgroup label="Munitions">{options.munitions}</optgroup>
         </select>
       </label>
       <div className="row">
