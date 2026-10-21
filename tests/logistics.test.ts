@@ -31,7 +31,7 @@ describe('logistics', () => {
     const f = t.brigade('POL', t.nodeAt(52.4, 16.9)); // Poznan
     t.drain(f, 0.3);
     t.engine.run(t.world, 2 * DAY);
-    expect(supplyFactor(t.world, f.node, id.nation('POL'))).toBeGreaterThan(0.85);
+    expect(supplyFactor(t.world, t.map, f.node, id.nation('POL'))).toBeGreaterThan(0.85);
     expect(t.fill(f, 'fuel')).toBeGreaterThan(0.95);
     expect(t.fill(f, 'ammo')).toBeGreaterThan(0.95);
     expect(t.world.nations[id.nation('POL')].bulk.fuel).toBeLessThan(PLENTY.fuel);
@@ -45,8 +45,8 @@ describe('logistics', () => {
     t.drain(deep, 0.3);
     t.engine.run(t.world, 2 * DAY);
     const dza = id.nation('DZA');
-    expect(supplyFactor(t.world, deep.node, dza)).toBeLessThan(0.2);
-    expect(supplyFactor(t.world, north.node, dza)).toBeGreaterThan(0.8);
+    expect(supplyFactor(t.world, t.map, deep.node, dza)).toBeLessThan(0.2);
+    expect(supplyFactor(t.world, t.map, north.node, dza)).toBeGreaterThan(0.8);
     expect(t.fill(deep, 'ammo')).toBeLessThan(0.45);
     expect(t.fill(north, 'ammo')).toBeGreaterThan(0.95);
   });
@@ -61,7 +61,7 @@ describe('logistics', () => {
     const bulkBefore = t.world.nations[id.nation('UKR')].bulk.food;
     const fuelBefore = f.supply.fuel;
     t.engine.run(t.world, 6 * DAY);
-    expect(supplyFactor(t.world, pocket, id.nation('UKR'))).toBe(0);
+    expect(supplyFactor(t.world, t.map, pocket, id.nation('UKR'))).toBe(0);
     expect(f.supply.food).toBe(0);
     expect(f.supply.fuel).toBeLessThan(fuelBefore);
     expect(t.world.nations[id.nation('UKR')].bulk.food).toBe(bulkBefore);
@@ -78,12 +78,12 @@ describe('logistics', () => {
     const assault = t.brigade('RUS', contested), spearhead = t.brigade('RUS', deep);
     t.drain(assault, 0.3);
     t.engine.run(t.world, 2 * DAY);
-    const across = supplyFactor(t.world, contested, rus);
-    const best = Math.max(...[...t.map.neighbors(contested)].filter((n) => t.world.control[n] === rus).map((n) => supplyFactor(t.world, n, rus)));
+    const across = supplyFactor(t.world, t.map, contested, rus);
+    const best = Math.max(...[...t.map.neighbors(contested)].filter((n) => t.world.control[n] === rus).map((n) => supplyFactor(t.world, t.map, n, rus)));
     expect(best).toBeGreaterThan(0);
     expect(across).toBeCloseTo(LAST_MILE_CAPACITY * best, 3);
     expect(t.fill(assault, 'ammo')).toBeGreaterThan(0.31);
-    expect(supplyFactor(t.world, spearhead.node, rus)).toBe(0);
+    expect(supplyFactor(t.world, t.map, spearhead.node, rus)).toBe(0);
   });
 
   it('lets intruders cut the roads through a cell only while they outnumber its defenders', () => {
@@ -99,7 +99,7 @@ describe('logistics', () => {
     };
     t.engine.run(t.world, 1);
     expect(cut()).toBe(false);
-    expect(supplyFactor(t.world, cell, ukr)).toBeGreaterThan(0.2);
+    expect(supplyFactor(t.world, t.map, cell, ukr)).toBeGreaterThan(0.2);
     defenders[1].status = 'destroyed';
     raid.personnel = 2 * defenders[0].personnel;
     t.engine.run(t.world, 1);
@@ -115,7 +115,7 @@ describe('logistics', () => {
     const marines = t.brigade('USA', okinawa);
     t.drain(marines, 0.3);
     t.engine.run(t.world, 2 * DAY);
-    expect(supplyFactor(t.world, okinawa, id.nation('USA'))).toBeGreaterThan(0.05);
+    expect(supplyFactor(t.world, t.map, okinawa, id.nation('USA'))).toBeGreaterThan(0.05);
     expect(t.fill(marines, 'ammo')).toBeGreaterThan(0.31);
   });
 
@@ -130,16 +130,16 @@ describe('logistics', () => {
     const lift = t.add({ nation: chn, name: 'landing ships', kind: 'surface_group', echelon: 'squadron', node: zone, equipment: { [id.platform('t_lst')]: 10 } });
     t.drain(landing, 0.3);
     t.engine.run(t.world, 2 * DAY);
-    const held = supplyFactor(t.world, beach, chn);
+    const held = supplyFactor(t.world, t.map, beach, chn);
     expect(held).toBeGreaterThan(0.05);
     expect(held).toBeLessThanOrEqual(0.25);
     expect(t.fill(landing, 'ammo')).toBeGreaterThan(0.31);
     lift.equipment[id.platform('t_lst')] = 5;
     t.engine.run(t.world, 1);
-    expect(supplyFactor(t.world, beach, chn)).toBeCloseTo(held / 2, 2);
+    expect(supplyFactor(t.world, t.map, beach, chn)).toBeCloseTo(held / 2, 2);
     for (const n of t.map.nodesWithin(zone, 600)) if (t.map.isSea(n)) t.world.theater.seaControl[n] = { nation: id.nation('TWN'), level: 1 };
     t.engine.run(t.world, 2 * DAY);
-    expect(supplyFactor(t.world, beach, chn)).toBe(0);
+    expect(supplyFactor(t.world, t.map, beach, chn)).toBe(0);
   });
 
   it('weighs sealift by cargo tons, so losing a landing ship costs a lodgement less than losing a ferry', () => {
@@ -153,12 +153,12 @@ describe('logistics', () => {
     const lift = t.add({ nation: chn, name: 'landing ships', kind: 'surface_group', echelon: 'squadron', node: zone, equipment: { [lst]: 1, [ferry]: 2 } });
     t.drain(landing, 0.3);
     t.engine.run(t.world, 2 * DAY);
-    const held = supplyFactor(t.world, beach, chn);
+    const held = supplyFactor(t.world, t.map, beach, chn);
     expect(held).toBeGreaterThan(0.05);
     // 1,625 t of LST (50 vehicles, 500 troops) beside 10,000 t of ferries: a third of the hulls, a seventh of the tons.
     delete lift.equipment[lst];
     t.engine.run(t.world, 1);
-    expect(supplyFactor(t.world, beach, chn)).toBeCloseTo((held * 10_000) / 11_625, 2);
+    expect(supplyFactor(t.world, t.map, beach, chn)).toBeCloseTo((held * 10_000) / 11_625, 2);
   });
 
   it('lands no more over the beach than one beach can take, however many lodgements a nation holds', () => {
@@ -170,7 +170,7 @@ describe('logistics', () => {
     t.add({ nation: id.nation('CHN'), name: 'landing ships', kind: 'surface_group', echelon: 'squadron', node: zone, equipment: { [id.platform('t_lst')]: 10 } });
     const ashore = cells.flatMap((n) => Array.from({ length: 100 }, () => t.brigade('CHN', n)));
     t.engine.step(t.world);
-    for (const n of cells) expect(supplyFactor(t.world, n, id.nation('CHN'))).toBeGreaterThan(0);
+    for (const n of cells) expect(supplyFactor(t.world, t.map, n, id.nation('CHN'))).toBeGreaterThan(0);
     for (const f of ashore) t.drain(f, 0);
     t.engine.step(t.world);
     const landed = ashore.reduce((a, f) => a + f.supply.fuel + f.supply.ammo + f.supply.food, 0);
@@ -188,13 +188,13 @@ describe('logistics', () => {
     t.world.control[outpost] = usa;
     const f = t.brigade('USA', outpost);
     t.engine.step(t.world);
-    const open = supplyFactor(t.world, outpost, usa);
+    const open = supplyFactor(t.world, t.map, outpost, usa);
     expect(open).toBeGreaterThan(0.15); // a one-berth port caps it near a third
 
     t.war('USA', 'RUS');
     for (const n of t.map.nodesWithin(outpost, 2000)) if (t.map.isSea(n)) t.world.theater.seaControl[n] = { nation: id.nation('RUS'), level: 0.95 };
     t.engine.run(t.world, DAY);
-    expect(supplyFactor(t.world, outpost, usa)).toBeLessThan(open * 0.2);
+    expect(supplyFactor(t.world, t.map, outpost, usa)).toBeLessThan(open * 0.2);
     t.drain(f, 0.3);
     t.engine.run(t.world, 2 * DAY);
     expect(t.fill(f, 'ammo')).toBeLessThan(0.36); // the open route would have refilled it past 0.5
@@ -205,12 +205,12 @@ describe('logistics', () => {
     const lublin = t.nodeAt(51.2, 22.6);
     const f = t.brigade('USA', lublin);
     t.engine.step(t.world);
-    expect(supplyFactor(t.world, lublin, f.nation)).toBe(0);
+    expect(supplyFactor(t.world, t.map, lublin, f.nation)).toBe(0);
 
     t.world.nations[id.nation('USA')].blocs = ['NATO'];
     t.world.nations[id.nation('POL')].blocs = ['NATO'];
     t.engine.step(t.world);
-    expect(supplyFactor(t.world, lublin, f.nation)).toBeGreaterThan(0.8);
+    expect(supplyFactor(t.world, t.map, lublin, f.nation)).toBeGreaterThan(0.8);
   });
 
   it('chokes throughput when infrastructure is bombed, then repairs it on friendly ground', () => {
@@ -218,17 +218,17 @@ describe('logistics', () => {
     const poznan = t.nodeAt(52.4, 16.9);
     t.brigade('POL', poznan);
     t.engine.step(t.world);
-    const intact = supplyFactor(t.world, poznan, id.nation('POL'));
+    const intact = supplyFactor(t.world, t.map, poznan, id.nation('POL'));
 
     const hit = t.map.nodesWithin(poznan, 250);
     for (const n of hit) t.world.theater.infrastructure[n] = 0.15;
     t.engine.run(t.world, DAY);
-    const bombed = supplyFactor(t.world, poznan, id.nation('POL'));
+    const bombed = supplyFactor(t.world, t.map, poznan, id.nation('POL'));
     expect(bombed).toBeLessThan(intact * 0.3);
 
     t.engine.run(t.world, 10 * DAY);
     expect(t.world.theater.infrastructure[poznan]).toBeGreaterThan(0.4);
-    expect(supplyFactor(t.world, poznan, id.nation('POL'))).toBeGreaterThan(bombed);
+    expect(supplyFactor(t.world, t.map, poznan, id.nation('POL'))).toBeGreaterThan(bombed);
   });
 
   it('does not repair infrastructure on the front line', () => {

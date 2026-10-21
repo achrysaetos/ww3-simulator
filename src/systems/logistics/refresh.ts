@@ -1,22 +1,19 @@
 import type { GameMap } from '../../core/map';
 import type { Formation, NationId, World } from '../../core/types';
 import { Controllers, NetworkSearch, networkKey, networkMembers } from './network';
-import { INPUT_TOLERANCE, LAND_KINDS, MAX_REFRESHES_PER_TICK } from './tables';
+import { INPUT_TOLERANCE, LAND_KINDS } from './tables';
 
-export interface SupplyNetwork {
+/**
+ * What one network's search was last run with. The search itself is derived from
+ * this and the `InputSnapshot`, so it lives in a runtime cache (`searchesOf`), not
+ * in the World.
+ */
+export interface NetworkInputs {
   members: NationId[];
-  /** Nations at war with any member, sorted, as the search last saw them. */
+  /** Nations at war with any member, sorted. */
   foes: NationId[];
-  /** Friendly cells held by enemy land forces, which block supply through them, as the search last saw them. */
+  /** Friendly cells held by enemy land forces, which block supply through them, sorted. */
   occupied: number[];
-  computedTick: number;
-  /** Inputs it depends on moved since computedTick; waiting for a refresh slot. */
-  dirty: boolean;
-  /** Nodes whose inputs moved since computedTick. */
-  pending: Set<number>;
-  /** The subset of `pending` that changed hands, which also moves the frontline next to them. */
-  recaptured: Set<number>;
-  search: NetworkSearch;
 }
 
 type ControlRecord = Record<number, { nation: NationId; level: number }>;
@@ -27,16 +24,24 @@ export interface InputSnapshot {
   infrastructure: number[];
   sea: ControlRecord;
   air: ControlRecord;
-  controllers: Controllers;
 }
 
-export function snapshotInputs(world: World, controllers: Controllers): InputSnapshot {
+/** The parts of the logistics slice the network searches derive from. */
+export interface NetworkState {
+  /** Keyed by networkKey(members). Only networks some nation currently needs. */
+  networks: Record<string, NetworkInputs>;
+  /** Which network each nation with forces or at war draws through. */
+  networkOf: Record<NationId, string>;
+  /** Network inputs as last seen, for change detection. Searches read these, not the live World. */
+  seen: InputSnapshot;
+}
+
+export function snapshotInputs(world: World): InputSnapshot {
   return {
     control: [...world.control],
     infrastructure: [...world.theater.infrastructure],
     sea: copyRecord(world.theater.seaControl),
     air: copyRecord(world.theater.airControl),
-    controllers,
   };
 }
 
@@ -44,6 +49,33 @@ function copyRecord(r: ControlRecord): ControlRecord {
   const out: ControlRecord = {};
   for (const k in r) out[k] = { ...r[k] };
   return out;
+}
+
+interface Searches {
+  controllers: Controllers;
+  byKey: Map<string, NetworkSearch>;
+}
+
+const searchCache = new WeakMap<NetworkState, Searches>();
+
+/**
+ * The kept searches for a logistics slice. A slice with none cached (a World that
+ * was loaded or cloned) gets them rebuilt from its network inputs and snapshot.
+ * Searches settle lazily, and a repaired search settles what a fresh one would, so
+ * rebuilt searches give the factors the ones they replace would have.
+ */
+export function searchesOf(s: NetworkState, map: GameMap): Searches {
+  let hit = searchCache.get(s);
+  if (!hit) {
+    const controllers = new Controllers(map, s.seen.control);
+    const byKey = new Map<string, NetworkSearch>();
+    for (const key in s.networks) {
+      const { members, foes, occupied } = s.networks[key];
+      byKey.set(key, new NetworkSearch(map, controllers, members, foes, occupied));
+    }
+    searchCache.set(s, (hit = { controllers, byKey }));
+  }
+  return hit;
 }
 
 /**
@@ -65,8 +97,8 @@ function file(into: Map<NationId, number[]>, nation: NationId | undefined, node:
   if (nation) (into.get(nation) ?? into.set(nation, []).get(nation)!).push(node);
 }
 
-/** Inputs that moved since last seen; updates the snapshot to match. */
-function changedInputs(world: World, seen: InputSnapshot): Changes {
+/** Inputs that moved since last seen; updates the snapshot and controllers to match. */
+function changedInputs(world: World, seen: InputSnapshot, controllers: Controllers): Changes {
   const out: Changes = { control: new Map(), infrastructure: new Map(), contested: new Map() };
   const control = world.control, infra = world.theater.infrastructure;
   for (let n = 0; n < control.length; n++)
@@ -74,7 +106,7 @@ function changedInputs(world: World, seen: InputSnapshot): Changes {
       file(out.control, seen.control[n], n);
       file(out.control, control[n], n);
       seen.control[n] = control[n];
-      seen.controllers.set(n, control[n]);
+      controllers.set(n, control[n]);
     }
   for (let n = 0; n < infra.length; n++)
     if (Math.abs(infra[n] - seen.infrastructure[n]) >= INPUT_TOLERANCE) {
@@ -102,14 +134,21 @@ function diffRecord(now: ControlRecord, seen: ControlRecord, out: Map<NationId, 
     }
 }
 
-/** Files the changes this network's search has reached into its pending set. */
-function queueChanges(net: SupplyNetwork, changes: Changes): void {
-  const { search, pending, recaptured } = net;
+interface Reached {
+  /** Changed nodes the search has reached. */
+  pending: Set<number>;
+  /** The subset of `pending` that changed hands, which also moves the frontline next to them. */
+  recaptured: Set<number>;
+}
+
+/** The changes this network's search has reached. */
+function reachedChanges(net: NetworkInputs, search: NetworkSearch, changes: Changes): Reached {
+  const out: Reached = { pending: new Set(), recaptured: new Set() };
   const add = (nodes: number[] | undefined, changedHands: boolean) => {
     for (const n of nodes ?? [])
       if (search.touches(n)) {
-        pending.add(n);
-        if (changedHands) recaptured.add(n);
+        out.pending.add(n);
+        if (changedHands) out.recaptured.add(n);
       }
   };
   for (const m of net.members) {
@@ -120,20 +159,20 @@ function queueChanges(net: SupplyNetwork, changes: Changes): void {
     add(changes.control.get(f), true);
     add(changes.contested.get(f), false);
   }
+  return out;
 }
 
 /**
- * The existing network closest in members and foes to a new one, if close enough
- * that re-opening what differs beats searching afresh. A lone nation's search is
- * small, and deriving it from a bloc would re-open the bloc, so it starts fresh.
+ * The network closest in members and foes to a new one, if close enough that
+ * re-opening what differs beats searching afresh. A lone nation's search is small,
+ * and deriving it from a bloc would re-open the bloc, so it starts fresh.
  */
-function closest(networks: Record<string, SupplyNetwork>, members: readonly NationId[], foes: readonly NationId[]): SupplyNetwork | undefined {
+function closest(networks: ReadonlyMap<string, NetworkInputs>, members: readonly NationId[], foes: readonly NationId[]): string | undefined {
   if (members.length < 2) return undefined;
-  let best: SupplyNetwork | undefined, bestDiff = Math.max(2, members.length >> 2) + 1;
-  for (const key in networks) {
-    const net = networks[key];
+  let best: string | undefined, bestDiff = Math.max(2, members.length >> 2) + 1;
+  for (const [key, net] of networks) {
     const diff = symmetricDifference(net.members, members) + symmetricDifference(net.foes, foes);
-    if (diff < bestDiff) [best, bestDiff] = [net, diff];
+    if (diff < bestDiff) [best, bestDiff] = [key, diff];
   }
   return best;
 }
@@ -149,11 +188,13 @@ const sameList = (a: readonly number[] | readonly string[], b: readonly number[]
 
 /**
  * Keeps one network per distinct membership that a nation with forces or at war
- * needs. A network is marked dirty when an input it has reached changes; new
- * networks start at once and dirty ones are repaired oldest first, a bounded number
- * per tick, so heavy churn costs a bounded amount and a quiet theatre costs nothing.
+ * needs, and brings every one up to date with the inputs that moved: a search
+ * re-opens only what the changed inputs reached, a new network starts from the
+ * closest existing search, and a quiet theatre costs nothing. Every search is
+ * current afterwards, so the searches are a function of the slice alone.
  */
-export function refreshNetworks(world: World, map: GameMap, networks: Record<string, SupplyNetwork>, seen: InputSnapshot, forces: Formation[]): Record<NationId, string> {
+export function refreshNetworks(world: World, map: GameMap, s: NetworkState, forces: Formation[]): void {
+  const { controllers, byKey } = searchesOf(s, map);
   const enemies = new Map<NationId, NationId[]>();
   for (const k in world.relations) {
     if (!world.relations[k].atWar) continue;
@@ -193,10 +234,14 @@ export function refreshNetworks(world: World, map: GameMap, networks: Record<str
     (reads.get(key) ?? reads.set(key, []).get(key)!).push(f.node);
   }
 
-  const changes = changedInputs(world, seen);
-  for (const key in networks) queueChanges(networks[key], changes);
-  const toRefresh: string[] = [];
-  const inputs = new Map<string, { foes: NationId[]; occupied: number[] }>();
+  const seen = s.seen;
+  const changes = changedInputs(world, seen, controllers);
+  // Every search is read before any moves, so a new network adopting an old one's search re-opens what changed under it.
+  const known = new Map(Object.entries(s.networks));
+  const reached = new Map<string, Reached>();
+  for (const [key, net] of known) reached.set(key, reachedChanges(net, byKey.get(key)!, changes));
+  const next: Record<string, NetworkInputs> = {};
+  const updates: (() => void)[] = [];
   for (const [key, members] of wanted) {
     const memberSet = new Set(members);
     const foeSet = new Set<NationId>();
@@ -211,40 +256,34 @@ export function refreshNetworks(world: World, map: GameMap, networks: Record<str
       if (foe > own) occupied.push(node);
     }
     occupied.sort((a, b) => a - b);
-    const net = networks[key];
+    const inputs = (next[key] = { members, foes, occupied });
+    const net = known.get(key);
     if (!net) {
-      const search = new NetworkSearch(map, seen.controllers, members, foes, occupied);
-      const base = closest(networks, members, foes);
-      if (base) search.adopt(seen, base.search, base.pending, base.recaptured);
-      search.cover(seen, reads.get(key) ?? []);
-      networks[key] = { members, foes, occupied, computedTick: world.tick, dirty: false, pending: new Set(), recaptured: new Set(), search };
+      const search = new NetworkSearch(map, controllers, members, foes, occupied);
+      const base = closest(known, members, foes);
+      if (base) search.adopt(seen, byKey.get(base)!, reached.get(base)!.pending, reached.get(base)!.recaptured);
+      byKey.set(key, search);
+      known.set(key, inputs);
+      reached.set(key, { pending: new Set(), recaptured: new Set() });
       continue;
     }
-    inputs.set(key, { foes, occupied });
-    if (net.pending.size || !sameList(net.foes, foes) || !sameList(net.occupied, occupied)) net.dirty = true;
-    if (net.dirty) toRefresh.push(key);
-  }
-
-  toRefresh.sort((a, b) => networks[a].computedTick - networks[b].computedTick || (a < b ? -1 : 1));
-  for (const key of toRefresh.slice(0, MAX_REFRESHES_PER_TICK)) {
-    const net = networks[key];
-    const { foes, occupied } = inputs.get(key)!;
-    if (sameList(net.foes, foes)) {
+    const { pending, recaptured } = reached.get(key)!;
+    if (!sameList(net.foes, foes)) {
+      const search = new NetworkSearch(map, controllers, members, foes, occupied);
+      updates.push(() => {
+        search.adopt(seen, byKey.get(key)!, pending, recaptured);
+        byKey.set(key, search);
+      });
+    } else if (pending.size || !sameList(net.occupied, occupied)) {
       const now = new Set(occupied), before = new Set(net.occupied);
-      for (const n of now) if (!before.has(n)) net.pending.add(n);
-      for (const n of before) if (!now.has(n)) net.pending.add(n);
-      net.search.repair(seen, [...net.pending], [...net.recaptured], occupied);
-    } else {
-      const search = new NetworkSearch(map, seen.controllers, net.members, foes, occupied);
-      search.adopt(seen, net.search, net.pending, net.recaptured);
-      net.search = search;
+      for (const n of now) if (!before.has(n)) pending.add(n);
+      for (const n of before) if (!now.has(n)) pending.add(n);
+      updates.push(() => byKey.get(key)!.repair(seen, [...pending], [...recaptured], occupied));
     }
-    Object.assign(net, { foes, occupied, computedTick: world.tick, dirty: false });
-    net.pending.clear();
-    net.recaptured.clear();
   }
-
-  for (const key in networks) if (!wanted.has(key)) delete networks[key];
-  for (const [key, nodes] of reads) networks[key].search.cover(seen, nodes);
-  return networkOf;
+  for (const update of updates) update();
+  for (const key of byKey.keys()) if (!next[key]) byKey.delete(key);
+  s.networks = next;
+  s.networkOf = networkOf;
+  for (const [key, nodes] of reads) byKey.get(key)!.cover(seen, nodes);
 }

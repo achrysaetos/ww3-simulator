@@ -129,10 +129,9 @@ export class Controllers {
   readonly index = new Map<NationId, number>();
   readonly cell: Uint16Array;
 
-  constructor(world: World, map: GameMap) {
+  constructor(map: GameMap, control: readonly NationId[]) {
     this.cell = new Uint16Array(map.size);
-    for (const id of Object.keys(world.nations).sort()) this.of(id as NationId);
-    for (let n = 0; n < map.landCount; n++) this.set(n, world.control[n]);
+    for (let n = 0; n < map.landCount; n++) this.set(n, control[n]);
     workspaceFor(map);
   }
 

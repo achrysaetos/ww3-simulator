@@ -313,7 +313,7 @@ export class SnapshotEncoder {
     }
 
     if (focus.nation && world.nations[focus.nation]) snap.focusNation = this.nationDetail(world, map, focus.nation);
-    if (focus.formation && world.formations[focus.formation]) snap.focusFormation = formationDetail(world, world.formations[focus.formation]);
+    if (focus.formation && world.formations[focus.formation]) snap.focusFormation = formationDetail(world, map, world.formations[focus.formation]);
     return snap;
   }
 
@@ -450,8 +450,8 @@ function bmdOf(interceptors: Record<string, number>, id: NationId): Record<strin
   return out;
 }
 
-function formationDetail(world: World, f: Formation): FormationDetail {
-  const flow = world.slices.logistics?.networkOf[f.nation] ? supplyFactor(world, f.node, f.nation) : undefined;
+function formationDetail(world: World, map: GameMap, f: Formation): FormationDetail {
+  const flow = world.slices.logistics?.networkOf[f.nation] ? supplyFactor(world, map, f.node, f.nation) : undefined;
   return {
     formation: f,
     supplyFlow: flow ?? null,
