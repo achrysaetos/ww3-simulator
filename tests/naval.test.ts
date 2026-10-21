@@ -40,6 +40,7 @@ const navalPlatforms: Platform[] = [
   ship('n_usv', 'usv', { crew: 0, unitCostUsdM: 0.25, mobility: { speedKph: 40, rangeKm: 800, fuelTonsPerHour: 0 }, firepower: { ship: 0.05 } }),
   ship('n_minelayer', 'corvette', { loadout: [mun('n_mine', 60)] }),
   P({ id: 'n_ssk', name: 'Diesel submarine', class: 'ssk', domain: 'subsurface', unitCostUsdM: 500, crew: 50, mobility: { speedKph: 37, rangeKm: 1e6, fuelTonsPerHour: 0 }, protection: { armor: 0.2, stealth: 0.85 }, sensors: { detectionKm: 40 }, firepower: { ship: 0.3 }, loadout: [{ munition: 't_torpedo' as MunitionId, count: 18 }] }),
+  P({ id: 'n_midget', name: 'Midget submarine', class: 'ssk', domain: 'subsurface', unitCostUsdM: 500, crew: 7, mobility: { speedKph: 37, rangeKm: 1e6, fuelTonsPerHour: 0 }, protection: { armor: 0.2, stealth: 0.85 }, sensors: { detectionKm: 40 }, firepower: { ship: 0.3 }, loadout: [{ munition: 't_torpedo' as MunitionId, count: 2 }] }),
   P({ id: 'n_coastal', name: 'Coastal ASBM launcher', class: 'coastal_asm', domain: 'land', unitCostUsdM: 5, crew: 4, mobility: { speedKph: 60, rangeKm: 600, fuelTonsPerHour: 0.05 }, protection: { armor: 0.1, stealth: 0.35 }, sensors: { detectionKm: 0 }, firepower: {}, loadout: [mun('n_asbm', 4)] }),
   ship('n_carrier', 'carrier', { crew: 3000, mobility: { speedKph: 55, rangeKm: 1e6, fuelTonsPerHour: 0 }, engagementChannels: 4, capacity: { aircraft: 60 }, loadout: [mun('t_sam', 16)] }),
   P({ id: 'n_helo', name: 'ASW helicopter', class: 'asw_helo', domain: 'air', unitCostUsdM: 40, crew: 4, mobility: { speedKph: 250, rangeKm: 300, fuelTonsPerHour: 0.5 }, protection: { armor: 0.1, stealth: 0.1 }, sensors: { detectionKm: 50 }, firepower: {}, loadout: [mun('n_lwt', 2)] }),
@@ -493,6 +494,19 @@ describe('sea control and blockade', () => {
     t.engine.step(t.world);
     expect((t.world.theater.tradeBlocked as Record<string, number>).IRN).toBeGreaterThan(0.2);
     expect((t.world.theater.tradeBlocked as Record<string, number>).QAT).toBe(0);
+  });
+
+  it('a flotilla of midget submarines with two torpedoes each cuts a lane less than one diesel boat with eighteen', () => {
+    const cut = (equipment: Record<string, number>) => {
+      const t = navalWorld();
+      const at = geography(t.map).chokepoints.find((c) => c.def.name === 'Strait of Hormuz')!.nodes[0];
+      t.war('USA', 'IRN');
+      const boats = t.add({ nation: USA, name: 'Boats', kind: 'submarine', echelon: 'squadron', node: at, equipment: t.eq(equipment), magazine: {} });
+      t.order(boats, { posture: 'patrol', target: at });
+      t.engine.step(t.world);
+      return (t.world.theater.tradeBlocked as Record<string, number>).IRN;
+    };
+    expect(cut({ n_midget: 6 })).toBeLessThan(cut({ n_ssk: 1 }));
   });
 });
 
