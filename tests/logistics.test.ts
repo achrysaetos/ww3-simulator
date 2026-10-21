@@ -6,6 +6,7 @@ import { loadMap } from '../src/data/load';
 const MAP = loadMap();
 import { logistics, supplyFactor } from '../src/systems/logistics';
 import { airWar } from '../src/systems/air';
+import { DEFAULT_DELEGATION } from '../src/systems/orders';
 import { BEACH_CAPACITY, HOST_SUPPORT, INFRA_REPAIR_FRONT_SHARE, INFRA_REPAIR_PER_DAY, LAST_MILE_CAPACITY, NODE_TONS_PER_DAY } from '../src/systems/logistics/tables';
 
 const PLENTY = { fuel: 1e7, ammo: 1e7, food: 1e7 };
@@ -413,6 +414,46 @@ describe('logistics', () => {
     expect(f.equipment[inf]).toBe(est[inf]);
     expect(pol.stockpile[mbt]).toBe(200 - est[mbt]);
     expect(pol.reserves).toBeLessThanOrEqual(crew);
+  });
+
+  it('raises new brigades from surplus trained reserves at war, one a month, keeping a replacement reserve back', () => {
+    const t = setup();
+    const ukr = id.nation('UKR');
+    const nation = t.world.nations[ukr];
+    t.war('UKR', 'RUS');
+    const infantry = { [id.platform('t_inf')]: 400, [id.platform('t_mbt')]: 30 };
+    const template = t.brigade('UKR', nation.capital, { equipment: infantry, personnel: 4_000 });
+    nation.stockpile[id.platform('t_mbt')] = 0;
+    nation.reserves = 4_000 * 3 + 0.1 * 4_000;
+    const raised = () => Object.values(t.world.formations).filter((f) => f.nation === ukr && f !== template);
+    t.engine.run(t.world, 15 * DAY);
+    expect(raised().length).toBe(1);
+    t.engine.run(t.world, 20 * DAY);
+    // Each manned from reserves, with rifle squads only: there are no tanks in the stockpile.
+    expect(raised().length).toBe(2);
+    for (const f of raised()) {
+      expect(f.personnel).toBe(4_000);
+      expect(f.equipment[id.platform('t_inf')]).toBe(400);
+      expect(f.equipment[id.platform('t_mbt')]).toBeUndefined();
+      expect(f.order.posture).toBe('reserve');
+    }
+    expect(nation.reserves).toBeCloseTo(4_000 + 400, 6);
+    t.engine.run(t.world, 60 * DAY);
+    // The last 4,400 men stay as replacements: the buffer is a tenth of the 12,000 now fielded.
+    expect(raised().length).toBe(2);
+  });
+
+  it('leaves raising brigades to a human player who has not delegated the home front', () => {
+    const t = setup();
+    const ukr = id.nation('UKR');
+    const nation = t.world.nations[ukr];
+    nation.controlledBy = 'human';
+    t.world.slices.command = { [ukr]: { ai: { ...DEFAULT_DELEGATION, homefront: false }, held: {}, answers: {} } };
+    t.war('UKR', 'RUS');
+    t.brigade('UKR', nation.capital, { equipment: { [id.platform('t_inf')]: 400 }, personnel: 4_000 });
+    nation.reserves = 100_000;
+    t.engine.run(t.world, 15 * DAY);
+    expect(Object.values(t.world.formations).filter((f) => f.nation === ukr).length).toBe(1);
   });
 
   it('reloads a warship from the national stockpile in port but not at sea', () => {

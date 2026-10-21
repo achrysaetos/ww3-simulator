@@ -1,14 +1,16 @@
 import { atWar, type SimContext, type System } from '../../core/engine';
+import { addFormation } from '../../core/forces';
 import type { Catalog } from '../../core/catalog';
 import type { GameMap } from '../../core/map';
-import type { Formation, FormationId, MunitionId, NationId, NodeId, Platform, PlatformId, World } from '../../core/types';
+import type { Formation, FormationId, MunitionId, Nation, NationId, NodeId, Platform, PlatformId, World } from '../../core/types';
 import { AIRFRAME } from '../air/tables';
 import { NAVAL_KINDS } from '../naval/state';
+import { delegated } from '../orders';
 import type { NetworkSearch } from './network';
 import { refreshNetworks, searchesOf, snapshotInputs, type NetworkState } from './refresh';
 import {
   FOOD_TONS_PER_PERSON_DAY, BEACH_CAPACITY, INFRA_REPAIR_FRONT_SHARE, INFRA_REPAIR_PER_DAY, LIFT_TONS_PER_TROOP, LIFT_TONS_PER_VEHICLE, MAX_REFILL_FRACTION_PER_DAY, NODE_TONS_PER_DAY,
-  READINESS_HOURS_PER_DAY, REARM_PER_DAY, REARMS_IN_PORT_ONLY, SEALIFT_CLASSES, RECONSTITUTE_DAYS, RECONSTITUTE_MIN_STRENGTH, RECONSTITUTED_KINDS, REGENERATED_CLASSES,
+  MIN_BRIGADE_PERSONNEL, RAISE_EVERY_DAYS, READINESS_HOURS_PER_DAY, REARM_PER_DAY, REARMS_IN_PORT_ONLY, RESERVE_BUFFER_SHARE, SEALIFT_CLASSES, RECONSTITUTE_DAYS, RECONSTITUTE_MIN_STRENGTH, RECONSTITUTED_KINDS, REGENERATED_CLASSES,
   REPAIR_FRACTION_PER_DAY, REPLACE_FRACTION_PER_DAY, RESERVE_REPLACE_MULTIPLIER, SUPPLY_CLASSES, type SupplyClass,
 } from './tables';
 
@@ -30,6 +32,8 @@ export interface LogisticsState extends NetworkState {
   lift: Record<NationId, { now: number; most: number }>;
   /** Bulk classes each nation is currently short of, so a shortage is reported once per episode. */
   short: Record<NationId, SupplyClass[]>;
+  /** Formations each nation has raised from reserves, and the tick it last tried. */
+  raised: Record<NationId, { count: number; tick: number }>;
 }
 
 declare module '../../core/types' {
@@ -54,7 +58,7 @@ function forcesFactor(s: LogisticsState, search: NetworkSearch, node: NodeId, na
 }
 
 const initialState = (world: World): LogisticsState => ({
-  networks: {}, networkOf: {}, seen: snapshotInputs(world), establishment: {}, fallen: {}, lift: {}, short: {},
+  networks: {}, networkOf: {}, seen: snapshotInputs(world), establishment: {}, fallen: {}, lift: {}, short: {}, raised: {},
 });
 
 export const logistics: System = {
@@ -70,6 +74,7 @@ export const logistics: System = {
     const dtDays = world.dtHours / 24;
     reconstitute(world, ctx, s);
     const forces = activeFormations(world, ctx, s);
+    raiseFromReserves(world, ctx, s);
     refreshNetworks(world, ctx.map, s, forces);
     repairInfrastructure(world, ctx, dtDays);
     sustain(world, ctx, s, forces, dtDays);
@@ -303,21 +308,8 @@ function reconstitute(world: World, ctx: SimContext, s: LogisticsState): void {
     }
     const node = world.control[f.home] === f.nation ? f.home : world.control[nation.capital] === f.nation ? nation.capital : undefined;
     if (node === undefined || nation.reserves < est.personnel) continue;
-    const equipment: Record<PlatformId, number> = {};
-    let fielded = 0, full = 0;
-    for (const k in est.equipment) {
-      const pid = k as PlatformId, n = est.equipment[pid];
-      const free = REGENERATED_CLASSES.has(ctx.catalog.platform(pid).class);
-      const take = free ? n : Math.min(n, Math.max(0, Math.floor(nation.stockpile[pid] ?? 0)));
-      if (take > 0) equipment[pid] = take;
-      fielded += take;
-      full += n;
-    }
-    if (fielded < RECONSTITUTE_MIN_STRENGTH * full) continue;
-    for (const k in equipment) {
-      const pid = k as PlatformId;
-      if (!REGENERATED_CLASSES.has(ctx.catalog.platform(pid).class)) nation.stockpile[pid] -= equipment[pid];
-    }
+    const equipment = equipFromStock(ctx, nation, est);
+    if (!equipment) continue;
     nation.reserves -= est.personnel;
     Object.assign(f, {
       node, home: node, equipment, damaged: {}, personnel: est.personnel, magazine: {}, supply: { fuel: 0, ammo: 0, food: 0 },
@@ -327,6 +319,86 @@ function reconstitute(world: World, ctx: SimContext, s: LogisticsState): void {
     delete s.fallen[id];
     ctx.emit({ type: 'message', tick: world.tick, nation: f.nation, text: `${f.name} re-formed at full manpower from reserves` });
   }
+}
+
+/**
+ * Equipment for a formation built to `est`: rifle squads and trucks without stock, every other platform
+ * drawn from the stockpile, which this takes. Undefined, taking nothing, when the stockpile cannot
+ * field RECONSTITUTE_MIN_STRENGTH of the platforms.
+ */
+function equipFromStock(ctx: SimContext, nation: Nation, est: Establishment): Record<PlatformId, number> | undefined {
+  const equipment: Record<PlatformId, number> = {};
+  let fielded = 0, full = 0;
+  for (const k in est.equipment) {
+    const pid = k as PlatformId, n = est.equipment[pid];
+    const free = REGENERATED_CLASSES.has(ctx.catalog.platform(pid).class);
+    const take = free ? n : Math.min(n, Math.max(0, Math.floor(nation.stockpile[pid] ?? 0)));
+    if (take > 0) equipment[pid] = take;
+    fielded += take;
+    full += n;
+  }
+  if (fielded < RECONSTITUTE_MIN_STRENGTH * full) return undefined;
+  for (const k in equipment) {
+    const pid = k as PlatformId;
+    if (!REGENERATED_CLASSES.has(ctx.catalog.platform(pid).class)) nation.stockpile[pid] -= equipment[pid];
+  }
+  return equipment;
+}
+
+/**
+ * Each nation at war whose home front the AI runs turns trained reserves beyond what replacing
+ * losses needs into new brigades, one every RAISE_EVERY_DAYS, as Ukraine raised the 150-155th
+ * mechanized brigades from mobilised men in 2024. A human player's nation raises them only when it
+ * delegates its home front to the AI.
+ */
+function raiseFromReserves(world: World, ctx: SimContext, s: LogisticsState): void {
+  const every = (RAISE_EVERY_DAYS * 24) / world.dtHours;
+  s.raised ??= {};
+  for (const id in world.nations) {
+    const nation = world.nations[id as NationId];
+    if (nation.status !== 'war' || !delegated(world, nation.id, 'homefront')) continue;
+    const r = (s.raised[nation.id] ??= { count: 0, tick: world.tick - every });
+    if (world.tick - r.tick < every) continue;
+    // A failed attempt waits as long as a success, so a nation short of men or kit is not rescanned every tick.
+    r.tick = world.tick;
+    if (raiseFormation(world, ctx, nation.id)) r.count++;
+  }
+}
+
+/**
+ * Raises one brigade for `nation` from trained reserves, if it holds more than a replacement
+ * reserve (RESERVE_BUFFER_SHARE of the troops it fields) plus the brigade: modelled on its lightest
+ * fielded manoeuvre brigade, equipped as a re-formed one is (rifle squads and trucks free, the rest
+ * from the stockpile, at least RECONSTITUTE_MIN_STRENGTH of the platforms), at the capital, green and
+ * in reserve with empty stocks for logistics to fill. Returns the new formation, or undefined when
+ * men, equipment or a held capital are lacking. Exported for an AI that decides when to raise.
+ */
+export function raiseFormation(world: World, ctx: SimContext, nationId: NationId): Formation | undefined {
+  const nation = world.nations[nationId];
+  const s = world.slices.logistics;
+  if (!nation || !s || world.control[nation.capital] !== nation.id) return undefined;
+  let fielded = 0;
+  let template: { f: Formation; est: Establishment } | undefined;
+  for (const id in world.formations) {
+    const f = world.formations[id as FormationId];
+    if (f.nation !== nation.id || f.status === 'destroyed') continue;
+    fielded += f.personnel;
+    const est = s.establishment[f.id];
+    if (f.kind !== 'maneuver' || f.echelon !== 'brigade' || !est || est.personnel < MIN_BRIGADE_PERSONNEL) continue;
+    if (!template || est.personnel < template.est.personnel || (est.personnel === template.est.personnel && f.id < template.f.id)) template = { f, est };
+  }
+  if (!template || nation.reserves < template.est.personnel + RESERVE_BUFFER_SHARE * fielded) return undefined;
+  const equipment = equipFromStock(ctx, nation, template.est);
+  if (!equipment) return undefined;
+  const count = (s.raised?.[nation.id]?.count ?? 0) + 1;
+  const f = addFormation(world, ctx.catalog, {
+    nation: nation.id, name: `${nation.id} new brigade ${count}`, kind: 'maneuver', echelon: 'brigade', node: nation.capital, equipment,
+    personnel: template.est.personnel, magazine: {}, supply: { fuel: 0, ammo: 0, food: 0 },
+    readiness: 0.5, morale: 0.6, experience: 0.2, order: { posture: 'reserve', issuedTick: world.tick },
+  });
+  nation.reserves -= template.est.personnel;
+  ctx.emit({ type: 'message', tick: world.tick, nation: nation.id, text: `${f.name} raised from reserves at the capital` });
+  return f;
 }
 
 /** Takes what a nation's forces asked for from its bulk stocks; returns the share of each class it could cover and reports new shortages. */
