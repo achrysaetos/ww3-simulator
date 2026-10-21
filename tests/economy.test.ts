@@ -125,8 +125,10 @@ describe('economy: blockade', () => {
     const t = dailyWorld();
     t.world.theater.tradeBlocked[JPN] = 0.8;
     t.world.theater.tradeBlocked[USA] = 0.8;
+    // Stocks cover the first week; rationing trims non-priority use as LNG runs down.
     t.days(7);
-    expect(t.world.slices.economy.nations[JPN].supply.energy).toBe(1);
+    expect(t.world.slices.economy.nations[JPN].supply.energy).toBeGreaterThan(0.9);
+    expect(t.shortages(JPN)).not.toContain('energy');
 
     // LNG (~3 weeks) and coal (~1 month) are gone; ~230 days of strategic oil still cover oil's share.
     t.days(53);
@@ -175,7 +177,7 @@ describe('economy: energy price', () => {
     expect(price).toBeGreaterThan(1.6);
     expect(price).toBeLessThan(3);
     const jp = t.world.slices.economy.nations[JPN];
-    expect(jp.supply.energy).toBe(1);
+    expect(jp.supply.energy).toBeGreaterThan(0.95);
     expect(jp.gdpIndex).toBeLessThan(0.99);
     expect(t.world.slices.economy.nations[USA].gdpIndex).toBe(1);
   });

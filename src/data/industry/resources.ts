@@ -37,7 +37,10 @@ export const SEABORNE_TRADE_SHARE: Record<string, number> = {
 };
 export const DEFAULT_SEABORNE_TRADE_SHARE = 0.8;
 
-/** One national stock of an import stream: its share of the resource's imports and the months of those imports it holds. */
+/**
+ * One national stock of an import stream: its share of the resource's imports and the months of
+ * national use of that stream it holds, as reserves are reported (days of LNG, of oil, of grain).
+ */
 export interface Stock {
   share: number;
   months: number;
@@ -70,6 +73,17 @@ export interface ResourceSpec {
   buffers?: Record<string, number>;
   /** Per-nation stocks split by import stream, replacing the single buffer. Shares sum to 1. */
   tiered?: Record<string, Stock[]>;
+  /** How the state rations a stock it draws on. Absent: the stock is drawn at the full rate until it is empty. */
+  rationing?: Rationing;
+}
+
+/**
+ * Once a stock covers less than `belowMonths` of use, the state cuts non-priority demand in step
+ * with the cover left, down to `priority`, the share of demand it serves from a nearly empty stock.
+ */
+export interface Rationing {
+  priority: number;
+  belowMonths: number;
 }
 
 const fromRest = (shares: Record<string, number>): Record<string, number> => {
@@ -105,6 +119,13 @@ export const RESOURCE_SPECS: Record<Resource, ResourceSpec> = {
       GBR: energy([0.55, 2], [0.05, 1], [0.4, 0.3]),
       DEU: iea, FRA: iea, ITA: iea, ESP: iea, POL: iea, NLD: iea,
     },
+    // Forces, power for hospitals, water, telecoms and households, and the food chain keep their
+    // supply; industry and feedstock go first. Judgment: Taiwan's industry takes ~55% of its power
+    // and petrochemical feedstock ~30% of its oil (Energy Administration, Energy Statistics Handbook
+    // 2023). Restraint starts when a fuel is down to about a month of cover, as Taipower sheds load
+    // when its LNG tanks run low, while a 90-day oil reserve is drawn freely at first (IEA
+    // emergency system: stock draw first, demand restraint of 7-10% if a shortage persists).
+    rationing: { priority: 0.5, belowMonths: 1 },
   },
   food: {
     market: fromRest({ USA: 0.1, BRA: 0.1, ARG: 0.04, NLD: 0.05, CAN: 0.04, AUS: 0.04, UKR: 0.03, RUS: 0.04, FRA: 0.04, IND: 0.04, THA: 0.03, IDN: 0.03 }),

@@ -249,21 +249,28 @@ function rawAccess(world: World, s: Scan, n: Nation, r: Resource): number {
   return self + (1 - self) * imported;
 }
 
-/** Each national stock covers its stream's share of a shortfall until it runs out, then that share bites. */
-function drawSupply(e: NationEconomy, id: NationId, r: Resource, raw: number, dtMonths: number): number {
+/**
+ * Each national stock covers its stream's share of a shortfall until it runs out, then that share
+ * bites. A rationed resource (`ResourceSpec.rationing`) cuts non-priority demand as a stock's cover
+ * falls, so supply sags and the stock lasts longer instead of holding full and then falling off a
+ * cliff. `need` is demand relative to normal: output idled by lost trade burns no energy.
+ */
+function drawSupply(e: NationEconomy, id: NationId, r: Resource, raw: number, need: number, dtMonths: number): number {
   const stocks = stocksOf(id, r), left = e.buffers[r];
-  const shortfall = 1 - raw;
+  const shortfall = need - raw;
   if (shortfall <= 1e-3) {
     for (let i = 0; i < stocks.length; i++) left[i] = Math.min(stocks[i].months, left[i] + BUFFER_REFILL_PER_MONTH * dtMonths);
-    return raw;
+    return 1;
   }
+  const rationing = RESOURCE_SPECS[r].rationing;
   let covered = 0;
   for (let i = 0; i < stocks.length; i++) {
     if (left[i] <= 0) continue;
-    covered += stocks[i].share;
-    left[i] = Math.max(0, left[i] - shortfall * dtMonths);
+    const served = rationing ? rationing.priority + (1 - rationing.priority) * Math.min(1, left[i] / rationing.belowMonths) : 1;
+    covered += stocks[i].share * served;
+    left[i] = Math.max(0, left[i] - shortfall * served * dtMonths);
   }
-  return raw + shortfall * covered;
+  return (raw + shortfall * covered) / need;
 }
 
 function tradeLossOf(world: World, s: Scan, n: Nation): number {
@@ -316,7 +323,8 @@ function stepNation(world: World, ctx: SimContext, s: Scan, n: Nation, e: Nation
   }
   e.integrity = s.integrity.get(n.id) ?? 1;
   e.tradeLoss = tradeLossOf(world, s, n);
-  for (const r of RESOURCES) e.supply[r] = drawSupply(e, n.id, r, rawAccess(world, s, n, r), dtMonths);
+  const tradeOutput = 1 - ((n.stats.importsPctGdp ?? 30) / 100) * e.tradeLoss * IMPORT_GDP_LOSS;
+  for (const r of RESOURCES) e.supply[r] = drawSupply(e, n.id, r, rawAccess(world, s, n, r), r === 'energy' ? tradeOutput : 1, dtMonths);
   announceShortages(world, ctx, n.id, e);
 
   const energyImported = 1 - selfShare(n, 'energy');
@@ -325,7 +333,7 @@ function stepNation(world: World, ctx: SimContext, s: Scan, n: Nation, e: Nation
     (1 - ENERGY_GDP_ELASTICITY * (1 - e.supply.energy)) *
     (1 - ENERGY_BILL_SHARE * energyImported * (world.slices.economy.energyPrice - 1) * ENERGY_PRICE_PASSTHROUGH) *
     (1 - FOOD_GDP_ELASTICITY * (1 - e.supply.food)) *
-    (1 - ((n.stats.importsPctGdp ?? 30) / 100) * e.tradeLoss * IMPORT_GDP_LOSS);
+    tradeOutput;
 
   const gdpB = ((n.stats.gdp ?? 0) / 1e9) * e.gdpIndex;
   const share = defenseShare(n);

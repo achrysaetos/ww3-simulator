@@ -19,7 +19,7 @@ for (let t = 0; t <= ticks; t++) {
     const row: Record<string, unknown> = {};
     for (const id of ids) {
       const e = eco.nations[id];
-      row[id] = { blocked: r2(w.theater.tradeBlocked[id] ?? 0), energy: r2(e.supply.energy), buffers: e.buffers.energy.map(r2), gdp: r2(e.gdpIndex), fuelKt: Math.round(w.nations[id].bulk.fuel / 1000), ammoKt: Math.round(w.nations[id].bulk.ammo / 1000), semis: r2(e.supply.semiconductors), tradeLoss: r2(e.tradeLoss) };
+      row[id] = { blocked: r2(w.theater.tradeBlocked[id] ?? 0), energy: r2(e.supply.energy), buffers: e.buffers.energy.map(r2), gdp: r2(e.gdpIndex), fuelKt: Math.round(w.nations[id].bulk.fuel / 1000), ammoKt: Math.round(w.nations[id].bulk.ammo / 1000), semis: r2(e.supply.semiconductors), food: r2(e.supply.food), tradeLoss: r2(e.tradeLoss) };
     }
     console.log(`d${Math.round((t * w.dtHours) / 24)} price=${r2(eco.energyPrice)} lost=${r2(eco.energyExportsLost * 100)}% ${JSON.stringify(row)}`);
   }
