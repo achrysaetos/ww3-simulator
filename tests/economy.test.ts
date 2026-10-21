@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
-import { Engine } from '../src/core/engine';
+import { Engine, relationMut } from '../src/core/engine';
 import { addFormation } from '../src/core/forces';
 import type { NationId, NodeId, SimEvent } from '../src/core/types';
 import { initialStockpiles } from '../src/data/industry';
 import { economicStress, economy } from '../src/systems/economy';
+import { sanctionDecisions } from '../src/systems/ai/strategy';
+import { profiles } from '../src/data/nations';
 import { createWorld } from '../src/core/world';
 import { loadMap } from '../src/data/load';
 import { id, testCatalog, testWorld } from '../src/testkit';
@@ -258,6 +260,17 @@ describe('economy: sanctions', () => {
     for (const s of bloc) t.world.pending.push({ type: 'sanction', nation: id.nation(s), target: RUS, on: false });
     t.days(2);
     expect(t.world.slices.economy.nations[RUS].supply.semiconductors).toBe(1);
+  });
+});
+
+describe('ai: sanctions policy', () => {
+  it('has the West, and the EU as one bloc, sanction a state at war while its friends and neutrals trade on', () => {
+    const world = createWorld(loadMap(), { profiles });
+    expect(sanctionDecisions(world)).toEqual([]);
+    relationMut(world, RUS, id.nation('UKR')).atWar = true;
+    const by = sanctionDecisions(world).filter((c) => c.type === 'sanction' && c.target === RUS).map((c) => c.nation);
+    expect(by).toEqual(expect.arrayContaining(['USA', 'GBR', 'JPN', 'DEU', 'ITA', 'HUN'].map(id.nation)));
+    for (const n of ['CHN', 'IND', 'TUR', 'BLR', 'UKR']) expect(by).not.toContain(id.nation(n));
   });
 });
 

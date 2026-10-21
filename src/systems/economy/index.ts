@@ -30,10 +30,19 @@ const WAR_TAX_FINANCED = 0.45;
 const MOBILIZE_MONTHS = 3;
 const DEMOBILIZE_MONTHS = 1;
 /**
- * Share of a sanctioning partner's trade that still arrives through third countries.
- * Russia's imports of Western dual-use chips recovered largely via China, Turkey and Central Asia (KSE 2023-24).
+ * Share of a partner's trade that still arrives, by why it stopped. Under sanctions, export-
+ * controlled inputs (`ResourceSpec.exportControlled`) leak through third countries: Russia's
+ * imports of Western dual-use chips recovered largely via China, Turkey and Central Asia (KSE
+ * 2023-24). Ordinary goods mostly reroute: Russia's goods imports fell ~15% in 2022 and were back
+ * near 2021 levels by 2023 (Bank of Russia balance of payments) though most of the world's GDP
+ * sanctioned it, as Chinese, Turkish and Central Asian suppliers replaced Western ones; traded
+ * commodities such as oil and grain find other buyers and sellers the same way.
  */
-const SANCTION_LEAK = 0.3;
+const STILL_ARRIVES: Record<Breach, { goods: number; controlled: number }> = {
+  war: { goods: 0, controlled: 0 },
+  sanctions: { goods: 0.8, controlled: 0.3 },
+};
+type Breach = 'war' | 'sanctions';
 /** Months of normal flow needed to rebuild one month of drawn-down stocks. */
 const BUFFER_REFILL_PER_MONTH = 0.25;
 /** Fraction of imports that GDP cannot replace at home in the short run (est.). */
@@ -196,10 +205,10 @@ function gridIntact(world: World, map: GameMap): Map<NationId, number> {
   return out;
 }
 
-/** For each nation, the partners whose trade it has lost: 0 for war, the leak share for sanctions. */
-function tradePartners(world: World): Map<NationId, Map<NationId, number>> {
-  const out = new Map<NationId, Map<NationId, number>>();
-  const put = (a: NationId, b: NationId, v: number) => {
+/** For each nation, the partners whose trade it has lost and why. */
+function tradePartners(world: World): Map<NationId, Map<NationId, Breach>> {
+  const out = new Map<NationId, Map<NationId, Breach>>();
+  const put = (a: NationId, b: NationId, v: Breach) => {
     let m = out.get(a);
     if (!m) out.set(a, (m = new Map()));
     m.set(b, v);
@@ -207,7 +216,7 @@ function tradePartners(world: World): Map<NationId, Map<NationId, number>> {
   for (const [k, r] of Object.entries(world.relations)) {
     if (!r.atWar && !r.sanctions) continue;
     const [a, b] = k.split('|') as NationId[];
-    const v = r.atWar ? 0 : SANCTION_LEAK;
+    const v: Breach = r.atWar ? 'war' : 'sanctions';
     put(a, b, v);
     put(b, a, v);
   }
@@ -217,7 +226,7 @@ function tradePartners(world: World): Map<NationId, Map<NationId, number>> {
 interface Scan {
   integrity: Map<NationId, number>;
   grid: Map<NationId, number>;
-  cut: Map<NationId, Map<NationId, number>>;
+  cut: Map<NationId, Map<NationId, Breach>>;
   personnel: Map<NationId, number>;
   worldGdp: number;
 }
@@ -253,10 +262,10 @@ function energyExportsLost(world: World, integrity: Map<NationId, number>): numb
 const energyPrice = (lost: number) => Math.min(MAX_ENERGY_PRICE, Math.pow(Math.max(1e-3, 1 - lost), -1 / ENERGY_PRICE_ELASTICITY));
 
 /** How much of a supplier's exports reach `buyer`, 0..1. */
-function supplierFlow(world: World, s: Scan, buyer: NationId, supplier: string): number {
+function supplierFlow(world: World, s: Scan, buyer: NationId, supplier: string, r: Resource): number {
   if (supplier === 'other' || !world.nations[supplier as NationId]) return 1;
-  const cut = s.cut.get(buyer)?.get(supplier as NationId);
-  const politics = cut ?? 1;
+  const breach = s.cut.get(buyer)?.get(supplier as NationId);
+  const politics = breach ? STILL_ARRIVES[breach][RESOURCE_SPECS[r].exportControlled ? 'controlled' : 'goods'] : 1;
   return politics * (1 - seaCut(world, supplier as NationId)) * (s.integrity.get(supplier as NationId) ?? 1);
 }
 
@@ -270,7 +279,7 @@ function rawAccess(world: World, s: Scan, n: Nation, r: Resource): number {
   for (const [supplier, share] of Object.entries(spec.market)) {
     if (supplier === n.id) continue;
     den += share;
-    num += share * supplierFlow(world, s, n.id, supplier);
+    num += share * supplierFlow(world, s, n.id, supplier, r);
   }
   const imported = (den > 0 ? num / den : 1) * (1 - seaCut(world, n.id));
   return self + (1 - self) * imported;
@@ -303,7 +312,7 @@ function drawSupply(e: NationEconomy, id: NationId, r: Resource, raw: number, ne
 function tradeLossOf(world: World, s: Scan, n: Nation): number {
   let lost = 0;
   const gdpOthers = s.worldGdp - (n.stats.gdp ?? 0);
-  for (const [p, flow] of s.cut.get(n.id) ?? []) lost += ((world.nations[p]?.stats.gdp ?? 0) / gdpOthers) * (1 - flow);
+  for (const [p, breach] of s.cut.get(n.id) ?? []) lost += ((world.nations[p]?.stats.gdp ?? 0) / gdpOthers) * (1 - STILL_ARRIVES[breach].goods);
   const blocked = seaCut(world, n.id);
   return clamp01(1 - (1 - blocked) * (1 - clamp01(lost)));
 }

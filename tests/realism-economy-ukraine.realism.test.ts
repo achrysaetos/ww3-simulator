@@ -34,6 +34,25 @@ describe.each(SEEDS)('ukraine-2026 war economy, seed %i', (seed) => {
     expect(eco(seed, 'RUS').gdpIndex).toBeGreaterThanOrEqual(0.95);
   });
 
+  it('the West sanctions Russia and the rest of the world does not (2022-25: US, UK, EU, Japan, Korea, Canada, Australia, Norway; not China, India, Turkey, Brazil or the Gulf)', () => {
+    const by = eco(seed, 'RUS').sanctionedBy;
+    expect(by).toEqual(expect.arrayContaining(['USA', 'GBR', 'DEU', 'FRA', 'ITA', 'ESP', 'POL', 'JPN', 'KOR', 'CAN', 'AUS', 'NOR']));
+    for (const n of ['CHN', 'IND', 'TUR', 'BRA', 'SAU', 'ARE']) expect(by).not.toContain(n);
+  });
+
+  it('Russia loses 5-25% of its trade as goods reroute through third countries (Bank of Russia: goods imports -15% in 2022, near 2021 levels by 2023)', () => {
+    const loss = eco(seed, 'RUS').weekly.tradeLoss.at(-1)!;
+    expect(loss).toBeGreaterThanOrEqual(0.05);
+    expect(loss).toBeLessThanOrEqual(0.25);
+  });
+
+  it('Russia draws down its stockpiled chips under export controls, yet keeps most of its supply (KSE 2023-24: Western chips arrive via China, Turkey, Central Asia)', () => {
+    const e = eco(seed, 'RUS');
+    const [start, end] = e.stockMonths.semiconductors;
+    expect(end).toBeLessThan(start);
+    expect(end).toBeGreaterThan(0);
+  });
+
   it('Russia signs 20-50k recruits a month (MoD: ~450k contracts in 2024; ISW ~30k/month)', () => {
     expect(eco(seed, 'RUS').recruitsPerMonth).toBeGreaterThanOrEqual(20_000);
     expect(eco(seed, 'RUS').recruitsPerMonth).toBeLessThanOrEqual(50_000);

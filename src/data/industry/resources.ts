@@ -73,6 +73,8 @@ export interface ResourceSpec {
   buffers?: Record<string, number>;
   /** Per-nation stocks split by import stream, replacing the single buffer. Shares sum to 1. */
   tiered?: Record<string, Stock[]>;
+  /** Covered by export controls, so sanctions stop most of it rather than rerouting it like ordinary goods. */
+  exportControlled?: boolean;
   /** How the state rations a stock it draws on. Absent: the stock is drawn at the full rate until it is empty. */
   rationing?: Rationing;
 }
@@ -148,6 +150,8 @@ export const RESOURCE_SPECS: Record<Resource, ResourceSpec> = {
     selfSufficiency: { TWN: 1, KOR: 0.9, CHN: 0.6, USA: 0.35, JPN: 0.6, DEU: 0.3, FRA: 0.3, GBR: 0.2, ISR: 0.4, NLD: 0.3, RUS: 0.1, IND: 0.1, IRN: 0.05, PRK: 0.05, UKR: 0.05, TUR: 0.1 },
     defaultSelf: () => 0,
     bufferMonths: 6,
+    // US, EU, Japanese, Korean and Taiwanese export controls on Russia from 2022; US controls on China from 2022.
+    exportControlled: true,
     // Russia stockpiled microelectronics before 2022 (est.).
     buffers: { RUS: 9 },
   },
@@ -157,6 +161,8 @@ export const RESOURCE_SPECS: Record<Resource, ResourceSpec> = {
     selfSufficiency: { CHN: 1, USA: 0.15, JPN: 0.1, RUS: 0.3, IND: 0.3, MYS: 0.5, AUS: 0.3 },
     defaultSelf: () => 0,
     bufferMonths: 4,
+    // China's export licensing of gallium, germanium, graphite and rare-earth magnets (2023-25).
+    exportControlled: true,
     // Japan holds a national rare-metals stockpile (JOGMEC) of ~60 days, plus industry stock (est.).
     buffers: { JPN: 6, USA: 6 },
   },
@@ -166,6 +172,8 @@ export const RESOURCE_SPECS: Record<Resource, ResourceSpec> = {
     market: fromRest({ CHN: 0.35, IND: 0.1, RUS: 0.1, POL: 0.04, DEU: 0.04, FRA: 0.03, KOR: 0.05, USA: 0.05, TUR: 0.04 }),
     selfSufficiency: { CHN: 1, RUS: 0.95, IND: 0.85, USA: 0.6, KOR: 0.8, DEU: 0.5, FRA: 0.6, POL: 0.6, GBR: 0.3, JPN: 0.5, TUR: 0.7, IRN: 0.8, PRK: 0.9, UKR: 0.3, ISR: 0.6 },
     defaultSelf: () => 0.2,
+    // Explosives and propellants are munitions-list items (Wassenaar, EU Common Military List).
+    exportControlled: true,
     bufferMonths: 3,
   },
   steel: {
