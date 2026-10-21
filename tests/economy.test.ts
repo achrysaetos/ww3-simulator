@@ -262,6 +262,21 @@ describe('economy: military fuel', () => {
     const depot = 6 * ((de.stats.milexUsd ?? 0) / 1e6) * 12 / 12;
     expect(de.bulk.fuel).toBeLessThanOrEqual(depot * 1.001);
   });
+
+  it('fills depots no further than their peacetime capacity however far a nation mobilizes', () => {
+    const t = dailyWorld();
+    const TWN = id.nation('TWN');
+    const tw = t.world.nations[TWN];
+    t.world.pending.push({ type: 'set_mobilization', nation: TWN, level: 1 });
+    t.world.theater.tradeBlocked[TWN] = 1;
+    const depot = 6 * ((tw.stats.milexUsd ?? 0) / 1e6) * 12 / 12;
+    let peak = 0;
+    for (let d = 0; d < 90; d++) {
+      t.days(1);
+      peak = Math.max(peak, tw.bulk.fuel);
+    }
+    expect(peak).toBeLessThanOrEqual(depot * 1.001);
+  });
 });
 
 describe('economy: manpower', () => {

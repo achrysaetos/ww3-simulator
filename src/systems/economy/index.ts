@@ -86,8 +86,10 @@ const DRAFT_SHARE_PER_MONTH = 0.019;
 const CONSCRIPTION_EXPONENT = 2.5;
 /** Mean months from call-up to a usable reservist: Russia 2022 weeks, Ukraine 1-2 months, NATO basic plus branch 3-6 months. */
 const TRAINING_MONTHS = 2.5;
-/** Full mobilization quadruples the fuel depots a military keeps stocked (est.). */
+/** Full mobilization quadruples the fuel a military's budget buys (est.). */
 const FUEL_MOBILIZATION_MULTIPLE = 4;
+/** Military depot capacity, months of peacetime fuel use; scenarios start them half full (initialStockpiles). */
+const DEPOT_MONTHS = 6;
 /**
  * Share of national oil use a state can route to its forces. In peacetime militaries
  * burn ~1-2% (US DoD ~11.6 Mt of ~1,000 Mt); in WWII the US armed forces took about a
@@ -345,16 +347,20 @@ function stepNation(world: World, ctx: SimContext, s: Scan, n: Nation, e: Nation
   const spendMultiple = share / s0;
   for (const line of Object.values(e.lines)) runLine(n, e, line, spendMultiple, dtMonths);
 
-  // Depots hold ~6 months of what the budget buys. Refills are the larger of what the budget buys
-  // abroad and what the state can commandeer from national oil supply, which in war far exceeds the
-  // peacetime budget. The military takes first claim on scarce energy.
-  const budgetFuelPerMonth = (((n.stats.milexUsd ?? 0) / 1e6) * MIL_FUEL_TONS_PER_USD_M / 12) * (1 + (FUEL_MOBILIZATION_MULTIPLE - 1) * n.mobilization);
+  // Refills are the larger of what the budget buys abroad and what the state can commandeer from
+  // national oil supply, which in war far exceeds the peacetime budget. Forces are priority demand
+  // under rationing, so energy reaches them first. Depots are tanks built in peacetime:
+  // they hold DEPOT_MONTHS of the peacetime budget's fuel whatever the mobilization, so war raises
+  // the flow through them, not the stock they can keep.
+  const peaceFuelPerMonth = ((n.stats.milexUsd ?? 0) / 1e6) * MIL_FUEL_TONS_PER_USD_M / 12;
+  const budgetFuelPerMonth = peaceFuelPerMonth * (1 + (FUEL_MOBILIZATION_MULTIPLE - 1) * n.mobilization);
   const oilMt = OIL_CONSUMPTION_MT[n.id];
   const oilTonsPerYear = oilMt !== undefined ? oilMt * 1e6 : ((n.stats.gdpPpp ?? n.stats.gdp ?? 0) / 1e6) * OIL_TONS_PER_PPP_USD_M;
   const commandeeredPerMonth = (oilTonsPerYear / 12) * (MIL_OIL_SHARE_PEACE + (MIL_OIL_SHARE_FULL - MIL_OIL_SHARE_PEACE) * n.mobilization);
   const fuelPerMonth = Math.max(budgetFuelPerMonth, commandeeredPerMonth);
   const fuelBefore = n.bulk.fuel;
-  n.bulk.fuel = Math.min(Math.max(n.bulk.fuel, 6 * budgetFuelPerMonth), n.bulk.fuel + fuelPerMonth * dtMonths * Math.min(1, 2 * e.supply.energy));
+  const served = Math.min(1, e.supply.energy / (RESOURCE_SPECS.energy.rationing?.priority ?? 1));
+  n.bulk.fuel = Math.min(Math.max(n.bulk.fuel, DEPOT_MONTHS * peaceFuelPerMonth), n.bulk.fuel + fuelPerMonth * dtMonths * served);
   e.fuelDelivered += n.bulk.fuel - fuelBefore;
 
   const personnel = s.personnel.get(n.id) ?? 0;
