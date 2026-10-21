@@ -72,8 +72,15 @@ export function planAir(p: Plan, targets: TargetGrid): void {
       const score = (enemySky(k) ? 2 : 1) - cover.get(k)!;
       if (score > bestScore) { bestScore = score; best = k; }
     }
+    // With no land front at all (a war across a strait or a gulf), fighters sweep the enemy ground the strikes go for.
+    if (!keys.length)
+      for (const t of targets.near(w.node, radius)) {
+        if (map.isSea(t.node) || !p.enemies.has(p.world.control[t.node]) || km(w.node, t.node) > radius) continue;
+        const score = t.value / (1 + (cover.get(t.node) ?? 0));
+        if (score > bestScore) { bestScore = score; best = t.node; }
+      }
     if (best === undefined) return false;
-    cover.set(best, cover.get(best)! + 1);
+    cover.set(best, (cover.get(best) ?? 0) + 1);
     issue(p, w, { posture: 'air_superiority', target: best });
     return true;
   };

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { relationMut } from '../src/core/engine';
 import type { FormationId, NationId } from '../src/core/types';
 import { createSession } from '../src/scenarios';
-import { cepFactor, isrFactor, spaceSupport } from '../src/systems/strategic';
+import { isrFactor, spaceSupport } from '../src/systems/strategic';
 
 const N = (s: string) => s as NationId;
 const sats = (w: ReturnType<typeof createSession>['world'], n: string) => w.slices.strategic.space[N(n)];
@@ -36,7 +36,8 @@ describe('national satellite constellations', () => {
     const jdam = { kind: 'glide_bomb' } as Parameters<typeof spaceSupport>[2];
     expect(isrFactor(w.world, N('USA'))).toBeLessThan(1);
     expect(spaceSupport(w.world, N('USA'), jdam, true)).toBeLessThan(1);
-    expect(cepFactor(w.world, N('USA'))).toBe(1);
+    // GPS is left out: once the imaging layer thins, the PLA's own ASAT planner turns its DN-3s on GPS in medium orbit
+    // (planAsat), so navigation losses here depend on the planner, not on this shot; the next test covers them.
   });
 
   it('degrade GNSS-aided weapons when navigation satellites are lost, but not seeker-guided ones', () => {

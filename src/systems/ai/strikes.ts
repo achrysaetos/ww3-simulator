@@ -37,15 +37,18 @@ const VALUE_BY_KIND: Partial<Record<FormationKind, { value: number; cls: TargetC
   logistics: { value: 3, cls: 'soft' },
 };
 /**
- * A naval group is worth what it carries: a US carrier strike group with its air wing runs about
- * USD 20bn, a Taiwanese frigate flotilla about 3bn, a patrol-boat squadron a few hundred million.
- * CSIS's 2023 Taiwan wargames had PLARF and PLAN salvos go after US carriers and Aegis escorts,
- * sinking 2 carriers and 7-20 major surface combatants per iteration. The value grows with the
- * square root of the group's cost against a SHIP_REF_USD_M squadron, held within SHIP_WORTH
- * (judgment), so a carrier group outranks an air defence site but not every other target together.
+ * A naval group or an air wing is worth what it carries: a US carrier strike group with its air wing
+ * runs about USD 20bn, a Taiwanese frigate flotilla about 3bn, a patrol-boat squadron a few hundred
+ * million; a US F-35 wing at Kadena about 5bn, a Taiwanese F-16 wing about 1.5bn. Troops and
+ * vehicles embarked on a ship count with it: a ro-ro ferry full of a PLA brigade is worth the
+ * brigade. CSIS's 2023 Taiwan wargames had PLARF and PLAN salvos go after US carriers, Aegis
+ * escorts and the ramps at Kadena and Guam, sinking 2 carriers and 7-20 major surface combatants per
+ * iteration, with most US aircraft lost on the ground. The value grows with the square root of the
+ * cost against a reference formation, held within WORTH (judgment), so a carrier group outranks an
+ * air defence site but not every other target together.
  */
-const SHIP_REF_USD_M = 3000;
-const SHIP_WORTH = { min: 0.5, max: 3 };
+const WORTH_REF_USD_M: Partial<Record<FormationKind, number>> = { surface_group: 3000, air_wing: 2000 };
+const WORTH = { min: 0.5, max: 3 };
 const FRONT_FORCES = { value: 2, cls: 'armor' as TargetClass };
 const RAIL_HUB = { value: 1.5, cls: 'structure' as TargetClass, minRailKm: 50 };
 const CAPITAL = { value: 2.5, cls: 'structure' as TargetClass };
@@ -61,10 +64,18 @@ const GRID = { value: 5, cls: 'power' as TargetClass, cities: 12 };
 /** Leadership willing to risk deep strikes on a nuclear power's homeland before the ladder sanctions them. */
 const DEEP_STRIKE_RISK = 0.7;
 
-function shipWorth(p: Plan, f: Formation): number {
+function costUsdM(p: Plan, f: Formation): number {
   let usd = 0;
   for (const [id, n] of Object.entries(f.equipment)) usd += n * p.ctx.catalog.platform(id as PlatformId).unitCostUsdM;
-  return Math.min(SHIP_WORTH.max, Math.max(SHIP_WORTH.min, Math.sqrt(usd / SHIP_REF_USD_M)));
+  return usd;
+}
+
+/** Each enemy ship's embarked cargo, by cost. */
+function cargoUsdM(p: Plan): Map<FormationId, number> {
+  const out = new Map<FormationId, number>();
+  for (const f of Object.values(p.world.formations))
+    if (f.status === 'embarked' && f.embarkedOn && p.enemies.has(f.nation)) out.set(f.embarkedOn, (out.get(f.embarkedOn) ?? 0) + costUsdM(p, f));
+  return out;
 }
 
 /**
@@ -142,15 +153,21 @@ export class TargetGrid {
 export function strikeTargets(p: Plan, battleArea: Set<number>): TargetGrid {
   const { map } = p.ctx;
   const out: StrikeTarget[] = [];
+  const cargo = cargoUsdM(p);
+  const worth = (f: Formation) => {
+    const ref = WORTH_REF_USD_M[f.kind];
+    return ref ? Math.min(WORTH.max, Math.max(WORTH.min, Math.sqrt((costUsdM(p, f) + (cargo.get(f.id) ?? 0)) / ref))) : 1;
+  };
   // Aimed where intelligence last fixed each formation, worth less as the fix goes stale.
   for (const e of p.enemies)
     for (const { f, node, confidence } of sighted(p, e)) {
       const v = VALUE_BY_KIND[f.kind] ?? (isGround(f) && battleArea.has(node) ? FRONT_FORCES : undefined);
       if (!v) continue;
-      if (f.kind !== 'surface_group') out.push({ node, cls: v.cls, value: v.value * confidence, formation: f.id, assigned: 0 });
+      const value = v.value * worth(f) * confidence;
+      if (f.kind !== 'surface_group') out.push({ node, cls: v.cls, value, formation: f.id, assigned: 0 });
       else {
         const fresh = node === f.node && confidence === 1;
-        out.push({ node, at: fresh ? navalPosition(map, f) : node, cls: v.cls, value: v.value * shipWorth(p, f) * confidence, formation: f.id, afloat: node !== f.home || (fresh && !!f.order.path?.length), assigned: 0 });
+        out.push({ node, at: fresh ? navalPosition(map, f) : node, cls: v.cls, value, formation: f.id, afloat: node !== f.home || (fresh && !!f.order.path?.length), assigned: 0 });
       }
     }
   for (const n of battleArea)
@@ -218,7 +235,9 @@ const STANDOFF_HORIZON_DAYS = 30;
  * Rationed weapons go in massed salvos every few days, starting the day the war
  * does, to saturate defenses rather than trickle into them: Russia's combined
  * missile strikes on Ukraine came every 4-10 days in 2024-25; Iran's 2024 attacks
- * were single massed salvos (judgment).
+ * were single massed salvos (judgment). What the launchers cannot put up on the salvo
+ * day goes on the days between: Iran fired waves on most nights of the June 2025 war,
+ * ~550 ballistic missiles in 12 days from launchers that could not fire them at once.
  */
 const SALVO_EVERY_DAYS = 3;
 
@@ -251,13 +270,15 @@ export class FireBudget {
     for (const x of this.proposals) for (const m of x.options) capacity.set(m.id, (capacity.get(m.id) ?? 0) + dailyRounds(x.f, m.id, ctx.catalog));
     const front = new Set<NationId>();
     for (const sec of this.p.sectors) for (const n of sec.enemyNodes) front.add(world.control[n]);
-    const salvo = this.salvoDay() ? SALVO_EVERY_DAYS : 0;
+    const salvoDay = this.salvoDay();
     const share = (m: MunitionId, horizon: number) => {
       const cap = capacity.get(m) ?? 0;
+      if (cap <= 0) return 0;
       let stock = world.nations[nation].stockpile[m] ?? 0;
       for (const f of this.p.index.byNation.get(nation) ?? []) if (f.kind === 'air_wing' || f.kind === 'missile') stock += f.magazine[m] ?? 0;
       const produced = (world.slices.economy?.nations[nation]?.lines[m]?.capacityPerMonth ?? 0) / 30;
-      return cap > 0 ? Math.min(1, (salvo * (produced + stock / horizon)) / cap) : 0;
+      const cycle = SALVO_EVERY_DAYS * (produced + stock / horizon);
+      return Math.min(1, (salvoDay ? cycle : Math.max(0, cycle - cap) / (SALVO_EVERY_DAYS - 1)) / cap);
     };
     for (const x of this.proposals) {
       const horizon = front.has(world.control[x.t.node]) ? ATTRITION_HORIZON_DAYS : STANDOFF_HORIZON_DAYS;
@@ -498,3 +519,4 @@ export function pickTarget(targets: StrikeTarget[], reachable: (t: StrikeTarget)
   if (best) best.assigned++;
   return best;
 }
+

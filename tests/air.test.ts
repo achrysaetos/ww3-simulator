@@ -136,20 +136,23 @@ describe('integrated air defense', () => {
     expect(t.world.slices.air?.runway?.[kyiv]).toBe(runway);
   });
 
-  it('a strike order whose raids all vanish into the defences stops after two; one that lands keeps striking', () => {
+  it("a strike order whose raids all vanish into the defences on two days running stops; one that lands keeps striking", () => {
     const raids = (defended: boolean) => {
       const t = airWorld(5);
       t.war('RUS', 'UKR');
       const kyiv = t.node(...KYIV);
-      if (defended) battery(t, 'UKR', kyiv, { x_patriot: 6 });
-      launchers(t, 'RUS', t.node(53.9, 27.6), { x_cruise_tel: 2 }, { posture: 'strike', target: kyiv, targetClass: 'structure' });
-      const s = t.strikes(t.tick(8));
-      return s;
+      if (defended) battery(t, 'UKR', kyiv, { x_patriot: 18 });
+      const f = launchers(t, 'RUS', t.node(53.9, 27.6), { x_cruise_tel: 2 }, { posture: 'strike', target: kyiv, targetClass: 'structure' });
+      f.magazine[mid('t_cruise')] = 40;
+      const s = t.strikes(t.tick(16));
+      return new Set(s.map((e) => Math.floor((e.tick * t.world.dtHours) / 24))).size;
     };
+    // Assessment feeds the next day's tasking, so a day's raids on one aim count as one: two futile days end it
+    // (a third if a stray round gets through on the first).
     const blocked = raids(true);
-    expect(blocked.every((e) => e.intercepted === e.fired)).toBe(true);
-    expect(blocked.length).toBe(2);
-    expect(raids(false).length).toBeGreaterThan(2);
+    expect(blocked).toBeGreaterThanOrEqual(2);
+    expect(blocked).toBeLessThanOrEqual(3);
+    expect(raids(false)).toBe(4);
   });
 
   it('attritable drones keep coming at an aim the defences stop, drawing down its interceptors', () => {

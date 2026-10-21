@@ -54,8 +54,10 @@ export function futileAim(world: World, nation: NationId, key: string, since = -
 
 function assess(world: World, slice: AirSlice, nation: NationId, key: string, effective: boolean): void {
   const mine = ((slice.bda ??= {})[nation] ??= {});
-  const prior = mine[key]?.futile ?? 0;
-  mine[key] = { tick: world.tick, futile: effective ? 0 : prior + 1 };
+  const prior = mine[key];
+  // Assessment feeds the next day's tasking (the 24-hour ATO cycle), so the raids of one day on an aim count as one.
+  const sameDay = !!prior && Math.floor((prior.tick * world.dtHours) / 24) === Math.floor((world.tick * world.dtHours) / 24);
+  mine[key] = { tick: world.tick, futile: effective ? 0 : (prior?.futile ?? 0) + (sameDay ? 0 : 1) };
 }
 
 /** Sorties (aircraft) or launches (ground launchers) available this tick, and how far the carrier itself goes. */
@@ -127,7 +129,7 @@ function carriersOf(f: Formation, pic: AirPicture, ctx: SimContext, world: World
  * Russia's KAB glide bombs (~USD 40k) did the front-line work in 2024-25 while
  * Kh-59/69s (~USD 1M) went to defended rear targets.
  */
-function chooseMunition(f: Formation, carriers: Carrier[], tc: TargetClass, dist: number, ringKm: number, ctx: SimContext): Munition | undefined {
+function chooseMunition(f: Formation, carriers: Carrier[], tc: TargetClass, dist: number, ringKm: number, rearKm: number, ctx: SimContext): Munition | undefined {
   let best: Munition | undefined, bestCost = Infinity;
   for (const [mid, n] of Object.entries(f.magazine) as [MunitionId, number][]) {
     if (n < 1 || (f.order.munition && f.order.munition !== mid)) continue;
@@ -137,6 +139,7 @@ function chooseMunition(f: Formation, carriers: Carrier[], tc: TargetClass, dist
     for (const c of carriers) {
       const load = loadOf(c.platform, mid);
       if (load <= 0 || c.reachKm + m.rangeKm < dist) continue;
+      if (c.group && rearKm - m.rangeKm > REAR_TOLERANCE_KM && visibility(c.platform.protection.stealth) >= PENETRATOR_VISIBILITY) continue;
       const exposure = TUNING.samExposure.strike * envelopeExposure(ringKm - m.rangeKm) * visibility(c.platform.protection.stealth) ** 2;
       const risk = c.group ? (exposure * c.platform.unitCostUsdM * TUNING.airframeLossAversion) / load : 0;
       const cost = (m.unitCostUsdM + risk) / pk;
@@ -157,6 +160,45 @@ function chooseMunition(f: Formation, carriers: Carrier[], tc: TargetClass, dist
  * stays clear of a Patriot battery 120 km behind the line. Enemy fighters holding
  * the target's airspace push the release point further out.
  */
+/**
+ * Strike aviation releases at most this far past a land front unless it holds the air there or is stealthy, as the
+ * planner assumes (ai SamCover): short-range air defences and fighters in the enemy's rear are not in the SAM list but
+ * kill as surely. Russian glide bombs reach 40-70 km past the line, and Russian jets do not overfly Poltava (ISW, RUSI 2024).
+ */
+const REAR_TOLERANCE_KM = 15;
+const PENETRATOR_VISIBILITY = 0.1;
+/** The line between two 1-degree cells in contact runs about half a cell (~55 km) from each side's cell centres. */
+const LINE_OFFSET_KM = 55;
+const frontMemo = new WeakMap<World, { tick: number; cells: Map<string, NodeId[]> }>();
+
+/**
+ * How far past the land front between `nation`'s side and the holder of `target` the target lies, km; 0 when the
+ * target is not enemy ground across a land front (a war across a sea has no rear to cross) or `nation` holds the air over it.
+ */
+function behindLineKm(world: World, ctx: SimContext, pic: AirPicture, target: NodeId, nation: NationId): number {
+  const { map } = ctx;
+  const holder = world.control[target];
+  if (map.isSea(target) || !holder || !pic.atWar(holder, nation) || world.theater.airControl[target]?.nation === nation) return 0;
+  let memo = frontMemo.get(world);
+  if (memo?.tick !== world.tick) frontMemo.set(world, (memo = { tick: world.tick, cells: new Map() }));
+  const key = `${nation}|${holder}`;
+  let front = memo.cells.get(key);
+  if (!front) {
+    front = [];
+    for (let n = 0; n < map.landCount; n++) {
+      const c = world.control[n];
+      if (!c || pic.atWar(c, nation) || !pic.atWar(c, holder)) continue;
+      for (let i = map.adjStart[n]; i < map.adjStart[n + 1]; i++)
+        if (map.adj[i] < map.landCount && world.control[map.adj[i]] === holder) { front.push(n as NodeId); break; }
+    }
+    memo.cells.set(key, front);
+  }
+  if (!front.length) return 0;
+  let km = Infinity;
+  for (const n of front) km = Math.min(km, nodeDistance(ctx, n, target));
+  return Math.max(0, km - LINE_OFFSET_KM);
+}
+
 function threatRingKm(world: World, ctx: SimContext, pic: AirPicture, from: NodeId, target: NodeId, nation: NationId): number {
   let ring = 0;
   const approach = nodeDistance(ctx, from, target);
@@ -181,7 +223,7 @@ function planPackage(world: World, ctx: SimContext, pic: AirPicture, f: Formatio
   const ship = tc === 'ship' && f.order.targetFormation ? world.formations[f.order.targetFormation] : undefined;
   const dist = nodeDistance(ctx, f.node, ship?.node === target ? navalPosition(ctx.map, ship) : target);
   const ring = threatRingKm(world, ctx, pic, f.node, target, f.nation);
-  const m = chooseMunition(f, carriers, tc, dist, ring, ctx);
+  const m = chooseMunition(f, carriers, tc, dist, ring, behindLineKm(world, ctx, pic, target, f.nation), ctx);
   let weapons = 0;
   const penetrators: AirGroup[] = [];
   for (const c of carriers) {
