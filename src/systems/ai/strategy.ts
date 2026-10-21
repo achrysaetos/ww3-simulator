@@ -149,7 +149,7 @@ function capitalInDanger(p: Plan): boolean {
  * thresholds for Pakistan; the Russian core-loss and force-loss levels), the strongest decides.
  * The capital lost is existential for every state that keeps the option of first use.
  */
-export function nuclearPressure(p: Plan, a: Assessment | undefined, rec: WarRecord | undefined): number {
+function nuclearPressure(p: Plan, a: Assessment | undefined, rec: WarRecord | undefined): number {
   const t = thresholdOf(p);
   if (!t.firstUse || !a) return 0;
   let pressure = a.capitalLost ? 2 : 0;
