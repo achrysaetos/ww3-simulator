@@ -20,6 +20,7 @@ const mun = (id: string, count: number) => ({ munition: id as MunitionId, count 
 const navalMunitions: Munition[] = [
   M({ id: 'n_lwt', name: 'Lightweight ASW torpedo', kind: 'torpedo', rangeKm: 10, speedMach: 0.07, warheadKg: 45, cepM: 5, pk: { submarine: 0.5 }, interceptDifficulty: 0.8, unitCostUsdM: 1.5, weightKg: 280 }),
   M({ id: 'n_asbm', name: 'Anti-ship ballistic missile', kind: 'antiship_ballistic', rangeKm: 1500, speedMach: 10, warheadKg: 600, cepM: 20, pk: { ship: 0.6 }, interceptDifficulty: 0.8, unitCostUsdM: 10, weightKg: 15000 }),
+  M({ id: 'n_sm3', name: 'Exo-atmospheric interceptor', kind: 'abm', rangeKm: 900, speedMach: 10, warheadKg: 0, cepM: 0, pk: { missile: 0.8 }, interceptDifficulty: 0, unitCostUsdM: 12, weightKg: 1500 }),
   M({ id: 'n_exocet', name: 'Exocet-class ASCM', kind: 'antiship_cruise', rangeKm: 70, speedMach: 0.9, warheadKg: 165, cepM: 5, pk: { ship: 1 }, interceptDifficulty: 1, unitCostUsdM: 1, weightKg: 670 }),
   M({ id: 'n_neptune', name: 'Neptune-class ASCM', kind: 'antiship_cruise', rangeKm: 280, speedMach: 0.8, warheadKg: 150, cepM: 5, pk: { ship: 1 }, interceptDifficulty: 1, unitCostUsdM: 1, weightKg: 870 }),
   M({ id: 'n_mine', name: 'Influence mine', kind: 'mine', rangeKm: 0, speedMach: 0, warheadKg: 500, cepM: 0, pk: { ship: 0.5, submarine: 0.3 }, interceptDifficulty: 1, unitCostUsdM: 0.1, weightKg: 1000 }),
@@ -144,6 +145,22 @@ describe('naval salvo combat', () => {
     }
     expect(subsonic / 120).toBeLessThan(0.35);
     expect(ballistic / 120).toBeGreaterThan(0.7);
+  });
+
+  it('an SM-3 layer stops most medium-range ballistic missiles in midcourse while its rounds last, and never fires at a sea-skimmer', () => {
+    const t = navalWorld();
+    const sam = t.catalog.munition(mid('t_sam'));
+    const sm3 = t.catalog.munition(mid('n_sm3'));
+    const defense = (exo: number) => ({ channels: 10, interceptors: [{ munition: sm3, available: exo }, { munition: sam, available: 64 }], pointDefense: 0.3, capShots: 0 });
+    let layered = 0, spent = 0, skimmerSm3 = 0;
+    for (let s = 1; s <= 40; s++) {
+      layered += resolveSalvo(new Rng(s), t.catalog.munition(mid('n_asbm')), 6, defense(64), 'ship').leakers;
+      spent += resolveSalvo(new Rng(s), t.catalog.munition(mid('n_asbm')), 6, defense(2), 'ship').leakers;
+      skimmerSm3 += resolveSalvo(new Rng(s), t.catalog.munition(mid('t_asm')), 6, defense(64), 'ship').interceptorsUsed.get(mid('n_sm3')) ?? 0;
+    }
+    expect(layered / 240).toBeLessThan(0.15);
+    expect(spent / 240).toBeGreaterThan(0.5);
+    expect(skimmerSm3).toBe(0);
   });
 
   it('spends two to three interceptors per one-way drone it kills (Red Sea 2023-24: about two per engaged threat)', () => {
@@ -350,6 +367,29 @@ describe('anti-ship strikes from shore', () => {
     expect(led(t, 'RUS')!.interceptorsFired).toBeGreaterThan(0);
     expect(fleet.magazine[mid('t_sam')]).toBeLessThan(96);
     expect(led(t, 'RUS')!.hullsSunk + led(t, 'RUS')!.hullsDamaged).toBeGreaterThan(0);
+  });
+
+  it('ballistic rounds find a group at sea only on a fresh fix: none without a contact, few on a day-old radar track', () => {
+    const hitsWith = (fix: { ageTicks: number; source: 'satellite' | 'naval' } | undefined) => {
+      let hits = 0, fired = 0;
+      for (let seed = 1; seed <= 6; seed++) {
+        const t = navalWorld(seed);
+        t.war('UKR', 'RUS');
+        const at = t.nodeAt(43, 34);
+        const fleet = t.add({ nation: RUS, name: 'Frigates', kind: 'surface_group', node: at, equipment: t.eq({ n_frigate: 3 }), magazine: {} });
+        fleet.home = t.portOf('RUS', 44.6, 33.5);
+        t.world.tick = 20;
+        t.world.slices.intel = { pictures: { [UKR]: fix ? { [fleet.id]: { node: at, tick: t.world.tick - fix.ageTicks, kind: 'surface_group', strength: 3, source: fix.source } } : {} } };
+        hits += strikeNavalGroup(t.world, t.engine.context(t.world), UKR, mid('n_asbm'), 12, fleet.id)!.hits.length;
+        fired += led(t, 'UKR')!.missilesFired;
+      }
+      expect(fired).toBe(72);
+      return hits;
+    };
+    const fresh = hitsWith({ ageTicks: 1, source: 'satellite' });
+    expect(fresh).toBeGreaterThan(10);
+    expect(hitsWith(undefined)).toBe(0);
+    expect(hitsWith({ ageTicks: 4, source: 'naval' })).toBeLessThan(fresh / 4);
   });
 });
 

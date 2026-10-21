@@ -4,7 +4,7 @@ import type { Formation, FormationId, NationId, NodeId, PlatformClass, PlatformI
 import { liftShare } from '../naval/amphibious';
 import { geography, sameWaters, seaNeighbour } from '../naval/geography';
 import { sailable } from '../naval/movement';
-import { boardable } from '../naval/orders';
+import { areaDefenseShare, boardable, REARMED } from '../naval/orders';
 import { compose, fleetLosses } from '../naval/state';
 import { dominant, isGround, issue, sighted } from './forces';
 import { enemyPowerAt, landMass } from './fronts';
@@ -363,7 +363,9 @@ const SEAWORTHY = 0.25;
 export function planNaval(p: Plan): void {
   const { map } = p.ctx;
   const km = (a: number, b: number) => map.distanceKm(a as NodeId, b as NodeId);
-  const groups = (p.index.byNation.get(p.nation) ?? []).filter((f) => (f.kind === 'surface_group' || f.kind === 'submarine') && f.status === 'active' && f.readiness >= SEAWORTHY);
+  // A group sent home with its interceptors spent (naval orders) stays there until it has rearmed.
+  const rearming = (f: Formation) => f.kind === 'surface_group' && f.order.posture === 'reserve' && areaDefenseShare(p.ctx, f) < REARMED;
+  const groups = (p.index.byNation.get(p.nation) ?? []).filter((f) => (f.kind === 'surface_group' || f.kind === 'submarine') && f.status === 'active' && f.readiness >= SEAWORTHY && !rearming(f));
   if (!groups.length) return;
   const liftCapable = groups.filter((g) => g.kind === 'surface_group' && compose(g, p.ctx.catalog).troopLift > 0);
   const assault = planAssault(p, liftCapable);

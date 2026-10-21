@@ -1,9 +1,11 @@
 import { newId, type SimContext } from '../../core/engine';
 import type { Command, Formation, NodeId, PlatformId, World } from '../../core/types';
+import { engages } from '../air/tables';
 import { canBoard, liftShare, liftUsed } from './amphibious';
 import { tickEnv } from './env';
 import { navalDestination, seaPath } from './movement';
 import { isNavalFormation } from './state';
+import { INTERCEPTOR_KINDS } from './tables';
 
 type OrderCommand = Extract<Command, { type: 'order' }>;
 
@@ -141,8 +143,37 @@ function repath(world: World, ctx: SimContext, f: Formation, goal: NodeId): void
   f.progressKm = 0;
 }
 
-/** Attack submarines with no torpedoes or missiles left go home to rearm. */
+/**
+ * Share of full load below which a surface group's area air-defence rounds send it home to
+ * rearm, and the share it must hold before it sails again. A warship cannot reload its vertical
+ * launch cells at sea under fire, and with its interceptors spent it can only be sunk: CSIS 2023
+ * lost US ships because salvos emptied their magazines. The thresholds are judgment.
+ */
+const WINCHESTER = 0.25;
+export const REARMED = 0.75;
+
+/**
+ * Share of its full load of area air-defence rounds a surface group still holds: the rounds that
+ * can engage a ballistic missile (SM-2/3/6, HQ-9, S-300, Aster 30; air tables `engages`), which
+ * its whole task force leans on. 1 for a group whose ships carry none.
+ */
+export function areaDefenseShare(ctx: SimContext, f: Formation): number {
+  let full = 0, have = 0;
+  const counted = new Set<string>();
+  for (const [pid, n] of Object.entries(f.equipment) as [PlatformId, number][]) {
+    for (const l of ctx.catalog.platform(pid).loadout) {
+      const m = ctx.catalog.munition(l.munition);
+      if (!INTERCEPTOR_KINDS.has(m.kind) || !engages(m, 'ballistic')) continue;
+      full += l.count * n;
+      if (!counted.has(m.id)) { counted.add(m.id); have += f.magazine[m.id] ?? 0; }
+    }
+  }
+  return full > 0 ? Math.min(1, have / full) : 1;
+}
+
+/** Attack submarines with no torpedoes or missiles left, and surface groups with their area-defence rounds spent, go home to rearm. */
 function outOfWeapons(ctx: SimContext, f: Formation): boolean {
+  if (f.kind === 'surface_group') return areaDefenseShare(ctx, f) < WINCHESTER;
   if (f.kind !== 'submarine') return false;
   let classes = 0, armed = 0;
   for (const pid of Object.keys(f.equipment)) {

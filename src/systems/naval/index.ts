@@ -1,6 +1,7 @@
 import type { SimContext, System } from '../../core/engine';
 import type { GameMap } from '../../core/map';
-import type { Formation, FormationId, MunitionId, NationId, NodeId, World } from '../../core/types';
+import type { Formation, FormationId, MunitionId, MunitionKind, NationId, NodeId, World } from '../../core/types';
+import { estimate, SOURCE_ERROR, STALENESS } from '../intel';
 import { landings } from './amphibious';
 import { computeSeaControl, computeTradeBlocked } from './blockade';
 import { applyHits, fire, navalCombat, targetValue } from './combat';
@@ -11,7 +12,7 @@ import { mineWarfare } from './mines';
 import { advance } from './movement';
 import { refreshOrders } from './orders';
 import { sealift } from './sealift';
-import { isNavalFormation } from './state';
+import { isNavalFormation, ledger } from './state';
 import type { SalvoOutcome } from './salvo';
 import { OCEAN_SURVEILLANCE } from './tables';
 
@@ -71,10 +72,38 @@ function isTrackedByOwnSide(tracks: Record<FormationId, NationId[]>, target: For
 }
 
 /**
+ * Radius, km, a ballistic anti-ship warhead's terminal seeker searches once it pulls out of its
+ * dive: it must arrive over a basket that holds the ship. A fix from a satellite or a patrol
+ * aircraft (5-20 km) puts the ship in the basket; an over-the-horizon radar or ELINT track
+ * (~50 km, intel SOURCE_ERROR) does about two times in three; a fix a day old, when the group has
+ * steamed hundreds of km, almost never: the ASBM needs a near-real-time cueing chain, which is
+ * why CSIS 2023 lists disrupting anti-ship kill chains among its recommendations. Estimate.
+ */
+const BALLISTIC_SEEKER_KM = 40;
+const BALLISTIC_KINDS: ReadonlySet<MunitionKind> = new Set(['antiship_ballistic', 'hgv', 'srbm', 'mrbm', 'irbm']);
+
+/**
+ * Share of ballistic rounds fired at group `t` whose seeker basket holds it. Against a poor fix
+ * the salvo spreads its aimpoints over the error area, so each round covers basket/error of it.
+ * A group in its home port is a fixed target. Intelligence updates after strikes are planned and
+ * strikes resolve the next tick, so a fix one tick old is the freshest any strike flies on; only
+ * age beyond that adds drift. A world run without intel has perfect intelligence.
+ */
+function seekerCoverage(world: World, by: NationId, t: Formation): number {
+  if ((t.node === t.home && !t.order.path?.length) || !world.slices.intel) return 1;
+  const est = estimate(world, by, t.id);
+  if (!est || est.node !== t.node) return 0;
+  const errorKm = SOURCE_ERROR[est.source].km + STALENESS.surface_group.driftKph * Math.max(0, est.ageHours - world.dtHours);
+  return Math.min(1, (BALLISTIC_SEEKER_KM / errorKm) ** 2);
+}
+
+/**
  * For air and missile systems striking ships (anti-ship ballistic missiles from shore, air-
  * launched ASCMs): resolve a salvo against a naval formation through the same defenses and
- * damage model the naval system uses. Spends nothing from the striker; the caller owns its
- * own magazines.
+ * damage model the naval system uses. A ballistic round flies to where the striker's
+ * intelligence last fixed the group (seekerCoverage); air-launched rounds are carried to the
+ * group by aircraft that find it themselves. Spends nothing from the striker; the caller owns
+ * its own magazines.
  */
 export function strikeNavalGroup(world: World, ctx: SimContext, by: NationId, munition: MunitionId, count: number, target: FormationId): SalvoOutcome | undefined {
   const t = world.formations[target];
@@ -82,9 +111,12 @@ export function strikeNavalGroup(world: World, ctx: SimContext, by: NationId, mu
   const env = tickEnv(world, ctx);
   const m = ctx.catalog.munition(munition);
   const against = env.comp(t).submerged ? 'submarine' : 'ship';
-  const out = fire(env, null, t, m, count, against, undefined, by);
+  const n = Math.floor(count);
+  const found = BALLISTIC_KINDS.has(m.kind) ? ctx.rng.binomial(n, seekerCoverage(world, by, t)) : n;
+  const out = fire(env, null, t, m, found, against, undefined, by);
+  ledger(world, by).missilesFired += n - found;
   if (out.hits.length) applyHits(env, t, out.hits, by);
-  return out;
+  return { ...out, fired: n };
 }
 
 /**
