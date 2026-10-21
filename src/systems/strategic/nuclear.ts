@@ -8,7 +8,7 @@ import { blastFatalities, empDamage, empRadiusKm, overpressureRadiusKm, sspk, th
 import { depositFallout } from './fallout';
 import { addSoot } from './climate';
 import type { Burst, LaunchWarning, ReleaseRequest, Salvo } from './state';
-import { BMD_SYSTEMS, DISPERSION_KM2, EARLY_WARNING, POINT_TARGET, SOOT_TONS_PER_PERSON, bmdCovers, hardnessPsi } from './tables';
+import { BMD_SYSTEMS, DISPERSION_KM2, EARLY_WARNING, IN_PORT, POINT_TARGET, SOOT_TONS_PER_PERSON, bmdCovers, hardnessPsi } from './tables';
 
 /** Decides whether a nation under a detected counterforce attack launches before impact. The AI system supplies it. */
 export type LaunchOnWarningHook = (world: World, warning: LaunchWarning, ctx: SimContext) => ReleaseRequest[];
@@ -206,12 +206,15 @@ function damageFormations(world: World, ctx: SimContext, here: Formation[], yiel
     if (f.kind === 'space') continue;
     const before = platformCount(f);
     if (before === 0) continue;
+    const inPort = !ctx.map.isSea(f.node);
     for (const pid of Object.keys(f.equipment) as (keyof typeof f.equipment)[]) {
       const p = ctx.catalog.platform(pid);
-      const psi = hardnessPsi(p.class, p.domain);
+      const moored = inPort && (p.domain === 'sea' || p.domain === 'subsurface');
+      const psi = moored ? IN_PORT.psi : hardnessPsi(p.class, p.domain);
+      const area = moored ? IN_PORT.areaKm2 : DISPERSION_KM2[f.kind];
       const pKill = POINT_TARGET.has(p.class)
         ? 1 - (1 - sspk(yieldKt, psi, cepM, burst)) ** (warheads / silos)
-        : 1 - (1 - Math.min(1, (Math.PI * overpressureRadiusKm(yieldKt, psi, burst) ** 2) / DISPERSION_KM2[f.kind])) ** warheads;
+        : 1 - (1 - Math.min(1, (Math.PI * overpressureRadiusKm(yieldKt, psi, burst) ** 2) / area)) ** warheads;
       f.equipment[pid] -= ctx.rng.binomial(f.equipment[pid], pKill);
     }
     const after = platformCount(f);

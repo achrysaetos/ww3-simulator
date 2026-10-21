@@ -24,3 +24,19 @@ describe('nuclear forces as fielded (FAS 2025)', () => {
     for (const f of atSea) expect(f.magazine['bulava' as MunitionId] ?? 0).toBeGreaterThanOrEqual(64);
   });
 });
+
+describe('SSBNs in port', () => {
+  it('die to a warhead or two on the base, while the boat on patrol survives', () => {
+    const s = createSession('peace-2027', 1);
+    const boats = (name: string) => {
+      const f = Object.values(s.world.formations).find((x) => x.name === name)!;
+      return f.status === 'destroyed' ? 0 : Object.values(f.equipment).reduce((a, n) => a + n, 0);
+    };
+    const port = Object.values(s.world.formations).find((f) => f.name === '25th Submarine Division')!;
+    expect(boats('25th Submarine Division')).toBe(4);
+    s.world.pending.push({ type: 'nuclear_release', nation: N('USA'), target: port.node, warheads: 2, munition: 'minuteman3' as MunitionId });
+    s.engine.step(s.world);
+    expect(boats('25th Submarine Division')).toBeLessThanOrEqual(1);
+    expect(boats('25th Submarine Division, SSBN on patrol')).toBe(1);
+  });
+});

@@ -87,6 +87,15 @@ export const DISPERSION_KM2: Record<FormationKind, number> = {
   submarine: 1000, strategic: 400, logistics: 100, space: Infinity,
 };
 
+/**
+ * Ships and submarines tied up at a naval base. A boat alongside is a surfaced hull, as soft as a surface ship
+ * (Glasstone & Dolan 1977 table 6.96: severe damage to surfaced submarines and ships at about 10-20 psi), and the
+ * piers, dry docks and explosives-handling wharves of a base such as Bangor, Kings Bay, Gadzhiyevo or Vilyuchinsk lie
+ * within a few square kilometres. OTA, "The Effects of Nuclear War" (1979), treats SSBNs in port as destroyed by a
+ * warhead or two on the base. Area estimate.
+ */
+export const IN_PORT = { psi: 15, areaKm2: 10 } as const;
+
 /** Silos are point targets: each warhead is aimed at one launcher, so they are resolved silo by silo, not by area. */
 export const POINT_TARGET: ReadonlySet<PlatformClass> = new Set(['icbm_silo']);
 
