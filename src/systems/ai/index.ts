@@ -6,6 +6,7 @@ import { DEFAULT_PROFILE, type StrategicProfile } from '../diplomacy/types';
 import { planAir } from './air';
 import { indexForces } from './forces';
 import { coBelligerents, hostileEdges, sectorsFor } from './fronts';
+import { planAirborne } from './airborne';
 import { planDeploy } from './deploy';
 import { planLand } from './land';
 import { planMissiles } from './missiles';
@@ -41,7 +42,7 @@ export function createAi(profiles: Readonly<Record<string, StrategicProfile>> = 
   return {
     id: 'ai',
     init(world) {
-      world.slices.ai = { baseStrength: {}, aims: {}, lastNuclear: {}, lastPeaceOffer: {}, deployments: {} };
+      world.slices.ai = { baseStrength: {}, aims: {}, lastNuclear: {}, lastPeaceOffer: {}, deployments: {}, airborne: {} };
     },
     step(world, ctx) {
       if (world.events.some((e) => FRONT_CHANGES.has(e.type))) {
@@ -89,6 +90,7 @@ export function createAi(profiles: Readonly<Record<string, StrategicProfile>> = 
         if (land) {
           planLand(p);
           planDeploy(p);
+          planAirborne(p);
         }
         if (tasking) {
           const battleArea = battleAreaOf(p);

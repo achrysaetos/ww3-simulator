@@ -23,7 +23,7 @@ const brigades = [
 ] as const;
 
 export const chnAirborne: OrbatEntry[] = [
-  ...brigades.map(([num, base]) => unit(CHN, `${num} Airborne Brigade (Airborne Corps)`, 'maneuver', 'brigade', base, BRIGADE, { ...AIRBORNE, personnel: 5_500 })),
+  ...brigades.map(([num, base]) => unit(CHN, `${num} Airborne Brigade (Airborne Corps)`, 'maneuver', 'brigade', base, BRIGADE, { ...AIRBORNE, personnel: 5_500, airborne: true })),
   unit(CHN, 'Airborne Corps Special Operations Brigade', 'maneuver', 'brigade', at('Guangzhou', 23.4, 113.3), { airborne_squad: 150, csk181: 40, truck: 60 }, { readiness: 0.9, experience: 0.35, personnel: 2_500 }),
   unit(CHN, 'Airborne Corps Support Brigade', 'logistics', 'brigade', at('Xiaogan', 30.95, 113.95), { truck: 600 }, { ...AIRBORNE, personnel: 2_500 }),
   unit(CHN, 'Airborne Corps Transport Aviation Brigade', 'logistics', 'wing', at('Wuhan Shanpo', 30.32, 114.4), { y9: 20, z8: 12 }, { ...AIRBORNE, personnel: 2_000 }),

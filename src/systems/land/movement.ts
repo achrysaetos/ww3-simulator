@@ -4,6 +4,7 @@ import type { GameMap } from '../../core/map';
 import { findPath } from '../../core/path';
 import type { Command, Formation, NationId, NodeId, PlatformId, World } from '../../core/types';
 import { allied, canEnter, indexByNode, isLandFormation, landSlice } from './state';
+import { cannotDrop, insert, supplyAirheads } from './airborne';
 import { airlift, embarkation, liftMode, overseas } from './strategic';
 import {
   AIR_INTERDICTION, DISMOUNTS, ENTRENCH_PER_DAY, FATIGUE_MARCH_PER_DAY, FATIGUE_RECOVERY_PER_DAY, HOSTILE_GROUND_COST,
@@ -57,6 +58,12 @@ export function applyLandOrder(world: World, cmd: OrderCommand, ctx: SimContext)
     return true;
   }
   const { posture, target } = cmd.order;
+  if (posture === 'air_assault') {
+    const why = target === undefined ? 'no drop zone' : cannotDrop(world, ctx.map, ctx.catalog, f, target);
+    if (why === undefined && target !== undefined) insert(world, ctx, f, target);
+    else ctx.emit({ type: 'message', tick: world.tick, nation: f.nation, text: `${f.name}: cannot be inserted by air, ${why}` });
+    return true;
+  }
   f.order = { ...cmd.order, issuedTick: world.tick };
   f.progressKm = 0;
   if (!MARCHING.has(posture) || target === undefined || target === f.node) {
@@ -185,5 +192,6 @@ export const landMovement: System = {
       else rest(f, dtDays, f.id in isolated, f.id in engaged);
     }
     airlift(world, ctx, (f, to) => route(world, ctx.map, f, to));
+    supplyAirheads(world, ctx.map, ctx.catalog);
   },
 };

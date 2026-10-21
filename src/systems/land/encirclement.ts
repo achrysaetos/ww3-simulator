@@ -2,6 +2,7 @@ import { atWar, type SimContext } from '../../core/engine';
 import type { GameMap } from '../../core/map';
 import type { Formation, NationId, NodeId, World } from '../../core/types';
 import { supplyFactor } from '../logistics';
+import { airFed } from './airborne';
 import { destroyFormation, isLandFormation, landSlice } from './state';
 import { MORALE_ISOLATED_PER_DAY, SURRENDER_GRACE_DAYS, SURRENDER_HAZARD_PER_DAY } from './tables';
 
@@ -80,7 +81,7 @@ class Encirclement {
   }
 }
 
-/** Daily: mark formations cut off from supply, sap their morale, and let long-isolated pockets surrender. */
+/** Daily: mark formations cut off from supply, sap their morale, and let long-isolated pockets surrender. An airhead fed by air is not a pocket. */
 export function updateEncirclement(world: World, ctx: SimContext): void {
   const ticksPerDay = Math.max(1, Math.round(24 / world.dtHours));
   if (world.tick % ticksPerDay) return;
@@ -94,7 +95,7 @@ export function updateEncirclement(world: World, ctx: SimContext): void {
     if (!isLandFormation(f, ctx.map)) continue;
     let e = byNation.get(f.nation);
     if (!e && belligerents.has(f.nation)) byNation.set(f.nation, (e = new Encirclement(world, ctx.map, f.nation)));
-    if (!e?.cutOff(f)) {
+    if (!e?.cutOff(f) || airFed(world, ctx.map, ctx.catalog, f)) {
       delete isolated[f.id];
       continue;
     }

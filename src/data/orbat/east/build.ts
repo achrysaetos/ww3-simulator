@@ -4,7 +4,7 @@ import type { OrbatEntry } from '../types';
 /** Equipment counts keyed by catalog platform id. */
 export type Kit = Record<string, number>;
 export type Base = OrbatEntry['base'];
-export type Extra = Pick<OrbatEntry, 'personnel' | 'readiness' | 'experience' | 'extraMagazine' | 'source'>;
+export type Extra = Pick<OrbatEntry, 'personnel' | 'readiness' | 'experience' | 'extraMagazine' | 'source' | 'airborne'>;
 
 export const at = (name: string, lat: number, lon: number): Base => ({ name, lat, lon });
 

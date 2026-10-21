@@ -11,6 +11,7 @@ export interface EntryOpts {
   experience?: number;
   extraMagazine?: Partial<Record<WestMunition, number>>;
   territorial?: true;
+  airborne?: true;
 }
 
 export const base = (name: string, lat: number, lon: number): Base => ({ name, lat, lon });
@@ -48,7 +49,7 @@ export function forNation(nation: string, source: string) {
     echelon,
     base: b,
     equipment: equipment as Record<string, number>,
-    ...(opts as Pick<OrbatEntry, 'personnel' | 'readiness' | 'experience' | 'extraMagazine' | 'territorial'>),
+    ...(opts as Pick<OrbatEntry, 'personnel' | 'readiness' | 'experience' | 'extraMagazine' | 'territorial' | 'airborne'>),
     source,
   });
 }
