@@ -295,7 +295,7 @@ function resolveRaid(world: World, ctx: SimContext, pic: AirPicture, slice: AirS
     assess(world, slice, attacker, aimKey(target, p.f.order.targetFormation, p.targetClass), effective);
     ctx.emit({ type: 'strike', tick: world.tick, by: attacker, munition: p.munition.id, fired: p.weapons, intercepted: p.weapons - leaked[i], target, damage });
   });
-  emitBattle(world, ctx, target, attacker, world.control[target] || attacker, tally);
+  emitBattle(world, ctx, pic, target, attacker, tally);
 }
 
 /**

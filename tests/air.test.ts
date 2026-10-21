@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { relationMut } from '../src/core/engine';
+import { atWar, relationMut } from '../src/core/engine';
 import { Rng } from '../src/core/rng';
-import type { Formation, NodeId } from '../src/core/types';
+import type { Formation, NodeId, SimEvent } from '../src/core/types';
+import { createSession } from '../src/scenarios';
 import { applyAirOrder, combatRadiusKm, interceptSalvo, resolveAirBattle } from '../src/systems/air';
 import { airWorld, battery, launchers, mid, nation, pid, wing } from './air.fixture';
 
@@ -320,3 +321,15 @@ describe('strikes', () => {
   });
 });
 
+
+describe('air battle reports', () => {
+  it('name two nations at war as attacker and defender, never one nation against itself', () => {
+    const s = createSession('baltic-2027', 1);
+    const battles: Extract<SimEvent, { type: 'battle' }>[] = [];
+    s.engine.run(s.world, (10 * 24) / s.world.dtHours, (_w, events) => {
+      for (const e of events) if (e.type === 'battle' && e.domain === 'air') battles.push(e);
+    });
+    expect(battles.length).toBeGreaterThan(10);
+    expect(battles.filter((b) => !atWar(s.world, b.attacker, b.defender)).map((b) => `${b.attacker}-${b.defender}`)).toEqual([]);
+  }, 120_000);
+});
