@@ -67,11 +67,10 @@ export function overrideProblem(overrides: Readonly<Record<string, number>>): st
 }
 
 function apply(overrides: Readonly<Record<string, number>> | undefined): void {
+  const problem = overrides && overrideProblem(overrides);
+  if (problem) throw new Error(problem);
   activeOverrides = overrides;
   for (let i = 0; i < defs.length; i++) active[i] = defs[i].value;
-  if (!overrides) return;
-  const problem = overrideProblem(overrides);
-  if (problem) throw new Error(problem);
   for (const id in overrides) active[slot.get(id)!] = overrides[id];
 }
 
