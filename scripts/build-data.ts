@@ -114,13 +114,23 @@ const inBoxes = (lat: number, lon: number, boxes: [number, number, number, numbe
  * boxes overlap the finer one wins. At 1 degree Taiwan was four cells with Taipei at sea; at 1/4 degree its
  * coast, the Taipei basin, Taoyuan, Taichung, Tainan, Kaohsiung, Hualien and Taitung each have a cell. At 1
  * degree Kerch and Taman share a square, which would carry armies across the strait inside one cell, Sevastopol
- * is at sea, and Baltiysk, the Baltic Fleet's base, is Polish.
+ * is at sea, and Baltiysk, the Baltic Fleet's base, is Polish. On the land fronts a 1-degree cell is about
+ * 8,000 km2, more than a year of fighting in Donbas moved (ISW counted about 4,000 km2 in 2024). At 1/2 degree
+ * Pokrovsk, Kramatorsk and Bakhmut each get a cell; at 1/4 degree Seoul, Kaesong and Chuncheon, the two ends of
+ * the Suwalki gap and the Lebanese border towns do.
  */
 const REFINE: { name: string; box: [number, number, number, number]; k: number }[] = [
   { name: 'Taiwan and Penghu', box: [21, 25, 119, 122], k: 4 },
   { name: 'northern Taiwan', box: [25, 26, 120, 122], k: 4 },
   { name: 'Crimea and the Kerch Strait', box: [44, 46, 32, 37], k: 2 },
-  { name: 'Kaliningrad', box: [54, 56, 19, 23], k: 2 },
+  { name: 'Ukraine front: Kherson, Zaporizhzhia, Donbas, Kharkiv, Sumy, Belgorod and Kursk', box: [46, 52, 32, 40], k: 2 },
+  { name: 'Baltic states, Pskov, Belarus border and Kaliningrad', box: [53, 60, 19, 29], k: 2 },
+  { name: 'Suwalki gap', box: [53, 55, 22, 24], k: 4 },
+  { name: 'South Korea', box: [34, 37, 125, 130], k: 2 },
+  { name: 'Seoul, Kaesong and the DMZ', box: [37, 39, 125, 130], k: 4 },
+  { name: 'North Korea', box: [39, 43, 124, 131], k: 2 },
+  { name: 'Israel, Gaza, Lebanon and the Golan', box: [31, 35, 34, 37], k: 4 },
+  { name: 'Caucasus', box: [39, 44, 38, 50], k: 2 },
 ];
 
 /**
@@ -154,6 +164,7 @@ const EXTRA_FACILITIES: { name: string; kind: 'port' | 'airport'; lat: number; l
   { name: 'Baltiysk naval base', kind: 'port', lat: 54.64, lon: 19.91 },
   { name: "Izmail, Ukraine's Danube port", kind: 'port', lat: 45.34, lon: 28.84 },
   { name: 'Primorsko-Akhtarsk air base', kind: 'airport', lat: 46.04, lon: 38.17 },
+  { name: 'Onchon air base', kind: 'airport', lat: 38.9, lon: 125.23 },
 ];
 
 /** Small islands whose garrisons, ports and airfields matter more than their area: each holds the cell at this point. */
