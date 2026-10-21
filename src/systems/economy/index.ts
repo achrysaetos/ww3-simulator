@@ -578,6 +578,19 @@ const unitCostOf = (ctx: SimContext, item: ItemId): number =>
 const GREENFIELD_MFG_SHARE = 0.001;
 
 /**
+ * Most a greenfield line for `item` can make a month once built: the plant the nation can put up
+ * (GREENFIELD_MFG_SHARE of manufacturing value added at the item's unit cost) and, for hulls, its
+ * yards' warship tonnage. What a `produce` order for an item with no line can reach; the UI shows it.
+ */
+export function greenfieldCeilingPerMonth(n: Nation, unitCostUsdM: number, item: ItemId): number {
+  const mfgUsdM = (n.stats.manufacturing ?? (n.stats.gdp ?? 0) * 0.12) / 1e6;
+  let perYear = (mfgUsdM * GREENFIELD_MFG_SHARE) / Math.max(1e-6, unitCostUsdM);
+  const tons = itemSpec(item)?.tons;
+  if (tons) perYear = Math.min(perYear, ((SHIPBUILDING_GT_PER_YEAR[n.id] ?? 0) * SHIPYARD_WARSHIP_SHARE) / tons);
+  return perYear / 12;
+}
+
+/**
  * Sets an ordered rate. An existing line runs toward it within its surge ceiling; an item with no
  * line gets a greenfield one whose ceiling is what plant the nation can build (GREENFIELD_MFG_SHARE,
  * and yard tonnage for hulls) and which ramps in at twice its category's lag.
@@ -601,10 +614,7 @@ function produce(world: World, ctx: SimContext, nation: NationId, item: ItemId, 
     return;
   }
   const spec = itemSpec(item);
-  const mfgUsdM = (n.stats.manufacturing ?? (n.stats.gdp ?? 0) * 0.12) / 1e6;
-  let ceilingPerYear = (mfgUsdM * GREENFIELD_MFG_SHARE) / Math.max(1e-6, entry.unitCostUsdM);
-  if (spec?.tons) ceilingPerYear = Math.min(ceilingPerYear, ((SHIPBUILDING_GT_PER_YEAR[nation] ?? 0) * SHIPYARD_WARSHIP_SHARE) / spec.tons);
-  const line = newLine(item, 0, Math.min(ratePerMonth * 12, ceilingPerYear), 2 * CATEGORIES[spec?.category ?? 'cruise_missile'].rampMonths);
+  const line = newLine(item, 0, Math.min(ratePerMonth, greenfieldCeilingPerMonth(n, entry.unitCostUsdM, item)) * 12, 2 * CATEGORIES[spec?.category ?? 'cruise_missile'].rampMonths);
   line.orderPerMonth = ratePerMonth;
   e.lines[item] = line;
 }
