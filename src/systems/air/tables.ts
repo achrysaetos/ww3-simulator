@@ -3,6 +3,7 @@
  * platform classes or munition kinds lives here, keyed by class or kind, so the
  * system code reads one row instead of branching.
  */
+import { defineParam, paramTable, tableParam } from '../../core/params';
 import type { Munition, MunitionKind, Platform, PlatformClass, Posture, TargetClass } from '../../core/types';
 
 export type AirRole = 'counter_air' | 'strike' | 'bomber' | 'awacs' | 'tanker' | 'ew' | 'isr' | 'helo' | 'transport';
@@ -90,7 +91,9 @@ export function isRoundOnRail(p: Platform): boolean {
  * average with single-night surges of 100+ per site (810 drones on 7 Sep 2025).
  * 45 x the groups' 0.65 readiness gives ~30 per site per day (estimate).
  */
-export const DRONE_SITE_LAUNCHES_PER_DAY = 45;
+export const DRONE_SITE_LAUNCHES_PER_DAY = defineParam({ id: 'air.DRONE_SITE_LAUNCHES_PER_DAY', value: 45, range: [30, 60], tag: 'estimated',
+  source: 'Ukrainian Air Force 2025 monthly tallies: 2,500-6,300 Shahed/Geran a month from 6-8 sites, ~25-35 per site per day',
+  affects: 'one-way drone raid size' });
 
 /**
  * Rearming from national stocks. A formation's depot restores up to this share of its
@@ -184,7 +187,9 @@ export function coverageShare(interceptor: MunitionKind, cat: ThreatCategory): n
  * fighter. Combat AAM pk vs fighters ~0.46 (Higby 2005); US/UK/Israeli jets downed
  * most of ~170 Shaheds on 13-14 Apr 2024 with AIM-9X/AMRAAM, implying ~0.7-0.9.
  */
-export const AAM_VS_DRONE_FACTOR = 1.6;
+export const AAM_VS_DRONE_FACTOR = defineParam({ id: 'air.AAM_VS_DRONE_FACTOR', value: 1.6, range: [1.3, 2.0], tag: 'estimated',
+  source: 'Combat AAM pk vs fighters ~0.46 (Higby 2005); 13-14 Apr 2024 Shahed intercepts imply 0.7-0.9',
+  affects: 'fighter kills of drones and cruise missiles' });
 
 /** Munition kinds that are not strike weapons (air-to-air, interceptors, naval-only). */
 export const NON_STRIKE_KINDS: ReadonlySet<MunitionKind> = new Set(['aam', 'sam', 'abm', 'shorad_missile', 'small_arms', 'torpedo', 'mine', 'arm']);
@@ -212,17 +217,17 @@ export const TARGET_OF_CLASS: Record<PlatformClass, TargetClass> = {
  * Tuning constants with their calibration. All are estimates fitted to the
  * historical anchors named; tests/air.calibration.test.ts re-checks each anchor.
  */
-export const TUNING = {
+export const TUNING = paramTable('air', {
   /** Fire-control cycle (launch, guide, assess) per channel, seconds. Patriot/S-300 engagement timelines ~60-90 s. */
-  engagementCycleS: 75,
+  engagementCycleS: tableParam({ value: 75, range: [60, 90], tag: 'observed', source: 'Patriot/S-300 engagement timelines ~60-90 s', affects: 'interceptions per raid' }),
   /** Cap on engagements per channel per raid (launcher reload, ~30-60 min for Patriot/S-300 crews). */
-  maxCycles: 12,
+  maxCycles: tableParam({ value: 12, range: [8, 16], tag: 'estimated', source: 'Patriot/S-300 crew reload ~30-60 min', affects: 'interceptions per raid' }),
   /**
    * Default spread of a raid's arrivals at the target. Iran's Oct 2024 salvo of ~180
    * MRBMs and Russia's combined strikes arrived in waves over tens of minutes; 10 min
    * is an estimate between a coordinated time-on-target and a staggered wave.
    */
-  raidWindowS: 600,
+  raidWindowS: tableParam({ value: 600, range: [300, 1200], tag: 'estimated', source: 'Iran Oct 2024 and Russian combined strikes arrived in waves over tens of minutes', affects: 'air-defence saturation' }),
   /** Each tanker sortie refuels ~2 receivers once (KC-135 ~90 t offload vs ~6-8 t per fighter top-up, minus tanker reserve). */
   tankerReceiversPerTanker: 2,
   /** Two refuels per sortie (outbound and recovery) at most roughly doubles combat radius. */
@@ -230,13 +235,13 @@ export const TUNING = {
   /** Fighter AAM shots per aircraft per BVR volley (standard 2-shot shoot doctrine). */
   shotsPerVolley: 2,
   /** WVR merge duration in hours of engaged combat (Platform.firepower is per hour). */
-  wvrHours: 0.25,
+  wvrHours: tableParam({ value: 0.25, range: [0.1, 0.5], tag: 'judgment', source: 'Judgment: length of a within-visual-range merge', affects: 'air-to-air losses' }),
   /** The weaker side disengages before the merge below this force ratio. */
-  disengageRatio: 0.4,
+  disengageRatio: tableParam({ value: 0.4, range: [0.25, 0.6], tag: 'judgment', source: 'Judgment: force ratio below which the weaker side declines the merge', affects: 'air superiority' }),
   /** Share of air-combat and SAM kills that limp home damaged instead of lost (Vietnam/ODS battle-damage records, estimate). */
-  damagedShare: 0.2,
+  damagedShare: tableParam({ value: 0.2, range: [0.1, 0.3], tag: 'estimated', source: 'Vietnam/ODS battle-damage records', affects: 'aircraft losses vs repairs' }),
   /** Air control is written once a side holds this share of surviving counter-air power. */
-  controlShare: 0.6,
+  controlShare: tableParam({ value: 0.6, range: [0.5, 0.75], tag: 'judgment', source: 'Judgment: share of surviving counter-air power that confers air control', affects: 'air control' }),
   /**
    * Share of sorties that end up inside a covering SAM's engagement envelope with a
    * firing solution, by mission. Fitted so non-stealth strike loses ~1-2 % per sortie
@@ -249,30 +254,30 @@ export const TUNING = {
    * takes the full samExposure (Linebacker II and ODS packages flew 100+ km inside
    * layered SAM belts); shallower releases scale down linearly (estimate).
    */
-  fullExposureDepthKm: 100,
+  fullExposureDepthKm: tableParam({ value: 100, range: [50, 150], tag: 'estimated', source: 'Linebacker II and ODS packages flew 100+ km inside layered SAM belts', affects: 'strike losses to SAMs' }),
   /**
    * Multiple of its unit cost at which a commander prices a lost airframe: crew,
    * months to replace (Russia builds ~20-30 Su-34 a year), lost sortie generation.
    * Both air forces over Ukraine in 2023-25 accepted very little SAM exposure,
    * trading cheap bombs for standoff missiles near known batteries (judgment).
    */
-  airframeLossAversion: 10,
+  airframeLossAversion: tableParam({ value: 10, range: [3, 20], tag: 'judgment', source: 'Judgment: both air forces over Ukraine in 2023-25 accepted little SAM exposure', affects: 'strike tactics vs IADS' }),
   /**
    * Share of strikes on a mobile unit aimed at a current position, and the minutes it
    * typically stays put once located. Judgment calls fitted to Ukraine 2023-25, where
    * Russia's thousands of strikes destroyed a few SAM launchers a month (Oryx).
    */
-  mobileTargetLocated: 0.5,
-  mobileTargetDwellMin: 60,
+  mobileTargetLocated: tableParam({ value: 0.5, range: [0.3, 0.7], tag: 'judgment', source: 'Judgment fitted to Ukraine 2023-25: a few SAM launchers destroyed a month (Oryx)', affects: 'strikes on mobile units' }),
+  mobileTargetDwellMin: tableParam({ value: 60, range: [30, 120], tag: 'judgment', source: 'Judgment fitted to Ukraine 2023-25 shoot-and-scoot', affects: 'strikes on mobile units' }),
   /** Interceptor difficulty an aircraft presents (ECM, chaff, terrain masking, maneuver). */
-  aircraftEvasion: 0.55,
-  aircraftEvasionWithEw: 0.7,
+  aircraftEvasion: tableParam({ value: 0.55, range: [0.4, 0.7], tag: 'judgment', source: 'Judgment: ECM, chaff, terrain masking and manoeuvre against interceptors', affects: 'aircraft losses to SAMs' }),
+  aircraftEvasionWithEw: tableParam({ value: 0.7, range: [0.55, 0.85], tag: 'judgment', source: 'Judgment: the same with escort jamming', affects: 'aircraft losses to SAMs' }),
   /** Coverage (channels x visibility) at which an IADS fully denies air control. */
-  samDenialChannels: 12,
-  maxSamDenial: 0.9,
+  samDenialChannels: tableParam({ value: 12, range: [8, 20], tag: 'judgment', source: 'Judgment: IADS coverage that fully denies air control', affects: 'air control over IADS' }),
+  maxSamDenial: tableParam({ value: 0.9, range: [0.75, 0.95], tag: 'judgment', source: 'Judgment: air control a full IADS can deny', affects: 'air control over IADS' }),
   /** Strike sorties lost and aborted per unit of enemy air control at the target when unescorted. */
-  enemyAirLoss: 0.05,
-  enemyAirAbort: 0.5,
+  enemyAirLoss: tableParam({ value: 0.05, range: [0.02, 0.1], tag: 'judgment', source: 'Judgment: unescorted strike losses per unit of enemy air control', affects: 'strike losses to fighters' }),
+  enemyAirAbort: tableParam({ value: 0.5, range: [0.3, 0.7], tag: 'judgment', source: 'Judgment: unescorted strike aborts per unit of enemy air control', affects: 'strike effectiveness' }),
   /** Minimum standoff when enemy fighters hold the target's airspace, km. */
   standoffVsFightersKm: 300,
   /**
@@ -280,7 +285,7 @@ export const TUNING = {
    * campaign on Ukraine's grid: ~1,000 missiles and drones cut ~40-50 % of generating
    * capacity concentrated in ~30 cells, i.e. ~0.5 % per hit (estimate).
    */
-  structurePerHit: 0.005,
+  structurePerHit: tableParam({ value: 0.005, range: [0.003, 0.008], tag: 'estimated', source: 'Russia 2022-23 grid campaign: ~1,000 weapons cut 40-50% of capacity in ~30 cells', affects: 'infrastructure damage' }),
   /**
    * Grid capacity a cell loses per 450 kg-class hit aimed at its power plants and substations
    * (the 'power' class). Russia's 2022-23 and 2024 campaigns: roughly a quarter of ~1,000-2,000
@@ -288,14 +293,14 @@ export const TUNING = {
    * generation (Ukrenergo; UN HRMMU 2024: ~9 of 18 GW by summer 2024), ~8 leaked hits a cell,
    * so ~6 % per hit (estimate).
    */
-  powerPerHit: 0.06,
+  powerPerHit: tableParam({ value: 0.06, range: [0.04, 0.08], tag: 'estimated', source: 'Ukrenergo; UN HRMMU 2024: ~9 of 18 GW lost by summer 2024', affects: 'power grid damage' }),
   /** Share of a cell's lost grid capacity restored per day: Ukraine got most supply back over the spring after each winter campaign (judgment). */
-  powerRepairPerDay: 0.02,
+  powerRepairPerDay: tableParam({ value: 0.02, range: [0.01, 0.04], tag: 'judgment', source: 'Judgment: Ukraine restored most supply over the spring after each winter campaign', affects: 'power grid recovery' }),
   /** Runway capacity cut per cratering hit, and rapid runway repair per day (USAF RADR: ~8 h to restore a MOS). */
-  runwayPerHit: 0.08,
+  runwayPerHit: tableParam({ value: 0.08, range: [0.05, 0.12], tag: 'judgment', source: 'Judgment: runway capacity cut per cratering hit', affects: 'airbase sortie generation' }),
   runwayRepairPerDay: 1,
   /** Share of parked aircraft in hardened shelters (CSIS 2023 notes few shelters in Japan/Guam). */
-  shelteredShare: 0.3,
+  shelteredShare: tableParam({ value: 0.3, range: [0.15, 0.5], tag: 'estimated', source: 'CSIS 2023: few hardened shelters in Japan and Guam', affects: 'aircraft lost on the ground' }),
   /**
    * Aircraft on a cell's fields at which the ramps are packed and every warhead that
    * lands among them finds one. Fewer aircraft spread over dispersal strips and
@@ -304,7 +309,7 @@ export const TUNING = {
    * lost a handful of aircraft on the ground a year to Iskander strikes (Oryx). The
    * number is a judgment.
    */
-  packedRampAircraft: 200,
+  packedRampAircraft: tableParam({ value: 200, range: [100, 300], tag: 'judgment', source: 'Judgment: CSIS 2023 crowded ramps at Kadena and Guam; dispersed Ukraine lost few on the ground (Oryx)', affects: 'aircraft lost on the ground' }),
   /** Suppression of a SAM's channels per ARM fired at it, and the cap (ODS: Iraqi radars largely silenced, few destroyed). */
   armSuppressionPerShot: 0.15,
   maxArmSuppression: 0.8,
@@ -313,7 +318,7 @@ export const TUNING = {
    * ~2,000 HARMs silenced Iraqi radars but destroyed perhaps 100-200, ~5-10 % a shot;
    * 0.1 x a 0.65 catalog pk gives ~6.5 % (estimate).
    */
-  armPkFactor: 0.1,
+  armPkFactor: tableParam({ value: 0.1, range: [0.05, 0.15], tag: 'estimated', source: 'ODS: ~2,000 HARMs destroyed perhaps 100-200 radars', affects: 'SEAD' }),
   /** Fatigue gained per day of surge flying and recovered per day standing down; full fatigue halves sortie rate. */
   surgeFatiguePerDay: 0.15,
   restRecoveryPerDay: 0.3,
@@ -323,10 +328,10 @@ export const TUNING = {
    * missiles and fed IRIS-T, Stingers and guns to Shaheds; nobody fires PAC-3s at
    * USD 40k glide bombs (2023-25 reporting; ratio and floor are estimates).
    */
-  interceptorCostRatio: 10,
+  interceptorCostRatio: tableParam({ value: 10, range: [5, 20], tag: 'estimated', source: 'Ukraine 2023-25 reserved Patriot and NASAMS rounds for missiles', affects: 'which threats SAMs engage' }),
   interceptorCostFloorUsdM: 0.5,
   /** Share of a defending fighter force's sorties available as an intercept layer vs cruise missiles and drones. */
-  fighterInterceptShare: 0.5,
+  fighterInterceptShare: tableParam({ value: 0.5, range: [0.3, 0.7], tag: 'judgment', source: 'Judgment: share of defending fighter sorties flying intercept against drones and cruise missiles', affects: 'drone and missile leakage' }),
   /** Hours on station or in ingress beyond transit per sortie. */
   sortieOverheadHours: 1,
-} as const;
+});

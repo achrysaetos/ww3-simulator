@@ -86,3 +86,27 @@ export function withParams<T>(overrides: Readonly<Record<string, number>> | unde
     apply(outer);
   }
 }
+
+const TABLE_PARAM: unique symbol = Symbol('table param');
+/** A tagged param written inline in a table of constants; `paramTable` gives it an id from its key. */
+export interface TableParam extends Omit<ParamDef, 'id'> {
+  readonly [TABLE_PARAM]: true;
+}
+export const tableParam = (def: Omit<ParamDef, 'id'>): TableParam => ({ ...def, [TABLE_PARAM]: true });
+
+export type ParamTable<T> = { readonly [K in keyof T]: T[K] extends TableParam ? number : T[K] };
+
+/**
+ * A table whose `tableParam` entries become `<prefix>.<key>` params, read through property getters,
+ * so `TABLE.key` stays the read at every call site. Other entries are copied as they are.
+ */
+export function paramTable<T extends object>(prefix: string, table: T): ParamTable<T> {
+  const out = {};
+  for (const [key, v] of Object.entries(table)) {
+    if (typeof v === 'object' && v !== null && TABLE_PARAM in v) {
+      const { value, range, tag, source, affects } = v as TableParam;
+      Object.defineProperty(out, key, { get: defineParam({ id: `${prefix}.${key}`, value, range, tag, source, affects }), enumerable: true });
+    } else Object.defineProperty(out, key, { value: v, enumerable: true });
+  }
+  return Object.freeze(out) as ParamTable<T>;
+}

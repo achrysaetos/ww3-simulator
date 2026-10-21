@@ -18,6 +18,7 @@ import { applyNavalOrder, isNavalOrder, navalWar } from './naval';
 import { createOrderRouter } from './orders';
 import { strategic } from './strategic';
 import { weather } from './weather';
+import { defineParam } from '../core/params';
 
 /** Collapse a nation's doctrine-level profile to the four knobs diplomacy and AI read. */
 export function decisionProfile(p: NationStrategy): StrategicProfile {
@@ -39,7 +40,9 @@ const KIND: Partial<Record<Alliance['obligation'], AllianceTreaty['kind']>> = {
 };
 
 /** Log-odds shift per unit of member reliability away from the 0.5 midpoint. Estimate: spans HUN (0.4) to SWE (0.85) by ~2.5x odds. */
-const RELIABILITY_LOGIT = 4;
+const RELIABILITY_LOGIT = defineParam({ id: 'diplomacy.RELIABILITY_LOGIT', value: 4, range: [2, 6], tag: 'judgment',
+  source: 'Estimate: spans HUN (0.4) to SWE (0.85) allies by ~2.5x odds',
+  affects: 'who honours a treaty and how fast' });
 
 /**
  * Treaties that can pull a nation into a war; consultative and economic groupings never do.
@@ -56,12 +59,14 @@ export function warTreaties(table: readonly Alliance[], profiles: Readonly<Recor
     const members: Record<NationId, TreatyMember> = {};
     const protectedOnly = new Set(a.protectedOnly ?? []);
     for (const m of a.members) {
-      const reliability = shiftOdds(a.commitment, RELIABILITY_LOGIT * ((profiles[m]?.allianceReliability ?? 0.5) - 0.5));
+      const record = profiles[m]?.allianceReliability ?? 0.5;
+      // Treaties are built once at load, so the odds are read when diplomacy asks, under the run's params.
+      const reliability = () => shiftOdds(a.commitment, RELIABILITY_LOGIT() * (record - 0.5));
       members[m] = {
         role: protectedOnly.has(m) ? 'protected' : protectedOnly.size ? 'guarantor' : 'mutual',
-        reliability,
+        get reliability() { return reliability(); },
         // Political decision plus deployment order: days for a firm pact, weeks for a hesitant one.
-        delayDays: Math.round(2 + (1 - reliability) * 14),
+        get delayDays() { return Math.round(2 + (1 - reliability()) * 14); },
       };
     }
     // A guarantor extends its threshold to allies only if its doctrine says so (NuclearThreshold.coversAllies).

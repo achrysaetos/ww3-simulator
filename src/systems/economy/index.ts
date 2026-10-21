@@ -9,6 +9,7 @@ import {
 import { defenseObligations } from '../../data/nations';
 import { recallReservists } from '../../data/nations/reserves';
 import { newLine, newNationEconomy, stocksOf, type LineState, type NationEconomy } from './state';
+import { defineParam } from '../../core/params';
 
 export type { EconomyState, LineState, NationEconomy } from './state';
 
@@ -48,36 +49,52 @@ type Breach = 'war' | 'sanctions';
 /** Months of normal flow needed to rebuild one month of drawn-down stocks. */
 const BUFFER_REFILL_PER_MONTH = 0.25;
 /** Fraction of imports that GDP cannot replace at home in the short run (est.). */
-const IMPORT_GDP_LOSS = 0.5;
-const ENERGY_GDP_ELASTICITY = 0.7;
+const IMPORT_GDP_LOSS = defineParam({ id: 'economy.IMPORT_GDP_LOSS', value: 0.5, range: [0.3, 0.7], tag: 'judgment',
+  source: 'Judgment: share of lost imports GDP cannot replace at home in the short run',
+  affects: 'GDP under trade loss' });
+const ENERGY_GDP_ELASTICITY = defineParam({ id: 'economy.ENERGY_GDP_ELASTICITY', value: 0.7, range: [0.4, 1.0], tag: 'contested',
+  source: 'Hand-fit (issue #2 section 7); uncalibrated against the 2022 European gas shock or the 1970s oil shocks, where estimates differ several-fold',
+  affects: 'GDP under energy shortage' });
 /**
  * Electricity's share of final energy use (IEA World Energy Balances: ~20% worldwide, ~18% in
  * Ukraine), the part strikes on the grid take away whatever fuel the nation holds. Ukraine lost
  * about half its generating capacity to strikes in 2024 (Ukrenergo, IEA Ukraine's Energy Security
  * and the Coming Winter 2024) and cut supply with rolling blackouts of up to 12-16 hours a day.
  */
-const ELECTRICITY_SHARE = 0.2;
+const ELECTRICITY_SHARE = defineParam({ id: 'economy.ELECTRICITY_SHARE', value: 0.2, range: [0.15, 0.25], tag: 'observed',
+  source: 'IEA World Energy Balances: ~20% of final energy worldwide, ~18% in Ukraine',
+  affects: 'GDP under grid strikes' });
 /**
  * Short-run price elasticity of world energy supply and demand combined, with stock
  * releases. Losing ~20% of world oil exports through Hormuz then lifts prices ~2.4x,
  * inside the USD 150-200/bbl range of EIA and IEA closure scenarios from ~USD 75 (est.).
  */
-const ENERGY_PRICE_ELASTICITY = 0.25;
+const ENERGY_PRICE_ELASTICITY = defineParam({ id: 'economy.ENERGY_PRICE_ELASTICITY', value: 0.25, range: [0.15, 0.4], tag: 'estimated',
+  source: 'Fitted so losing ~20% of world oil exports gives USD 150-200/bbl, as EIA and IEA Hormuz closure scenarios',
+  affects: 'world energy price shocks' });
 const MAX_ENERGY_PRICE = 4;
 /**
  * Energy imports cost ~3-5% of GDP for large net importers at 2024 prices (World Bank,
  * IEA); half of a price rise passes through to lost output in the short run (est.;
  * IMF rule of thumb: +USD 10/bbl costs ~0.15% of world GDP).
  */
-const ENERGY_BILL_SHARE = 0.04;
-const ENERGY_PRICE_PASSTHROUGH = 0.5;
-const FOOD_GDP_ELASTICITY = 0.3;
+const ENERGY_BILL_SHARE = defineParam({ id: 'economy.ENERGY_BILL_SHARE', value: 0.04, range: [0.03, 0.05], tag: 'observed',
+  source: 'Energy imports cost 3-5% of GDP for large net importers at 2024 prices (World Bank, IEA)',
+  affects: 'GDP under energy price shocks' });
+const ENERGY_PRICE_PASSTHROUGH = defineParam({ id: 'economy.ENERGY_PRICE_PASSTHROUGH', value: 0.5, range: [0.3, 0.7], tag: 'estimated',
+  source: 'IMF rule of thumb: +USD 10/bbl costs ~0.15% of world GDP',
+  affects: 'GDP under energy price shocks' });
+const FOOD_GDP_ELASTICITY = defineParam({ id: 'economy.FOOD_GDP_ELASTICITY', value: 0.3, range: [0.15, 0.5], tag: 'judgment',
+  source: 'Hand-fit elasticity (issue #2 section 7), no published anchor',
+  affects: 'GDP under food shortage' });
 /**
  * Output lost per unit of chip supply short, once inventories are gone. Est., set so the shortfall a
  * Taiwan blockade leaves the US (~30% of its chips) costs ~4% of GDP, against Bloomberg Economics'
  * 2024 estimate of -3.3% for the US and -5% for the world in a blockade's first year.
  */
-const SEMI_GDP_ELASTICITY = 0.15;
+const SEMI_GDP_ELASTICITY = defineParam({ id: 'economy.SEMI_GDP_ELASTICITY', value: 0.15, range: [0.1, 0.25], tag: 'estimated',
+  source: 'Set so a Taiwan blockade costs the US ~4% of GDP (Bloomberg Economics 2024: -3.3% US, -5% world)',
+  affects: 'GDP under chip shortage' });
 /** Peacetime under-arms ceiling: standing forces plus 1% of the population as reserves (createWorld's default). */
 const BASE_RESERVE_SHARE = 0.01;
 /**
@@ -285,7 +302,7 @@ function energyExportsLost(world: World, integrity: Map<NationId, number>): numb
 }
 
 /** World energy price relative to normal: lost export capacity through a short-run elasticity. */
-const energyPrice = (lost: number) => Math.min(MAX_ENERGY_PRICE, Math.pow(Math.max(1e-3, 1 - lost), -1 / ENERGY_PRICE_ELASTICITY));
+const energyPrice = (lost: number) => Math.min(MAX_ENERGY_PRICE, Math.pow(Math.max(1e-3, 1 - lost), -1 / ENERGY_PRICE_ELASTICITY()));
 
 /** How much of a supplier's exports reach `buyer`, 0..1. */
 function supplierFlow(world: World, s: Scan, buyer: NationId | undefined, supplier: string, r: Resource): number {
@@ -408,18 +425,18 @@ function stepNation(world: World, ctx: SimContext, s: Scan, n: Nation, e: Nation
   e.integrity = s.integrity.get(n.id) ?? 1;
   e.tradeLoss = tradeLossOf(world, s, n, false);
   const newTradeLoss = BASELINE_SANCTIONS[n.id] ? tradeLossOf(world, s, n, true) : e.tradeLoss;
-  const tradeOutput = 1 - ((n.stats.importsPctGdp ?? 30) / 100) * newTradeLoss * IMPORT_GDP_LOSS;
+  const tradeOutput = 1 - ((n.stats.importsPctGdp ?? 30) / 100) * newTradeLoss * IMPORT_GDP_LOSS();
   for (const r of RESOURCES) e.supply[r] = drawSupply(e, n.id, r, rawAccess(world, s, n, r), r === 'energy' ? tradeOutput : 1, dtMonths);
-  e.supply.energy *= 1 - ELECTRICITY_SHARE * (1 - (s.grid.get(n.id) ?? 1));
+  e.supply.energy *= 1 - ELECTRICITY_SHARE() * (1 - (s.grid.get(n.id) ?? 1));
   announceShortages(world, ctx, n.id, e);
 
   const energyImported = 1 - selfShare(n, 'energy');
   e.gdpIndex =
     e.integrity *
-    (1 - ENERGY_GDP_ELASTICITY * (1 - e.supply.energy)) *
-    (1 - ENERGY_BILL_SHARE * energyImported * (world.slices.economy.energyPrice - 1) * ENERGY_PRICE_PASSTHROUGH) *
-    (1 - FOOD_GDP_ELASTICITY * (1 - e.supply.food)) *
-    (1 - SEMI_GDP_ELASTICITY * (1 - e.supply.semiconductors)) *
+    (1 - ENERGY_GDP_ELASTICITY() * (1 - e.supply.energy)) *
+    (1 - ENERGY_BILL_SHARE() * energyImported * (world.slices.economy.energyPrice - 1) * ENERGY_PRICE_PASSTHROUGH()) *
+    (1 - FOOD_GDP_ELASTICITY() * (1 - e.supply.food)) *
+    (1 - SEMI_GDP_ELASTICITY() * (1 - e.supply.semiconductors)) *
     tradeOutput;
 
   const gdpB = ((n.stats.gdp ?? 0) / 1e9) * e.gdpIndex;

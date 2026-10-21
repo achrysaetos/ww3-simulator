@@ -98,7 +98,7 @@ export function dailyRounds(f: Formation, m: MunitionId, catalog: Catalog): numb
     const load = loadOf(p, m);
     if (n <= 0 || load <= 0) continue;
     if (f.kind === 'air_wing') rounds += n * (AIRFRAME[p.class]?.surgePerDay ?? 0) * load;
-    else if (isRoundOnRail(p)) rounds += DRONE_SITE_LAUNCHES_PER_DAY;
+    else if (isRoundOnRail(p)) rounds += DRONE_SITE_LAUNCHES_PER_DAY();
     else rounds += n * (LAUNCHER[p.class]?.launchesPerDay ?? 0);
   }
   return rounds * f.readiness;
@@ -114,7 +114,7 @@ function carriersOf(f: Formation, pic: AirPicture, ctx: SimContext, world: World
     const platform = ctx.catalog.platform(pid);
     const rate = LAUNCHER[platform.class];
     if (!rate || n <= 0) continue;
-    const perDay = isRoundOnRail(platform) ? DRONE_SITE_LAUNCHES_PER_DAY : n * rate.launchesPerDay;
+    const perDay = isRoundOnRail(platform) ? DRONE_SITE_LAUNCHES_PER_DAY() : n * rate.launchesPerDay;
     const expected = perDay * f.readiness * (world.dtHours / 24);
     const launches = Math.floor(expected) + (ctx.rng.chance(expected % 1) ? 1 : 0);
     if (launches > 0) out.push({ platform, n: launches, reachKm: 0 });
