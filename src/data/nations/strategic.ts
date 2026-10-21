@@ -46,7 +46,8 @@ const FRAGILE: Record<string, number> = {
  * IND: 2003 CCS doctrine: NFU, but retains the option against a major chemical or biological attack.
  * PAK: Lt Gen Kidwai's 2002 thresholds (Landau Network interview): loss of a large part of territory
  *   (space), destruction of a large part of land or air forces (military), economic strangulation,
- *   political destabilization. Values are estimates of "large part".
+ *   political destabilization. Values are estimates of "large part"; strangulation is read as a
+ *   30% fall in output, also an estimate. Political destabilization is not modelled.
  * FRA: Macron, Ecole de Guerre, 7 Feb 2020: vital interests have a European dimension; a single
  *   "final warning" strike precedes general use.
  * GBR: Integrated Review 2021: no NFU; reserves right against emerging technologies of comparable impact.
@@ -56,15 +57,15 @@ const FRAGILE: Record<string, number> = {
  *   when important strategic objects are struck, or to "take the initiative" as a war expands.
  */
 const NUCLEAR_THRESHOLDS: Record<string, NuclearThreshold> = {
-  USA: { firstUse: true, coreLossShare: null, forceLossShare: null, onStrategicAttack: true, onChemBio: true, coversAllies: true },
-  RUS: { firstUse: true, coreLossShare: 0.05, forceLossShare: 0.25, onStrategicAttack: true, onChemBio: true, coversAllies: true },
-  CHN: { firstUse: false, coreLossShare: null, forceLossShare: null, onStrategicAttack: true, onChemBio: false, coversAllies: false },
-  IND: { firstUse: false, coreLossShare: null, forceLossShare: null, onStrategicAttack: false, onChemBio: true, coversAllies: false },
-  PAK: { firstUse: true, coreLossShare: 0.1, forceLossShare: 0.3, onStrategicAttack: true, onChemBio: true, coversAllies: false },
-  FRA: { firstUse: true, coreLossShare: 0.1, forceLossShare: null, onStrategicAttack: true, onChemBio: false, coversAllies: true },
-  GBR: { firstUse: true, coreLossShare: 0.15, forceLossShare: null, onStrategicAttack: true, onChemBio: true, coversAllies: true },
-  ISR: { firstUse: true, coreLossShare: 0.15, forceLossShare: 0.5, onStrategicAttack: false, onChemBio: true, coversAllies: false },
-  PRK: { firstUse: true, coreLossShare: 0.05, forceLossShare: 0.2, onStrategicAttack: true, onChemBio: true, coversAllies: false },
+  USA: { firstUse: true, coreLossShare: null, forceLossShare: null, economicLossShare: null, onStrategicAttack: true, onChemBio: true, coversAllies: true },
+  RUS: { firstUse: true, coreLossShare: 0.05, forceLossShare: 0.25, economicLossShare: null, onStrategicAttack: true, onChemBio: true, coversAllies: true },
+  CHN: { firstUse: false, coreLossShare: null, forceLossShare: null, economicLossShare: null, onStrategicAttack: true, onChemBio: false, coversAllies: false },
+  IND: { firstUse: false, coreLossShare: null, forceLossShare: null, economicLossShare: null, onStrategicAttack: false, onChemBio: true, coversAllies: false },
+  PAK: { firstUse: true, coreLossShare: 0.1, forceLossShare: 0.3, economicLossShare: 0.3, onStrategicAttack: true, onChemBio: true, coversAllies: false },
+  FRA: { firstUse: true, coreLossShare: 0.1, forceLossShare: null, economicLossShare: null, onStrategicAttack: true, onChemBio: false, coversAllies: true },
+  GBR: { firstUse: true, coreLossShare: 0.15, forceLossShare: null, economicLossShare: null, onStrategicAttack: true, onChemBio: true, coversAllies: true },
+  ISR: { firstUse: true, coreLossShare: 0.15, forceLossShare: 0.5, economicLossShare: null, onStrategicAttack: false, onChemBio: true, coversAllies: false },
+  PRK: { firstUse: true, coreLossShare: 0.05, forceLossShare: 0.2, economicLossShare: null, onStrategicAttack: true, onChemBio: true, coversAllies: false },
 };
 
 const o = (id: string, kind: ObjectiveKind, targets: string, priority: 1 | 2 | 3, description: string): StrategicObjective => ({

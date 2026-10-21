@@ -1,7 +1,7 @@
 import { atWar, type SimContext } from '../../core/engine';
 import type { MunitionId, NationId, NodeId, World } from '../../core/types';
 import { delegated } from '../orders';
-import { deliveryReachKm } from '../strategic/nuclear';
+import { nuclearLaunchers, weaponFor } from '../strategic/targeting';
 import { CITY_POP_SHARE, STRATEGIC_YIELD_KT } from './escalation';
 import type { AllianceTreaty, DiplomacyState, UmbrellaCase } from './types';
 import { declareWar, raiseEscalation } from './wars';
@@ -102,16 +102,10 @@ function theatreTargets(world: World, ctx: SimContext, c: UmbrellaCase): NodeId[
 
 /** The lowest-yield weapon the guarantor can put on the first reachable target: a W76-2 or B61 where it has one, France's ASMPA-R "final warning" where it does not. */
 function tailoredOption(world: World, ctx: SimContext, c: UmbrellaCase): { target: NodeId; munition: MunitionId } | undefined {
-  const carriers = Object.values(world.formations).filter((f) => f.nation === c.guarantor && (f.status === 'active' || f.status === 'routed'));
+  const launchers = nuclearLaunchers(world, ctx.catalog, c.guarantor);
   for (const target of theatreTargets(world, ctx, c)) {
-    let best: MunitionId | undefined, bestYield = Infinity;
-    for (const f of carriers)
-      for (const [mid, n] of Object.entries(f.magazine) as [MunitionId, number][]) {
-        const m = ctx.catalog.munitions.get(mid);
-        if (!m?.yieldKt || n <= 0 || m.yieldKt >= bestYield) continue;
-        if (ctx.map.distanceKm(f.node, target) <= deliveryReachKm(ctx.catalog, f, m)) { best = mid; bestYield = m.yieldKt; }
-      }
-    if (best) return { target, munition: best };
+    const munition = weaponFor(launchers, ctx.map, target, 'smallest');
+    if (munition) return { target, munition };
   }
   return undefined;
 }

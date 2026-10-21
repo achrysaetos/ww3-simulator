@@ -65,6 +65,8 @@ export interface NuclearThreshold {
   coreLossShare: number | null;
   /** Share of the nation's conventional forces destroyed that triggers use. */
   forceLossShare: number | null;
+  /** Share of national output (the economy's GDP index) lost to blockade, strikes and occupation that triggers use. */
+  economicLossShare: number | null;
   /** A conventional attack on strategic forces, NC3, or leadership triggers use. */
   onStrategicAttack: boolean;
   /** Retaliates for chemical or biological attack. */

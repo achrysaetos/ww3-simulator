@@ -13,7 +13,7 @@ import { BMD_SYSTEMS, DISPERSION_KM2, EARLY_WARNING, POINT_TARGET, SOOT_TONS_PER
 /** Decides whether a nation under a detected counterforce attack launches before impact. The AI system supplies it. */
 export type LaunchOnWarningHook = (world: World, warning: LaunchWarning, ctx: SimContext) => ReleaseRequest[];
 
-const isLive = (f: Formation) => f.status === 'active' || f.status === 'routed';
+export const isLive = (f: Formation) => f.status === 'active' || f.status === 'routed';
 
 /** How far a formation can deliver this munition: missile range, plus the combat radius when the carrier is an aircraft. */
 export function deliveryReachKm(catalog: Catalog, f: Formation, m: Munition): number {
