@@ -38,9 +38,19 @@ export function ammoFactor(f: Formation): number {
   return Math.max(0.05, Math.min(1, f.supply.ammo / f.supplyCapacity.ammo / AMMO_RATION_BELOW));
 }
 
+/** Share of fire a unit keeps with no fuel: guns still fire, but nothing manoeuvres to new positions. */
+const DRY_FIRE = 0.7;
+
+/** Fire kept for want of fuel, falling from 1 with a day's combat burn on hand to DRY_FIRE with none. */
+export function fuelFactor(f: Formation): number {
+  const need = (f.supplyCapacity.fuel / 72) * 24 * COMBAT_FUEL_DUTY;
+  if (need <= 0) return 1;
+  return DRY_FIRE + (1 - DRY_FIRE) * Math.min(1, Math.max(0, f.supply.fuel) / need);
+}
+
 function fireModifier(f: Formation): number {
   if (f.status === 'routed') return 0;
-  return quality(f) * ammoFactor(f) * (f.supply.fuel <= 0 && f.supplyCapacity.fuel > 0 ? 0.7 : 1);
+  return quality(f) * ammoFactor(f) * fuelFactor(f);
 }
 
 /** Kills-equivalent per engaged hour this formation delivers against a force of the given composition. */

@@ -1,5 +1,7 @@
 import type { Formation, NationId, NodeId } from '../../core/types';
-import { canEnter, landSlice } from '../land';
+import { allied, landSlice } from '../land';
+import { atWar } from '../../core/engine';
+import { aggressor, commitment, releasable } from './deploy';
 import { isGround, issue, strength } from './forces';
 import { enemyPowerAt, landMass, stagingSector } from './fronts';
 import type { Plan, Sector } from './types';
@@ -36,6 +38,11 @@ const pressureRatio = (aggression: number, casualtyTolerance: number) => ATTACK_
  * worn or under-supplied units stop attacking.
  */
 const MAX_DRIVE_CELLS = 3;
+/**
+ * Most of an army a nation sends to partners' fronts. NATO's regional plans assign each ally a region and expect it to hold its own territory
+ * first (Vilnius summit 2023), so half the army stays home (judgement call).
+ */
+const FOREIGN_SHARE = 0.5;
 const FIT_TO_ATTACK = { strength: 0.6, supply: 0.4 };
 
 function needsRetreat(p: Plan, f: Formation): boolean {
@@ -45,18 +52,33 @@ function needsRetreat(p: Plan, f: Formation): boolean {
   return strength(p.ai, f) < RETREAT_BELOW.strength || supply < RETREAT_BELOW.supply || f.morale < RETREAT_BELOW.morale;
 }
 
-/** Connected regions of land the nation's troops can march through without fighting: own, allied and open neutral ground. -1 elsewhere. */
+/**
+ * Connected regions of land the nation's troops can march through without fighting: own,
+ * allied and open neutral ground. -1 elsewhere. Both the list of open holders and the flood
+ * fill over it are cached until control changes (Plan.memo); the list is re-read daily, since
+ * alliances by opinion shift without an event.
+ */
 function passableRegions(p: Plan): Int32Array {
   const { map } = p.ctx;
+  const { world } = p;
+  const listKey = `open|${p.nation}`;
+  let list = p.memo.get(listKey) as { tick: number; key: string; holders: NationId[] } | undefined;
+  if (!list || (world.tick - list.tick) * world.dtHours >= 24) {
+    // canEnter's rule by holder: own, allied, unclaimed, or (not here) enemy ground.
+    const holders = (Object.keys(world.nations) as NationId[]).filter((c) => !p.enemies.has(c) && (allied(world, p.nation, c) || atWar(world, p.nation, c))).sort();
+    p.memo.set(listKey, (list = { tick: world.tick, key: `regions|${holders.join(',')}`, holders }));
+  }
+  const { key } = list;
+  const hit = p.memo.get(key) as Int32Array | undefined;
+  if (hit) return hit;
+  const isOpen = new Set(list.holders);
   const region = new Int32Array(map.landCount).fill(-1);
   const open = new Uint8Array(map.landCount);
-  const byHolder = new Map<NationId | undefined, number>();
   for (let n = 0; n < map.landCount; n++) {
-    const c = p.world.control[n];
-    let o = byHolder.get(c);
-    if (o === undefined) byHolder.set(c, (o = canEnter(p.world, map, p.nation, n as NodeId) && !p.enemies.has(c) ? 1 : 0));
-    open[n] = o;
+    const c = world.control[n];
+    open[n] = !c || isOpen.has(c) ? 1 : 0;
   }
+  p.memo.set(key, region);
   let next = 0;
   for (let s = 0; s < map.landCount; s++) {
     if (!open[s] || region[s] >= 0) continue;
@@ -74,10 +96,16 @@ function passableRegions(p: Plan): Int32Array {
   return region;
 }
 
-/** A friendly cell at least two cells behind the front, by breadth-first search from `from`. */
+/**
+ * A cell at least two cells behind the front, by breadth-first search from `from`, inside the
+ * territory of whoever holds `from`: a reserve backing Estonia's line waits in Estonia, not
+ * across the Gulf in Finland. A small country whose every cell is near the front gets its
+ * deepest cell. From enemy ground, any friendly cell will do.
+ */
 function rear(p: Plan, from: NodeId, front: Set<number>): NodeId {
   const { map } = p.ctx;
-  const ok = (n: number) => n < map.landCount && p.friends.has(p.world.control[n]);
+  const holder = p.world.control[from];
+  const ok = p.friends.has(holder) ? (n: number) => n < map.landCount && p.world.control[n] === holder : (n: number) => n < map.landCount && p.friends.has(p.world.control[n]);
   const quiet = (n: number) => {
     if (front.has(n)) return false;
     for (let k = map.adjStart[n]; k < map.adjStart[n + 1]; k++) if (front.has(map.adj[k])) return false;
@@ -93,7 +121,53 @@ function rear(p: Plan, from: NodeId, front: Set<number>): NodeId {
       if (!seen.has(m) && ok(m)) { seen.add(m); queue.push(m); }
     }
   }
-  return from;
+  return queue.length > 1 && ok(queue[queue.length - 1]) ? (queue[queue.length - 1] as NodeId) : from;
+}
+
+/**
+ * A coalition's connected front split into each holder's stretch of it, with the threat
+ * shared out by the enemy pressing on each cell, so one nation's duty to its own border is
+ * not read as a duty to the whole line from Poland to Finland.
+ */
+function byHolder(p: Plan, s: Sector): Sector[] {
+  const { map } = p.ctx;
+  const groups = new Map<NationId, { nodes: NodeId[]; pressure: number }>();
+  for (const n of s.nodes) {
+    const h = p.world.control[n];
+    (groups.get(h) ?? groups.set(h, { nodes: [], pressure: 0 }).get(h)!).nodes.push(n);
+  }
+  if (groups.size === 1) return [s];
+  let total = 0;
+  const holderOf = new Map<number, NationId>();
+  for (const [h, g] of groups) {
+    for (const n of g.nodes) {
+      holderOf.set(n, h);
+      let e = 2 * enemyPowerAt(n, p.index, p.enemies);
+      for (let k = map.adjStart[n]; k < map.adjStart[n + 1]; k++) {
+        const m = map.adj[k];
+        if (m < map.landCount && p.enemies.has(p.world.control[m])) e += enemyPowerAt(m, p.index, p.enemies);
+      }
+      g.pressure += e;
+    }
+    total += g.pressure;
+  }
+  const facing = new Map<NationId, NodeId[]>();
+  for (const e of s.enemyNodes) {
+    const seen = new Set<NationId>();
+    for (let k = map.adjStart[e]; k < map.adjStart[e + 1]; k++) {
+      const h = holderOf.get(map.adj[k]);
+      if (h === undefined || seen.has(h)) continue;
+      seen.add(h);
+      (facing.get(h) ?? facing.set(h, []).get(h)!).push(e);
+    }
+  }
+  return [...groups].map(([h, g]) => ({
+    nodes: g.nodes,
+    enemyNodes: facing.get(h) ?? [],
+    battleArea: s.battleArea,
+    threat: s.threat * (total > 0 ? g.pressure / total : g.nodes.length / s.nodes.length),
+    key: g.nodes[0],
+  }));
 }
 
 /**
@@ -103,8 +177,11 @@ function rear(p: Plan, from: NodeId, front: Set<number>): NodeId {
  */
 export function planLand(p: Plan): void {
   const { map } = p.ctx;
-  const staging = stagingSector(p.world, map, p.nation, p.friends, p.enemies, p.index);
-  const sectors = staging ? [...p.sectors, staging] : p.sectors;
+  const stagingKey = `staging|${p.nation}`;
+  let staging = p.memo.get(stagingKey) as Sector | null | undefined;
+  if (staging === undefined) p.memo.set(stagingKey, (staging = stagingSector(p.world, map, p.nation, p.friends, p.enemies, p.index) ?? null));
+  if (staging) staging = { ...staging, threat: staging.enemyNodes.reduce((a, n) => a + enemyPowerAt(n, p.index, p.enemies), 0) };
+  const sectors = (staging ? [...p.sectors, staging] : p.sectors).flatMap((s) => byHolder(p, s));
   if (!sectors.length) return;
   const mass = landMass(map);
   const theatres = new Set(sectors.map((s) => mass[s.key]));
@@ -191,13 +268,49 @@ export function planLand(p: Plan): void {
     return best >= 0 && canPress(n, best) ? best : -1;
   };
 
-  // Defence: required power per sector in reach, scaled down together when the army is too small.
+  // Who fights where. A nation holds its own front first. A partner's front is a commitment:
+  // the nation covers, in proportion to its treaty obligation, only the part of the threat the
+  // coalition has not already manned, sends only formations released for service abroad, and
+  // keeps at least half its army home. Territorial forces never leave their own soil.
   const region = passableRegions(p);
   const inRange = (f: Formation, n: number) => km(f.node, n) <= MAX_COMMIT_KM && region[f.node] >= 0 && region[f.node] === region[n];
-  const need = sectors.map((s) => (pool.some((f) => inRange(f, s.key)) ? s.threat / HOLD_RATIO : 0));
+  const ownSectors = new Set(sectors.filter((s) => s.nodes.some((n) => map.owner[n] === p.nation || p.world.control[n] === p.nation)));
+  const own = (s: Sector) => ownSectors.has(s);
+  const ownSoil = new Set(sectors.filter((s) => s.nodes.some((n) => map.owner[n] === p.nation)));
+  const atHome = (f: Formation) => map.owner[f.node] === f.nation;
+  const released = new Set(pool.filter((f) => releasable(p, f)));
+  const mayServe = (f: Formation, s: Sector) => (f.territorial ? atHome(f) && ownSoil.has(s) : own(s) || !atHome(f) || released.has(f));
+  // The share is of the whole army in the theatre. Formations on a partner's soil, fighting or not, have spent it; ground the
+  // nation holds itself (occupied or captured) is not a partner's. A nation that started the war deploys to its own plan instead.
+  const onPartnerSoil = (f: Formation) => p.world.control[f.node] !== f.nation && map.owner[f.node] !== f.nation;
+  let abroadBudget = aggressor(p) ? Infinity : 0;
+  for (const f of p.index.byNation.get(p.nation) ?? []) {
+    if (!isGround(f) || map.isSea(f.node) || !theatres.has(mass[f.node])) continue;
+    abroadBudget += onPartnerSoil(f) ? (FOREIGN_SHARE - 1) * power(f) : FOREIGN_SHARE * power(f);
+  }
+  /** Whether sending `f` to a cell of `s` would take it out of the country, and the share of the army allowed out is spent. */
+  const overBudget = (f: Formation, s: Sector) => !own(s) && atHome(f) && sectorOf.get(f.node) !== s && abroadBudget < power(f);
+  // Partners' troops on each front cell or ordered onto it.
+  const others = new Map<number, number>();
+  for (const n of p.friends) {
+    if (n === p.nation) continue;
+    for (const g of p.index.byNation.get(n) ?? []) {
+      if (!isGround(g)) continue;
+      const t = g.order.target;
+      const at = sectorOf.has(g.node) ? g.node : t !== undefined && sectorOf.has(t) && g.order.posture !== 'reserve' ? t : -1;
+      if (at >= 0) others.set(at, (others.get(at) ?? 0) + power(g));
+    }
+  }
+  const need = sectors.map((s) => {
+    if (!pool.some((f) => inRange(f, s.key) && mayServe(f, s))) return 0;
+    const covered = s.nodes.reduce((a, n) => a + (others.get(n) ?? 0), 0);
+    return Math.max(0, s.threat / HOLD_RATIO - covered) * commitment(p.nation, p.world.control[s.key]);
+  });
   const needTotal = need.reduce((a, b) => a + b, 0);
   const scale = needTotal > total ? total / needTotal : 1;
-  sectors.forEach((s, i) => {
+  const byDuty = sectors.map((_, i) => i).sort((a, b) => Number(own(sectors[b])) - Number(own(sectors[a])) || need[b] - need[a] || a - b);
+  for (const i of byDuty) {
+    const s = sectors[i];
     const req = need[i] * scale;
     // A unit already on a cell of this line stays on it; one marching to it keeps its post.
     const post = (f: Formation): number | undefined => {
@@ -206,7 +319,7 @@ export function planLand(p: Plan): void {
       return f.order.posture === 'defend' && t !== undefined && sectorOf.get(t) === s ? t : undefined;
     };
     const candidates = [...free]
-      .filter((f) => post(f) !== undefined || inRange(f, s.key))
+      .filter((f) => mayServe(f, s) && (post(f) !== undefined || inRange(f, s.key)))
       .sort((a, b) => km(a.node, s.key) - km(b.node, s.key) || (a.id < b.id ? -1 : 1));
     const pressure = new Map<number, number>();
     const manned = new Map<number, number>();
@@ -217,10 +330,12 @@ export function planLand(p: Plan): void {
         if (m < map.landCount && p.enemies.has(p.world.control[m])) e += enemyPowerAt(m, p.index, p.enemies);
       }
       pressure.set(n, e);
-      manned.set(n, 0);
+      manned.set(n, others.get(n) ?? 0);
     }
     let got = 0;
     const assign = (f: Formation, target: number) => {
+      if (overBudget(f, s)) return;
+      if (!own(s) && atHome(f) && sectorOf.get(f.node) !== s) abroadBudget -= power(f);
       manned.set(target, manned.get(target)! + power(f));
       const push = f.node === target && fit(f) ? pressureTarget(target) : -1;
       issue(p, f, push >= 0 ? { posture: 'attack', target: push as NodeId } : { posture: 'defend', target: target as NodeId });
@@ -236,7 +351,7 @@ export function planLand(p: Plan): void {
       if (manned.get(n)) continue;
       let best: Formation | undefined, bestKm = Infinity;
       for (const f of candidates) {
-        if (!free.has(f)) continue;
+        if (!free.has(f) || overBudget(f, s)) continue;
         const d = km(f.node, n);
         if (d < bestKm) { bestKm = d; best = f; }
       }
@@ -245,7 +360,7 @@ export function planLand(p: Plan): void {
     // Then newcomers go where the enemy presses hardest relative to what already holds there.
     for (const f of candidates) {
       if (got >= req) break;
-      if (!free.has(f)) continue;
+      if (!free.has(f) || overBudget(f, s)) continue;
       let target = post(f);
       if (target === undefined || !short(target)) {
         let gap = -Infinity;
@@ -256,7 +371,7 @@ export function planLand(p: Plan): void {
       }
       assign(f, target!);
     }
-  });
+  }
 
   // Attack: spare power beyond the reserve goes to sectors where 3:1 is achievable.
   let spare = [...free].reduce((a, f) => a + power(f), 0) - reserveShare(p.profile.aggression) * total;
@@ -291,7 +406,7 @@ export function planLand(p: Plan): void {
     const group: Formation[] = [];
     let got = 0;
     const candidates = [...free]
-      .filter((f) => fit(f) && (assaulting(f) || inRange(f, s.key)))
+      .filter((f) => fit(f) && mayServe(f, s) && !overBudget(f, s) && (assaulting(f) || inRange(f, s.key)))
       .map((f) => ({ f, d: assaulting(f) ? 0 : km(f.node, target) }))
       .sort((a, b) => a.d - b.d || (a.f.id < b.f.id ? -1 : 1));
     for (const { f } of candidates) {
@@ -303,19 +418,21 @@ export function planLand(p: Plan): void {
     for (const f of group) {
       issue(p, f, { posture: 'attack', target: target as NodeId });
       free.delete(f);
+      if (!own(s) && atHome(f) && sectorOf.get(f.node) !== s) abroadBudget -= power(f);
     }
     spare -= got;
   }
 
-  // Reserve: everything left waits behind the nearest sector.
+  // Reserve: everything left waits behind the nearest sector it may serve on without leaving the country beyond its share.
   const rearOf = new Map<Sector, NodeId>();
   for (const f of free) {
     let near = sectors[0], bestD = Infinity;
     for (const s of sectors) {
-      const d = inRange(f, s.key) ? km(f.node, s.key) : Infinity;
+      const d = inRange(f, s.key) && mayServe(f, s) && !overBudget(f, s) ? km(f.node, s.key) : Infinity;
       if (d < bestD) { bestD = d; near = s; }
     }
     if (bestD > MAX_COMMIT_KM) continue;
+    if (!own(near) && atHome(f) && sectorOf.get(f.node) !== near) abroadBudget -= power(f);
     if (!rearOf.has(near)) rearOf.set(near, rear(p, near.key, front));
     issue(p, f, { posture: 'reserve', target: rearOf.get(near)! });
   }

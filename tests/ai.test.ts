@@ -185,3 +185,47 @@ describe('strikes on a neutral host', () => {
     expect(strikesOnJapan(20)).toEqual([]);
   });
 });
+
+describe('coalition allocation', () => {
+  const NATO = ['POL', 'LTU', 'LVA', 'EST', 'FIN', 'DEU'];
+  /** NATO at war with Russia, Russian brigades on the Estonian and Lithuanian borders, and a Polish army at Warsaw. */
+  function alliance(polish: { readiness: number; territorial?: true }[]) {
+    const t = testWorld([createAi()]);
+    for (const n of NATO) t.world.nations[N(n)].blocs = ['NATO'];
+    for (const n of NATO) t.war('RUS', n);
+    for (const host of ['EST', 'LTU']) for (const n of border(t, 'RUS', host).slice(0, 3)) for (let i = 0; i < 3; i++) brigade(t, 'RUS', n);
+    const tallinn = t.world.nations[N('EST')].capital;
+    const estonians = [0, 1, 2].map(() => brigade(t, 'EST', tallinn));
+    const warsaw = t.world.nations[N('POL')].capital;
+    const poles = polish.map((o) => Object.assign(brigade(t, 'POL', warsaw), o));
+    const last = new Map<string, Extract<Command, { type: 'order' }>>();
+    for (const c of commandsOver(t, 8)) if (c.type === 'order') last.set(c.formation, c);
+    const abroad = (f: { id: string }) => {
+      const target = last.get(f.id)?.order.target;
+      return target !== undefined && t.map.owner[target] !== N('POL');
+    };
+    return { t, estonians, poles, last, abroad };
+  }
+
+  it('keeps territorial defence and units still inside their notice to move at home', () => {
+    const { poles, abroad } = alliance([
+      { readiness: 0.9, territorial: true }, { readiness: 0.9, territorial: true },
+      { readiness: 0.5 }, { readiness: 0.5 },
+    ]);
+    expect(poles.filter(abroad)).toHaveLength(0);
+  });
+
+  it('sends at most half of an untouched army to its partners', () => {
+    const { poles, abroad } = alliance(Array.from({ length: 10 }, () => ({ readiness: 0.95 })));
+    const tanks = (fs: typeof poles) => fs.reduce((a, f) => a + (f.equipment[id.platform('t_mbt')] ?? 0), 0);
+    expect(tanks(poles.filter(abroad))).toBeGreaterThan(0);
+    expect(tanks(poles.filter(abroad))).toBeLessThanOrEqual(tanks(poles) / 2);
+  });
+
+  it('holds a small country’s reserve inside it rather than across the water', () => {
+    const { t, estonians, last } = alliance([]);
+    const posts = estonians.map((f) => last.get(f.id)?.order.target).filter((n) => n !== undefined);
+    expect(posts.length).toBeGreaterThan(0);
+    for (const n of posts) expect(t.map.owner[n!]).toBe(N('EST'));
+  });
+});

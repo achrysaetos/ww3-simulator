@@ -67,6 +67,16 @@ export const usaNavy = [
   u('Expeditionary Strike Group 3 amphibious ships', 'surface_group', 'task_group', sanDiego, { lha_america: 1, lhd_wasp: 3, lpd_san_antonio: 6, lsd_whidbey_island: 3 }, { readiness: 0.65, personnel: 9000 }),
   u('Expeditionary Strike Group 2 amphibious ships', 'surface_group', 'task_group', norfolk, { lhd_wasp: 4, lpd_san_antonio: 5, lsd_whidbey_island: 4 }, { readiness: 0.65, personnel: 9500 }),
 
+  // Strategic sealift for the Army's heavy forces: vehicles and cargo sail, troops fly. MSC surge
+  // sealift keeps about 15 LMSRs in Reduced Operating Status; MARAD's Ready Reserve Force holds
+  // about 40 ships, mostly RO-RO, at 5-10 days' notice, and GAO found its 2019 activation reached
+  // only ~40% readiness (MSC fact sheets; MARAD RRF; GAO-20-536). An RRF RO-RO has roughly half an
+  // LMSR's deck, so the RRF appears as LMSR equivalents.
+  u('MSC surge sealift, Atlantic and Gulf (LMSR)', 'surface_group', 'task_group', base('Charleston, SC', 32.78, -79.93), { lmsr: 10 }, { readiness: 0.8, personnel: 10 * 30 }),
+  u('MSC surge sealift, Pacific (LMSR)', 'surface_group', 'task_group', sanDiego, { lmsr: 5 }, { readiness: 0.8, personnel: 5 * 30 }),
+  u('Ready Reserve Force RO-RO, Atlantic and Gulf (LMSR equivalents)', 'surface_group', 'task_group', base('Port Arthur and Beaumont, TX', 29.6, -93.8), { lmsr: 12 }, { readiness: 0.5, personnel: 12 * 30 }),
+  u('Ready Reserve Force RO-RO, Pacific (LMSR equivalents)', 'surface_group', 'task_group', base('Alameda, CA', 37.77, -122.3), { lmsr: 5 }, { readiness: 0.5, personnel: 5 * 30 }),
+
   // Combat logistics force
   u('Military Sealift Command combat logistics force (Atlantic)', 'logistics', 'task_group', norfolk, { t_ao: 8, t_ake: 6 }, { readiness: 0.8, personnel: 1800 }),
   u('Military Sealift Command combat logistics force (Pacific)', 'logistics', 'task_group', sanDiego, { t_ao: 8, t_ake: 8 }, { readiness: 0.8, personnel: 2000 }),

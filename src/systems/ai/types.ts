@@ -1,4 +1,4 @@
-import type { Command, NationId, NodeId } from '../../core/types';
+import type { Command, FormationId, NationId, NodeId } from '../../core/types';
 import type { SimContext } from '../../core/engine';
 import type { World, Formation } from '../../core/types';
 import type { StrategicProfile } from '../diplomacy/types';
@@ -16,6 +16,8 @@ export interface AiState {
   aims: Record<NationId, Objective[]>;
   lastNuclear: Record<NationId, number>;
   lastPeaceOffer: Record<NationId, number>;
+  /** Formations sent overseas by strategic deployment, and the port each is bound for. */
+  deployments: Record<FormationId, NodeId>;
 }
 
 declare module '../../core/types' {
@@ -59,4 +61,6 @@ export interface Plan {
   index: ForceIndex;
   sectors: Sector[];
   out: Command[];
+  /** Derived geography that holds until control or the set of wars changes; cleared on front changes. */
+  memo: Map<string, unknown>;
 }

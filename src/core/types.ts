@@ -181,6 +181,8 @@ export interface Formation {
   status: 'active' | 'routed' | 'destroyed' | 'embarked';
   /** Carrier/transport formation this one is embarked on. */
   embarkedOn?: FormationId;
+  /** Territorial or home-defence force (Polish WOT, Ukrainian TDF, Baltic and Nordic home guards): fights only on its own nation's soil. */
+  territorial?: true;
 }
 
 // ---------------------------------------------------------------- nations

@@ -82,5 +82,5 @@ export const pol = [
     ['16th Lower Silesian Territorial Defence Brigade', 'Wrocław', 51.11, 17.03],
     ['17th Lubusz Territorial Defence Brigade', 'Zielona Góra', 51.94, 15.51],
     ['18th Warsaw Territorial Defence Brigade', 'Warsaw', 52.23, 21.01],
-  ] as const).map(([name, bname, lat, lon]) => u(name, 'maneuver', 'brigade', base(bname, lat, lon), { infantry_squad: 50, truck: 60 }, { readiness: 0.4, personnel: 2500 })),
+  ] as const).map(([name, bname, lat, lon]) => u(name, 'maneuver', 'brigade', base(bname, lat, lon), { infantry_squad: 50, truck: 60 }, { readiness: 0.4, personnel: 2500, territorial: true })),
 ];
