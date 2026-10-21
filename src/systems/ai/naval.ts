@@ -8,31 +8,6 @@ import { enemyPowerAt, landMass } from './fronts';
 import { reachKm } from './strikes';
 import type { Plan } from './types';
 
-/**
- * Maritime chokepoints and the nations whose trade or fleets depend on them
- * (EIA "World Oil Transit Chokepoints" 2023 for energy flows; fleet basing
- * from IISS Military Balance 2024 for naval exits such as the GIUK gap).
- */
-const CHOKEPOINTS: { name: string; lat: number; lon: number; users: string[] }[] = [
-  { name: 'Strait of Hormuz', lat: 26.3, lon: 56.8, users: ['IRN', 'IRQ', 'KWT', 'QAT', 'SAU', 'ARE', 'BHR', 'CHN', 'JPN', 'KOR', 'IND'] },
-  { name: 'Strait of Malacca', lat: 3.5, lon: 100.0, users: ['CHN', 'JPN', 'KOR', 'TWN', 'SGP', 'MYS', 'IND'] },
-  { name: 'Bab el-Mandeb', lat: 12.5, lon: 43.5, users: ['SAU', 'EGY', 'ISR', 'JOR', 'CHN', 'IND'] },
-  { name: 'Suez approaches', lat: 31.8, lon: 32.4, users: ['EGY', 'ISR', 'ITA', 'GRC', 'TUR'] },
-  { name: 'Strait of Gibraltar', lat: 36.0, lon: -5.8, users: ['ESP', 'MAR', 'ITA', 'FRA', 'DZA'] },
-  { name: 'Turkish Straits', lat: 41.3, lon: 29.2, users: ['RUS', 'UKR', 'ROU', 'BGR', 'GEO'] },
-  { name: 'Danish Straits', lat: 56.5, lon: 11.5, users: ['RUS', 'POL', 'FIN', 'EST', 'LVA', 'LTU', 'SWE', 'DEU'] },
-  { name: 'GIUK gap', lat: 63.0, lon: -12.0, users: ['RUS'] },
-  { name: 'Taiwan Strait', lat: 24.5, lon: 119.5, users: ['CHN', 'TWN', 'JPN', 'KOR'] },
-  { name: 'Luzon Strait', lat: 20.5, lon: 121.5, users: ['CHN', 'TWN'] },
-  { name: 'Korea Strait', lat: 34.5, lon: 129.0, users: ['KOR', 'JPN', 'RUS', 'CHN'] },
-  { name: 'La Perouse Strait', lat: 45.7, lon: 142.0, users: ['RUS'] },
-  { name: 'Panama approaches', lat: 8.5, lon: -79.5, users: ['USA', 'PAN', 'CHL', 'PER'] },
-  { name: 'Dover Strait', lat: 51.0, lon: 1.5, users: ['GBR', 'FRA', 'BEL', 'NLD', 'DEU'] },
-  { name: 'Lombok Strait', lat: -8.8, lon: 115.7, users: ['CHN', 'AUS', 'JPN'] },
-];
-
-const resolved = new WeakMap<GameMap, { node: NodeId; users: Set<string> }[]>();
-
 /** Nearest sea zone to a node, breadth-first; chokepoints often fall on a land cell at 1-degree resolution. */
 export function nearestSea(map: GameMap, from: NodeId): NodeId {
   if (map.isSea(from)) return from;
@@ -48,9 +23,23 @@ export function nearestSea(map: GameMap, from: NodeId): NodeId {
   return from;
 }
 
-function chokepoints(map: GameMap) {
-  let c = resolved.get(map);
-  if (!c) resolved.set(map, (c = CHOKEPOINTS.map((p) => ({ node: nearestSea(map, map.nodeAt(p.lat, p.lon)), users: new Set(p.users) }))));
+interface Choke { node: NodeId; users: Set<string>; shores: Set<NationId> }
+const chokeCache = new WeakMap<GameMap, Choke[]>();
+/** Chokepoint sea zones, with the nations whose trade or energy passes each and the states whose shores form the passage. */
+function chokepoints(map: GameMap): Choke[] {
+  let c = chokeCache.get(map);
+  if (!c) {
+    c = geography(map).chokepoints.flatMap(({ def, nodes }) => {
+      const users = new Set([...Object.keys(def.general), ...Object.keys(def.energy)]);
+      const shores = new Set<NationId>();
+      for (const [la, lo] of def.points) {
+        const n = map.nodeAt(la, lo);
+        for (const m of [n, ...map.neighbors(n)]) if (!map.isSea(m)) shores.add(map.owner[m]);
+      }
+      return nodes.map((node) => ({ node, users, shores }));
+    });
+    chokeCache.set(map, c);
+  }
   return c;
 }
 
@@ -314,7 +303,8 @@ export function planNaval(p: Plan): void {
   const stations = assault ? [focus] : standoffZones(p, focus);
   let capitals = 0;
   const inPort = enemyFleet ? new Set<NodeId>() : batteredFleets(p, groups);
-  const enemyChokes = chokepoints(map).filter((c) => [...c.users].some((u) => p.enemies.has(u as NationId)));
+  // A belligerent may not fight in neutral waters, so it blockades only passages a party to the war borders (San Remo Manual 1994, paras 14-16).
+  const enemyChokes = chokepoints(map).filter((c) => [...c.users].some((u) => p.enemies.has(u as NationId)) && [...c.shores].some((n) => p.enemies.has(n) || p.friends.has(n)));
   const claimed = new Map<NodeId, number>();
 
   const blockade = (f: Formation): boolean => {
