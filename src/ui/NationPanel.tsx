@@ -3,12 +3,15 @@ import { COMMAND_DOMAINS, type Command, type CommandDomain, type ItemId, type Na
 import type { SimClient } from './client';
 import type { Palette } from './colors';
 import type { MunitionGroup, NationDetail, WarEntry, WarView } from './snapshot';
+import type { Objective } from './briefing';
+import { ObjectiveList } from './GameFlow';
 import { Bar, Section, Stat, fmtNum, fmtUsdB } from './widgets';
 
 interface Props {
   client: SimClient;
   palette: Palette;
   playAs: NationId;
+  objectives: Objective[];
   /** Send a command; `label` is what the toast says was done. */
   onCommand(c: Command, label: string): void;
   onNuclear(): void;
@@ -39,7 +42,7 @@ const RESOURCE_LABEL: Record<string, string> = {
   energy: 'Energy', food: 'Food', semiconductors: 'Semiconductors', rare_earths: 'Rare earths', energetics: 'Explosives / propellant', steel: 'Steel',
 };
 
-export function NationPanel({ client, palette, playAs, onCommand, onNuclear }: Props) {
+export function NationPanel({ client, palette, playAs, objectives, onCommand, onNuclear }: Props) {
   const nations = client.state.nations;
   const n = nations.get(playAs);
   const d = client.state.focusNation?.id === playAs ? client.state.focusNation : undefined;
@@ -74,6 +77,10 @@ export function NationPanel({ client, palette, playAs, onCommand, onNuclear }: P
           <div className="nation-sub">{n.id} · {n.blocs.slice(0, 4).join(', ') || 'non-aligned'} · <span className={`status ${n.status}`}>{n.status}</span></div>
         </div>
       </div>
+
+      <Section title={`Objectives · ${objectives.filter((o) => o.met).length} of ${objectives.length} met`}>
+        <ObjectiveList items={objectives} />
+      </Section>
 
       <Section title="Wars">
         {d ? <Wars d={d} name={name} palette={palette} tick={client.state.tick} dtHours={client.meta?.dtHours ?? 6} /> : <p className="muted">Loading…</p>}

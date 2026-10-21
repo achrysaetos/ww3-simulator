@@ -3,7 +3,7 @@ import type { Formation, FormationId, FormationKind, NationId, NodeId, Order, Po
 import type { SimClient } from './client';
 import type { Palette } from './colors';
 import type { PlaceNamer } from './events';
-import type { FormationDetail } from './snapshot';
+import type { DeployView, FormationDetail } from './snapshot';
 import type { Routes } from './routes';
 import { Bar, Section, Stat, fmtNum } from './widgets';
 
@@ -42,7 +42,9 @@ interface Props {
   command: Command;
   domainLabel: string;
   pending: Posture | null;
-  onPickPosture(p: Posture | null, targetClass?: TargetClass): void;
+  /** The lift chosen for a pending overseas deployment. */
+  pendingLift: 'air' | 'sea' | null;
+  onPickPosture(p: Posture | null, targetClass?: TargetClass, lift?: 'air' | 'sea'): void;
   onImmediate(p: Posture): void;
   /** Send an order to any formation of the player's (embark, sail a lift group, march to a port). */
   onOrder(formation: FormationId, order: Omit<Order, 'issuedTick'>, label: string): void;
@@ -51,7 +53,7 @@ interface Props {
   onFocus(node: NodeId): void;
 }
 
-export function FormationPanel({ client, palette, places, routes, playAs, command, domainLabel, pending, onPickPosture, onImmediate, onOrder, onHold, onClose, onFocus }: Props) {
+export function FormationPanel({ client, palette, places, routes, playAs, command, domainLabel, pending, pendingLift, onPickPosture, onImmediate, onOrder, onHold, onClose, onFocus }: Props) {
   const detail = client.state.focusFormation;
   const [tc, setTc] = useState<TargetClass>('structure');
   if (!detail) return <div className="panel-scroll"><p className="muted">Loading formation…</p></div>;
@@ -65,7 +67,7 @@ export function FormationPanel({ client, palette, places, routes, playAs, comman
   const magazine = Object.entries(f.magazine).filter(([, v]) => v > 0);
   const frac = (k: 'fuel' | 'ammo' | 'food') => (f.supplyCapacity[k] ? f.supply[k] / f.supplyCapacity[k] : 0);
   const ground = GROUND_KINDS.has(f.kind);
-  const port = ground && f.status === 'active' && detail.portZone === null ? routes.nearestPort(f.node, (p) => client.state.control[p] === client.state.control[f.node]) : null;
+  const port = detail.deploy && f.status === 'active' && detail.portZone === null ? routes.nearestPort(f.node, (p) => client.state.control[p] === client.state.control[f.node]) : null;
 
   return (
     <div className="panel-scroll">
@@ -104,7 +106,7 @@ export function FormationPanel({ client, palette, places, routes, playAs, comman
               <button
                 key={p}
                 data-testid={`posture-${p}`}
-                className={pending === p ? 'active' : f.order.posture === p ? 'current' : ''}
+                className={pending === p && !pendingLift ? 'active' : f.order.posture === p ? 'current' : ''}
                 onClick={() => (NEEDS_TARGET.has(p) ? onPickPosture(pending === p ? null : p, p === 'strike' ? tc : undefined) : onImmediate(p))}
               >
                 {p.replace(/_/g, ' ')}
@@ -125,9 +127,13 @@ export function FormationPanel({ client, palette, places, routes, playAs, comman
         <p className="muted small pad">{own ? 'Formation destroyed.' : `Foreign formation. Play as ${nation?.name ?? f.nation} to command it.`}</p>
       )}
 
-      {own && ground && f.status === 'active' && (
-        <Section title="Sealift">
-          <p className="muted small">Ground units cross water aboard a lift group: board it in a port, then order the lift group to Move to a friendly port to unload, or Attack a coast to land under fire.</p>
+      {own && detail.deploy && f.status === 'active' && (
+        <Deploy d={detail.deploy} name={f.name} place={(n) => places.name(n)} pendingLift={pending === 'move' ? pendingLift : null} onPick={(lift) => onPickPosture(pending === 'move' && pendingLift === lift ? null : 'move', undefined, lift)} />
+      )}
+
+      {own && detail.deploy && f.status === 'active' && (
+        <Section title="Amphibious lift">
+          <p className="muted small">To land under fire, or where no friendly port is open, board an amphibious group in a port, then order the group to Attack a coast or Move to a friendly port to unload.</p>
           {detail.portZone === null && (port !== null
             ? <p className="small">Not in a port. Nearest port: <a onClick={() => onFocus(port)}>{places.name(port)}</a> <button data-testid="move-to-port" onClick={() => onOrder(f.id, { posture: 'move', target: port }, `${f.name} marching to ${places.name(port)} to embark`)}>March there</button></p>
             : <p className="small tt-warn">No friendly port on this land mass.</p>)}
@@ -142,7 +148,7 @@ export function FormationPanel({ client, palette, places, routes, playAs, comman
                 </li>
               ))}
             </ul>
-          ) : <p className="small tt-warn">None of your ships can carry this unit.</p>}
+          ) : <p className="small muted">No amphibious group has room for this unit.</p>}
         </Section>
       )}
 
@@ -199,6 +205,42 @@ export function FormationPanel({ client, palette, places, routes, playAs, comman
       </Section>
 
     </div>
+  );
+}
+
+const days = (d: number) => (d < 1 ? `${Math.max(1, Math.round(d * 24))} hours` : `${d.toFixed(d < 10 ? 1 : 0)} days`);
+
+/** Strategic deployment overseas: by the nation's airlift or by its cargo ships, to a friendly port or airfield on the far shore. */
+function Deploy({ d, name, place, pendingLift, onPick }: { d: DeployView; name: string; place(n: NodeId): string; pendingLift: 'air' | 'sea' | null; onPick(lift: 'air' | 'sea'): void }) {
+  const canFly = d.airPortable && d.airliftTonsPerDay > 0;
+  const flyDays = d.airliftTonsPerDay > 0 ? d.airTons / d.airliftTonsPerDay : Infinity;
+  const job = d.deploying;
+  return (
+    <Section title="Deploy overseas">
+      <p className="muted small">Order a move to a cell across the sea. {name} marches to a port or airfield, waits for lift, and is put down at the friendly port or airfield nearest the destination.</p>
+      {job && (
+        <p className="small" data-testid="deploy-status">
+          <b>Deploying to {place(job.target)} by {job.mode === 'air' ? 'airlift' : 'sealift'}</b>: {job.waiting
+            ? job.mode === 'air' ? `at the airfield, ${fmtNum(job.flownTons)} of ${fmtNum(d.airTons)} t flown.` : d.atWar ? 'at the port, waiting for cargo ships.' : 'at the port. Cargo ships sail only once your nation is at war.'
+            : `marching to its ${job.mode === 'air' ? 'airfield' : 'port'}.`}
+        </p>
+      )}
+      <table className="tbl deploy-tbl" data-testid="deploy">
+        <tbody>
+          <tr>
+            <td><b>Airlift</b></td>
+            <td className="small">{!d.airPortable ? 'Too heavy to fly: tanks and tracked vehicles go by sea.' : d.airliftTonsPerDay <= 0 ? 'Your nation has no transport aircraft.' : `${fmtNum(d.airTons)} t to fly; your airlift moves ${fmtNum(d.airliftTonsPerDay)} t a day for land forces, about ${days(flyDays)} if nothing else is queued.`}</td>
+            <td><button disabled={!canFly} className={pendingLift === 'air' ? 'active' : ''} onClick={() => onPick('air')} data-testid="deploy-air">By air…</button></td>
+          </tr>
+          <tr>
+            <td><b>Sealift</b></td>
+            <td className="small">{d.sealiftGroups === 0 ? 'Your nation has no cargo-ship groups.' : `${fmtNum(d.deckSlots)} deck slots to load; ${d.sealiftGroups} cargo-ship group${d.sealiftGroups > 1 ? 's' : ''} with ${fmtNum(d.sealiftSlots)} slots.${d.atWar ? '' : ' Ships sail once your nation is at war.'}`}</td>
+            <td><button disabled={d.sealiftGroups === 0} className={pendingLift === 'sea' ? 'active' : ''} onClick={() => onPick('sea')} data-testid="deploy-sea">By sea…</button></td>
+          </tr>
+        </tbody>
+      </table>
+      {pendingLift && <p className="hint">Click the destination across the sea. Esc cancels.</p>}
+    </Section>
   );
 }
 

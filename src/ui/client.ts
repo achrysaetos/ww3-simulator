@@ -2,9 +2,12 @@ import { loadMap } from '../data/load';
 import type { Command, FormationId, NationId, SimEvent } from '../core/types';
 import { PlaceNamer, type Namer } from './events';
 import { EventFeed } from './feed';
+import { readSlot, writeSlot, type SlotInfo } from './slot';
 import {
   applySnapshot, emptyClientState, type ClientState, type FromWorker, type NationCard, type RunStats, type ScenarioCard, type SessionMeta, type ToWorker,
 } from './snapshot';
+
+export interface Notice { text: string; tone: 'info' | 'error'; seq: number }
 
 /**
  * Main-thread handle on the simulation worker. Holds the decoded mirror of the
@@ -18,16 +21,24 @@ export class SimClient {
   scenarios: ScenarioCard[] = [];
   nationCards = new Map<NationId, NationCard>();
   meta: SessionMeta | null = null;
-  /** The nation the player took command of at start. */
+  /** The nation the player commands. */
   playing: NationId | null = null;
   starting = false;
-  readonly feed = new EventFeed();
+  /** Bumped each time a game starts or loads, so the UI remounts with fresh state. */
+  sessionId = 0;
+  feed = new EventFeed();
   private formationNames = new Map<FormationId, string>();
   private namesVersion = -1;
   version = 0;
   stats: RunStats = { stepMs: 0, achievedTps: 0 };
   ticksPerSec = 0;
   error: string | null = null;
+  /** The latest thing the command boundary or a save or load reported, for a toast. */
+  notice: Notice | null = null;
+  /** The quick-save slot's contents, when one exists. */
+  slot: SlotInfo | null = null;
+  private saveTo: 'download' | 'slot' | null = null;
+  private noticeSeq = 0;
   private readonly worker: Worker;
   private readonly listeners = new Set<() => void>();
 
@@ -38,6 +49,11 @@ export class SimClient {
       this.error = ev.message || 'worker failed to load';
       this.notify();
     };
+    void readSlot().then((s) => {
+      if (!s) return;
+      this.slot = { scenario: s.scenario, tick: s.tick, savedAt: s.savedAt };
+      this.notify();
+    });
   }
 
   private receive(msg: FromWorker) {
@@ -51,10 +67,26 @@ export class SimClient {
         this.scenarios = msg.scenarios;
         this.nationCards = new Map(msg.nations.map((n) => [n.id, n]));
         break;
+      case 'refused':
+        this.say(`Order not sent: ${msg.reason}`, 'error');
+        break;
+      case 'load_failed':
+        this.starting = false;
+        this.say(`Could not load the save: ${msg.message}`, 'error');
+        break;
+      case 'saved':
+        void this.store(msg.text, msg.scenario, msg.tick);
+        return;
+      case 'closed':
+        this.reset();
+        break;
       case 'ready':
       case 'snapshot':
         if (msg.type === 'ready') {
+          this.reset();
+          this.sessionId++;
           this.meta = msg.meta;
+          this.playing = msg.playing;
           this.starting = false;
         } else this.stats = msg.stats;
         applySnapshot(this.state, msg.snapshot, this.meta!.nationIds, this.nationCards);
@@ -82,6 +114,45 @@ export class SimClient {
     this.feed.record(events, this.namer);
   }
 
+  private say(text: string, tone: Notice['tone']) {
+    this.notice = { text, tone, seq: ++this.noticeSeq };
+  }
+
+  /** Forget the previous session's mirror, so a new or loaded game starts clean. */
+  private reset() {
+    this.state = emptyClientState(this.map.size);
+    this.feed = new EventFeed();
+    this.formationNames.clear();
+    this.namesVersion = -1;
+    this.meta = null;
+    this.playing = null;
+    this.ticksPerSec = 0;
+    this.stats = { stepMs: 0, achievedTps: 0 };
+    this.error = null;
+  }
+
+  private async store(text: string, scenario: string, tick: number) {
+    const to = this.saveTo;
+    this.saveTo = null;
+    const name = `ww3-${scenario}-D${Math.floor((tick * (this.meta?.dtHours ?? 6)) / 24)}.json`;
+    if (to === 'download') {
+      const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = name;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+      this.say(`Saved as ${name}.`, 'info');
+    } else if (to === 'slot') {
+      const info = { scenario, tick, savedAt: new Date().toISOString() };
+      if (await writeSlot({ ...info, text })) {
+        this.slot = info;
+        this.say("Saved to this browser's quick-save slot.", 'info');
+      } else this.say('This browser would not store the save. Use Download instead.', 'error');
+    }
+    this.notify();
+  }
+
   private notify() {
     this.version++;
     for (const l of this.listeners) l();
@@ -100,9 +171,33 @@ export class SimClient {
 
   start(scenario: string, nation: NationId, seed = 1) {
     this.starting = true;
-    this.playing = nation;
     this.notify();
     this.send({ type: 'start', scenario, nation, seed });
+  }
+
+  /** Save the running game as a file download or into the browser's quick-save slot. */
+  save(to: 'download' | 'slot') {
+    if (!this.meta) return;
+    this.saveTo = to;
+    this.send({ type: 'save' });
+  }
+
+  /** Resume from save text: a chosen file's, or the quick-save slot's when omitted. */
+  async load(text?: string) {
+    const body = text ?? (await readSlot())?.text;
+    if (!body) {
+      this.say('The quick-save slot is empty.', 'error');
+      this.notify();
+      return;
+    }
+    this.starting = true;
+    this.notify();
+    this.send({ type: 'load', text: body });
+  }
+
+  /** End the game and go back to the start screen. */
+  quit() {
+    this.send({ type: 'quit' });
   }
 
   setSpeed(ticksPerSec: number) {
@@ -120,6 +215,7 @@ export class SimClient {
   }
 
   playAs(nation: NationId) {
+    this.playing = nation;
     this.send({ type: 'play_as', nation });
   }
 

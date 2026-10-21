@@ -13,15 +13,20 @@ import type { Catalog } from '../core/catalog';
 import { BMD_SYSTEMS } from '../systems/strategic/tables';
 import { supplyFactor } from '../systems/logistics';
 import { geography } from '../systems/naval/geography';
-import { isNavalFormation, liftDemand } from '../systems/naval/state';
+import { compose } from '../systems/naval/state';
+import { liftShare } from '../systems/naval/amphibious';
+import { boardable } from '../systems/naval/orders';
+import { isSealift } from '../systems/naval/sealift';
+import { airliftTonsPerDay, airPortable, airTons, awaitingLift, deckSlots, liftMode, overseas } from '../systems/land/strategic';
 import { authority } from '../systems/orders';
+import { deliveryReachKm, isLive } from '../systems/strategic/nuclear';
 import type {
-  Command, CommandDomain, Echelon, Formation, FormationId, FormationKind, ItemId, MunitionKind, Nation, NationId, NodeId, PlatformId, Posture, SimEvent, World,
+  Command, CommandDomain, Echelon, Formation, FormationId, FormationKind, ItemId, MunitionId, MunitionKind, Nation, NationId, NodeId, PlatformId, Posture, SimEvent, World,
 } from '../core/types';
 
 export const NO_NATION = 0xffff;
 export const NO_NODE = 0xffff;
-export const POSTURES: readonly Posture[] = ['reserve', 'defend', 'attack', 'move', 'strike', 'air_superiority', 'patrol', 'blockade', 'escort', 'embark'];
+export const POSTURES: readonly Posture[] = ['reserve', 'defend', 'attack', 'move', 'strike', 'air_superiority', 'patrol', 'blockade', 'escort', 'embark', 'air_assault'];
 export const STATUSES: readonly Formation['status'][] = ['active', 'routed', 'destroyed', 'embarked'];
 const NATION_STATUSES: readonly Nation['status'][] = ['peace', 'war', 'capitulated', 'collapsed'];
 /** Per-nation numbers sent every tick, packed in this order. */
@@ -54,10 +59,16 @@ export interface NationCard {
 
 export type ToWorker =
   | { type: 'start'; scenario: string; nation: NationId; seed: number }
+  /** Resume a save file's text (the CLI's --save format). */
+  | { type: 'load'; text: string }
+  | { type: 'save' }
+  /** End the session and go back to the start screen. */
+  | { type: 'quit' }
   /** Target ticks per second; 0 pauses. The worker never runs ahead of the UI's acks. */
   | { type: 'speed'; ticksPerSec: number }
   | { type: 'step' }
   | { type: 'ack' }
+  /** Untrusted until the worker's boundary (commands.ts) has checked it. */
   | { type: 'command'; command: Command }
   | { type: 'play_as'; nation: NationId }
   | { type: 'focus'; nation?: NationId; formation?: FormationId };
@@ -71,7 +82,12 @@ export interface RunStats {
 
 export type FromWorker =
   | { type: 'hello'; scenarios: ScenarioCard[]; nations: NationCard[] }
-  | { type: 'ready'; meta: SessionMeta; snapshot: Snapshot }
+  | { type: 'ready'; meta: SessionMeta; playing: NationId; snapshot: Snapshot }
+  | { type: 'saved'; text: string; scenario: string; tick: number }
+  | { type: 'load_failed'; message: string }
+  | { type: 'closed' }
+  /** A command the boundary rejected, and why. */
+  | { type: 'refused'; reason: string }
   | { type: 'snapshot'; snapshot: Snapshot; stats: RunStats }
   | { type: 'error'; message: string };
 
@@ -209,7 +225,14 @@ export interface NationDetail {
     /** Remaining interceptors per national missile-defence system. */
     bmd: Record<string, number>;
     satellites: number;
+    /** Nuclear rounds on launchers, by weapon: where each launching formation stands and how far it reaches. */
+    weapons: NuclearWeapon[];
   };
+}
+
+export interface NuclearWeapon {
+  munition: MunitionId;
+  sites: { node: NodeId; reachKm: number; rounds: number }[];
 }
 
 export interface FormationDetail {
@@ -228,13 +251,32 @@ export interface FormationDetail {
   lifts: LiftOption[];
   /** For a surface group: the formations it carries. */
   aboard: { id: FormationId; name: string }[];
+  /** For a ground formation: what strategic deployment overseas can use. */
+  deploy: DeployView | null;
+}
+
+/** Strategic deployment: a 'move' to another land mass, crossing by the nation's airlift or its cargo ships (land/strategic.ts). */
+export interface DeployView {
+  /** No tracked or heavy vehicles, so it can fly. */
+  airPortable: boolean;
+  /** Tons it puts on aircraft, and the nation's daily airlift for its land forces. */
+  airTons: number;
+  airliftTonsPerDay: number;
+  /** Deck slots it needs, and the nation's cargo-ship groups and their slots. */
+  deckSlots: number;
+  sealiftGroups: number;
+  sealiftSlots: number;
+  /** Cargo ships sail only once the nation is at war. */
+  atWar: boolean;
+  /** An overseas move under way: how it crosses, and whether it is at its gateway waiting for lift. */
+  deploying: { mode: 'air' | 'sea'; target: NodeId; waiting: boolean; flownTons: number } | null;
 }
 
 export interface LiftOption {
   id: FormationId;
   name: string;
   node: NodeId;
-  /** Share of this formation it can carry in one lift, 0..1. */
+  /** Share of this formation it can carry in the room it has left, 0..1. */
   share: number;
   /** The lift group is in this formation's port or just offshore of it. */
   boardNow: boolean;
@@ -415,16 +457,21 @@ export class SnapshotEncoder {
       if (g) groups.get(g)!.warehoused += count;
     }
     let formations = 0, personnel = 0, launchers = 0, loadedWarheads = 0;
+    const weapons = new Map<MunitionId, NuclearWeapon>();
     for (const f of Object.values(world.formations)) {
       if (f.nation !== id || f.status === 'destroyed') continue;
       formations++;
       personnel += f.personnel;
       if (f.kind === 'strategic') launchers += platformCount(f);
-      for (const [mid, count] of Object.entries(f.magazine)) {
+      for (const [mid, count] of Object.entries(f.magazine) as [MunitionId, number][]) {
         const g = groupOf(mid);
         if (!g) continue;
         groups.get(g)!.loaded += count;
-        if (g === 'nuclear') loadedWarheads += count;
+        if (g !== 'nuclear') continue;
+        loadedWarheads += count;
+        if (count <= 0 || !isLive(f)) continue;
+        const w = weapons.get(mid) ?? weapons.set(mid, { munition: mid, sites: [] }).get(mid)!;
+        w.sites.push({ node: f.node, reachKm: deliveryReachKm(catalog, f, catalog.munitions.get(mid)!), rounds: count });
       }
     }
     const eco = world.slices.economy?.nations[id];
@@ -475,6 +522,7 @@ export class SnapshotEncoder {
         loadedWarheads,
         bmd: bmdOf(strategic?.interceptors ?? {}, id),
         satellites: space ? Object.values(space).reduce((a, s) => a + s.alive, 0) : 0,
+        weapons: [...weapons.values()],
       },
     };
   }
@@ -518,26 +566,59 @@ function bmdOf(interceptors: Record<string, number>, id: NationId): Record<strin
 
 const GROUND: ReadonlySet<FormationKind> = new Set(['maneuver', 'artillery', 'air_defense', 'missile', 'logistics']);
 
+/** A ground formation that marches and can be shipped or flown: not an air unit filed under logistics, such as an airlift wing. */
+function transportable(catalog: Catalog, f: Formation): boolean {
+  if (!GROUND.has(f.kind)) return false;
+  return !Object.entries(f.equipment).some(([pid, n]) => n > 0 && catalog.platforms.get(pid as PlatformId)?.domain === 'air');
+}
+
+function deployView(world: World, map: GameMap, catalog: Catalog, f: Formation): DeployView {
+  let sealiftGroups = 0, sealiftSlots = 0;
+  for (const g of Object.values(world.formations)) {
+    if (g.nation !== f.nation || g.status !== 'active' || g.kind !== 'surface_group') continue;
+    const comp = compose(g, catalog);
+    if (!isSealift(comp)) continue;
+    sealiftGroups++;
+    sealiftSlots += comp.vehicleLift;
+  }
+  const t = f.order.target;
+  return {
+    airPortable: airPortable(catalog, f),
+    airTons: airTons(catalog, f),
+    airliftTonsPerDay: airliftTonsPerDay(world, catalog, f.nation),
+    deckSlots: deckSlots(catalog, f),
+    sealiftGroups,
+    sealiftSlots,
+    atWar: enemiesOf(world, f.nation).length > 0,
+    deploying: f.status === 'active' && f.order.posture === 'move' && t !== undefined && overseas(map, f.node, t)
+      ? { mode: liftMode(world, catalog, f), target: t, waiting: awaitingLift(map, f), flownTons: world.slices.land?.airlifted[f.id] ?? 0 }
+      : null,
+  };
+}
+
 function formationDetail(world: World, map: GameMap, catalog: Catalog, f: Formation): FormationDetail {
   const flow = world.slices.logistics?.networkOf[f.nation] ? supplyFactor(world, map, f.node, f.nation) : undefined;
   const zone = geography(map).portZone.get(f.node);
   const lifts: LiftOption[] = [];
   const aboard: FormationDetail['aboard'] = [];
-  const need = GROUND.has(f.kind) ? liftDemand(f, catalog) : null;
+  const canShip = transportable(catalog, f);
+  const loaded = new Map<FormationId, Formation[]>();
+  for (const g of Object.values(world.formations)) {
+    if (g.status === 'embarked' && g.embarkedOn) (loaded.get(g.embarkedOn) ?? loaded.set(g.embarkedOn, []).get(g.embarkedOn)!).push(g);
+  }
   for (const g of Object.values(world.formations)) {
     if (g.embarkedOn === f.id && g.status === 'embarked') aboard.push({ id: g.id, name: g.name });
-    if (!need || g.nation !== f.nation || g.status !== 'active' || !isNavalFormation(g)) continue;
-    let troops = 0, vehicles = 0;
-    for (const [pid, n] of Object.entries(g.equipment)) {
-      const cap = catalog.platforms.get(pid as PlatformId)?.capacity;
-      troops += n * (cap?.troops ?? 0);
-      vehicles += n * (cap?.vehicles ?? 0);
-    }
-    const load = Math.max(troops ? need.troops / troops : Infinity, need.vehicles ? (vehicles ? need.vehicles / vehicles : Infinity) : 0);
-    // Below a battalion landing team's worth the engine refuses to embark (naval/orders.ts MIN_LANDING_TEAM).
-    if (load <= 10) lifts.push({ id: g.id, name: g.name, node: g.node, share: Math.min(1, 1 / load), boardNow: zone !== undefined && (g.node === f.node || g.node === zone) });
+    if (!canShip || g.nation !== f.nation || g.status !== 'active' || g.kind !== 'surface_group') continue;
+    const comp = compose(g, catalog);
+    // Amphibious lift only: cargo ships carry strategic deployments on their own (deployView), and carriers carry no troops.
+    if (!comp.troopLift || isSealift(comp)) continue;
+    const share = liftShare(catalog, f, comp);
+    const room = Math.max(0, 1 - (loaded.get(g.id) ?? []).reduce((a, e) => a + liftShare(catalog, e, comp), 0));
+    // Below a battalion landing team's worth the engine refuses to embark (naval/orders.ts boardable).
+    if (!Number.isFinite(share) || !boardable(room, share)) continue;
+    lifts.push({ id: g.id, name: g.name, node: g.node, share: Math.min(1, room / share), boardNow: zone !== undefined && (g.node === f.node || g.node === zone) });
   }
-  if (need && zone !== undefined) lifts.sort((a, b) => Number(b.boardNow) - Number(a.boardNow) || map.distanceKm(f.node, a.node) - map.distanceKm(f.node, b.node));
+  if (zone !== undefined) lifts.sort((a, b) => Number(b.boardNow) - Number(a.boardNow) || map.distanceKm(f.node, a.node) - map.distanceKm(f.node, b.node));
   else lifts.sort((a, b) => map.distanceKm(f.node, a.node) - map.distanceKm(f.node, b.node));
   return {
     formation: f,
@@ -548,6 +629,7 @@ function formationDetail(world: World, map: GameMap, catalog: Catalog, f: Format
     portZone: zone ?? null,
     lifts,
     aboard,
+    deploy: canShip ? deployView(world, map, catalog, f) : null,
   };
 }
 
