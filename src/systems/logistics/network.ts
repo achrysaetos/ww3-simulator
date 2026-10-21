@@ -10,7 +10,7 @@ import {
  * plus every bloc partner it is not at war with. Nations with the same membership
  * share one computed network, so NATO costs one search, not thirty.
  */
-export function networkMembers(world: World, enemies: ReadonlyMap<NationId, readonly NationId[]>): (nation: NationId) => NationId[] {
+export function networkMembers(world: World, enemies: ReadonlyMap<NationId, ReadonlySet<NationId>>): (nation: NationId) => NationId[] {
   const byBloc = new Map<string, NationId[]>();
   for (const id in world.nations) {
     const other = world.nations[id as NationId];
@@ -30,7 +30,7 @@ export function networkMembers(world: World, enemies: ReadonlyMap<NationId, read
     }
     const foes = enemies.get(nation);
     if (!foes && (blocs.length === 0 || partners.includes(nation))) return blocs.length ? partners : [nation];
-    const out = partners.filter((o) => o !== nation && !foes?.includes(o));
+    const out = partners.filter((o) => o !== nation && !foes?.has(o));
     out.push(nation);
     return out.sort();
   };
@@ -550,43 +550,36 @@ export class NetworkSearch {
       this.heapLive = w.heap.size;
     }
     for (const n of this.blocked) w.blocked[n] = 0;
-    [this.heapIds, this.heapKeys, this.heapSize] = w.heap.save(this.heapIds, this.heapKeys);
+    [this.heapIds, this.heapKeys, this.heapSize] = w.heap.save();
   }
 }
 
 /** Binary max-heap over (node, key) with typed storage; stale entries are skipped by the caller. */
 class MaxHeap {
-  private ids = new Int32Array(1024);
-  private keys = new Float64Array(1024);
+  private ids: Int32Array = NO_I32;
+  private keys: Float64Array = NO_F64;
   size = 0;
   topKey(): number {
     return this.keys[0];
   }
-  /** Takes over a saved heap's entries in the same layout, so pops come out in the same order. */
+  /** Takes over a saved heap's storage, entries in the same layout, so pops come out in the same order. */
   load(ids: Int32Array, keys: Float64Array, size: number): void {
-    if (this.ids.length < size) {
-      this.ids = new Int32Array(size * 2);
-      this.keys = new Float64Array(size * 2);
-    }
-    this.ids.set(ids.subarray(0, size));
-    this.keys.set(keys.subarray(0, size));
+    this.ids = ids;
+    this.keys = keys;
     this.size = size;
   }
-  /** Copies the entries out, into `ids`/`keys` when they are large enough, and empties the heap. */
-  save(ids: Int32Array, keys: Float64Array): [Int32Array, Float64Array, number] {
-    const size = this.size;
-    if (ids.length < size) {
-      ids = new Int32Array(size + (size >> 1) + 16);
-      keys = new Float64Array(ids.length);
-    }
-    ids.set(this.ids.subarray(0, size));
-    keys.set(this.keys.subarray(0, size));
+  /** Hands the storage back, grown if pushes outran it, and empties the heap. */
+  save(): [Int32Array, Float64Array, number] {
+    const out: [Int32Array, Float64Array, number] = [this.ids, this.keys, this.size];
+    this.ids = NO_I32;
+    this.keys = NO_F64;
     this.size = 0;
-    return [ids, keys, size];
+    return out;
   }
   push(id: number, key: number) {
     if (this.size === this.ids.length) {
-      const ids = new Int32Array(this.size * 2), keys = new Float64Array(this.size * 2);
+      const grown = Math.max(1024, this.size * 2);
+      const ids = new Int32Array(grown), keys = new Float64Array(grown);
       ids.set(this.ids);
       keys.set(this.keys);
       this.ids = ids;

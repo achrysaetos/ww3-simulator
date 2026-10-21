@@ -1,17 +1,12 @@
 import type { GameMap } from '../../core/map';
-import { relationKey } from '../../core/engine';
+import { hostility, relationKey } from '../../core/engine';
 import type { NationId, World } from '../../core/types';
 import type { Assessment } from './types';
 
-/** Who is at war with whom, from one pass over relations. */
+/** Who is at war with whom: a copy of the tick's hostility index, so a caller may keep it past a declaration. */
 export function enemyMap(world: World): Map<NationId, Set<NationId>> {
   const out = new Map<NationId, Set<NationId>>();
-  for (const [k, r] of Object.entries(world.relations)) {
-    if (!r.atWar) continue;
-    const [a, b] = k.split('|') as NationId[];
-    (out.get(a) ?? out.set(a, new Set()).get(a)!).add(b);
-    (out.get(b) ?? out.set(b, new Set()).get(b)!).add(a);
-  }
+  for (const [n, foes] of hostility(world).foes) out.set(n, new Set(foes));
   return out;
 }
 

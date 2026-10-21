@@ -1,4 +1,4 @@
-import { atWar, relation, relationKey, relationMut, type SimContext } from '../../core/engine';
+import { atWar, relation, relationKey, relationMut, setAtWar, type SimContext } from '../../core/engine';
 import { ESCALATION, type EscalationLevel, type NationId, type World } from '../../core/types';
 import { clearTreatyAnswer, delegated, treatyAnswer } from '../orders';
 import { neighbours } from './assess';
@@ -36,8 +36,7 @@ export function enterWar(world: World, s: DiplomacyState, n: NationId, rally: ke
 
 function openHostilities(world: World, ctx: SimContext, by: NationId, on: NationId, reason: string): void {
   if (atWar(world, by, on)) return;
-  const r = relationMut(world, by, on);
-  r.atWar = true;
+  const r = setAtWar(world, by, on, true);
   r.warSince = world.tick;
   r.opinion = Math.min(r.opinion, -60);
   ctx.emit({ type: 'war_declared', tick: world.tick, by, on, reason });
@@ -291,8 +290,7 @@ function meanOpinion(world: World, n: NationId, side: NationId[]): number {
 /** End hostilities between a and b; drop nations from wars once they fight no one on the other side. */
 export function makePeace(world: World, ctx: SimContext, s: DiplomacyState, a: NationId, b: NationId, terms: string): void {
   if (!atWar(world, a, b)) return;
-  const r = relationMut(world, a, b);
-  r.atWar = false;
+  const r = setAtWar(world, a, b, false);
   r.escalation = 'crisis';
   r.warSince = undefined;
   delete s.offers[relationKey(a, b)];

@@ -1,3 +1,4 @@
+import { hostility } from '../../core/engine';
 import type { GameMap } from '../../core/map';
 import type { Formation, NationId, World } from '../../core/types';
 import { Controllers, NetworkSearch, networkKey, networkMembers } from './network';
@@ -195,13 +196,7 @@ const sameList = (a: readonly number[] | readonly string[], b: readonly number[]
  */
 export function refreshNetworks(world: World, map: GameMap, s: NetworkState, forces: Formation[]): void {
   const { controllers, byKey } = searchesOf(s, map);
-  const enemies = new Map<NationId, NationId[]>();
-  for (const k in world.relations) {
-    if (!world.relations[k].atWar) continue;
-    const [a, b] = k.split('|') as NationId[];
-    (enemies.get(a) ?? enemies.set(a, []).get(a)!).push(b);
-    (enemies.get(b) ?? enemies.set(b, []).get(b)!).push(a);
-  }
+  const enemies = hostility(world).foes;
   const demand = new Set<NationId>(enemies.keys());
   // Land forces on ground another nation holds: the only ones that can block a network's supply.
   const intruders: Formation[] = [];
@@ -216,6 +211,12 @@ export function refreshNetworks(world: World, map: GameMap, s: NetworkState, for
   for (const f of forces) {
     const here = landKinds.has(f.kind) ? strength.get(f.node) : undefined;
     if (here) here.set(f.nation, (here.get(f.nation) ?? 0) + f.personnel);
+  }
+  // Only a network whose member holds an intruded cell can lose it, so each network reads just its members' cells.
+  const intrudedBy = new Map<NationId, number[]>();
+  for (const node of strength.keys()) {
+    const holder = world.control[node];
+    if (holder) (intrudedBy.get(holder) ?? intrudedBy.set(holder, []).get(holder)!).push(node);
   }
 
   const networkOf: Record<NationId, string> = {};
@@ -248,13 +249,12 @@ export function refreshNetworks(world: World, map: GameMap, s: NetworkState, for
     for (const m of members) for (const e of enemies.get(m) ?? []) if (!memberSet.has(e)) foeSet.add(e);
     const foes = [...foeSet].sort();
     const occupied: number[] = [];
-    for (const [node, here] of strength) {
-      const holder = world.control[node];
-      if (!holder || !memberSet.has(holder)) continue;
-      let foe = 0, own = 0;
-      for (const [n, p] of here) if (foeSet.has(n)) foe += p; else if (memberSet.has(n)) own += p;
-      if (foe > own) occupied.push(node);
-    }
+    for (const m of members)
+      for (const node of intrudedBy.get(m) ?? []) {
+        let foe = 0, own = 0;
+        for (const [n, p] of strength.get(node)!) if (foeSet.has(n)) foe += p; else if (memberSet.has(n)) own += p;
+        if (foe > own) occupied.push(node);
+      }
     occupied.sort((a, b) => a - b);
     const inputs = (next[key] = { members, foes, occupied });
     const net = known.get(key);
