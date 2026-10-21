@@ -18,6 +18,42 @@ import { AIRFRAME, DRONE_SITE_LAUNCHES_PER_DAY, isRoundOnRail, LAUNCHER, MOBILE_
 export interface AirSlice {
   /** Runway capacity per airbase node after cratering, 0..1; absent = intact. */
   runway: Record<number, number>;
+  /** Each attacker's battle damage assessment of what it aimed at, by aimKey; absent in older saves. */
+  bda?: Record<NationId, Record<string, Assessment>>;
+}
+
+/** What a shooter's last raids on one aim achieved, as its sensors and reports show it. */
+export interface Assessment {
+  /** Tick of the last raid. */
+  tick: number;
+  /** Raids in a row, up to the last, that left nothing destroyed or damaged. */
+  futile: number;
+}
+
+/**
+ * Joint targeting (JP 3-60) re-attacks an aim only when assessment shows the effect was not
+ * achieved and another strike is likely to achieve it. Two raids in a row that all but vanish
+ * into the defences (Taiwan's HF-2E salvos on Shanghai; Russia's piecemeal 2022 strikes before
+ * it massed them) end the mission; the aim is offered again after REASSESS_DAYS, when stocks of
+ * interceptors may have run down (judgment).
+ */
+export const BDA = { futileRaids: 2, reassessDays: 3 };
+
+/** The key a strike's aim is assessed under: the formation it aims at, else the cell. */
+export function aimKey(target: NodeId, formation?: FormationId): string {
+  return formation ?? `n${target}`;
+}
+
+/** Whether `nation`'s assessment of an aim says to stop striking it now. */
+export function futileAim(world: World, nation: NationId, key: string, since = -Infinity): boolean {
+  const a = world.slices.air?.bda?.[nation]?.[key];
+  return !!a && a.futile >= BDA.futileRaids && a.tick >= since && ((world.tick - a.tick) * world.dtHours) / 24 < BDA.reassessDays;
+}
+
+function assess(world: World, slice: AirSlice, nation: NationId, key: string, effective: boolean): void {
+  const mine = ((slice.bda ??= {})[nation] ??= {});
+  const prior = mine[key]?.futile ?? 0;
+  mine[key] = { tick: world.tick, futile: effective ? 0 : prior + 1 };
 }
 
 /** Sorties (aircraft) or launches (ground launchers) available this tick, and how far the carrier itself goes. */
@@ -168,6 +204,7 @@ export function resolveStrikes(world: World, ctx: SimContext, pic: AirPicture, s
   const raids = new Map<string, Package[]>();
   for (const f of Object.values(world.formations)) {
     if (f.status !== 'active' || f.order.posture !== 'strike' || !hostileTarget(world, pic, f)) continue;
+    if (futileAim(world, f.nation, aimKey(f.order.target!, f.order.targetFormation), f.order.issuedTick)) continue;
     const p = planPackage(world, ctx, pic, f);
     if (!p) continue;
     const key = `${f.order.target}|${f.nation}`;
@@ -249,12 +286,13 @@ function resolveRaid(world: World, ctx: SimContext, pic: AirPicture, slice: AirS
   const all = pkgs.flatMap((p) => (p.strike && p.strike.weapons > 0 ? [{ f: p.f, ...p.strike }] : []));
   const live = all.filter((p) => p.targetClass !== 'ship');
   for (const p of live) p.f.magazine[p.munition.id] -= p.weapons;
-  strikeShips(world, ctx, pic, target, attacker, all.filter((p) => p.targetClass === 'ship'));
+  strikeShips(world, ctx, pic, slice, target, attacker, all.filter((p) => p.targetClass === 'ship'));
   const streams: RaidStream[] = live.map((p) => ({ munition: p.munition, count: p.weapons, overflightKm: overflightKm(world, ctx, pic, p.f.node, target, attacker) }));
   const leaked = defendRaid(world, ctx, pic, target, attacker, streams);
   live.forEach((p, i) => {
     const flightMin = nodeDistance(ctx, p.f.node, target) / (Math.max(0.05, p.munition.speedMach) * MACH_KM_PER_MIN);
-    const damage = applyEffect(world, ctx, pic, slice, target, attacker, p.munition, p.targetClass, leaked[i], tally, flightMin, p.f.order.targetFormation);
+    const { damage, effective } = applyEffect(world, ctx, pic, slice, target, attacker, p.munition, p.targetClass, leaked[i], tally, flightMin, p.f.order.targetFormation);
+    assess(world, slice, attacker, aimKey(target, p.f.order.targetFormation), effective);
     ctx.emit({ type: 'strike', tick: world.tick, by: attacker, munition: p.munition.id, fired: p.weapons, intercepted: p.weapons - leaked[i], target, damage });
   });
   emitBattle(world, ctx, target, attacker, world.control[target] || attacker, tally);
@@ -268,7 +306,7 @@ function resolveRaid(world: World, ctx: SimContext, pic: AirPicture, slice: AirS
  * the time the weapon arrives (see naval ANTISHIP_KINDS). With nothing to hit, the shooter
  * holds its rounds.
  */
-function strikeShips(world: World, ctx: SimContext, pic: AirPicture, node: NodeId, attacker: NationId, pkgs: { f: Formation; munition: Munition; weapons: number }[]): void {
+function strikeShips(world: World, ctx: SimContext, pic: AirPicture, slice: AirSlice, node: NodeId, attacker: NationId, pkgs: { f: Formation; munition: Munition; weapons: number }[]): void {
   const salvos = new Map<string, { target: Formation; munition: Munition; count: number }>();
   for (const p of pkgs) {
     const target = shipTarget(world, ctx, pic, node, attacker, p.f.order.targetFormation);
@@ -280,7 +318,7 @@ function strikeShips(world: World, ctx: SimContext, pic: AirPicture, node: NodeI
     if (s) s.count += p.weapons;
     else salvos.set(key, { target, munition: p.munition, count: p.weapons });
   }
-  for (const s of salvos.values()) strikeNavalGroup(world, ctx, attacker, s.munition.id, s.count, s.target.id);
+  for (const s of salvos.values()) assess(world, slice, attacker, aimKey(node, s.target.id), !!strikeNavalGroup(world, ctx, attacker, s.munition.id, s.count, s.target.id)?.hits.length);
 }
 
 /** The aimed surface group if it is still at the node, else the most valuable hostile surface group there. */
@@ -373,18 +411,19 @@ function victims(ctx: SimContext, pic: AirPicture, target: NodeId, attacker: Nat
   return out;
 }
 
-/** Apply the weapons that got through. Returns a short damage report for the strike event. */
-function applyEffect(world: World, ctx: SimContext, pic: AirPicture, slice: AirSlice, target: NodeId, attacker: NationId, m: Munition, tc: TargetClass, hits: number, tally: LossTally, flightMin: number, aimed: FormationId | undefined): string {
-  if (hits <= 0) return 'no hits';
+/** Apply the weapons that got through. Returns a short damage report for the strike event, and whether anything was destroyed or damaged. */
+function applyEffect(world: World, ctx: SimContext, pic: AirPicture, slice: AirSlice, target: NodeId, attacker: NationId, m: Munition, tc: TargetClass, hits: number, tally: LossTally, flightMin: number, aimed: FormationId | undefined): { damage: string; effective: boolean } {
+  if (hits <= 0) return { damage: 'no hits', effective: false };
   if (tc === 'structure' || tc === 'hardened') {
     const owner = world.control[target];
-    if (!owner || !pic.atWar(owner, attacker)) return 'no hostile infrastructure';
+    if (!owner || !pic.atWar(owner, attacker)) return { damage: 'no hostile infrastructure', effective: false };
     const infra = world.theater.infrastructure;
     const before = infra[target];
     const perHit = TUNING.structurePerHit * effectPk(m, tc) * (m.warheadKg / 450) ** (2 / 3);
     infra[target] = before * (1 - Math.min(0.5, perHit)) ** hits;
-    return `infrastructure ${before.toFixed(3)} -> ${infra[target].toFixed(3)}`;
+    return { damage: `infrastructure ${before.toFixed(3)} -> ${infra[target].toFixed(3)}`, effective: infra[target] < before };
   }
+  let cratered = false;
   let p = effectPk(m, tc) * stillThere(m, tc, flightMin);
   const parts: string[] = [];
   if (tc === 'aircraft') {
@@ -392,6 +431,7 @@ function applyEffect(world: World, ctx: SimContext, pic: AirPicture, slice: AirS
     if (!ctx.map.isSea(target)) {
       const r = slice.runway[target] ?? 1;
       slice.runway[target] = Math.max(0, r * (1 - TUNING.runwayPerHit * (m.pk.structure ?? 0)) ** hits);
+      cratered = slice.runway[target] < r;
       parts.push(`runway ${r.toFixed(2)} -> ${slice.runway[target].toFixed(2)}`);
     }
   }
@@ -414,5 +454,5 @@ function applyEffect(world: World, ctx: SimContext, pic: AirPicture, slice: AirS
   for (const [v, n] of picked) killed[v.pid] = (killed[v.pid] ?? 0) + takeLosses(world, ctx, v.f, v.pid, n, TUNING.damagedShare, tally);
   const list = Object.entries(killed).map(([pid, n]) => `${pid} ${n}`);
   parts.push(list.length ? `hit ${list.join(', ')}` : `no ${tc} targets hit`);
-  return parts.join('; ');
+  return { damage: parts.join('; '), effective: cratered || list.length > 0 };
 }

@@ -135,6 +135,22 @@ describe('integrated air defense', () => {
     expect(t.world.slices.air?.runway?.[kyiv]).toBe(runway);
   });
 
+  it('a strike order whose raids all vanish into the defences stops after two; one that lands keeps striking', () => {
+    const raids = (defended: boolean) => {
+      const t = airWorld(5);
+      t.war('RUS', 'UKR');
+      const kyiv = t.node(...KYIV);
+      if (defended) battery(t, 'UKR', kyiv, { x_patriot: 6 });
+      launchers(t, 'RUS', t.node(53.9, 27.6), { x_cruise_tel: 2 }, { posture: 'strike', target: kyiv, targetClass: 'structure' });
+      const s = t.strikes(t.tick(8));
+      return s;
+    };
+    const blocked = raids(true);
+    expect(blocked.every((e) => e.intercepted === e.fired)).toBe(true);
+    expect(blocked.length).toBe(2);
+    expect(raids(false).length).toBeGreaterThan(2);
+  });
+
   it('runs interceptor stocks down until only the counter-drone belt stops drones', () => {
     const t = airWorld();
     t.war('RUS', 'UKR');

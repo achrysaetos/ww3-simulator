@@ -15,7 +15,7 @@ import { AIRFRAME, LAUNCHER, OFFENSIVE_POSTURES, STRIKE_ROLES, TUNING } from './
 
 export { combatRadiusKm, resolveAirBattle, visibility } from './combat';
 export { engagementCycles, interceptSalvo, type SalvoDefense, type SalvoResult, type SalvoThreat, type ShotDoctrine } from './intercept';
-export { dailyRounds, effectPk, type AirSlice } from './strike';
+export { aimKey, dailyRounds, effectPk, futileAim, type AirSlice, type Assessment } from './strike';
 
 declare module '../../core/types' {
   interface Slices {

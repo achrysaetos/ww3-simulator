@@ -4,7 +4,7 @@ import type { Formation, FormationId, FormationKind, Munition, MunitionId, Natio
 import { isOverseas } from '../../data/territories';
 import { HOSTILE_OPINION } from '../diplomacy/escalation';
 import { rung } from '../diplomacy/wars';
-import { dailyRounds, effectPk } from '../air';
+import { aimKey, dailyRounds, effectPk, futileAim } from '../air';
 import { ANTISHIP_KINDS, navalPosition } from '../naval';
 import { isGround, issue } from './forces';
 import type { Plan } from './types';
@@ -156,7 +156,9 @@ export function strikeTargets(p: Plan, battleArea: Set<number>): TargetGrid {
     if (ok === undefined) deep.set(owner, (ok = deepStrikeAllowed(p, owner)));
     return ok && (p.enemies.has(owner) || nearEnemyCapital(p, t.node));
   };
-  return new TargetGrid(out.filter(allowed).sort((a, b) => b.value - a.value || a.node - b.node), map);
+  // Aims recent raids could not touch wait for reassessment (air BDA).
+  const live = (t: StrikeTarget) => !futileAim(p.world, p.nation, aimKey(t.node, t.formation));
+  return new TargetGrid(out.filter((t) => allowed(t) && live(t)).sort((a, b) => b.value - a.value || a.node - b.node), map);
 }
 
 /**
