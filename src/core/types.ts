@@ -345,6 +345,8 @@ export interface World {
   /** Rolling history of notable events. */
   history: SimEvent[];
   nextId: number;
+  /** Overrides of calibration params (src/core/params.ts) in force for this run, by param id. Absent = every default. */
+  params?: Record<string, number>;
   /** Cross-system signals: one system writes each field, several read it. */
   theater: Theater;
   slices: Slices;

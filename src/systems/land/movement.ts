@@ -48,7 +48,7 @@ function edgeKm(world: World, map: GameMap, f: Formation, to: NodeId, km: number
   const holder = world.control[to];
   const hostile = !!holder && atWar(world, f.nation, holder);
   if (hostile && !canSeize(f)) return Infinity;
-  return (km * TERRAIN[map.terrain[to]].moveCost * (hostile ? HOSTILE_GROUND_COST : 1)) / railBoost(world, map, f.nation, to) / groundFactorAt(world, map, to);
+  return (km * TERRAIN[map.terrain[to]].moveCost * (hostile ? HOSTILE_GROUND_COST() : 1)) / railBoost(world, map, f.nation, to) / groundFactorAt(world, map, to);
 }
 
 /**
@@ -110,7 +110,7 @@ function route(world: World, map: GameMap, f: Formation, to: NodeId): NodeId[] |
 function rest(f: Formation, dtDays: number, isolated: boolean, engaged: boolean): void {
   // A unit under assault fights from the holes it has; digging new ones waits for a lull.
   if (engaged) return;
-  if (f.order.posture === 'defend' || f.order.posture === 'reserve') f.entrenchment = Math.min(1, f.entrenchment + ENTRENCH_PER_DAY * dtDays);
+  if (f.order.posture === 'defend' || f.order.posture === 'reserve') f.entrenchment = Math.min(1, f.entrenchment + ENTRENCH_PER_DAY() * dtDays);
   f.fatigue = Math.max(0, f.fatigue - FATIGUE_RECOVERY_PER_DAY * dtDays);
   if (!isolated) f.morale = Math.min(0.9, f.morale + MORALE_RECOVERY_PER_DAY * dtDays);
   if (f.status === 'routed' && !isolated && f.morale >= RALLY_MORALE) f.status = 'active';
@@ -131,7 +131,7 @@ export function marchKmPerDay(world: World, catalog: Catalog, f: Formation): num
     speed *= fuelled + (1 - fuelled) * NO_FUEL_SPEED;
   }
   const air = world.theater.airControl[f.node];
-  if (air && atWar(world, f.nation, air.nation)) speed *= 1 - AIR_INTERDICTION * air.level;
+  if (air && atWar(world, f.nation, air.nation)) speed *= 1 - AIR_INTERDICTION() * air.level;
   return speed * MARCH_HOURS_PER_DAY;
 }
 

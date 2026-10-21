@@ -1,4 +1,5 @@
 import type { FormationKind, PlatformClass, TargetClass, Terrain } from '../../core/types';
+import { defineParam } from '../../core/params';
 
 export interface TerrainProfile {
   /**
@@ -52,23 +53,35 @@ export const DISMOUNTS: ReadonlySet<PlatformClass> = new Set(['infantry', 'atgm'
  * (Dupuy TNDM attacker loss ~1-4%/day for division-level attacks; Ukraine
  * 2023-25, where the defender's dug-in advantage outweighed the attacker's mass).
  */
-export const ENGAGED_HOURS_PER_DAY = 1.5;
+export const ENGAGED_HOURS_PER_DAY = defineParam({ id: 'land.ENGAGED_HOURS_PER_DAY', value: 1.5, range: [1, 2.5], tag: 'judgment',
+  source: 'Tuned so a 3:1 assault on a dug-in defender costs 2-4% of equipment a day (Dupuy TNDM attacker loss 1-4%/day; Ukraine 2023-25)',
+  affects: 'ground loss rates' });
 
 /** Target platform count at which area fire reaches nominal effect (~a brigade in a 1-degree cell). Estimate. */
-export const AREA_FIRE_REF_DENSITY = 400;
+export const AREA_FIRE_REF_DENSITY = defineParam({ id: 'land.AREA_FIRE_REF_DENSITY', value: 400, range: [200, 800], tag: 'judgment',
+  source: 'Judgment: about a brigade in a 1-degree cell',
+  affects: 'area-fire effect vs dispersion' });
 /** Weight of the linear law in aimed fire (0 = pure square, 1 = pure linear). Tuned with ENGAGED_HOURS_PER_DAY. */
-export const DIRECT_DENSITY_EXP = 0.5;
+export const DIRECT_DENSITY_EXP = defineParam({ id: 'land.DIRECT_DENSITY_EXP', value: 0.5, range: [0.25, 0.75], tag: 'judgment',
+  source: 'Judgment between Lanchester square (0) and linear (1) laws, tuned with ENGAGED_HOURS_PER_DAY',
+  affects: 'aimed-fire losses vs density' });
 
 /**
  * Close air support multiplier at full air control. Estimate: 1991 GWAPS credits
  * the air campaign with the bulk of Iraqi armour attrition before G-day; in
  * battle CAS roughly doubles a force's effective fire.
  */
-export const CAS_BONUS = 1.0;
+export const CAS_BONUS = defineParam({ id: 'land.CAS_BONUS', value: 1.0, range: [0.5, 1.5], tag: 'estimated',
+  source: '1991 GWAPS: air attrited most Iraqi armour before G-day; CAS roughly doubles effective fire',
+  affects: 'ground fire under friendly air control' });
 /** Fire lost under hostile air control (suppression, disrupted resupply and command). */
-export const AIR_SUPPRESSION = 0.35;
+export const AIR_SUPPRESSION = defineParam({ id: 'land.AIR_SUPPRESSION', value: 0.35, range: [0.2, 0.5], tag: 'judgment',
+  source: 'Judgment: fire lost to suppression, disrupted resupply and command under hostile air',
+  affects: 'ground fire under enemy air control' });
 /** Movement lost under hostile air control: daylight movement in Normandy 1944 was near-impossible for the Germans. */
-export const AIR_INTERDICTION = 0.6;
+export const AIR_INTERDICTION = defineParam({ id: 'land.AIR_INTERDICTION', value: 0.6, range: [0.4, 0.8], tag: 'estimated',
+  source: 'Normandy 1944: German daylight movement near-impossible under Allied air',
+  affects: 'movement under enemy air control' });
 
 /** Below this ammo fraction a unit rations fire linearly. */
 export const AMMO_RATION_BELOW = 0.3;
@@ -79,7 +92,9 @@ export const AMMO_RATION_BELOW = 0.3;
  * tonnage. At 3 days the rest of the army drew twice the shells' tonnage in ukraine-2026 and
  * drained Ukraine's depots by D+180; at 10 it draws about two-thirds of it (judgment).
  */
-export const AMMO_DAYS_INTENSE = 10;
+export const AMMO_DAYS_INTENSE = defineParam({ id: 'land.AMMO_DAYS_INTENSE', value: 10, range: [3, 15], tag: 'judgment',
+  source: 'FM 4-0 basic load lasts 3-5 days of mobile combat; 10 keeps non-gun ammunition at ~2/3 of shell tonnage on a positional front (judgment)',
+  affects: 'ammunition burn and depot drain' });
 /** Gun artillery, which fires rounds at SHELLS_PER_TUBE_DAY rather than spending a basic load. */
 export const TUBE_ARTILLERY: ReadonlySet<PlatformClass> = new Set(['sp_artillery', 'towed_artillery']);
 /** A complete 152/155 mm round with charge and packaging, tons (matches the industry model's shell weight). */
@@ -92,14 +107,22 @@ export const SHELL_TONS = 0.06;
  * held line. A gun's basic load here is only 15-30 rounds (core/forces.ts sizes it
  * from firepower), so higher rates empty it before logistics can refill it.
  */
-export const SHELLS_PER_TUBE_DAY = 12;
+export const SHELLS_PER_TUBE_DAY = defineParam({ id: 'land.SHELLS_PER_TUBE_DAY', value: 12, range: [8, 16], tag: 'estimated',
+  source: 'Russia fired 10-20k rounds/day from 4-5k guns in 2024-25 (RUSI, ISW, Estonian intelligence)',
+  affects: 'artillery fire and shell consumption' });
 /** Fraction of full-operation fuel burn spent per hour of combat (manoeuvre, idling). */
 export const COMBAT_FUEL_DUTY = 0.25;
 
 /** Cumulative loss fraction that forces a retreat; Dupuy observed breakpoints 20-40% depending on quality. */
-export const RETREAT_LOSS = 0.35;
-export const RETREAT_MORALE = 0.3;
-export const ROUT_MORALE = 0.12;
+export const RETREAT_LOSS = defineParam({ id: 'land.RETREAT_LOSS', value: 0.35, range: [0.2, 0.4], tag: 'observed',
+  source: 'Dupuy: unit breakpoints at 20-40% cumulative loss',
+  affects: 'when units break off' });
+export const RETREAT_MORALE = defineParam({ id: 'land.RETREAT_MORALE', value: 0.3, range: [0.2, 0.4], tag: 'judgment',
+  source: 'Judgment: morale at which a unit falls back',
+  affects: 'when units break off' });
+export const ROUT_MORALE = defineParam({ id: 'land.ROUT_MORALE', value: 0.12, range: [0.06, 0.2], tag: 'judgment',
+  source: 'Judgment: morale at which a retreat becomes a rout',
+  affects: 'breakthroughs' });
 export const RALLY_MORALE = 0.4;
 /** Share of equipment abandoned by a routed unit as it flees (captured or scuttled). */
 export const ROUT_ABANDON = 0.05;
@@ -114,12 +137,16 @@ export const MARCH_SPEED_FACTOR = 0.5;
 export const RAIL_BOOST_MAX = 2;
 export const RAIL_KM_FULL = 300;
 /** Advance into enemy-held ground is slower: reconnaissance, obstacles, demolitions. */
-export const HOSTILE_GROUND_COST = 2;
+export const HOSTILE_GROUND_COST = defineParam({ id: 'land.HOSTILE_GROUND_COST', value: 2, range: [1.5, 3], tag: 'judgment',
+  source: 'Judgment: reconnaissance, obstacles and demolitions slow an advance into enemy ground',
+  affects: 'advance speed' });
 /** Without fuel, vehicles cannot move; troops walk and tow what they can. */
 export const NO_FUEL_SPEED = 0.1;
 
 /** Per-day rates. */
-export const ENTRENCH_PER_DAY = 0.2;
+export const ENTRENCH_PER_DAY = defineParam({ id: 'land.ENTRENCH_PER_DAY', value: 0.2, range: [0.1, 0.35], tag: 'judgment',
+  source: 'Judgment: days to dig a prepared position',
+  affects: 'defender advantage over time' });
 export const FATIGUE_MARCH_PER_DAY = 0.05;
 export const FATIGUE_COMBAT_PER_DAY = 0.15;
 export const FATIGUE_RECOVERY_PER_DAY = 0.1;
@@ -128,13 +155,17 @@ export const MORALE_ISOLATED_PER_DAY = 0.04;
 export const EXPERIENCE_PER_COMBAT_DAY = 0.005;
 
 /** Entrenchment at 1 adds Dupuy's "fortified" posture factor (1.6) on top of terrain. */
-export const ENTRENCH_MAX_BONUS = 0.6;
+export const ENTRENCH_MAX_BONUS = defineParam({ id: 'land.ENTRENCH_MAX_BONUS', value: 0.6, range: [0.4, 0.8], tag: 'estimated',
+  source: 'Dupuy fortified posture factor 1.6 on top of terrain',
+  affects: 'defender advantage' });
 
 /** Opinion above which a nation lets another's troops through. */
 export const ALLIED_OPINION = 50;
 
 /** Daily surrender hazard per day encircled, scaled by (1 - morale). Stalingrad 6th Army held ~70 days; Ilovaisk/Debaltseve pockets collapsed in 1-3 weeks. */
-export const SURRENDER_HAZARD_PER_DAY = 0.01;
+export const SURRENDER_HAZARD_PER_DAY = defineParam({ id: 'land.SURRENDER_HAZARD_PER_DAY', value: 0.01, range: [0.005, 0.03], tag: 'estimated',
+  source: 'Stalingrad 6th Army held ~70 days; Ilovaisk/Debaltseve pockets collapsed in 1-3 weeks',
+  affects: 'pocket surrender' });
 /** A fresh pocket holds on its basic load for about a week before surrender becomes possible. */
 export const SURRENDER_GRACE_DAYS = 7;
 
@@ -144,7 +175,9 @@ export const SURRENDER_GRACE_DAYS = 7;
  * assault's engaged hours. Estimate, tuned so a quiet 2024-25 Ukrainian front
  * sector costs each side a few tenths of a percent of its strength per day.
  */
-export const POSITIONAL_INTENSITY = 0.25;
+export const POSITIONAL_INTENSITY = defineParam({ id: 'land.POSITIONAL_INTENSITY', value: 0.25, range: [0.15, 0.4], tag: 'judgment',
+  source: 'Tuned so a quiet 2024-25 Ukrainian sector costs a few tenths of a percent of strength a day',
+  affects: 'positional attrition and shell use' });
 
 /**
  * Advance across a contested cell, averaged over the cell's ~100 km width.
@@ -153,20 +186,28 @@ export const POSITIONAL_INTENSITY = 0.25;
  * a year along a ~1,000 km front (ISW, DeepState), i.e. a few km of depth a
  * year averaged over the front, and 0.1-1 km/day on the active axes.
  */
-export const ATTRITION_KM_PER_DAY = 0.15;
-export const ATTRITION_MAX_KM_PER_DAY = 1;
+export const ATTRITION_KM_PER_DAY = defineParam({ id: 'land.ATTRITION_KM_PER_DAY', value: 0.15, range: [0.08, 0.3], tag: 'judgment',
+  source: 'Front law, fitted to Ukraine only: Russia took 3,500-5,000 km2/yr on ~1,000 km of front in 2024-25 (ISW, DeepState)',
+  affects: 'attritional advance rate' });
+export const ATTRITION_MAX_KM_PER_DAY = defineParam({ id: 'land.ATTRITION_MAX_KM_PER_DAY', value: 1, range: [0.5, 2], tag: 'estimated',
+  source: '0.1-1 km/day on active axes in 2024-25 (ISW, DeepState)',
+  affects: 'attritional advance rate cap' });
 /**
  * Against a broken (routed) defender: 10-40 km/day, e.g. Kharkiv September 2022
  * (~50 km in 5 days), Kursk August 2024 (~25-30 km in the first days).
  */
-export const BREAKTHROUGH_KM_PER_DAY = 25;
+export const BREAKTHROUGH_KM_PER_DAY = defineParam({ id: 'land.BREAKTHROUGH_KM_PER_DAY', value: 25, range: [10, 40], tag: 'observed',
+  source: 'Kharkiv Sep 2022 ~50 km in 5 days; Kursk Aug 2024 25-30 km in the first days',
+  affects: 'advance against a routed defender' });
 /**
  * Through an empty cell the enemy line next door still covers with drones and
  * artillery: infiltration, not breakthrough. Russia's fastest sustained gains
  * of the war, on the Pokrovsk, Kurakhove and Velyka Novosilka axes in autumn
  * 2024 where Ukrainian lines had thinned, ran 1-4 km/day (ISW, DeepState).
  */
-export const COVERED_KM_PER_DAY = 3;
+export const COVERED_KM_PER_DAY = defineParam({ id: 'land.COVERED_KM_PER_DAY', value: 3, range: [1, 4], tag: 'observed',
+  source: 'Pokrovsk, Kurakhove, Velyka Novosilka axes autumn 2024: 1-4 km/day (ISW, DeepState)',
+  affects: 'infiltration through thin lines' });
 
 /**
  * Share of a formation's platforms of each class that stand where the enemy can
@@ -199,7 +240,9 @@ export const exposureOf = (c: PlatformClass): number => EXPOSURE[c] ?? 1;
  * ratio Western estimates give for Russian assaults on Avdiivka, Bakhmut and
  * Pokrovsk in 2023-25 (UK MoD; RUSI "Meatgrinder", 2023).
  */
-export const ASSAULT_EXPOSURE = 2;
+export const ASSAULT_EXPOSURE = defineParam({ id: 'land.ASSAULT_EXPOSURE', value: 2, range: [1.5, 3], tag: 'judgment',
+  source: 'Tuned so a 3:1 assault on a prepared line costs the attacker 2-3x the defender (UK MoD; RUSI Meatgrinder 2023)',
+  affects: 'attacker casualties' });
 /**
  * Share of an assaulting force inside the kill zone at once when it attacks a fully
  * prepared line; the rest waits out of drone and artillery reach while its guns fire.
@@ -211,28 +254,38 @@ export const ASSAULT_EXPOSURE = 2;
  * the front supplied so that Russia loses ~1,000-1,700 men and 5-8 tanks a day
  * (UK MoD, Oryx) while firing 10-20k shells.
  */
-export const KILL_ZONE_COMMIT = 0.3;
+export const KILL_ZONE_COMMIT = defineParam({ id: 'land.KILL_ZONE_COMMIT', value: 0.3, range: [0.15, 0.6], tag: 'judgment',
+  source: 'Drone-era small-group assaults (RUSI, Watling and Reynolds 2025); tuned to 1,000-1,700 Russian casualties a day (UK MoD, Oryx)',
+  affects: 'assault mass and casualties' });
 /**
  * Entrenchment a shaken defender must have dug before it can give up a line for the
  * next one: two and a half days of digging at ENTRENCH_PER_DAY. Below it there is no
  * prepared line to give up. Judgment: Ukrainian withdrawals in 2023-25 came every
  * few days to weeks on an active axis, not continuously (Avdiivka, Vuhledar, Pokrovsk).
  */
-export const NEXT_LINE_ENTRENCHMENT = 0.5;
+export const NEXT_LINE_ENTRENCHMENT = defineParam({ id: 'land.NEXT_LINE_ENTRENCHMENT', value: 0.5, range: [0.3, 0.8], tag: 'judgment',
+  source: 'Judgment: Ukrainian withdrawals in 2023-25 came every few days to weeks on an active axis',
+  affects: 'defender withdrawals' });
 /** Depth given up when a defender falls back to its next prepared line: 2-5 km per withdrawal in 2023-25 (Avdiivka, Vuhledar). */
-export const WITHDRAWAL_KM = 3;
+export const WITHDRAWAL_KM = defineParam({ id: 'land.WITHDRAWAL_KM', value: 3, range: [2, 5], tag: 'observed',
+  source: '2-5 km per withdrawal in 2023-25 (Avdiivka, Vuhledar)',
+  affects: 'ground given per withdrawal' });
 /**
  * Local superiority at which an attacker assaults along the whole cell; below
  * it, assault intensity scales down in proportion (attacks on a few axes, the
  * rest of the line held). The 3:1 planning ratio (FM 3-90; Mearsheimer 1989).
  */
-export const DELIBERATE_ASSAULT_RATIO = 3;
+export const DELIBERATE_ASSAULT_RATIO = defineParam({ id: 'land.DELIBERATE_ASSAULT_RATIO', value: 3, range: [2, 4], tag: 'contested',
+  source: 'The 3:1 rule (FM 3-90; Mearsheimer 1989) against its critics (Epstein 1989; Dupuy)',
+  affects: 'assault intensity and breakthroughs' });
 /**
  * Exposed platforms that can bring direct fire to bear along one cell's
  * ~100 km front: a mechanised brigade (~300 platforms) holds or attacks on
  * roughly 10 km (FM 3-90; Ukrainian brigades held 10-20 km sectors in 2024).
  */
-export const FRONTAGE_PLATFORMS = 3000;
+export const FRONTAGE_PLATFORMS = defineParam({ id: 'land.FRONTAGE_PLATFORMS', value: 3000, range: [2000, 4500], tag: 'estimated',
+  source: 'A mechanised brigade holds ~10 km (FM 3-90); Ukrainian brigades held 10-20 km in 2024',
+  affects: 'how thin a line is' });
 /** Front length FRONTAGE_PLATFORMS holds: a 1-degree cell's ~100 km. Smaller cells (islands, city-states) need proportionally fewer. */
 export const CELL_FRONT_KM = 100;
 /**
@@ -242,4 +295,6 @@ export const CELL_FRONT_KM = 100;
  * three days (AMMO_DAYS_INTENSE): a thin, dug-in NATO line in baltic-2027 gives up a few cells
  * in three weeks without collapsing, against ~1 at the old 1 km/day cap.
  */
-export const HASTY_BARRIER = 0.7;
+export const HASTY_BARRIER = defineParam({ id: 'land.HASTY_BARRIER', value: 0.7, range: [0.5, 0.9], tag: 'judgment',
+  source: 'Judgment: FM 3-90 hasty barrier plans; tuned to a thin dug-in NATO line in baltic-2027',
+  affects: 'advance through thin lines' });

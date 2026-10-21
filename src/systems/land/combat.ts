@@ -103,10 +103,10 @@ function summarize(world: World, catalog: Catalog, side: Side, node: NodeId, clo
   let total = 0;
   for (const c of TARGET_CLASSES) total += count[c];
   // Only so many direct-fire weapons can see the enemy along one cell's front; the rest wait in depth. Massed artillery is not so limited.
-  const inLine = Math.min(1, FRONTAGE_PLATFORMS / Math.max(1, total));
+  const inLine = Math.min(1, FRONTAGE_PLATFORMS() / Math.max(1, total));
   for (const c of TARGET_CLASSES) direct[c] *= inLine;
   const ac = world.theater.airControl[node];
-  const air = !ac ? 1 : allied(world, side.nation, ac.nation) ? 1 + CAS_BONUS * ac.level : atWar(world, side.nation, ac.nation) ? 1 - AIR_SUPPRESSION * ac.level : 1;
+  const air = !ac ? 1 : allied(world, side.nation, ac.nation) ? 1 + CAS_BONUS() * ac.level : atWar(world, side.nation, ac.nation) ? 1 - AIR_SUPPRESSION() * ac.level : 1;
   const closePenalty = closed && total > 0 && count.armor / total > COMBINED_ARMS.armorShare && count.infantry / total < COMBINED_ARMS.infantryShare;
   return { count, total, direct, indirect, closePenalty, air };
 }
@@ -122,8 +122,8 @@ function summarize(world: World, catalog: Catalog, side: Side, node: NodeId, clo
 function expectedKills(s: SideState, t: SideState, hours: number, fireMult: number, vulnerability: number): ClassVector {
   const out = zeros();
   if (t.total <= 0) return out;
-  const density = Math.min(4, Math.max(0.25, t.total / AREA_FIRE_REF_DENSITY));
-  const directDensity = density ** DIRECT_DENSITY_EXP;
+  const density = Math.min(4, Math.max(0.25, t.total / AREA_FIRE_REF_DENSITY()));
+  const directDensity = density ** DIRECT_DENSITY_EXP();
   const mult = hours * fireMult * s.air * (s.closePenalty ? COMBINED_ARMS.fire : 1) * vulnerability * (t.closePenalty ? COMBINED_ARMS.vulnerability : 1);
   for (const c of TARGET_CLASSES) {
     if (!t.count[c]) continue;
@@ -194,8 +194,8 @@ function consume(world: World, catalog: Catalog, f: Formation, dtHours: number):
   // A unit short of ammunition rations fire, and so spends less, the same way it hits less.
   const ration = ammoFactor(f) * dtDays;
   const otherLoad = supplyCapacityOf(catalog, armed).ammo;
-  const fired = Math.min(tubes * SHELLS_PER_TUBE_DAY * ration, Math.max(0, f.supply.ammo) / SHELL_TONS);
-  f.supply.ammo = Math.max(0, f.supply.ammo - fired * SHELL_TONS - (otherLoad * ration) / AMMO_DAYS_INTENSE);
+  const fired = Math.min(tubes * SHELLS_PER_TUBE_DAY() * ration, Math.max(0, f.supply.ammo) / SHELL_TONS);
+  f.supply.ammo = Math.max(0, f.supply.ammo - fired * SHELL_TONS - (otherLoad * ration) / AMMO_DAYS_INTENSE());
   if (fired > 0) {
     const tally = landSlice(world).shellsFired;
     tally[f.nation] = (tally[f.nation] ?? 0) + fired;
@@ -247,7 +247,7 @@ function entrenchmentOf(world: World, fighters: Formation[], node: NodeId): numb
 
 /** Terrain and entrenchment of a side's own ground; half of it is cover (fewer hits taken), half prepared fields of fire. */
 function defensiveEdge(world: World, map: GameMap, fighters: Formation[], node: NodeId): number {
-  return Math.sqrt(TERRAIN[map.terrain[node]].defense * (1 + ENTRENCH_MAX_BONUS * entrenchmentOf(world, fighters, node)));
+  return Math.sqrt(TERRAIN[map.terrain[node]].defense * (1 + ENTRENCH_MAX_BONUS() * entrenchmentOf(world, fighters, node)));
 }
 
 /**
@@ -277,14 +277,14 @@ function resolveBattle(world: World, ctx: SimContext, node: NodeId, att: Side, d
   const a = summarize(world, catalog, att, node, terrain.closed);
   const d = summarize(world, catalog, def, node, terrain.closed);
   // An attacker without a deliberate-assault superiority attacks on a few narrow axes, not along the whole cell.
-  const intensity = how.kind === 'assault' ? Math.min(1, Math.max(POSITIONAL_INTENSITY, fireRatio(a, d) / DELIBERATE_ASSAULT_RATIO)) : POSITIONAL_INTENSITY;
+  const intensity = how.kind === 'assault' ? Math.min(1, Math.max(POSITIONAL_INTENSITY(), fireRatio(a, d) / DELIBERATE_ASSAULT_RATIO())) : POSITIONAL_INTENSITY();
   // Against a prepared line only part of an assaulting force is in the kill zone at once; the rest waits outside it while the guns fire.
-  const committed = how.kind === 'assault' ? 1 - (1 - KILL_ZONE_COMMIT) * entrenchmentOf(world, def.fighters, node) * (1 - airControlOf(world, att.nation, node)) : 1;
-  const hours = (ENGAGED_HOURS_PER_DAY * world.dtHours * intensity * committed) / 24;
+  const committed = how.kind === 'assault' ? 1 - (1 - KILL_ZONE_COMMIT()) * entrenchmentOf(world, def.fighters, node) * (1 - airControlOf(world, att.nation, node)) : 1;
+  const hours = (ENGAGED_HOURS_PER_DAY() * world.dtHours * intensity * committed) / 24;
   const routedVulnerability = (s: Side) => (s.fighters.some((f) => f.status === 'routed') ? 2 : 1);
   const noise = () => Math.exp(rng.normal(0, 0.2));
   const onDef = expectedKills(a, d, hours, attEdge * noise(), routedVulnerability(def) / defEdge);
-  const exposure = how.kind === 'assault' ? 1 + ASSAULT_EXPOSURE * entrenchmentOf(world, def.fighters, node) : 1;
+  const exposure = how.kind === 'assault' ? 1 + ASSAULT_EXPOSURE() * entrenchmentOf(world, def.fighters, node) : 1;
   const onAtt = expectedKills(d, a, hours, defEdge * noise(), (exposure * routedVulnerability(att)) / attEdge);
   const sum = (v: ClassVector) => TARGET_CLASSES.reduce((acc, c) => acc + v[c], 0);
   const exchange = sum(onDef) / Math.max(1, d.total) / Math.max(1e-9, sum(onAtt) / Math.max(1, a.total));
@@ -310,7 +310,7 @@ function resolveBattle(world: World, ctx: SimContext, node: NodeId, att: Side, d
         continue;
       }
       const lossFrac = 1 - left / (slice.baseline[f.id] ?? left);
-      if (f.morale < ROUT_MORALE) {
+      if (f.morale < ROUT_MORALE()) {
         f.status = 'routed';
         for (const pid of Object.keys(f.equipment) as PlatformId[]) {
           const abandoned = rng.binomial(f.equipment[pid], ROUT_ABANDON);
@@ -318,7 +318,7 @@ function resolveBattle(world: World, ctx: SimContext, node: NodeId, att: Side, d
           ledger.losses[pid] = (ledger.losses[pid] ?? 0) + abandoned;
         }
         onRetreat(f);
-      } else if (lossFrac > RETREAT_LOSS || f.morale < RETREAT_MORALE) onRetreat(f);
+      } else if (lossFrac > RETREAT_LOSS() || f.morale < RETREAT_MORALE()) onRetreat(f);
     }
     for (const f of side.support) consume(world, catalog, f, world.dtHours * intensity);
   };
@@ -338,7 +338,7 @@ function resolveBattle(world: World, ctx: SimContext, node: NodeId, att: Side, d
     // One not yet dug in has no line to give up and fights where it stands, so a shaken defender yields once per line rather than every tick.
     settle(def, defLost, ledgers.def, defRate <= attRate, (f) => {
       if (f.status === 'routed') return fallBackFrom(node)(f);
-      if (f.entrenchment < NEXT_LINE_ENTRENCHMENT) return;
+      if (f.entrenchment < NEXT_LINE_ENTRENCHMENT()) return;
       yielded = true;
       f.entrenchment = 0;
       slice.baseline[f.id] = platformCount(f);
@@ -354,7 +354,7 @@ function resolveBattle(world: World, ctx: SimContext, node: NodeId, att: Side, d
     casualties: { [att.nation]: ledgers.att.casualties, [def.nation]: ledgers.def.casualties } as Record<NationId, number>,
     ...(winner ? { winner } : {}),
   });
-  return { exchange, yielded, ratio: fireRatio(a, d), manned: Math.min(1, d.total / (FRONTAGE_PLATFORMS * (cellDepthKm(map, node) / CELL_FRONT_KM))) };
+  return { exchange, yielded, ratio: fireRatio(a, d), manned: Math.min(1, d.total / (FRONTAGE_PLATFORMS() * (cellDepthKm(map, node) / CELL_FRONT_KM))) };
 }
 
 /** Artillery formations in nodes adjacent to the battle, friendly to `nation`, not on the march, not yet firing elsewhere this tick. */
@@ -430,7 +430,7 @@ function advanceRate(world: World, ctx: SimContext, node: NodeId, attackers: For
   if (!movers.length) return 0;
   if (!defenders.length && !cover.length) {
     // Unopposed: a road march through hostile ground (reconnaissance, obstacles, demolitions).
-    return Math.max(...movers.map((f) => marchKmPerDay(world, ctx.catalog, f))) / (HOSTILE_GROUND_COST * moveCost);
+    return Math.max(...movers.map((f) => marchKmPerDay(world, ctx.catalog, f))) / (HOSTILE_GROUND_COST() * moveCost);
   }
   if (!defenders.length) {
     // An empty cell the line next door still covers: infiltration, unless that line is too thin to stop a deliberate assault.
@@ -438,16 +438,16 @@ function advanceRate(world: World, ctx: SimContext, node: NodeId, attackers: For
     const { closed } = TERRAIN[ctx.map.terrain[node]];
     const ratio = fireRatio(summarize(world, ctx.catalog, { nation: movers[0].nation, fighters: movers, support: [] }, node, closed), summarize(world, ctx.catalog, { nation: cover[0].nation, fighters: cover, support: [] }, node, closed));
     const fort = landSlice(world).fortified[node] ?? 0;
-    if (ratio >= DELIBERATE_ASSAULT_RATIO) return ((1 - fort) * BREAKTHROUGH_KM_PER_DAY + fort * ATTRITION_MAX_KM_PER_DAY) / moveCost;
-    return ((1 - fort) * COVERED_KM_PER_DAY) / moveCost;
+    if (ratio >= DELIBERATE_ASSAULT_RATIO()) return ((1 - fort) * BREAKTHROUGH_KM_PER_DAY() + fort * ATTRITION_MAX_KM_PER_DAY()) / moveCost;
+    return ((1 - fort) * COVERED_KM_PER_DAY()) / moveCost;
   }
-  if (defenders.every((f) => f.status === 'routed')) return BREAKTHROUGH_KM_PER_DAY / moveCost;
-  const attrition = Math.min(ATTRITION_MAX_KM_PER_DAY, ATTRITION_KM_PER_DAY * Math.max(0, Math.log(battle.exchange)));
+  if (defenders.every((f) => f.status === 'routed')) return BREAKTHROUGH_KM_PER_DAY() / moveCost;
+  const attrition = Math.min(ATTRITION_MAX_KM_PER_DAY(), ATTRITION_KM_PER_DAY() * Math.max(0, Math.log(battle.exchange)));
   // A line too thin for its cell is bypassed through its gaps at the pace the odds allow, unless a standing belt of obstacles closes them; a unit's own dug positions and hasty obstacles close part.
   const dug = defenders.reduce((t, f) => t + f.entrenchment, 0) / defenders.length;
-  const gaps = (1 - battle.manned) * (1 - Math.max(landSlice(world).fortified[node] ?? 0, HASTY_BARRIER * dug));
-  const odds = Math.min(1, Math.max(0, (battle.ratio - 1) / (DELIBERATE_ASSAULT_RATIO - 1)));
-  const manoeuvre = battle.ratio > 1 ? (COVERED_KM_PER_DAY + (BREAKTHROUGH_KM_PER_DAY - COVERED_KM_PER_DAY) * odds) / moveCost : 0;
+  const gaps = (1 - battle.manned) * (1 - Math.max(landSlice(world).fortified[node] ?? 0, HASTY_BARRIER() * dug));
+  const odds = Math.min(1, Math.max(0, (battle.ratio - 1) / (DELIBERATE_ASSAULT_RATIO() - 1)));
+  const manoeuvre = battle.ratio > 1 ? (COVERED_KM_PER_DAY() + (BREAKTHROUGH_KM_PER_DAY() - COVERED_KM_PER_DAY()) * odds) / moveCost : 0;
   return Math.max(attrition, gaps * manoeuvre);
 }
 
@@ -477,7 +477,7 @@ function contestCell(world: World, ctx: SimContext, node: NodeId, invaders: Form
   const holdingOn = defenders.filter((f) => f.status !== 'destroyed' && f.node === node);
   const stillIn = attackers.filter((f) => f.status !== 'destroyed' && f.node === node);
   const cover = holdingOn.length ? [] : coveringFire(world, ctx.map, byNode, node, lead);
-  contest.km += (advanceRate(world, ctx, node, stillIn, holdingOn, cover, battle) * world.dtHours) / 24 + (battle.yielded ? WITHDRAWAL_KM : 0);
+  contest.km += (advanceRate(world, ctx, node, stillIn, holdingOn, cover, battle) * world.dtHours) / 24 + (battle.yielded ? WITHDRAWAL_KM() : 0);
   if (contest.km < cellDepthKm(ctx.map, node)) return;
 
   delete slice.contest[node];

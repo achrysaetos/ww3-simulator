@@ -102,7 +102,7 @@ export function updateEncirclement(world: World, ctx: SimContext): void {
     const d = (isolated[f.id] = (isolated[f.id] ?? 0) + days);
     f.morale = Math.max(0, f.morale - MORALE_ISOLATED_PER_DAY * days);
     const starving = f.supply.food <= 0 ? 2 : 1;
-    if (ctx.rng.chance(SURRENDER_HAZARD_PER_DAY * Math.max(0, d - SURRENDER_GRACE_DAYS) * (1 - f.morale) * starving * days)) {
+    if (ctx.rng.chance(SURRENDER_HAZARD_PER_DAY() * Math.max(0, d - SURRENDER_GRACE_DAYS) * (1 - f.morale) * starving * days)) {
       ctx.emit({ type: 'message', tick: world.tick, nation: f.nation, text: `${f.name} surrendered after ${Math.round(d)} days encircled` });
       destroyFormation(world, ctx, f);
     }
