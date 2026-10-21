@@ -13,13 +13,6 @@ interface Effort { surface: number; asw: number }
  * one only now and then (estimate; NWP 3-21 search theory; CNA ASW effectiveness studies).
  */
 const ASW_K = 0.03;
-/**
- * A submarine that fired last tick is a flaming datum: torpedo and missile launches are loud and
- * the escorts are close by. Localized search around the datum, not area search, so it is not
- * scaled by ASW_K: a boat at stealth 0.85 that just fired is found about one tick in six, a noisy
- * one at 0.6 about two in five (Falklands 1982, WWII convoy escort experience; estimate).
- */
-const DATUM_EFFORT = 1.25;
 /** A submarine at transit speed is louder. */
 const TRANSIT_STEALTH_PENALTY = 0.1;
 /** SSBN bastions (Sea of Okhotsk, Barents, Bohai): friendly sea control screens the boomers. */
@@ -28,7 +21,7 @@ const BASTION_SCREEN = 0.7;
 /**
  * Roll which hostile nations hold a track on each naval formation this tick. Surface ships
  * are found by radar, aircraft and satellites from the node and its neighbours; submarines
- * only by ASW effort at their own node.
+ * only by area search at their own node (an attacking boat's datum is prosecuted in combat.ts).
  */
 export function detect(env: TickEnv): Map<FormationId, Set<NationId>> {
   const { world, ctx } = env;
@@ -66,11 +59,10 @@ export function detect(env: TickEnv): Map<FormationId, Set<NationId>> {
       if (!here) continue;
       const control = world.theater.seaControl[t.node];
       const bastion = c.hulls.every((h) => h.platform.class === 'ssbn') && control?.nation === t.nation ? 1 - BASTION_SCREEN * control.level : 1;
-      const datum = world.slices.naval.lastFired[t.id] === world.tick - 1 ? DATUM_EFFORT : 0;
       const stealth = Math.max(0, c.stealth - (t.order.path?.length ? TRANSIT_STEALTH_PENALTY : 0));
       for (const [nation, e] of here) {
         if (!atWar(world, nation, t.nation)) continue;
-        if (rng.chance(1 - Math.exp(-(e.asw * bastion * ASW_K + datum) * (1 - stealth)))) seen.add(nation);
+        if (rng.chance(1 - Math.exp(-e.asw * bastion * ASW_K * (1 - stealth)))) seen.add(nation);
       }
     } else {
       for (const [nation, e] of surfaceEffortAround(t.node)) {

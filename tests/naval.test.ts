@@ -38,6 +38,7 @@ const navalPlatforms: Platform[] = [
   ship('n_mcm', 'mine_warfare', { crew: 50 }),
   ship('n_usv', 'usv', { crew: 0, unitCostUsdM: 0.25, mobility: { speedKph: 40, rangeKm: 800, fuelTonsPerHour: 0 }, firepower: { ship: 0.05 } }),
   ship('n_minelayer', 'corvette', { loadout: [mun('n_mine', 60)] }),
+  P({ id: 'n_ssk', name: 'Diesel submarine', class: 'ssk', domain: 'subsurface', unitCostUsdM: 500, crew: 50, mobility: { speedKph: 37, rangeKm: 1e6, fuelTonsPerHour: 0 }, protection: { armor: 0.2, stealth: 0.85 }, sensors: { detectionKm: 40 }, firepower: { ship: 0.3 }, loadout: [{ munition: 't_torpedo' as MunitionId, count: 18 }] }),
   P({ id: 'n_coastal', name: 'Coastal ASBM launcher', class: 'coastal_asm', domain: 'land', unitCostUsdM: 5, crew: 4, mobility: { speedKph: 60, rangeKm: 600, fuelTonsPerHour: 0.05 }, protection: { armor: 0.1, stealth: 0.35 }, sensors: { detectionKm: 0 }, firepower: {}, loadout: [mun('n_asbm', 4)] }),
   ship('n_carrier', 'carrier', { crew: 3000, mobility: { speedKph: 55, rangeKm: 1e6, fuelTonsPerHour: 0 }, engagementChannels: 4, capacity: { aircraft: 60 }, loadout: [mun('t_sam', 16)] }),
   P({ id: 'n_helo', name: 'ASW helicopter', class: 'asw_helo', domain: 'air', unitCostUsdM: 40, crew: 4, mobility: { speedKph: 250, rangeKm: 300, fuelTonsPerHour: 0.5 }, protection: { armor: 0.1, stealth: 0.1 }, sensors: { detectionKm: 50 }, firepower: {}, loadout: [mun('n_lwt', 2)] }),
@@ -188,7 +189,7 @@ describe('submarine warfare', () => {
     s.order = { posture: 'reserve', issuedTick: 0 };
     return s;
   };
-  const detectionRate = (screen: Record<string, number>, firing = false) => {
+  const detectionRate = (screen: Record<string, number>) => {
     const t = navalWorld(11);
     const at = t.nodeAt(20, 125);
     t.war('USA', 'CHN');
@@ -197,7 +198,6 @@ describe('submarine warfare', () => {
     let seen = 0;
     const ticks = 200;
     for (let i = 0; i < ticks; i++) {
-      if (firing) t.world.slices.naval.lastFired[ssn.id] = t.world.tick - 1;
       t.engine.step(t.world);
       if (t.world.slices.naval.tracks[ssn.id]?.includes(CHN)) seen++;
     }
@@ -216,11 +216,42 @@ describe('submarine warfare', () => {
     expect(massed).toBeGreaterThan(bare * 3);
   });
 
-  it('a submarine that has just fired is found by the screen it attacked far more often than one lying quiet', () => {
-    const quiet = detectionRate({ t_destroyer: 1, n_frigate: 2, n_helo: 4 });
-    const datum = detectionRate({ t_destroyer: 1, n_frigate: 2, n_helo: 4 }, true);
-    expect(datum).toBeGreaterThan(0.1);
-    expect(datum).toBeGreaterThan(quiet * 3);
+  /** ASW torpedoes a frigate screen fires in ten days at a pack of SSNs in its zone, and the most boats one counterattack sank. */
+  const counterattacks = (attacking: boolean) => {
+    const t = navalWorld(3);
+    const at = t.nodeAt(20, 125);
+    t.war('USA', 'CHN');
+    const pack = t.add({ nation: USA, name: 'SSN squadron', kind: 'submarine', echelon: 'squadron', node: at, equipment: t.eq({ t_ssn: 8 }) });
+    pack.order = { posture: attacking ? 'patrol' : 'reserve', issuedTick: 0 };
+    const force = t.add({ nation: CHN, name: 'Amphibious force', kind: 'surface_group', node: at, equipment: t.eq({ n_lhd: 40 }) });
+    const screen = t.add({ nation: CHN, name: 'ASW screen', kind: 'surface_group', node: at, equipment: t.eq({ n_frigate: 6, n_helo: 12 }) });
+    screen.order = { posture: 'escort', targetFormation: force.id, issuedTick: 0 };
+    let worst = 0;
+    for (let i = 0; i < 40; i++)
+      for (const e of t.engine.step(t.world)) if (e.type === 'battle' && e.defender === USA) worst = Math.max(worst, e.losses[USA]?.['t_ssn' as PlatformId] ?? 0);
+    return { torpedoes: led(t, 'CHN')?.torpedoesFired ?? 0, worst };
+  };
+
+  it('boats that attack a screened group draw far more counterattacks than boats lying quiet, and each sinks at most the boat that attacked', () => {
+    const quiet = counterattacks(false), attacking = counterattacks(true);
+    expect(attacking.torpedoes).toBeGreaterThan(Math.max(4, quiet.torpedoes * 3));
+    expect(attacking.worst).toBeLessThanOrEqual(1);
+  });
+
+  it('a nuclear boat strikes a group one sea zone over and a diesel boat does not', () => {
+    const sank = (boat: string) => {
+      const t = navalWorld(5);
+      const at = t.nodeAt(20, 125);
+      const next = [...t.map.neighbors(at)].find((n) => t.map.isSea(n))!;
+      t.war('USA', 'CHN');
+      const sub = t.add({ nation: USA, name: 'Boat', kind: 'submarine', echelon: 'squadron', node: next, equipment: t.eq({ [boat]: 1 }) });
+      sub.order = { posture: 'patrol', issuedTick: 0 };
+      t.add({ nation: CHN, name: 'LHD', kind: 'surface_group', node: at, equipment: t.eq({ n_lhd: 4 }) });
+      for (let i = 0; i < 12; i++) t.engine.step(t.world);
+      return led(t, 'CHN')?.hullsSunk ?? 0;
+    };
+    expect(sank('t_ssn')).toBeGreaterThan(0);
+    expect(sank('n_ssk')).toBe(0);
   });
 
   it('an SSN ambush sinks an unescorted amphibious ship and the submarine survives', () => {

@@ -229,6 +229,18 @@ function standoffZones(p: Plan, focus: NodeId): NodeId[] {
 }
 
 /**
+ * Where attack submarines wait when the focus holds an enemy fleet: the sea zone next to it
+ * farthest from hostile shore, away from the enemy's home-water ASW, from which nuclear boats
+ * run in, attack and withdraw (naval combat lets them strike groups one zone over). A submarine
+ * that stays among the massed escorts of an invasion fleet is found by area search sooner or
+ * later; SSNs attack from the edges of a screen and clear the datum (judgment).
+ */
+function submarineStation(map: GameMap, focus: NodeId, standoff: NodeId[]): NodeId {
+  const next = new Set<number>(map.neighbors(focus));
+  return standoff.find((z) => next.has(z)) ?? focus;
+}
+
+/**
  * Lift groups shuttle troops from the embarkation port to the beach: sail to the port, load
  * staged formations (oversized ones board as landing teams), sail at SAIL_LOAD, land, return.
  * Ground formations nearest the port are staged there for STAGE_WAVES loads ahead.
@@ -301,6 +313,7 @@ export function planNaval(p: Plan): void {
   const assault = planAssault(p, liftCapable);
   const { node: focus, enemyFleet } = maritimeFocus(p, assault);
   const stations = assault ? [focus] : standoffZones(p, focus);
+  const subStation = enemyFleet && !assault ? submarineStation(map, focus, stations) : focus;
   let capitals = 0;
   const inPort = enemyFleet ? new Set<NodeId>() : batteredFleets(p, groups);
   // A belligerent may not fight in neutral waters, so it blockades only passages a party to the war borders (San Remo Manual 1994, paras 14-16).
@@ -336,8 +349,8 @@ export function planNaval(p: Plan): void {
         issue(p, g, { posture: 'patrol', target: nearestSea(map, g.home) });
         break;
       case 'submarine':
-        if (km(g.node, focus) <= FOCUS_SUB_KM) issue(p, g, { posture: 'patrol', target: focus });
-        else if (!blockade(g)) issue(p, g, { posture: 'patrol', target: focus });
+        if (km(g.node, focus) <= FOCUS_SUB_KM) issue(p, g, { posture: 'patrol', target: subStation });
+        else if (!blockade(g)) issue(p, g, { posture: 'patrol', target: subStation });
         break;
       case 'capital':
         issue(p, g, { posture: 'patrol', target: stations[(capitals++ >> 1) % stations.length] });
