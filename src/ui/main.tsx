@@ -5,6 +5,7 @@ import { SimClient } from './client';
 import './styles.css';
 
 const client = new SimClient();
+(window as unknown as { __client?: SimClient }).__client = client;
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

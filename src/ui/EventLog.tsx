@@ -1,46 +1,41 @@
-import { useMemo, useState } from 'react';
-import type { FormationId, NationId, NodeId } from '../core/types';
+import { memo, useMemo, useState } from 'react';
+import type { NationId, NodeId } from '../core/types';
 import type { SimClient } from './client';
-import { CATEGORY_OF, EVENT_CATEGORIES, describeEvent, eventNations, eventNode, type EventCategory, type PlaceNamer } from './events';
+import { EVENT_CATEGORIES, type EventCategory } from './events';
+import type { LoggedEvent } from './feed';
 
 interface Props {
   client: SimClient;
-  places: PlaceNamer;
   playAs: NationId | null;
-  version: number;
+  logVersion: number;
   onFocus(node: NodeId): void;
 }
 
 const SHOWN = 250;
 
-export function EventLog({ client, places, playAs, version, onFocus }: Props) {
+function stamp(tick: number, dtHours: number): string {
+  const hours = tick * dtHours;
+  return `D+${Math.floor(hours / 24)} ${String(hours % 24).padStart(2, '0')}:00`;
+}
+
+const Row = memo(function Row({ row, seq, repeats, dtHours, onFocus }: { row: LoggedEvent; seq: number; repeats: number; dtHours: number; onFocus(node: NodeId): void }) {
+  const { node } = row;
+  const when = repeats > 1 ? `${stamp(row.firstTick, dtHours)}–${stamp(row.event.tick, dtHours).replace(/ .*/, '')}` : stamp(row.event.tick, dtHours);
+  return (
+    <li data-seq={seq} className={`ev ev-${row.tag}`} onClick={() => node !== null && onFocus(node)} style={{ cursor: node !== null ? 'pointer' : 'default' }}>
+      <span className="ev-time mono">{when}</span>
+      <span className={`ev-tag ${row.tag}`}>{row.tag}</span>
+      <span className="ev-text">{row.text}{repeats > 1 && <span className="ev-repeat mono" title="Identical reports folded into one line"> ×{repeats}</span>}</span>
+    </li>
+  );
+});
+
+export function EventLog({ client, playAs, logVersion, onFocus }: Props) {
   const [off, setOff] = useState<Set<EventCategory>>(() => new Set(['economy']));
   const [mine, setMine] = useState(false);
-  const nameOf = (id: NationId) => client.state.nations.get(id)?.name ?? id;
-  const formations = useMemo(() => new Map(client.state.formations.map((f) => [f.entry.id, f.entry.name])), [client.state.rosterVersion]);
-  const formationName = (id: FormationId) => formations.get(id) ?? id;
-  const counts = useMemo(() => {
-    const c: Partial<Record<EventCategory, number>> = {};
-    for (const { event } of client.log) c[CATEGORY_OF[event.type]] = (c[CATEGORY_OF[event.type]] ?? 0) + 1;
-    return c;
-  }, [version, client.log]);
-
-  const rows = [];
-  for (let i = client.log.length - 1; i >= 0 && rows.length < SHOWN; i--) {
-    const { seq, event } = client.log[i];
-    const cat = CATEGORY_OF[event.type];
-    if (off.has(cat)) continue;
-    if (mine && playAs && !eventNations(event).includes(playAs)) continue;
-    const node = eventNode(event);
-    const hours = event.tick * (client.meta?.dtHours ?? 6);
-    rows.push(
-      <li key={seq} className={`ev ev-${cat}`} onClick={() => node !== null && onFocus(node)} style={{ cursor: node !== null ? 'pointer' : 'default' }}>
-        <span className="ev-time mono">D+{Math.floor(hours / 24)} {String(hours % 24).padStart(2, '0')}:00</span>
-        <span className={`ev-tag ${cat}`}>{cat}</span>
-        <span className="ev-text">{describeEvent(event, nameOf, places, client.meta, formationName)}</span>
-      </li>,
-    );
-  }
+  const only = mine ? playAs : null;
+  const rows = useMemo(() => client.feed.newest(off, only, SHOWN), [client, off, only, logVersion]);
+  const dtHours = client.meta?.dtHours ?? 6;
 
   const toggle = (c: EventCategory) => setOff((s) => {
     const n = new Set(s);
@@ -54,13 +49,13 @@ export function EventLog({ client, places, playAs, version, onFocus }: Props) {
         <span className="ev-title">Event log</span>
         {EVENT_CATEGORIES.map((c) => (
           <button key={c} className={`chip-btn ${off.has(c) ? '' : 'on'} ${c}`} onClick={() => toggle(c)}>
-            {c} <span className="mono">{counts[c] ?? 0}</span>
+            {c} <span className="mono">{client.feed.counts[c]}</span>
           </button>
         ))}
-        <label className="chk"><input type="checkbox" checked={mine} disabled={!playAs} onChange={(e) => setMine(e.target.checked)} /> involving {playAs ?? 'my nation'} only</label>
+        <label className="chk"><input type="checkbox" checked={mine} disabled={!playAs} onChange={(e) => setMine(e.target.checked)} /> involving {playAs ? client.namer.nation(playAs) : 'my nation'} only</label>
       </div>
       <ul className="ev-list" data-testid="event-log">
-        {rows.length ? rows : <li className="muted pad">No events yet. Advance time to see the war unfold.</li>}
+        {rows.length ? rows.map((r) => <Row key={r.seq} row={r} seq={r.seq} repeats={r.repeats} dtHours={dtHours} onFocus={onFocus} />) : <li className="muted pad">No events yet. Advance time to see the war unfold.</li>}
       </ul>
     </div>
   );
