@@ -1,11 +1,31 @@
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import type { MunitionId, NationId, PlatformId } from '../src/core/types';
+import type { MunitionId, NationId, PlatformId, SimEvent } from '../src/core/types';
+import { nuclearThreshold, strategicProfile } from '../src/data/nations';
 import { nuclearForces } from '../src/data/nations/nuclear';
 import { createSession } from '../src/scenarios';
-import { detonate } from '../src/systems/strategic';
+import { atWar, relation } from '../src/core/engine';
+import { detonate, targetList } from '../src/systems/strategic';
 
 const N = (s: string) => s as NationId;
 const NINE = ['USA', 'RUS', 'CHN', 'FRA', 'GBR', 'IND', 'PAK', 'ISR', 'PRK'];
+
+describe('nuclear thresholds', () => {
+  function sources(dir: string): string[] {
+    return readdirSync(dir).flatMap((f) => {
+      const p = join(dir, f);
+      return statSync(p).isDirectory() ? sources(p) : /\.tsx?$/.test(p) ? [p] : [];
+    });
+  }
+
+  it('are written in one table, and every armed state reads its threshold from it', () => {
+    const writers = sources('src').filter((f) => /\bfirstUse: (true|false)/.test(readFileSync(f, 'utf8')));
+    expect(writers).toEqual([join('src', 'data', 'nations', 'strategic.ts')]);
+    for (const n of NINE) expect(nuclearThreshold(n)).toBe(strategicProfile[n].nuclearThreshold);
+    expect(nuclearThreshold('BEL')).toMatchObject({ firstUse: false });
+  });
+});
 
 describe('nuclear forces as fielded (FAS 2025)', () => {
   const s = createSession('peace-2027', 1);
@@ -58,6 +78,57 @@ describe('theatre missile defence', () => {
     expect(fired).toBe(20);
     expect(intercepted).toBeGreaterThan(fired / 2);
     expect(intercepted).toBeLessThan(fired);
+  });
+});
+
+describe('a nuclear attack is answered, declared or not', () => {
+  const nuclearBy = (events: SimEvent[], by: string) => events.filter((e) => e.type === 'nuclear_detonation' && e.by === by).length;
+
+  it('a US surprise counterforce strike from peace draws a Russian launch on warning of hundreds of warheads, before it lands', () => {
+    const s = createSession('peace-2027', 1);
+    const w = s.world;
+    w.nations[N('USA')].controlledBy = 'human';
+    s.engine.step(w);
+    expect(atWar(w, N('USA'), N('RUS'))).toBe(false);
+    for (const t of targetList(w, s, N('USA'), N('RUS'), 'counterforce').slice(0, 200))
+      for (const munition of ['minuteman3', 'trident2_d5'] as MunitionId[]) w.pending.push({ type: 'nuclear_release', nation: N('USA'), target: t.node, warheads: 2, munition });
+    const events = s.engine.step(w);
+    expect(nuclearBy(events, 'USA')).toBeGreaterThan(250);
+    expect(nuclearBy(events, 'RUS')).toBeGreaterThan(200);
+    expect(atWar(w, N('USA'), N('RUS'))).toBe(true);
+    expect(w.slices.diplomacy.records[N('RUS')].nuclearStruckBy).toContain('USA');
+  });
+
+  it('North Korea nuking Vladivostok puts Russia at war with it, and Russia answers within a day', () => {
+    const s = createSession('korea-2027', 1);
+    const w = s.world;
+    const prk = w.nations[N('PRK')];
+    prk.controlledBy = 'human';
+    prk.nuclear.deployed = prk.nuclear.warheads;
+    const vladivostok = s.map.cities.find((c) => c.name === 'Vladivostok')!.node;
+    w.pending.push({ type: 'nuclear_release', nation: N('PRK'), target: vladivostok, warheads: 1, munition: 'hwasong12' as MunitionId });
+    expect(nuclearBy(s.engine.step(w), 'PRK')).toBe(1);
+    expect(atWar(w, N('PRK'), N('RUS'))).toBe(true);
+    let answered = 0;
+    for (let t = 0; t < 4; t++) for (const e of s.engine.step(w)) if (e.type === 'nuclear_detonation' && e.by === 'RUS' && s.map.owner[e.node] === 'PRK') answered++;
+    expect(answered).toBeGreaterThan(0);
+  });
+
+  it('a nuclear salvo shot down whole is still a nuclear attack: Japan goes to war and its guarantor deliberates', () => {
+    const s = createSession('korea-2027', 1);
+    const w = s.world;
+    w.params = { 'strategic.BMD_LEAKAGE': 0.05 };
+    const prk = w.nations[N('PRK')];
+    prk.controlledBy = 'human';
+    prk.nuclear.deployed = prk.nuclear.warheads;
+    const tokyo = s.map.cities.find((c) => c.name === 'Tokyo')!.node;
+    w.pending.push({ type: 'nuclear_release', nation: N('PRK'), target: tokyo, warheads: 1, munition: 'hwasong12' as MunitionId });
+    const events = s.engine.step(w);
+    expect(nuclearBy(events, 'PRK')).toBe(0);
+    expect(atWar(w, N('PRK'), N('JPN'))).toBe(true);
+    expect(w.slices.diplomacy.records[N('JPN')].nuclearStruckBy).toContain('PRK');
+    expect(relation(w, N('PRK'), N('JPN')).escalation).toBe('strategic_nuclear');
+    expect(w.slices.diplomacy.umbrella.some((c) => c.ally === 'JPN' && c.attacker === 'PRK')).toBe(true);
   });
 });
 

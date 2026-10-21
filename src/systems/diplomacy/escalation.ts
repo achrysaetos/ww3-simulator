@@ -2,7 +2,7 @@ import { atWar, relation, relationKey, relationMut, type SimContext } from '../.
 import type { EscalationLevel, NationId, NodeId, World } from '../../core/types';
 import { isOverseas } from '../../data/territories';
 import type { DiplomacyState, WarRecord } from './types';
-import { raiseEscalation, sideOf } from './wars';
+import { declareWar, raiseEscalation, sideOf } from './wars';
 
 /**
  * Escalation pressure added per event. A dyad moves from 'conventional' to
@@ -45,12 +45,64 @@ function addPressure(s: DiplomacyState, a: NationId, b: NationId, amount: number
  */
 const NUCLEAR_RALLY = 0.2;
 
-/** Nations hit by a detonation: the owner and controller of a land cell, and anyone with forces there, if at war with the attacker. */
-export function hitBy(world: World, map: SimContext['map'], by: NationId, node: NodeId): Set<NationId> {
+/** One nuclear attack in this tick's events: a warhead that detonated, or a salvo shot down whole on its way. */
+export interface NuclearAttack {
+  by: NationId;
+  node: NodeId;
+  /** Detonations; 0 for a salvo the defences stopped. */
+  detonations: number;
+  casualties: number;
+  /** A large weapon, or one aimed at a population centre. */
+  strategic: boolean;
+  /** Nations it struck (see nuclearVictims). */
+  victims: NationId[];
+}
+
+const fightsBeside = (s: DiplomacyState, a: NationId, b: NationId) => s.wars.some((w) => sideOf(w, a) !== -1 && sideOf(w, a) === sideOf(w, b));
+
+/**
+ * Nations a nuclear weapon aimed at `node` attacks: whoever holds the cell, its owner if the owner holds it or is at war
+ * with the attacker, and every nation with forces there. A war is not required. Every doctrine answers a nuclear attack
+ * whether or not war was declared (Russia's 2024 Fundamentals para. 19; China's 2019 white paper), and a launch of
+ * nuclear-armed missiles is nuclear use under US declaratory policy (NPR 2022) even if all are shot down. The
+ * attacker's co-belligerents are never its victims. Each victim reads the attack from its own territory and forces,
+ * which it observes directly.
+ */
+function nuclearVictims(world: World, map: SimContext['map'], s: DiplomacyState, by: NationId, node: NodeId, forcesAt: ReadonlyMap<number, ReadonlySet<NationId>>): NationId[] {
   const out = new Set<NationId>();
-  if (!map.isSea(node)) for (const n of [map.owner[node], world.control[node]]) if (n && atWar(world, by, n)) out.add(n);
-  for (const f of Object.values(world.formations)) if (f.node === node && f.nation !== by && f.status !== 'destroyed' && atWar(world, by, f.nation)) out.add(f.nation);
-  return out;
+  if (!map.isSea(node)) {
+    const holder = world.control[node], owner = map.owner[node];
+    if (holder) out.add(holder);
+    if (owner && (owner === holder || atWar(world, by, owner))) out.add(owner);
+  }
+  for (const n of forcesAt.get(node) ?? []) out.add(n);
+  return [...out].filter((n) => n !== by && world.nations[n] && !fightsBeside(s, by, n));
+}
+
+/** This tick's nuclear attacks: one per detonation, and one per nuclear salvo intercepted before any warhead arrived. */
+export function nuclearAttacks(world: World, ctx: Pick<SimContext, 'map' | 'catalog'>, s: DiplomacyState): NuclearAttack[] {
+  const { map } = ctx;
+  const raw: Omit<NuclearAttack, 'victims'>[] = [];
+  for (const e of world.events) {
+    if (e.type === 'nuclear_detonation') {
+      const strategic = e.yieldKt >= STRATEGIC_YIELD_KT || (!map.isSea(e.node) && map.popShare[e.node] >= CITY_POP_SHARE);
+      raw.push({ by: e.by, node: e.node, detonations: 1, casualties: e.casualties, strategic });
+    } else if (e.type === 'strike' && e.fired > 0 && e.intercepted >= e.fired) {
+      const yieldKt = ctx.catalog.munitions.get(e.munition)?.yieldKt;
+      if (!yieldKt) continue;
+      const strategic = yieldKt >= STRATEGIC_YIELD_KT || (!map.isSea(e.target) && map.popShare[e.target] >= CITY_POP_SHARE);
+      raw.push({ by: e.by, node: e.target, detonations: 0, casualties: 0, strategic });
+    }
+  }
+  if (!raw.length) return [];
+  const forcesAt = new Map<number, Set<NationId>>();
+  const wanted = new Set(raw.map((a) => a.node));
+  for (const f of Object.values(world.formations)) {
+    if (f.status === 'destroyed' || !wanted.has(f.node)) continue;
+    const here = forcesAt.get(f.node) ?? forcesAt.set(f.node, new Set()).get(f.node)!;
+    here.add(f.nation);
+  }
+  return raw.map((a) => ({ ...a, victims: nuclearVictims(world, map, s, a.by, a.node, forcesAt) }));
 }
 
 function record(s: DiplomacyState, n: NationId): WarRecord {
@@ -94,43 +146,43 @@ export function processEvents(world: World, ctx: SimContext, s: DiplomacyState, 
       case 'battle':
         for (const [n, c] of Object.entries(e.casualties) as [NationId, number][]) record(s, n).casualties += c;
         break;
-      case 'nuclear_detonation': {
-        const land = !map.isSea(e.node);
-        const firstUse = !Object.values(s.records).some((r) => r.nuclearStruckBy.includes(e.by));
-        const strategic = e.yieldKt >= STRATEGIC_YIELD_KT || (land && map.popShare[e.node] >= CITY_POP_SHARE);
-        const level: EscalationLevel = strategic ? 'strategic_nuclear' : 'tactical_nuclear';
-        for (const v of hitBy(world, map, e.by, e.node)) {
-          raiseEscalation(world, ctx, e.by, v, level);
-          const rec = record(s, v);
-          if (!rec.nuclearStruckBy.includes(e.by)) rec.nuclearStruckBy.push(e.by);
-          rec.lastNuclearNode = e.node;
-          const armed = world.nations[v].nuclear.warheads > 0;
-          if (armed) {
-            rec.rally = Math.max(rec.rally, NUCLEAR_RALLY);
-            rec.rallyTick = world.tick;
-          }
-          if (land && map.owner[e.node] === v) {
-            rec.nuclearHits++;
-            if (strategic && !rec.strategicStruckBy?.includes(e.by)) (rec.strategicStruckBy ??= []).push(e.by);
-            // A nuclear-armed state's will rests on its deterrent, not the Mueller casualty curve (see NUCLEAR_RALLY).
-            if (!armed) rec.casualties += e.casualties;
-          }
-        }
-        // First use shocks every third party that held a view of the user; its co-belligerents stand by it.
-        if (!firstUse) break;
-        for (const n of Object.keys(world.nations) as NationId[]) {
-          if (n === e.by || !world.relations[relationKey(n, e.by)]) continue;
-          if (s.wars.some((w) => sideOf(w, n) !== -1 && sideOf(w, n) === sideOf(w, e.by))) continue;
-          const r = relationMut(world, n, e.by);
-          r.opinion = Math.max(-100, r.opinion - 40);
-        }
-        break;
-      }
       case 'formation_destroyed':
         if (!ssbn.has(e.formation)) break;
         record(s, e.nation).ssbnLost++;
         for (const foe of enemies.get(e.nation) ?? []) addPressure(s, e.nation, foe, PRESSURE.ssbnLost);
         break;
+    }
+  }
+
+  for (const atk of nuclearAttacks(world, ctx, s)) {
+    const land = !map.isSea(atk.node);
+    const firstUse = !Object.values(s.records).some((r) => r.nuclearStruckBy.includes(atk.by));
+    const level: EscalationLevel = atk.strategic ? 'strategic_nuclear' : 'tactical_nuclear';
+    for (const v of atk.victims) {
+      // At war before the record is written, so the victim's war record opens with this attack in it.
+      if (!atWar(world, atk.by, v)) declareWar(world, ctx, s, atk.by, v, `nuclear attack on ${v}`);
+      raiseEscalation(world, ctx, atk.by, v, level);
+      const rec = record(s, v);
+      if (!rec.nuclearStruckBy.includes(atk.by)) rec.nuclearStruckBy.push(atk.by);
+      rec.lastNuclearNode = atk.node;
+      const armed = world.nations[v].nuclear.warheads > 0;
+      if (armed) {
+        rec.rally = Math.max(rec.rally, NUCLEAR_RALLY);
+        rec.rallyTick = world.tick;
+      }
+      if (land && map.owner[atk.node] === v && atk.detonations > 0) {
+        rec.nuclearHits += atk.detonations;
+        if (atk.strategic && !rec.strategicStruckBy?.includes(atk.by)) (rec.strategicStruckBy ??= []).push(atk.by);
+        // A nuclear-armed state's will rests on its deterrent, not the Mueller casualty curve (see NUCLEAR_RALLY).
+        if (!armed) rec.casualties += atk.casualties;
+      }
+    }
+    // First use shocks every third party that held a view of the user; its co-belligerents stand by it.
+    if (!firstUse) continue;
+    for (const n of Object.keys(world.nations) as NationId[]) {
+      if (n === atk.by || !world.relations[relationKey(n, atk.by)] || fightsBeside(s, n, atk.by)) continue;
+      const r = relationMut(world, n, atk.by);
+      r.opinion = Math.max(-100, r.opinion - 40);
     }
   }
 
