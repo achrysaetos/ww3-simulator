@@ -416,13 +416,11 @@ export function planNaval(p: Plan): void {
   const lift = new Set(liftCapable);
   const roles = new Map(groups.map((g) => [g, roleOf(p, g, lift.has(g))]));
   if (assault) runAssault(p, assault, liftCapable.filter((l) => sails(l, assault.port)));
-  // Escorts screen the ships that cannot fight a submarine themselves: the landing force, the capital ships, sweepers
-  // working a minefield, and loaded sealift convoys (the Atlantic convoys of 1940-45; Earnest Will's escorted tankers).
-  const voyages = p.world.slices.sealift?.voyages ?? {};
+  // Escorts screen the ships that cannot fight a submarine themselves: the landing force, the capital ships and sweepers
+  // working a minefield.
   const unescorted = [
     ...(assault ? liftCapable.filter((g) => g.order.posture !== 'reserve') : []),
     ...groups.filter((g) => roles.get(g) === 'capital' || (roles.get(g) === 'mcm' && mined)),
-    ...groups.filter((g) => !roles.get(g) && voyages[g.id]),
   ];
   for (const g of groups) {
     // Groups with no fighting role (sealift) sail under naval/sealift.ts.
