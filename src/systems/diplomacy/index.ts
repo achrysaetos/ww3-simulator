@@ -1,5 +1,6 @@
 import { relationKey, type System } from '../../core/engine';
 import type { FormationId, NationId, PlatformId } from '../../core/types';
+import { grantAccess, pledgeAid, setAccess, setAid, treatyPartners } from './access';
 import { assess, enemyMap } from './assess';
 import { processEvents } from './escalation';
 import { checkCapitulation, negotiatedPeace, offerPeace, reviewOffers, updateSupport } from './support';
@@ -23,9 +24,11 @@ export function createDiplomacy(input: DiplomacyInput = {}): System {
     profiles: input.profiles ?? {},
     peace: new Set((input.peace ?? []).map((p) => relationKey(...p.between))),
   };
+  const partners = treatyPartners(d.alliances);
+  const pledges = input.aid ?? [];
   return {
     id: 'diplomacy',
-    commands: ['declare_war', 'offer_peace'],
+    commands: ['declare_war', 'offer_peace', 'grant_access', 'set_aid'],
     init(world) {
       world.slices.diplomacy = { wars: [], joins: [], records: {}, assessment: {}, pressure: {}, offers: {}, access: {}, aid: {}, rev: 0, ssbnFormations: [], invoked: [], umbrella: [] };
     },
@@ -33,6 +36,8 @@ export function createDiplomacy(input: DiplomacyInput = {}): System {
       const s = world.slices.diplomacy;
       if (cmd.type === 'declare_war') declareWar(world, ctx, s, cmd.nation, cmd.target, cmd.reason ?? 'declaration of war');
       else if (cmd.type === 'offer_peace') offerPeace(world, ctx, s, cmd.nation, cmd.target);
+      else if (cmd.type === 'grant_access') setAccess(s, cmd.nation, cmd.target, cmd.on);
+      else if (cmd.type === 'set_aid') setAid(s, cmd.nation, cmd.target, cmd.on);
     },
     step(world, ctx) {
       const s = world.slices.diplomacy;
@@ -58,6 +63,8 @@ export function createDiplomacy(input: DiplomacyInput = {}): System {
       checkCapitulation(world, ctx, s);
       negotiatedPeace(world, ctx, s);
       if (daily) reviewOffers(world, ctx, s);
+      grantAccess(world, s, partners);
+      pledgeAid(world, s, pledges);
     },
   };
 }

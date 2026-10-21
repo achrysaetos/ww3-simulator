@@ -5,6 +5,7 @@ import { applyLandOrder, combatPower, landCombat, landMovement, terrainDefense }
 import { marchKmPerDay } from '../src/systems/land/movement';
 import { loadMap } from '../src/data/load';
 import type { System } from '../src/core/engine';
+import { diplomacy } from '../src/systems/diplomacy';
 import { logistics } from '../src/systems/logistics';
 
 const MAP = loadMap();
@@ -170,17 +171,20 @@ describe('land movement', () => {
     expect(s.world.control[PLAIN_UKR]).toBe(UKR);
   });
 
-  it('will not enter a neutral country, but allies grant passage', () => {
-    const s = setup();
+  it('will not enter a neutral country, even a bloc ally, until it grants passage', () => {
+    const s = setup(1, [landMovement, landCombat, diplomacy]);
     const from = MAP.nodeAt(51.5, 60.5), kaz = MAP.nodeAt(50.5, 60.5);
     const f = s.add({ nation: RUS, name: 'x', kind: 'maneuver', echelon: 'brigade', node: from, equipment: brigade(1) });
+    s.world.nations[RUS].blocs = ['CSTO'];
+    s.world.nations[KAZ].blocs = ['CSTO'];
+    s.world.nations[KAZ].controlledBy = 'human';
     s.order(f, { posture: 'move', target: kaz });
     s.days(3);
     expect(f.node).toBe(from);
     expect(s.world.control[kaz]).toBe(KAZ);
 
-    s.world.nations[RUS].blocs = ['CSTO'];
-    s.world.nations[KAZ].blocs = ['CSTO'];
+    s.world.pending.push({ type: 'grant_access', nation: KAZ, target: RUS, on: true });
+    s.days(1);
     s.order(f, { posture: 'move', target: kaz });
     s.days(3);
     expect(f.node).toBe(kaz);

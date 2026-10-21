@@ -125,7 +125,7 @@ describe('player decisions in the snapshot', () => {
     const [USA, CHN, TWN, RUS] = ['USA', 'CHN', 'TWN', 'RUS'].map(N);
     w.world.slices.diplomacy = {
       wars: [{
-        id: 'w1', name: 'CHN-TWN war', since: 0,
+        id: 'w1', name: 'CHN-TWN war', since: 0, theatre: w.world.nations[TWN].capital,
         sides: [{ leader: CHN, members: { [CHN]: { joined: 0, via: 'declared' } } }, { leader: TWN, members: { [TWN]: { joined: 0, via: 'attacked' } } }],
       }],
       joins: [{ nation: USA, war: 'w1', side: 1, dueTick: 24, treaty: 'US-TWN-TRA', kind: 'ambiguous', victim: TWN, aggressor: CHN }],

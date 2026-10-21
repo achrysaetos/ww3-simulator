@@ -200,7 +200,7 @@ export function adoptWars(world: World, s: DiplomacyState, enemies: Map<NationId
       const war = s.wars.find((w) => (sideOf(w, a) === -1) !== (sideOf(w, b) === -1));
       if (!war) {
         s.wars.push({
-          id: `w${world.tick}_${a}_${b}`, name: `${a}-${b} war`, since: world.tick,
+          id: `w${world.tick}_${a}_${b}`, name: `${a}-${b} war`, since: world.tick, theatre: world.nations[b].capital,
           sides: [{ leader: a, members: { [a]: { joined: world.tick, via: 'scenario' } } }, { leader: b, members: { [b]: { joined: world.tick, via: 'scenario' } } }],
         });
         s.rev++;
@@ -234,7 +234,7 @@ export function declareWar(world: World, ctx: SimContext, s: DiplomacyState, by:
       joinSide(world, ctx, s, war, on, (1 - sideOf(war, by)) as 0 | 1, reason, 'attacked', 'attacked');
     } else {
       war = {
-        id: `w${world.tick}_${by}_${on}`, name: `${by}-${on} war`, since: world.tick,
+        id: `w${world.tick}_${by}_${on}`, name: `${by}-${on} war`, since: world.tick, theatre: world.nations[on].capital,
         sides: [{ leader: by, members: { [by]: { joined: world.tick, via: 'declared' } } }, { leader: on, members: {} }],
       };
       s.wars.push(war);

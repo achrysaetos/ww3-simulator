@@ -130,7 +130,7 @@ describe('dashboard detail', () => {
     const [RUS, POL, DEU, FRA] = ['RUS', 'POL', 'DEU', 'FRA'].map(nation);
     t.world.slices.diplomacy = {
       wars: [{
-        id: 'w1', name: 'RUS-POL war', since: 0,
+        id: 'w1', name: 'RUS-POL war', since: 0, theatre: t.world.nations[POL].capital,
         sides: [
           { leader: RUS, members: { [RUS]: { joined: 0, via: 'declared' } } },
           { leader: POL, members: { [POL]: { joined: 0, via: 'attacked' }, [DEU]: { joined: 8, via: 'NATO', defends: POL } } },

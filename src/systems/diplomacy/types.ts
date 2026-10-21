@@ -92,6 +92,8 @@ export interface War {
   name: string;
   sides: [Side, Side];
   since: number;
+  /** The capital first attacked; members that joined the war fight each other only near it (see ai/strikes.ts). */
+  theatre: NodeId;
 }
 
 export interface PendingJoin {
