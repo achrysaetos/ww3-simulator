@@ -25,7 +25,7 @@ export interface System {
 }
 
 const HISTORY_LIMIT = 5_000;
-const NOTABLE: ReadonlySet<SimEvent['type']> = new Set(['war_declared', 'peace', 'node_captured', 'formation_destroyed', 'nuclear_detonation', 'escalation', 'capitulation', 'message']);
+const NOTABLE: ReadonlySet<SimEvent['type']> = new Set(['war_declared', 'peace', 'node_captured', 'formation_destroyed', 'nuclear_detonation', 'nuclear_alert', 'escalation', 'capitulation', 'message']);
 
 export class Engine {
   private readonly commandOwner = new Map<Command['type'], System>();

@@ -265,6 +265,8 @@ export type SimEvent =
   | { type: 'formation_destroyed'; tick: number; formation: FormationId; nation: NationId }
   | { type: 'nuclear_detonation'; tick: number; by: NationId; node: NodeId; yieldKt: number; casualties: number }
   | { type: 'escalation'; tick: number; a: NationId; b: NationId; level: EscalationLevel }
+  /** A nation mating stored warheads to launchers: ordered, first tranche ready, all ready. */
+  | { type: 'nuclear_alert'; tick: number; nation: NationId; stage: 'ordered' | 'ready' | 'complete'; ready: number; of: number; reason: string }
   | { type: 'production'; tick: number; nation: NationId; item: ItemId; count: number }
   | { type: 'shortage'; tick: number; nation: NationId; what: string }
   | { type: 'capitulation'; tick: number; nation: NationId; to: NationId[] }

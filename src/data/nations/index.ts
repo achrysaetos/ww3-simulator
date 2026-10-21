@@ -8,7 +8,7 @@ import { strategicProfiles } from './strategic';
 
 export type * from './types';
 export { alliances, allianceById, defenseObligations } from './alliances';
-export { nuclearForces } from './nuclear';
+export { NUCLEAR_ALERT, nuclearForces, type AlertSpec } from './nuclear';
 export { opinions } from './opinions';
 export { recallReservists } from './reserves';
 

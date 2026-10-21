@@ -32,6 +32,7 @@ function describe(e: SimEvent): string | null {
     case 'peace': return `PEACE    ${name(e.a)} and ${name(e.b)}: ${e.terms}`;
     case 'nuclear_detonation': return `NUCLEAR  ${name(e.by)} detonates ${e.yieldKt} kt near ${nearestCity(e.node)}: ${Math.round(e.casualties).toLocaleString()} casualties`;
     case 'escalation': return `ESCALATE ${name(e.a)} / ${name(e.b)} -> ${e.level}`;
+    case 'nuclear_alert': return `ALERT    ${name(e.nation)} nuclear forces ${e.stage}: ${e.ready}/${e.of} warheads ready (${e.reason})`;
     case 'capitulation': return `SURRENDER ${name(e.nation)} capitulates to ${e.to.map(name).join(', ')}`;
     case 'formation_destroyed': return quiet ? null : `LOST     ${name(e.nation)} ${world.formations[e.formation]?.name ?? e.formation}`;
     default: return null;
