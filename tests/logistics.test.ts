@@ -81,7 +81,7 @@ describe('logistics', () => {
     const across = supplyFactor(t.world, t.map, contested, rus);
     const best = Math.max(...[...t.map.neighbors(contested)].filter((n) => t.world.control[n] === rus).map((n) => supplyFactor(t.world, t.map, n, rus)));
     expect(best).toBeGreaterThan(0);
-    expect(across).toBeCloseTo(LAST_MILE_CAPACITY * best, 3);
+    expect(across).toBeCloseTo(Math.round(LAST_MILE_CAPACITY * best * 1000) / 1000, 6);
     expect(t.fill(assault, 'ammo')).toBeGreaterThan(0.31);
     expect(supplyFactor(t.world, t.map, spearhead.node, rus)).toBe(0);
   });
@@ -123,7 +123,7 @@ describe('logistics', () => {
     const t = setup();
     const chn = id.nation('CHN');
     t.war('CHN', 'TWN');
-    const beach = t.nodeAt(23.5, 120.5);
+    const beach = t.nodeAt(23.4, 120.15);
     expect(t.world.control[beach]).toBe(id.nation('TWN'));
     const zone = [...t.map.neighbors(beach)].find((n) => t.map.isSea(n))!;
     const landing = t.brigade('CHN', beach);
@@ -146,7 +146,7 @@ describe('logistics', () => {
     const t = setup();
     const chn = id.nation('CHN');
     t.war('CHN', 'TWN');
-    const beach = t.nodeAt(23.5, 120.5);
+    const beach = t.nodeAt(23.4, 120.15);
     const zone = [...t.map.neighbors(beach)].find((n) => t.map.isSea(n))!;
     const landing = t.brigade('CHN', beach);
     const lst = id.platform('t_lst'), ferry = id.platform('t_ferry');
@@ -164,7 +164,7 @@ describe('logistics', () => {
   it('lands no more over the beach than one beach can take, however many lodgements a nation holds', () => {
     const t = setup();
     t.war('CHN', 'TWN');
-    const cells = [t.nodeAt(23.5, 120.5), t.nodeAt(25, 121.5)];
+    const cells = [t.nodeAt(23.4, 120.15), t.nodeAt(25.05, 121.15)];
     expect(new Set(cells.map((n) => t.world.control[n]))).toEqual(new Set([id.nation('TWN')]));
     const zone = [...t.map.neighbors(cells[0])].find((n) => t.map.isSea(n))!;
     t.add({ nation: id.nation('CHN'), name: 'landing ships', kind: 'surface_group', echelon: 'squadron', node: zone, equipment: { [id.platform('t_lst')]: 10 } });
@@ -233,7 +233,7 @@ describe('logistics', () => {
 
   it('does not repair infrastructure on the front line', () => {
     const t = setup();
-    const kharkiv = t.nodeAt(50, 36.2); // borders Russian-held cells
+    const kharkiv = t.nodeAt(50.2, 36.6); // Kharkiv oblast on the Russian border
     t.war('UKR', 'RUS');
     t.world.theater.infrastructure[kharkiv] = 0.2;
     t.engine.run(t.world, 5 * DAY);

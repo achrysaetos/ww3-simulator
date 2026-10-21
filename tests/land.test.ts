@@ -11,8 +11,9 @@ const MAP = loadMap();
 import { id, testWorld } from '../src/testkit';
 
 const RUS = id.nation('RUS'), UKR = id.nation('UKR'), KAZ = id.nation('KAZ');
-// Real map cells: Donbas plain (UKR) with the Russian plain cell south of it; Kharkiv-area hills (UKR) beside a Russian urban cell.
-const PLAIN_UKR = MAP.nodeAt(48.5, 38.5), PLAIN_RUS = MAP.nodeAt(47.5, 38.5);
+// Real map cells: the Azov coastal plain (UKR) with the Russian plain cell east of it; a wooded Kharkiv-area cell (UKR),
+// which defends as well as hills, beside a Russian cell.
+const PLAIN_UKR = MAP.nodeAt(47.5, 37.5), PLAIN_RUS = MAP.nodeAt(47.5, 38.5);
 const HILLS_UKR = MAP.nodeAt(50.5, 35.5), URBAN_RUS = MAP.nodeAt(50.5, 36.5);
 
 const brigade = (k = 1): Record<PlatformId, number> => ({
@@ -288,7 +289,7 @@ describe('the front', () => {
   });
 
   it('an empty cell covered by an equal line next door is infiltrated a few km a day; a thin line is broken through', () => {
-    const NORTH_UKR = MAP.nodeAt(49.5, 38.5);
+    const NORTH_UKR = MAP.nodeAt(48.5, 37.5);
     expect([...MAP.neighbors(PLAIN_UKR)]).toContain(NORTH_UKR);
     const cross = (cover: number) => {
       const s = setup();
