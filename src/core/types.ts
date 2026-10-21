@@ -215,7 +215,7 @@ export interface Nation {
   stats: NationStats;
   capital: NodeId;
   government: Government;
-  /** Alliance/bloc memberships, e.g. 'NATO', 'CSTO', 'SCO'. */
+  /** Military treaties whose members host, transit and supply each other's forces, e.g. 'NATO', 'CSTO'; never SCO or BRICS. */
   blocs: string[];
   /** Current warfighting state; subsystems update these. */
   population: number;
