@@ -91,7 +91,7 @@ describe('logistics', () => {
     t.war('RUS', 'UKR');
     const rus = id.nation('RUS');
     const home = t.nodeAt(50.5, 37.5); // Belgorod oblast, beside Kharkiv oblast
-    const contested = t.nodeAt(49.5, 36.5); // Kharkiv
+    const contested = t.nodeAt(50.15, 36.9); // Kharkiv oblast on the Russian border
     const deep = t.nodeAt(48.5, 34.5); // Dnipro region, no Russian ground next to it
     expect([t.world.control[home], t.world.control[contested], t.world.control[deep]]).toEqual([rus, id.nation('UKR'), id.nation('UKR')]);
     const assault = t.brigade('RUS', contested), spearhead = t.brigade('RUS', deep);
@@ -100,7 +100,7 @@ describe('logistics', () => {
     const across = supplyFactor(t.world, t.map, contested, rus);
     const best = Math.max(...[...t.map.neighbors(contested)].filter((n) => t.world.control[n] === rus).map((n) => supplyFactor(t.world, t.map, n, rus)));
     expect(best).toBeGreaterThan(0);
-    expect(across).toBeCloseTo(LAST_MILE_CAPACITY * best, 3);
+    expect(across).toBeCloseTo(Math.round(LAST_MILE_CAPACITY * best * 1000) / 1000, 6);
     expect(t.fill(assault, 'ammo')).toBeGreaterThan(0.31);
     expect(supplyFactor(t.world, t.map, spearhead.node, rus)).toBe(0);
   });
@@ -109,7 +109,7 @@ describe('logistics', () => {
     const t = setup();
     t.war('RUS', 'UKR');
     const rus = id.nation('RUS');
-    const contested = t.nodeAt(49.5, 36.5); // Kharkiv
+    const contested = t.nodeAt(50.2, 36.6); // the Kharkiv border cell
     const behind = [...t.map.neighbors(contested)].filter((n) => n < t.map.landCount && t.world.control[n] === rus);
     expect(behind.length).toBeGreaterThan(0);
     const assault = t.brigade('RUS', contested);
@@ -175,7 +175,7 @@ describe('logistics', () => {
     const t = setup();
     const chn = id.nation('CHN');
     t.war('CHN', 'TWN');
-    const beach = t.nodeAt(23.5, 120.5);
+    const beach = t.nodeAt(23.4, 120.15);
     expect(t.world.control[beach]).toBe(id.nation('TWN'));
     const zone = [...t.map.neighbors(beach)].find((n) => t.map.isSea(n))!;
     const landing = t.brigade('CHN', beach);
@@ -198,7 +198,7 @@ describe('logistics', () => {
     const t = setup();
     const chn = id.nation('CHN');
     t.war('CHN', 'TWN');
-    const beach = t.nodeAt(23.5, 120.5);
+    const beach = t.nodeAt(23.4, 120.15);
     const zone = [...t.map.neighbors(beach)].find((n) => t.map.isSea(n))!;
     const landing = t.brigade('CHN', beach);
     const lst = id.platform('t_lst'), ferry = id.platform('t_ferry');
@@ -216,7 +216,7 @@ describe('logistics', () => {
   it('lands no more over the beach than one beach can take, however many lodgements a nation holds', () => {
     const t = setup();
     t.war('CHN', 'TWN');
-    const cells = [t.nodeAt(23.5, 120.5), t.nodeAt(25, 121.5)];
+    const cells = [t.nodeAt(23.4, 120.15), t.nodeAt(25.05, 121.15)];
     expect(new Set(cells.map((n) => t.world.control[n]))).toEqual(new Set([id.nation('TWN')]));
     const zone = [...t.map.neighbors(cells[0])].find((n) => t.map.isSea(n))!;
     t.add({ nation: id.nation('CHN'), name: 'landing ships', kind: 'surface_group', echelon: 'squadron', node: zone, equipment: { [id.platform('t_lst')]: 10 } });
@@ -286,7 +286,7 @@ describe('logistics', () => {
 
   it('repairs infrastructure on the front line at half the rate of the rear', () => {
     const t = setup();
-    const kharkiv = t.nodeAt(50, 36.2); // borders Russian-held cells
+    const kharkiv = t.nodeAt(50.2, 36.6); // Kharkiv oblast on the Russian border
     const kyiv = t.nodeAt(50.45, 30.5);
     t.war('UKR', 'RUS');
     t.world.theater.infrastructure[kharkiv] = t.world.theater.infrastructure[kyiv] = 0.2;

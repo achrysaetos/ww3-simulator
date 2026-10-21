@@ -65,7 +65,11 @@ describe('nuclear alerts', () => {
     t.war('ISR', 'IRN');
     run(t, 2 * DAY);
     expect(of(t.world.history, 'nuclear_alert')).toEqual([]);
-    for (let n = 0; n < t.map.landCount; n++) if (t.map.owner[n] === ISR && n !== t.world.nations[ISR].capital) t.world.control[n] = IRN;
+    // Iran takes the cells farthest from Jerusalem until a quarter of Israelis live under it: past the 15%
+    // threshold, short of a loss that would make Israel capitulate first.
+    const capital = t.world.nations[ISR].capital;
+    const far = t.map.nodesOf(ISR).sort((a, b) => t.map.distanceKm(b, capital) - t.map.distanceKm(a, capital));
+    for (let lost = 0, i = 0; lost < 0.25; i++) { t.world.control[far[i]] = IRN; lost += t.map.popShare[far[i]]; }
     run(t, 2 * DAY);
     expect(of(t.world.history, 'nuclear_alert')[0]).toMatchObject({ nation: ISR, stage: 'ordered' });
     expect(t.world.nations[ISR].nuclear.deployed).toBeGreaterThan(0);
