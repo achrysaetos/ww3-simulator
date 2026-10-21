@@ -56,6 +56,24 @@ describe('strategic deployment', () => {
     expect(ships.status).toBe('active');
   });
 
+  it('lands a brigade bound for Lithuania at a port out of Kaliningrad\'s missile reach, then marches it on to Vilnius', () => {
+    const t = setup();
+    const vilnius = t.nodeAt(54.69, 25.28), kaliningrad = t.nodeAt(54.7, 20.5);
+    for (const n of ['LTU', 'LVA', 'EST']) t.world.nations[N(n)].blocs = ['NATO'];
+    const brigade = heavyBrigade(t, 'USA', t.nodeAt(...FORT_HOOD));
+    sealiftGroup(t, t.nodeAt(...NORFOLK));
+    t.order(brigade, vilnius);
+    const mass = landMass(t.map);
+    let landedAt = -1;
+    for (let d = 1; d <= 60 && t.map.distanceKm(brigade.node, vilnius) > 200; d++) {
+      t.day();
+      if (landedAt < 0 && brigade.status === 'active' && mass[brigade.node] === mass[vilnius]) landedAt = brigade.node;
+    }
+    expect(landedAt).toBeGreaterThanOrEqual(0);
+    expect(t.map.distanceKm(landedAt as NodeId, kaliningrad)).toBeGreaterThan(450);
+    expect(t.map.distanceKm(brigade.node, vilnius)).toBeLessThanOrEqual(200);
+  }, 120_000);
+
   it('sinks the embarked vehicles with the ships that carried them', () => {
     const t = setup();
     const norfolk = t.nodeAt(...NORFOLK);

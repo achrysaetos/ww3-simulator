@@ -583,6 +583,23 @@ describe('naval movement and lift', () => {
     expect(ssn.node).not.toBe(a);
   });
 
+  it('a ship alongside at its base draws fuel and stores from it, with no land supply line, while one on station at sea uses hers up', () => {
+    const t = navalWorld();
+    const port = t.portOf('RUS', 54.65, 19.9);
+    const sea = t.nodeAt(56, 18);
+    const alongside = t.add({ nation: RUS, name: 'Alongside', kind: 'surface_group', node: port, equipment: t.eq({ n_frigate: 2 }), magazine: {} });
+    const onStation = t.add({ nation: RUS, name: 'On station', kind: 'surface_group', node: sea, equipment: t.eq({ n_frigate: 2 }) });
+    onStation.home = port;
+    alongside.supply.food *= 0.5;
+    alongside.supply.fuel *= 0.5;
+    t.order(onStation, { posture: 'patrol', target: sea });
+    t.engine.run(t.world, Math.round((10 * 24) / t.world.dtHours));
+    expect(alongside.node).toBe(port);
+    expect(alongside.supply.food).toBeCloseTo(alongside.supplyCapacity.food);
+    expect(alongside.supply.fuel).toBeCloseTo(alongside.supplyCapacity.fuel);
+    expect(onStation.supply.food).toBeLessThan(0.8 * onStation.supplyCapacity.food);
+  });
+
   it('a carrier in a refuelling overhaul refuses an order to sail, whoever gives it; one between deployments sails', () => {
     const t = navalWorld();
     const port = t.portOf('USA', 36.9, -76.3);

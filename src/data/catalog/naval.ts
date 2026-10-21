@@ -121,6 +121,8 @@ const minorAndSupport: PlatformSpec<MunitionKey>[] = [
   { id: 'bykov', name: 'Vasily Bykov (22160) patrol ship', cls: 'patrol', crew: 80, producers: ['RUS'], inService: 2018, unitCostUsdM: 100, speedKph: 40, rangeKm: 6000, fuelTph: 0.8 },
   { id: 'nsc', name: 'Legend-class National Security Cutter', cls: 'patrol', crew: 120, producers: ['USA'], inService: 2008, unitCostUsdM: 700, speedKph: 52, rangeKm: 22000, fuelTph: 1.2, detectionKm: 150 },
   { id: 'avenger_mcm', name: 'Avenger-class MCM', cls: 'mine_warfare', crew: 84, producers: [], inService: 1987, unitCostUsdM: 120 },
+  // The Independence-class LCS carrying its mine countermeasures mission package (IOC 2023), which replaced the Avengers in Bahrain.
+  { id: 'lcs_mcm', name: 'Independence-class LCS (MCM mission package)', cls: 'mine_warfare', crew: 98, producers: ['USA'], inService: 2023, unitCostUsdM: 600, speedKph: 74 },
   { id: 'alexandrit', name: 'Alexandrit (12700) MCM', cls: 'mine_warfare', crew: 44, producers: ['RUS'], inService: 2016, unitCostUsdM: 80 },
   { id: 'type082ii', name: 'Type 082II Wozang MCM', cls: 'mine_warfare', producers: ['CHN'], inService: 2005, unitCostUsdM: 60 },
   { id: 'tripartite', name: 'Tripartite-class MCM', cls: 'mine_warfare', crew: 40, producers: [], inService: 1984, unitCostUsdM: 60 },

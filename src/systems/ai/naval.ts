@@ -3,7 +3,7 @@ import type { GameMap } from '../../core/map';
 import type { Formation, FormationId, NationId, NodeId, PlatformClass, PlatformId } from '../../core/types';
 import { liftShare } from '../naval/amphibious';
 import { geography, sameWaters, seaNeighbour } from '../naval/geography';
-import { sailable } from '../naval/movement';
+import { minedClosed, navalDestination, sailable, seaPath } from '../naval/movement';
 import { areaDefenseShare, boardable, REARMED, SEAWORTHY } from '../naval/orders';
 import { compose, fleetLosses } from '../naval/state';
 import { dominant, isGround, issue, sighted } from './forces';
@@ -78,14 +78,16 @@ function coast(map: GameMap): NodeId[] {
   return c;
 }
 
-type NavalRole = 'ssbn' | 'submarine' | 'capital' | 'lift' | 'escort' | 'raider';
+type NavalRole = 'ssbn' | 'submarine' | 'capital' | 'lift' | 'escort' | 'raider' | 'mcm';
 const NAVAL_ROLE: Partial<Record<PlatformClass, NavalRole>> = {
   ssbn: 'ssbn',
   ssn: 'submarine', ssk: 'submarine', ssgn: 'submarine', uuv: 'submarine',
   carrier: 'capital', amphibious: 'capital',
-  cruiser: 'escort', destroyer: 'escort', frigate: 'escort', corvette: 'escort', patrol: 'escort', mine_warfare: 'escort', usv: 'raider',
+  cruiser: 'escort', destroyer: 'escort', frigate: 'escort', corvette: 'escort', patrol: 'escort', mine_warfare: 'mcm', usv: 'raider',
 };
-const PRIORITY: NavalRole[] = ['ssbn', 'capital', 'submarine', 'escort', 'raider'];
+/** Sweepers work a minefield only with no enemy surface group within this distance: an MCM ship cannot fight one, and a submarine nobody has found does not hold them back (judgment). */
+const MCM_STANDOFF_KM = 300;
+const PRIORITY: NavalRole[] = ['ssbn', 'capital', 'submarine', 'escort', 'raider', 'mcm'];
 
 function roleOf(p: Plan, f: Formation, liftCapable: boolean): NavalRole | undefined {
   if (liftCapable) return 'lift';
@@ -354,8 +356,9 @@ function runAssault(p: Plan, a: Assault, lifts: Formation[]): void {
 export function planNaval(p: Plan): void {
   const { map } = p.ctx;
   const km = (a: number, b: number) => map.distanceKm(a as NodeId, b as NodeId);
-  // A group sent home with its interceptors spent (naval orders) stays there until it has rearmed.
-  const rearming = (f: Formation) => f.kind === 'surface_group' && f.order.posture === 'reserve' && areaDefenseShare(p.ctx, f) < REARMED;
+  // A group sent home with its interceptors or stores spent (naval orders) stays there until it has rearmed and victualled.
+  const rearming = (f: Formation) =>
+    f.order.posture === 'reserve' && ((f.kind === 'surface_group' && areaDefenseShare(p.ctx, f) < REARMED) || f.supply.food < REARMED * f.supplyCapacity.food);
   const groups = (p.index.byNation.get(p.nation) ?? []).filter((f) => (f.kind === 'surface_group' || f.kind === 'submarine') && f.status === 'active' && f.readiness >= SEAWORTHY && !rearming(f));
   if (!groups.length) return;
   const liftCapable = groups.filter((g) => g.kind === 'surface_group' && compose(g, p.ctx.catalog).troopLift > 0);
@@ -374,7 +377,18 @@ export function planNaval(p: Plan): void {
   const atWar = [...p.enemies].some((e) => isAtWar(p.world, p.nation, e));
   // A fleet in a closed sea (the Caspian Flotilla, a Black Sea squadron with the Straits shut to it)
   // fights where open water takes it; a station it cannot reach falls back to its home waters.
-  const sails = (g: Formation, n: NodeId) => sailable(p.world, map, g, n);
+  // Open water joins the two, and once enemy minefields close some zones, a route around them does too.
+  const closing = Object.keys(p.world.slices.naval.mines).some((z) => minedClosed(p.world, Number(z), p.nation));
+  const routes = new Map<string, boolean>();
+  const sails = (g: Formation, n: NodeId) => {
+    if (!sailable(p.world, map, g, n)) return false;
+    if (!closing) return true;
+    const dest = navalDestination(p.world, map, g.nation, n)!;
+    const key = `${g.node}|${dest}`;
+    let ok = routes.get(key);
+    if (ok === undefined) routes.set(key, (ok = seaPath(p.world, map, g.nation, g.node, dest) !== null));
+    return ok;
+  };
   const patrol = (g: Formation, target: NodeId) => issue(p, g, { posture: 'patrol', target: sails(g, target) ? target : nearestSea(map, g.home) });
 
   const blockade = (f: Formation): boolean => {
@@ -395,10 +409,21 @@ export function planNaval(p: Plan): void {
     return true;
   };
 
+  const mined = Object.values(p.world.slices.naval.mines).some((laid) => Object.keys(laid).some((layer) => isAtWar(p.world, layer as NationId, p.nation)));
+  const enemyWarships = [...p.enemies].flatMap((e) => (p.index.byNation.get(e) ?? []).filter((f) => f.kind === 'surface_group' && f.status === 'active'));
+  const enemyWarshipsNear = (n: number) => enemyWarships.some((f) => km(f.node, n) <= MCM_STANDOFF_KM);
+
   const lift = new Set(liftCapable);
   const roles = new Map(groups.map((g) => [g, roleOf(p, g, lift.has(g))]));
   if (assault) runAssault(p, assault, liftCapable.filter((l) => sails(l, assault.port)));
-  const unescorted = [...(assault ? liftCapable.filter((g) => g.order.posture !== 'reserve') : []), ...groups.filter((g) => roles.get(g) === 'capital')];
+  // Escorts screen the ships that cannot fight a submarine themselves: the landing force, the capital ships, sweepers
+  // working a minefield, and loaded sealift convoys (the Atlantic convoys of 1940-45; Earnest Will's escorted tankers).
+  const voyages = p.world.slices.sealift?.voyages ?? {};
+  const unescorted = [
+    ...(assault ? liftCapable.filter((g) => g.order.posture !== 'reserve') : []),
+    ...groups.filter((g) => roles.get(g) === 'capital' || (roles.get(g) === 'mcm' && mined)),
+    ...groups.filter((g) => !roles.get(g) && voyages[g.id]),
+  ];
   for (const g of groups) {
     // Groups with no fighting role (sealift) sail under naval/sealift.ts.
     if (!roles.get(g)) continue;
@@ -424,6 +449,18 @@ export function planNaval(p: Plan): void {
       case 'lift':
         if (!assault) issue(p, g, { posture: 'patrol', target: nearestSea(map, g.home) });
         break;
+      // Mine countermeasures sweep the nearest enemy minefield the enemy's warships have left (Gulf 1991:
+      // the sweepers went in once the Iraqi navy was sunk) and otherwise keep home waters.
+      case 'mcm': {
+        let field: NodeId | undefined, bestD = Infinity;
+        for (const [node, laid] of Object.entries(p.world.slices.naval.mines)) {
+          if (!Object.keys(laid).some((layer) => isAtWar(p.world, layer as NationId, p.nation)) || enemyWarshipsNear(Number(node))) continue;
+          const d = km(g.node, Number(node));
+          if (d < bestD && sails(g, Number(node) as NodeId)) { bestD = d; field = Number(node) as NodeId; }
+        }
+        issue(p, g, { posture: 'patrol', target: field ?? nearestSea(map, g.home) });
+        break;
+      }
       // Strike USVs are launched from shore at targets within their range; they do not keep the sea.
       case 'raider':
         issue(p, g, { posture: 'defend', target: g.home });

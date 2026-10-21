@@ -172,3 +172,22 @@ describe('naval AI reachable tasking', () => {
     expect(s.map.lon[caspian.node]).toBeLessThan(55);
   }, 120_000);
 });
+
+describe('naval AI mine countermeasures', () => {
+  it("the 5th Fleet's sweepers go to work on Iran's Hormuz minefield once Iran's surface navy is gone, and not before", () => {
+    const s = createSession('gulf-2027', 1);
+    const sweepers = Object.values(s.world.formations).find((f) => f.name.startsWith('Commander Task Force 55'))!;
+    const perDay = 24 / s.world.dtHours;
+    const iranAfloat = () => Object.values(s.world.formations).some((f) => f.nation === 'IRN' && f.kind === 'surface_group' && f.status === 'active');
+    let sentEarly = false, sent = false;
+    for (let i = 0; i < 40 * perDay && !sent; i++) {
+      s.engine.step(s.world);
+      const target = sweepers.order.target;
+      const toField = target !== undefined && String(target) in s.world.slices.naval.mines;
+      if (toField && iranAfloat()) sentEarly = true;
+      if (toField) sent = true;
+    }
+    expect(sentEarly).toBe(false);
+    expect(sent).toBe(true);
+  }, 240_000);
+});
