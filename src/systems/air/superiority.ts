@@ -149,5 +149,5 @@ export function emitBattle(world: World, ctx: SimContext, node: NodeId, attacker
   if (!nations.length) return;
   const casualties: Record<NationId, number> = {};
   for (const n of nations) casualties[n] = Object.entries(tally[n]).reduce((s, [pid, c]) => s + c * ctx.catalog.platform(pid as PlatformId).crew, 0);
-  ctx.emit({ type: 'battle', tick: world.tick, node, attacker, defender, losses: tally, casualties });
+  ctx.emit({ type: 'battle', tick: world.tick, node, attacker, defender, losses: tally, casualties, domain: 'air' });
 }
