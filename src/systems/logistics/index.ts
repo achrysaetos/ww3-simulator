@@ -136,7 +136,7 @@ function sustain(world: World, ctx: SimContext, s: LogisticsState, forces: Forma
   const n = forces.length;
   const factor = new Float64Array(n);
   const want = new Float64Array(n * 3); // fuel, ammo, food per formation
-  const nodeTons = new Map<number, number>(), nodeFactor = new Map<number, number>();
+  const { tons: nodeTons, factor: nodeFactor } = nodeScratch(ctx.map);
   const ashore = new Uint8Array(n), beachTons = new Map<NationId, number>();
   // Hoisted: dev loaders (vitest, tsx) compile imported bindings to getters, which dominates this loop.
   const refill = MAX_REFILL_FRACTION_PER_DAY * dtDays, hours = READINESS_HOURS_PER_DAY, food = FOOD_TONS_PER_PERSON_DAY * dtDays;
@@ -156,20 +156,21 @@ function sustain(world: World, ctx: SimContext, s: LogisticsState, forces: Forma
       (want[j] = Math.min(Math.max(0, cap.fuel - have.fuel), cap.fuel * refill * phi)) +
       (want[j + 1] = Math.min(Math.max(0, cap.ammo - have.ammo), cap.ammo * refill * phi)) +
       (want[j + 2] = Math.min(Math.max(0, cap.food - have.food), cap.food * refill * phi));
-    nodeTons.set(f.node, (nodeTons.get(f.node) ?? 0) + tons);
-    nodeFactor.set(f.node, Math.max(nodeFactor.get(f.node) ?? 0, phi));
+    nodeTons[f.node] += tons;
+    nodeFactor[f.node] = Math.max(nodeFactor[f.node], phi);
   }
 
   const nationWant = new Map<NationId, number[]>();
   for (let i = 0; i < n; i++) {
     if (factor[i] <= 0) continue;
     const f = forces[i];
-    const tons = nodeTons.get(f.node)!;
+    const tons = nodeTons[f.node];
     if (tons <= 0) continue;
-    const ration = Math.min(1, (NODE_TONS_PER_DAY * nodeFactor.get(f.node)! * dtDays) / tons);
+    const ration = Math.min(1, (NODE_TONS_PER_DAY * nodeFactor[f.node] * dtDays) / tons);
     for (let c = 0; c < 3; c++) want[i * 3 + c] *= ration;
     if (ashore[i]) beachTons.set(f.nation, (beachTons.get(f.nation) ?? 0) + want[i * 3] + want[i * 3 + 1] + want[i * 3 + 2]);
   }
+  for (const f of forces) nodeTons[f.node] = nodeFactor[f.node] = 0;
   const beachRation = new Map<NationId, number>();
   for (const [id, tons] of beachTons) {
     const lift = s.lift[id]!;
@@ -208,6 +209,15 @@ function sustain(world: World, ctx: SimContext, s: LogisticsState, forces: Forma
   rearm(world, ctx, s, forces, factor, dtDays);
 }
 
+const nodeScratches = new WeakMap<GameMap, { tons: Float64Array; factor: Float64Array }>();
+
+/** Per-node tonnage asked for and best supply factor, all zero between calls to `sustain`. */
+function nodeScratch(map: GameMap): { tons: Float64Array; factor: Float64Array } {
+  let hit = nodeScratches.get(map);
+  if (!hit) nodeScratches.set(map, (hit = { tons: new Float64Array(map.size), factor: new Float64Array(map.size) }));
+  return hit;
+}
+
 /**
  * Reloads magazines from the national stockpile toward the platforms' full loadouts,
  * at a rate set by formation kind and scaled by the supply factor; ships only in a
@@ -215,26 +225,28 @@ function sustain(world: World, ctx: SimContext, s: LogisticsState, forces: Forma
  * cover every request. Rounds an ORBAT carries beyond the loadouts are not topped up.
  */
 function rearm(world: World, ctx: SimContext, s: LogisticsState, forces: Formation[], factor: Float64Array, dtDays: number): void {
-  const requests: { f: Formation; m: MunitionId; want: number }[] = [];
-  const asked = new Map<string, number>();
+  const requests: { f: Formation; m: MunitionId; want: number; asked: Map<MunitionId, number> }[] = [];
+  const askedBy = new Map<NationId, Map<MunitionId, number>>();
   const landCount = ctx.map.landCount;
+  const load = new Map<MunitionId, number>();
   for (let i = 0; i < forces.length; i++) {
     const f = forces[i], phi = factor[i];
     const rate = REARM_PER_DAY[f.kind] * phi * dtDays;
     if (rate <= 0 || (REARMS_IN_PORT_ONLY.has(f.kind) && f.node >= landCount)) continue;
     const stock = world.nations[f.nation].stockpile;
-    for (const [m, full] of fullLoad(f, ctx)) {
+    fullLoad(f, ctx, load);
+    for (const [m, full] of load) {
       const missing = full - (f.magazine[m] ?? 0);
       if (missing <= 0 || !((stock[m] ?? 0) >= 1)) continue;
       const want = Math.min(missing, full * rate);
-      requests.push({ f, m, want });
-      const k = `${f.nation}|${m}`;
-      asked.set(k, (asked.get(k) ?? 0) + want);
+      const asked = askedBy.get(f.nation) ?? askedBy.set(f.nation, new Map()).get(f.nation)!;
+      requests.push({ f, m, want, asked });
+      asked.set(m, (asked.get(m) ?? 0) + want);
     }
   }
-  for (const { f, m, want } of requests) {
+  for (const { f, m, want, asked } of requests) {
     const stock = world.nations[f.nation].stockpile;
-    const x = want * Math.min(1, stock[m] / asked.get(`${f.nation}|${m}`)!);
+    const x = want * Math.min(1, stock[m] / asked.get(m)!);
     const k = Math.min(stock[m], Math.floor(x) + (ctx.rng.chance(x - Math.floor(x)) ? 1 : 0));
     if (k <= 0) continue;
     f.magazine[m] = (f.magazine[m] ?? 0) + k;
@@ -242,13 +254,13 @@ function rearm(world: World, ctx: SimContext, s: LogisticsState, forces: Formati
   }
 }
 
-function fullLoad(f: Formation, ctx: SimContext): Map<MunitionId, number> {
-  const out = new Map<MunitionId, number>();
+/** Fills `out` with the rounds of each munition the formation's platforms carry at full load. */
+function fullLoad(f: Formation, ctx: SimContext, out: Map<MunitionId, number>): void {
+  out.clear();
   for (const key in f.equipment) {
     const n = f.equipment[key as PlatformId];
     if (n > 0) for (const l of ctx.catalog.platform(key as PlatformId).loadout) out.set(l.munition, (out.get(l.munition) ?? 0) + l.count * n);
   }
-  return out;
 }
 
 /**
