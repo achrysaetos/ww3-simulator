@@ -500,7 +500,7 @@ describe('air wing basing', () => {
     // A US garrison opens Japan's airfields; the brigade's MRBMs (1,700 km) reach Okinawa, Kyushu and Shikoku but not
     // northern Honshu, which the tanked fighters still reach the brigade from.
     t.add({ nation: N('USA'), name: 'US Army Japan', kind: 'maneuver', echelon: 'brigade', node: t.node(35.5, 139.4), equipment: { [id.platform('t_mbt')]: 10 } });
-    const shanghai = t.node(31.2, 121.0);
+    const shanghai = t.node(31.2, 121.4);
     t.add({ nation: N('CHN'), name: 'PLARF brigade', kind: 'missile', echelon: 'brigade', node: shanghai, equipment: { [id.platform('x_mrbm_tel')]: 12 } });
     const moves = commandsOver(t, 8).flatMap((c) => (c.type === 'order' && c.formation === w.id && c.order.posture === 'move' ? [c.order.target!] : []));
     expect(moves.length).toBeGreaterThan(0);
