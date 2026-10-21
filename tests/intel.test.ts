@@ -65,13 +65,14 @@ describe('intelligence picture', () => {
 describe('strike AI under the fog of war', () => {
   /**
    * Strike orders China's missile brigade gives against a US air wing at Yonaguni that moved, unseen,
-   * to a road strip in southern Taiwan (no airfield, so not a base fix) after the first tick.
+   * to a road strip in southern Taiwan (no airfield, so not a base fix) after the first tick. Three squadrons, so
+   * that a stale fix on the wing still outweighs a salvo on Taipei.
    */
   const strikesOn = (systems: 'intel' | 'perfect') => {
     const t = testWorld(systems === 'intel' ? [createDiplomacy(), intel, createAi()] : [createDiplomacy(), createAi()]);
     const base = t.nodeAt(24.45, 123.0), dispersal = t.nodeAt(23.1, 120.4);
     const launch = t.map.nodesOf(N('CHN')).sort((a, b) => t.map.distanceKm(a, base) - t.map.distanceKm(b, base))[0];
-    const wing = t.add({ nation: N('USA'), name: 'US air wing', kind: 'air_wing', echelon: 'wing', node: base, equipment: { [id.platform('t_fighter')]: 24 } });
+    const wing = t.add({ nation: N('USA'), name: 'US air wing', kind: 'air_wing', echelon: 'wing', node: base, equipment: { [id.platform('t_fighter')]: 72 } });
     tels(t, 'CHN', launch, launch);
     relationMut(t.world, N('CHN'), N('JPN')).opinion = -55;
     t.world.nations[N('CHN')].stockpile[id.munition('t_srbm')] = 10_000;
