@@ -18,7 +18,7 @@ const BERTH_REFILL_PER_DAY = 0.5;
 
 /** Hostile mines at a node close it to this nation. */
 export function minedClosed(world: World, node: number, nation: NationId): boolean {
-  const laid = world.slices.naval.mines[node];
+  const laid = world.slices.naval?.mines[node];
   if (!laid) return false;
   let hostile = 0;
   for (const [layer, n] of Object.entries(laid)) if (atWar(world, layer as NationId, nation)) hostile += n;
@@ -40,7 +40,7 @@ export function navalDestination(world: World, map: GameMap, nation: NationId, t
 export function sailable(world: World, map: GameMap, f: Formation, target: NodeId): boolean {
   const dest = navalDestination(world, map, f.nation, target);
   if (dest === undefined || !sameWaters(map, f.node, dest)) return false;
-  for (const n in world.slices.naval.mines) if (minedClosed(world, Number(n), f.nation)) return seaPath(world, map, f.nation, f.node, dest) !== null;
+  for (const n in world.slices.naval?.mines) if (minedClosed(world, Number(n), f.nation)) return seaPath(world, map, f.nation, f.node, dest) !== null;
   return true;
 }
 
