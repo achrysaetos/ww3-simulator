@@ -249,6 +249,17 @@ describe('land inside one nation crosses water only by bridge or tunnel', () => 
   });
 });
 
+describe('ports open onto the sea', () => {
+  it.each(['EST', 'LVA', 'LTU', 'UKR', 'KOR', 'PRK', 'TWN', 'JPN', 'ISR', 'GBR', 'NOR'])('in %s', (nation) => {
+    const inland = map.nodesOf(nation as NationId).filter((n) => map.ports[n] > 0 && !map.isCoastal(n)).map(where);
+    expect(inland).toEqual([]);
+  });
+
+  it('including Tallinn, on a bay too narrow for a sea zone of its own', () => {
+    expect(map.isCoastal(at([59.44, 24.75]))).toBe(true);
+  });
+});
+
 describe('population lives where the census counts it', () => {
   const shareIn = (nation: string, [s, n, w, e]: readonly number[]) =>
     map.nodesOf(nation as NationId).filter((c) => map.lat[c] >= s && map.lat[c] <= n && map.lon[c] >= w && map.lon[c] <= e)
