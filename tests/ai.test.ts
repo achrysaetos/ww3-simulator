@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { relationMut, type System } from '../src/core/engine';
-import type { Command, NodeId, SimEvent } from '../src/core/types';
+import { atWar, relationMut, type System } from '../src/core/engine';
+import type { Command, NationId, NodeId, SimEvent } from '../src/core/types';
 import { createSession } from '../src/scenarios';
 import { createAi } from '../src/systems/ai';
 import { createDiplomacy } from '../src/systems/diplomacy';
@@ -192,8 +192,11 @@ describe('strike wing basing', () => {
     const s = createSession('taiwan-2027', 1);
     const wing = Object.values(s.world.formations).find((f) => f.name === '7th Bomb Wing')!;
     const home = wing.node;
+    const perDay = 24 / s.world.dtHours;
+    for (let i = 0; i < 30 * perDay && !atWar(s.world, 'USA' as NationId, 'CHN' as NationId); i++) s.engine.step(s.world);
+    expect(atWar(s.world, 'USA' as NationId, 'CHN' as NationId)).toBe(true);
     let strikesAbroad = 0;
-    s.engine.run(s.world, (14 * 24) / s.world.dtHours, () => {
+    s.engine.run(s.world, 10 * perDay, () => {
       if (wing.order.posture === 'strike' && s.map.distanceKm(wing.node, home) > 8000) strikesAbroad++;
     });
     expect(s.map.distanceKm(wing.node, home)).toBeGreaterThan(8000);
