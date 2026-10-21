@@ -248,3 +248,27 @@ describe('land inside one nation crosses water only by bridge or tunnel', () => 
     expect([...map.neighbors(tunnel.a)]).toContain(tunnel.b);
   });
 });
+
+describe('population lives where the census counts it', () => {
+  const shareIn = (nation: string, [s, n, w, e]: readonly number[]) =>
+    map.nodesOf(nation as NationId).filter((c) => map.lat[c] >= s && map.lat[c] <= n && map.lon[c] >= w && map.lon[c] <= e)
+      .reduce((t, c) => t + map.popShare[c], 0);
+
+  it.each([
+    // Statistics Korea 2020: the Seoul Capital Area holds 50.2% of South Koreans.
+    ['the Seoul Capital Area', 'KOR', [36.9, 38.3, 126.4, 127.9], 0.45, 0.55],
+    // Japan 2020 census: Tokyo, Kanagawa, Saitama and Chiba hold 29% of Japanese, all of Kanto 34%.
+    ['Tokyo and its neighbours', 'JPN', [35, 36.5, 139, 140.9], 0.29, 0.4],
+    // Taiwan 2023: Taipei, New Taipei, Keelung and Taoyuan hold 40% of Taiwanese.
+    ['northern Taiwan', 'TWN', [24.75, 25.35, 121.25, 122], 0.33, 0.45],
+  ] as const)('puts %s at its census share', (_, nation, box, lo, hi) => {
+    const share = shareIn(nation, box);
+    expect(share).toBeGreaterThan(lo);
+    expect(share).toBeLessThan(hi);
+  });
+
+  it('spreads a metro area over the cells it covers, not the one under its centre', () => {
+    // Taipei City is 11% of Taiwan and Seoul 18% of South Korea; at 1/4 degree no one cell holds a whole metro area.
+    for (const nation of ['TWN', 'KOR', 'PRK']) expect(Math.max(...map.nodesOf(nation as NationId).map((c) => map.popShare[c]))).toBeLessThan(0.2);
+  });
+});
