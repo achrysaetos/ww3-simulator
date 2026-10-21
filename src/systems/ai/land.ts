@@ -124,6 +124,115 @@ function rear(p: Plan, from: NodeId, front: Set<number>): NodeId {
   return queue.length > 1 && ok(queue[queue.length - 1]) ? (queue[queue.length - 1] as NodeId) : from;
 }
 
+/** A formation fighting inside an enemy-held cell is this many km further from a home task than its distance: it must break contact first (estimate). */
+const ENGAGED_KM = 400;
+
+/**
+ * Defence of the homeland, planned before anything else and drawing on the whole army, the
+ * offensive included. Every cell of the nation's own soil that it held at the start and an
+ * enemy now holds draws the nearest fit formations until they outnumber the enemy there
+ * ATTACK_RATIO to 1, as Russia drew forces from Donbas and Zaporizhzhia to clear Kursk in
+ * 2024. Every home cell that borders such a penetration keeps at least one formation, so a
+ * breakthrough meets a screen rather than rolling on through an empty rear, and so does an
+ * empty border cell facing enemy troops mounting an assault. A quiet border is not screened:
+ * holding every cell against every enemy across it would tie down an attacker's whole army,
+ * Russia facing NATO from Kola to Belarus among them. It covers land borders only: a landing on
+ * an island the enemy has no soil on is fought by the ordinary front. Ground next to home soil already occupied
+ * when the scenario began is the old front, where cells change hands in attrition; losing one
+ * there is not a penetration. A counter-attack goes in only with the means to reach 3:1;
+ * short of that the screen holds. Returns the formations so committed, which the rest of the
+ * plan leaves alone.
+ */
+function defendHomeland(p: Plan, fit: (f: Formation) => boolean): Set<Formation> {
+  const { map } = p.ctx;
+  const { world } = p;
+  const committed = new Set<Formation>();
+  const { origin } = landSlice(world);
+  if (!origin.length) return committed;
+  // Only across a land border: an amphibious lodgement on an island is the naval war's and the ordinary front's business.
+  const mass = landMass(map);
+  const bordered = new Set<number>();
+  for (const e of p.enemies) for (const n of map.nodesOf(e)) bordered.add(mass[n]);
+  const home = (n: number) => n < map.landCount && map.owner[n] === p.nation && origin[n] === p.nation && bordered.has(mass[n]);
+  // The nation's own soil already in enemy hands when the scenario began: the old front, where ground changes hands by inches.
+  const oldFront = (n: number) => n < map.landCount && map.owner[n] === p.nation && origin[n] !== p.nation;
+  const nextToOldFront = (n: number) => {
+    for (let k = map.adjStart[n]; k < map.adjStart[n + 1]; k++) if (oldFront(map.adj[k])) return true;
+    return false;
+  };
+  // Enemy ground forces under orders to attack: the warning a border garrison gets of an assault.
+  const massing = (m: number) => (p.index.groundAt.get(m) ?? []).some((g) => p.enemies.has(g.nation) && g.order.posture === 'attack');
+  const occupied = (n: number) => (p.index.groundAt.get(n) ?? []).some((g) => g.nation === p.nation);
+  // Home cells lost across a border, not ground given up on the old front (Russian gains in Donbas are not a penetration of Ukraine's rear).
+  const lost: { n: NodeId; enemy: number }[] = [];
+  for (const n of map.nodesOf(p.nation)) if (home(n) && p.enemies.has(world.control[n]) && !nextToOldFront(n)) lost.push({ n, enemy: enemyPowerAt(n, p.index, p.enemies) });
+  const lostCells = new Set<number>(lost.map((l) => l.n));
+  /** Cells to hold: true next to a penetration (any formation will do), false on a border facing an assault (reserves only). */
+  const screen = new Map<NodeId, boolean>();
+  for (const n of map.nodesOf(p.nation)) {
+    if (!home(n) || world.control[n] !== p.nation) continue;
+    for (let k = map.adjStart[n]; k < map.adjStart[n + 1]; k++) {
+      const m = map.adj[k];
+      if (m >= map.landCount || !p.enemies.has(world.control[m])) continue;
+      if (lostCells.has(m)) {
+        screen.set(n, true);
+        break;
+      }
+      if (massing(m) && !oldFront(m) && !occupied(n)) screen.set(n, false);
+    }
+  }
+  if (!lost.length && !screen.size) return committed;
+  const power = p.index.power;
+  const own = (p.index.byNation.get(p.nation) ?? []).filter((f) => isGround(f) && f.kind === 'maneuver' && !map.isSea(f.node) && !needsRetreat(p, f));
+  const cost = (f: Formation, n: number) => map.distanceKm(f.node, n as NodeId) + (p.enemies.has(world.control[f.node]) ? ENGAGED_KM : 0);
+  const nearest = (n: number, ok: (f: Formation) => boolean) =>
+    own
+      .filter((f) => !committed.has(f) && ok(f) && mass[f.node] === mass[n] && map.distanceKm(f.node, n as NodeId) <= MAX_COMMIT_KM)
+      .sort((a, b) => cost(a, n) - cost(b, n) || (a.id < b.id ? -1 : 1));
+
+  // Formations already on a homeland task keep it.
+  const sent = new Map<number, number>();
+  for (const f of own) {
+    const t = f.order.target;
+    if (t === undefined) continue;
+    if (f.order.posture === 'attack' && lostCells.has(t)) {
+      committed.add(f);
+      sent.set(t, (sent.get(t) ?? 0) + power(f));
+    } else if (f.order.posture === 'defend' && screen.has(t)) {
+      committed.add(f);
+      screen.delete(t);
+    }
+  }
+  lost.sort((a, b) => b.enemy - a.enemy || a.n - b.n);
+  for (const { n, enemy } of lost) {
+    // An empty lost cell still takes a formation to retake it.
+    const need = Math.max(ATTACK_RATIO * enemy, Number.MIN_VALUE);
+    let got = sent.get(n) ?? 0;
+    if (got >= need) continue;
+    // Counter-attack only with the means to win it; short of 3:1 the screen around the cell has to hold instead.
+    const near = nearest(n, fit);
+    if (near.reduce((t, f) => t + power(f), got) < need) continue;
+    for (const f of near) {
+      committed.add(f);
+      got += power(f);
+      issue(p, f, { posture: 'attack', target: n });
+      if (got >= need) break;
+    }
+  }
+  // A border screen takes formations out of contact, so it never strips the line or the nation's own assault groups.
+  const inContact = (f: Formation) => {
+    for (let k = map.adjStart[f.node]; k < map.adjStart[f.node + 1]; k++) if (map.adj[k] < map.landCount && p.enemies.has(world.control[map.adj[k]])) return true;
+    return p.enemies.has(world.control[f.node]);
+  };
+  for (const [n, block] of [...screen].sort((a, b) => a[0] - b[0])) {
+    const f = own.find((g) => g.node === n && !committed.has(g)) ?? nearest(n, block ? () => true : (g) => !inContact(g))[0];
+    if (!f) continue;
+    committed.add(f);
+    issue(p, f, { posture: 'defend', target: n });
+  }
+  return committed;
+}
+
 /**
  * A coalition's connected front split into each holder's stretch of it, with the threat
  * shared out by the enemy pressing on each cell, so one nation's duty to its own border is
@@ -233,8 +342,9 @@ export function planLand(p: Plan): void {
     return best;
   };
   const canPress = (from: number, t: number) => attritional && inReach(t) && friendlyPowerAt(from) >= pressAt * enemyPowerAt(t, p.index, p.enemies);
+  const countering = defendHomeland(p, fit);
   for (const f of p.index.byNation.get(p.nation) ?? []) {
-    if (!isGround(f) || map.isSea(f.node) || !theatres.has(mass[f.node])) continue;
+    if (!isGround(f) || map.isSea(f.node) || !theatres.has(mass[f.node]) || countering.has(f)) continue;
     if (needsRetreat(p, f)) {
       const to = rear(p, f.node, front);
       issue(p, f, to === f.node ? { posture: 'reserve' } : { posture: 'move', target: to });
