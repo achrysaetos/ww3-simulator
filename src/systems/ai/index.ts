@@ -3,9 +3,12 @@ import { COMMAND_DOMAINS, type Command, type NationId, type SimEvent, type World
 import { enemyMap } from '../diplomacy/assess';
 import { aiMayIssue, delegated } from '../orders';
 import { DEFAULT_PROFILE, type DiplomacyState, type StrategicProfile } from '../diplomacy/types';
+import { warningOf } from '../intel';
+import { believedWorld, viewOf } from '../intel/view';
 import { planAir } from './air';
 import { indexForces } from './forces';
 import { coBelligerents, hostileEdges, sectorsFor } from './fronts';
+import { planWarning } from './warning';
 import { planAirborne } from './airborne';
 import { planDeploy } from './deploy';
 import { planLand } from './land';
@@ -13,7 +16,7 @@ import { planMissiles } from './missiles';
 import { planNaval } from './naval';
 import { planStrategy, sanctionDecisions } from './strategy';
 import { battleAreaOf, strikeTargets } from './strikes';
-import type { Plan, Sector } from './types';
+import type { ForceIndex, Plan, Sector } from './types';
 
 export * from './types';
 export { ATTACK_RATIO } from './land';
@@ -65,40 +68,54 @@ export function createAi(profiles: Readonly<Record<string, StrategicProfile>> = 
           land: (world.tick + i) % LAND_EVERY === 0,
           tasking: (world.tick + i + 1) % TASKING_EVERY === 0 || entered.has(n),
         }))
-        .filter(({ n, strategy, land, tasking }) => (strategy || land || tasking) && (world.nations[n].status === 'war' || surging.has(n)) && COMMAND_DOMAINS.some((d) => delegated(world, n, d)));
+        .filter(({ n, strategy, land, tasking }) => (strategy || land || tasking) && (world.nations[n].status === 'war' || surging.has(n) || (land && warningOf(world, n))) && COMMAND_DOMAINS.some((d) => delegated(world, n, d)));
       if (!due.length) return;
 
       const enemies = enemyMap(world);
       let edges = fronts.get(world);
       if (!edges) fronts.set(world, (edges = hostileEdges(world, ctx.map, enemies)));
-      const index = indexForces(world, ctx.catalog);
-      for (const { n, tasking } of due) {
-        const surge = surging.get(n);
-        if (!surge || !tasking || enemies.has(n)) continue;
-        // Plans against the war it expects to join; nobody fires on a nation it is not at war with.
-        planNaval({
-          world, ctx, ai: world.slices.ai, nation: n, profile: profiles[n] ?? DEFAULT_PROFILE,
-          enemies: surge.enemies, friends: surge.friends, index, out: world.pending, sectors: [], memo: memo!,
-        });
-      }
-      // Coalition partners usually share both friend and enemy sets, so they share one front picture.
-      const sectorCache = new Map<string, Sector[]>();
-      const sectorsOf = (friends: Set<NationId>, foes: Set<NationId>) => {
+      // Each nation plans in its believed world, on the forces its intelligence shows it. Without the
+      // intel system every belief is the world itself, so nations share one index, and coalition
+      // partners with the same friends and foes share one front picture.
+      const indexes = new Map<World, ForceIndex>();
+      const beliefOf = (n: NationId) => {
+        const believed = believedWorld(world, ctx.map, n, ctx.catalog);
+        let index = indexes.get(believed);
+        if (!index) indexes.set(believed, (index = indexForces(believed, ctx.catalog)));
+        return { world: believed, view: viewOf(world, ctx.map, n), index };
+      };
+      const sectorCache = new Map<World, Map<string, Sector[]>>();
+      const sectorsOf = (belief: { world: World; index: ForceIndex }, friends: Set<NationId>, foes: Set<NationId>) => {
         const key = `${[...friends].sort().join(',')}|${[...foes].sort().join(',')}`;
-        let s = sectorCache.get(key);
-        if (!s) sectorCache.set(key, (s = sectorsFor(world, ctx.map, edges!, friends, foes, index)));
+        let byKey = sectorCache.get(belief.world);
+        if (!byKey) sectorCache.set(belief.world, (byKey = new Map()));
+        let s = byKey.get(key);
+        if (!s) byKey.set(key, (s = sectorsFor(belief.world, ctx.map, edges!, friends, foes, belief.index)));
         return s;
       };
+      const peaceOut = (n: NationId): Command[] => (world.nations[n].controlledBy === 'human' ? [] : world.pending);
+      for (const { n, land, tasking } of due) {
+        if (enemies.has(n)) continue;
+        const surge = surging.get(n);
+        const warning = land ? warningOf(world, n) : undefined;
+        if (!(surge && tasking) && !warning) continue;
+        const out = peaceOut(n);
+        const base = { ctx, ai: world.slices.ai, nation: n, profile: profiles[n] ?? DEFAULT_PROFILE, out, sectors: [], memo: memo!, ...beliefOf(n) };
+        // Plans against the war it expects to join; nobody fires on a nation it is not at war with.
+        if (surge && tasking) planNaval({ ...base, enemies: surge.enemies, friends: surge.friends });
+        if (warning) planWarning({ ...base, enemies: new Set([warning.from]), friends: new Set([n]) }, warning);
+        keepAllowed(world, n, out);
+      }
       for (const { n, strategy, land, tasking } of due) {
         const foes = enemies.get(n);
         if (!foes?.size) continue;
         const friends = coBelligerents(n, enemies);
-        const human = world.nations[n].controlledBy === 'human';
-        const out: Command[] = human ? [] : world.pending;
+        const out = peaceOut(n);
+        const belief = beliefOf(n);
         const p: Plan = {
-          world, ctx, ai: world.slices.ai, nation: n, profile: profiles[n] ?? DEFAULT_PROFILE,
-          enemies: foes, friends, index, out,
-          sectors: sectorsOf(friends, foes), memo: memo!,
+          ctx, ai: world.slices.ai, nation: n, profile: profiles[n] ?? DEFAULT_PROFILE,
+          enemies: foes, friends, out, ...belief,
+          sectors: sectorsOf(belief, friends, foes), memo: memo!,
         };
         if (strategy) planStrategy(p);
         if (land) {
@@ -113,15 +130,20 @@ export function createAi(profiles: Readonly<Record<string, StrategicProfile>> = 
           planMissiles(p, targets);
           planNaval(p);
         }
-        if (human)
-          for (const c of out) {
-            if (aiMayIssue(world, c)) world.pending.push(c);
-            // Never sent, as the player keeps the domain: not to be taken for a refusal.
-            else if (c.type === 'order') delete world.slices.ai.sent[c.formation];
-          }
+        keepAllowed(world, n, out);
       }
     },
   };
+}
+
+/** A human nation's delegate keeps only the commands its player let it give. */
+function keepAllowed(world: World, n: NationId, out: Command[]): void {
+  if (out === world.pending) return;
+  for (const c of out) {
+    if (aiMayIssue(world, c)) world.pending.push(c);
+    // Never sent, as the player keeps the domain: not to be taken for a refusal.
+    else if (c.type === 'order') delete world.slices.ai.sent[c.formation];
+  }
 }
 
 /**

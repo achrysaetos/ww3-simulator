@@ -1,5 +1,6 @@
 import { atWar, type SimContext } from '../../core/engine';
 import type { MunitionId, NationId, NodeId, World } from '../../core/types';
+import { believedWorld } from '../intel/view';
 import { delegated } from '../orders';
 import { nuclearLaunchers, weaponFor } from '../strategic/targeting';
 import { CITY_POP_SHARE, STRATEGIC_YIELD_KT, hitBy } from './escalation';
@@ -80,7 +81,8 @@ export function openUmbrellaCases(world: World, ctx: SimContext, s: DiplomacySta
 /** The attacker's heaviest force concentration in the theatre that is not in a city and not on ground the guarantor's side holds. */
 function theatreTargets(world: World, ctx: SimContext, c: UmbrellaCase): NodeId[] {
   const weight = new Map<NodeId, number>();
-  for (const f of Object.values(world.formations)) {
+  // The attacker's forces as the guarantor's intelligence places them.
+  for (const f of Object.values(believedWorld(world, ctx.map, c.guarantor, ctx.catalog).formations)) {
     if (f.nation !== c.attacker || (f.status !== 'active' && f.status !== 'routed') || f.kind === 'space') continue;
     if (ctx.map.distanceKm(f.node, c.node) > THEATRE_KM) continue;
     if (!ctx.map.isSea(f.node)) {

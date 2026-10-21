@@ -6,9 +6,10 @@ import { HOSTILE_OPINION } from '../diplomacy/escalation';
 import { delegated } from '../orders';
 import { rung } from '../diplomacy/wars';
 import { aimKey, ATTRITABLE_COST_USD_M, dailyRounds, effectPk, futileAim } from '../air';
-import { ANTISHIP_KINDS, navalPosition } from '../naval';
+import { ANTISHIP_KINDS } from '../naval';
 import type { HqLevel } from '../c2/state';
 import { isGround, issue, sighted } from './forces';
+import { CURRENT_CONFIDENCE } from '../intel/view';
 import type { Plan } from './types';
 
 export interface StrikeTarget {
@@ -192,20 +193,22 @@ export function strikeTargets(p: Plan, battleArea: Set<number>): TargetGrid {
   };
   // Aimed where intelligence last fixed each formation, worth less as the fix goes stale.
   for (const e of p.enemies)
-    for (const { f, node, confidence } of sighted(p, e)) {
+    for (const { f, node, confidence, contact } of sighted(p, e)) {
       const v = VALUE_BY_KIND[f.kind] ?? (isBomberForce(p, f) ? VALUE_BY_KIND.air_wing : isGround(f) && battleArea.has(node) ? FRONT_FORCES : undefined);
       if (!v) continue;
       const value = v.value * worth(f) * confidence;
       if (f.kind !== 'surface_group') out.push({ node, cls: v.cls, value, formation: f.id, assigned: 0 });
       else {
-        const fresh = node === f.node && confidence === 1;
-        out.push({ node, at: fresh ? navalPosition(map, f) : node, cls: v.cls, value, formation: f.id, afloat: node !== f.home || (fresh && !!f.order.path?.length), assigned: 0 });
+        const fresh = confidence === 1;
+        out.push({ node, at: fresh ? (contact.inshore ?? node) : node, cls: v.cls, value, formation: f.id, afloat: node !== f.home || (fresh && !!contact.underway), assigned: 0 });
       }
     }
   const front = [...battleArea];
   for (const hq of Object.values(p.world.slices.c2?.hqs ?? {})) {
     const v = HQ_VALUE[hq.level];
     if (!v || hq.integrity <= 0 || !p.enemies.has(hq.nation) || hq.node === p.world.nations[hq.nation].capital) continue;
+    // A field HQ is found with the troops it commands: one is struck only where a current contact of its nation stands.
+    if (p.world.slices.intel && !p.view.contactsAt(hq.node).some((c) => c.nation === hq.nation && c.confidence >= CURRENT_CONFIDENCE)) continue;
     if (front.some((n) => map.distanceKm(n as NodeId, hq.node) <= HQ_REACH_KM)) out.push({ node: hq.node, cls: 'hardened', value: v * hq.integrity, assigned: 0 });
   }
   for (const n of battleArea)

@@ -2,6 +2,7 @@ import type { GameMap } from '../../core/map';
 import { hostility, relationKey } from '../../core/engine';
 import type { NationId, NodeId, World } from '../../core/types';
 import type { Assessment } from './types';
+import { CURRENT_CONFIDENCE, viewOf } from '../intel/view';
 
 /** Who is at war with whom: a copy of the tick's hostility index, so a caller may keep it past a declaration. */
 export function enemyMap(world: World): Map<NationId, Set<NationId>> {
@@ -87,18 +88,17 @@ export function assess(world: World, map: GameMap, enemies: Map<NationId, Set<Na
   for (const [n, a] of Object.entries(out) as [NationId, Assessment][]) a.areaLost /= cells.get(n) ?? 1;
 
   if (!enemies.size) return { nations: out, lostTo, invadedBy };
-  const groundAt = new Map<number, NationId[]>();
-  for (const f of Object.values(world.formations)) {
-    if (f.status !== 'active' || (f.kind !== 'maneuver' && f.kind !== 'artillery')) continue;
-    (groundAt.get(f.node) ?? groundAt.set(f.node, []).get(f.node)!).push(f.nation);
-  }
   for (const [n, foes] of enemies) {
     const nation = world.nations[n];
     if (!nation) continue;
     const a = get(n);
     const cap = nation.capital;
     a.capitalLost = world.control[cap] !== n;
-    const hostile = (node: number) => foes.has(world.control[node]) || (groundAt.get(node)?.some((g) => foes.has(g)) ?? false);
+    // Enemy troops near the capital as the nation's own intelligence places them.
+    const view = viewOf(world, map, n);
+    const hostile = (node: number) =>
+      foes.has(world.control[node]) ||
+      view.contactsAt(node as NodeId).some((c) => foes.has(c.nation) && (c.kind === 'maneuver' || c.kind === 'artillery') && !c.embarkedOn && c.confidence >= CURRENT_CONFIDENCE);
     a.capitalThreatened = a.capitalLost || nearCapital(map, cap).some(hostile);
   }
   return { nations: out, lostTo, invadedBy };

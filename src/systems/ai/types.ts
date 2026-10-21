@@ -2,6 +2,7 @@ import type { Command, FormationId, NationId, NodeId } from '../../core/types';
 import type { SimContext } from '../../core/engine';
 import type { World, Formation, Order } from '../../core/types';
 import type { StrategicProfile } from '../diplomacy/types';
+import type { View } from '../intel/view';
 
 /** Something worth taking: an enemy capital, city, industrial cell or port. */
 export interface Objective {
@@ -64,7 +65,7 @@ export interface Sector {
   key: NodeId;
 }
 
-/** Active, un-embarked formations indexed once per tick. */
+/** Active, un-embarked formations of a believed world, indexed once per tick. */
 export interface ForceIndex {
   byNation: Map<NationId, Formation[]>;
   groundAt: Map<number, Formation[]>;
@@ -72,9 +73,14 @@ export interface ForceIndex {
   power: (f: Formation) => number;
 }
 
-/** Everything one nation's planners need for one planning pass. */
+/**
+ * Everything one nation's planners need for one planning pass. `world` is the nation's believed
+ * world (intel/view.ts believedWorld): friendly formations true, others as its intelligence holds
+ * them, so planners never read another nation's true forces.
+ */
 export interface Plan {
   world: World;
+  view: View;
   ctx: SimContext;
   ai: AiState;
   nation: NationId;

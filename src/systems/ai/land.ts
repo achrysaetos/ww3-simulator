@@ -160,8 +160,16 @@ function defendHomeland(p: Plan, fit: (f: Formation) => boolean): Set<Formation>
     for (let k = map.adjStart[n]; k < map.adjStart[n + 1]; k++) if (oldFront(map.adj[k])) return true;
     return false;
   };
-  // Enemy ground forces under orders to attack: the warning a border garrison gets of an assault.
-  const massing = (m: number) => (p.index.groundAt.get(m) ?? []).some((g) => p.enemies.has(g.nation) && g.order.posture === 'attack');
+  // Enemy orders are not seen, only forces: an enemy cell holding the 3:1 it needs against the friendly
+  // troops around it is read as an assault forming, the way a border garrison reads a concentration.
+  const massing = (m: number) => {
+    const enemy = enemyPowerAt(m, p.index, p.enemies);
+    if (enemy <= 0) return false;
+    let friendly = 0;
+    for (let k = map.adjStart[m]; k < map.adjStart[m + 1]; k++)
+      for (const g of p.index.groundAt.get(map.adj[k]) ?? []) if (p.friends.has(g.nation)) friendly += p.index.power(g);
+    return enemy >= ATTACK_RATIO * friendly;
+  };
   const occupied = (n: number) => (p.index.groundAt.get(n) ?? []).some((g) => g.nation === p.nation);
   // Home cells lost across a border, not ground given up on the old front (Russian gains in Donbas are not a penetration of Ukraine's rear).
   const lost: { n: NodeId; enemy: number }[] = [];
