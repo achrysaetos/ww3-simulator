@@ -3,6 +3,7 @@ import type { GameMap } from '../../core/map';
 import type { Formation, FormationId, FormationKind, Munition, MunitionId, NationId, NodeId, Order, PlatformId, TargetClass } from '../../core/types';
 import { isOverseas } from '../../data/territories';
 import { HOSTILE_OPINION } from '../diplomacy/escalation';
+import { delegated } from '../orders';
 import { rung } from '../diplomacy/wars';
 import { aimKey, ATTRITABLE_COST_USD_M, dailyRounds, effectPk, futileAim } from '../air';
 import { ANTISHIP_KINDS, navalPosition } from '../naval';
@@ -77,7 +78,7 @@ function shipWorth(p: Plan, f: Formation): number {
  * Russian refineries and airbases from 2023, Iran's salvos on Israel in 2024.
  */
 function deepStrikeAllowed(p: Plan, owner: NationId): boolean {
-  if (!p.enemies.has(owner)) return relation(p.world, p.nation, owner).opinion <= HOSTILE_OPINION;
+  if (!p.enemies.has(owner)) return delegated(p.world, p.nation, 'strategic') && relation(p.world, p.nation, owner).opinion <= HOSTILE_OPINION;
   if (p.world.nations[owner].nuclear.warheads <= 0) return true;
   if (p.world.nations[p.nation].nuclear.warheads <= 0 || p.profile.riskTolerance >= DEEP_STRIKE_RISK) return true;
   return rung(relation(p.world, p.nation, owner).escalation) >= rung('strategic_conventional');
@@ -90,7 +91,8 @@ function deepStrikeAllowed(p: Plan, owner: NationId): boolean {
  * China strike US bases on Okinawa, ~650 km from Taipei, in most iterations;
  * mainland Japan and Korea, 1,300-1,500 km out, stay unstruck in its base case.
  * A friendly or ambivalent host is never struck: China would not hit Al Udeid
- * over Taiwan, nor Russia its own ally Belarus.
+ * over Taiwan, nor Russia its own ally Belarus. Widening the war is a strategic
+ * decision, so a player's delegate never makes it for a player who kept those.
  */
 const THEATRE_KM = 1000;
 

@@ -5,6 +5,7 @@ import { createSession } from '../src/scenarios';
 import { createAi } from '../src/systems/ai';
 import { landSlice } from '../src/systems/land';
 import { createDiplomacy } from '../src/systems/diplomacy';
+import { DEFAULT_DELEGATION } from '../src/systems/orders';
 import { isrFactor, strategic } from '../src/systems/strategic';
 import { id, testWorld } from '../src/testkit';
 
@@ -293,8 +294,9 @@ describe('nuclear release', () => {
 
 describe('strikes on a neutral host', () => {
   /** Strike orders China's missile brigade aims at a US air wing based at Yonaguni, Japan, ~150 km from Taiwan. */
-  const strikesOnJapan = (japanOpinionOfChina: number) => {
+  const strikesOnJapan = (japanOpinionOfChina: number, setup: (t: T) => void = () => {}) => {
     const t = testWorld([createDiplomacy(), createAi()]);
+    setup(t);
     const base = t.map.nodeAt(24.45, 123.0);
     const launch = t.map.nodesOf(N('CHN')).sort((a, b) => t.map.distanceKm(a, base) - t.map.distanceKm(b, base))[0];
     t.add({ nation: N('USA'), name: 'US air wing', kind: 'air_wing', echelon: 'wing', node: base, equipment: { [id.platform('t_fighter')]: 24 } });
@@ -313,6 +315,14 @@ describe('strikes on a neutral host', () => {
 
   it('leaves them alone on a host that is not hostile', () => {
     expect(strikesOnJapan(20)).toEqual([]);
+  });
+
+  it("leaves them alone when the striker is a player's delegate and the player kept strategic decisions", () => {
+    const keepStrategic = (t: T) => {
+      t.world.nations[N('CHN')].controlledBy = 'human';
+      t.world.slices.command = { [N('CHN')]: { ai: { ...DEFAULT_DELEGATION, strategic: false }, held: {}, answers: {} } };
+    };
+    expect(strikesOnJapan(-55, keepStrategic)).toEqual([]);
   });
 });
 
