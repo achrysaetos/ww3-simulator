@@ -24,7 +24,7 @@ export type Terrain = (typeof TERRAINS)[number];
 export type Domain = 'land' | 'air' | 'sea' | 'subsurface' | 'space';
 
 /** What a weapon is shooting at. Kill probabilities and firepower are keyed by this. */
-export const TARGET_CLASSES = ['infantry', 'soft', 'armor', 'aircraft', 'helicopter', 'ship', 'submarine', 'missile', 'structure', 'hardened'] as const;
+export const TARGET_CLASSES = ['infantry', 'soft', 'armor', 'aircraft', 'helicopter', 'ship', 'submarine', 'missile', 'structure', 'hardened', 'power'] as const;
 export type TargetClass = (typeof TARGET_CLASSES)[number];
 
 export type PlatformClass =
@@ -258,11 +258,25 @@ export interface Relation {
 
 // ---------------------------------------------------------------- events and commands
 
+/**
+ * What one strike did, as data for readers to word. Levels are 0..1 shares of capacity before
+ * and after the strike. An empty list is a strike that changed nothing.
+ */
+export type StrikeEffect =
+  | { kind: 'losses'; platforms: Partial<Record<PlatformId, number>> }
+  | { kind: 'ship_hits'; formation: FormationId; hits: number }
+  | { kind: 'infrastructure' | 'grid' | 'runway'; before: number; after: number }
+  | { kind: 'sam_suppressed'; sites: number }
+  | { kind: 'nuclear_detonations'; count: number }
+  | { kind: 'satellites_destroyed'; count: number }
+  /** Why the rounds that got through did nothing: none got through, nothing hostile to hit there, or no target of the aimed class found. */
+  | { kind: 'no_effect'; why: 'all_intercepted' | 'not_hostile' | 'no_targets' };
+
 export type SimEvent =
   | { type: 'war_declared'; tick: number; by: NationId; on: NationId; reason: string }
   | { type: 'peace'; tick: number; a: NationId; b: NationId; terms: string }
   | { type: 'battle'; tick: number; node: NodeId; attacker: NationId; defender: NationId; losses: Record<NationId, Record<PlatformId, number>>; casualties: Record<NationId, number>; winner?: NationId; domain?: 'land' | 'sea' | 'air' }
-  | { type: 'strike'; tick: number; by: NationId; munition: MunitionId; fired: number; intercepted: number; target: NodeId; damage: string }
+  | { type: 'strike'; tick: number; by: NationId; munition: MunitionId; fired: number; intercepted: number; target: NodeId; effects: StrikeEffect[] }
   | { type: 'node_captured'; tick: number; node: NodeId; from: NationId; to: NationId }
   | { type: 'formation_destroyed'; tick: number; formation: FormationId; nation: NationId }
   | { type: 'nuclear_detonation'; tick: number; by: NationId; node: NodeId; yieldKt: number; casualties: number }
@@ -344,4 +358,9 @@ export interface Theater {
   tradeBlocked: Record<NationId, number>;
   /** Writer: strategic. Radiation/fallout intensity per node, decays over time. */
   fallout: Record<number, number>;
+  /**
+   * Writer: air (strikes on the 'power' target class, and repair). Generation and grid capacity
+   * serving each land cell, 0..1; absent = intact. Absent in older saves.
+   */
+  power?: Record<number, number>;
 }

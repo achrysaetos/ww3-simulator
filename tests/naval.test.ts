@@ -38,6 +38,7 @@ const navalPlatforms: Platform[] = [
   ship('n_mcm', 'mine_warfare', { crew: 50 }),
   ship('n_usv', 'usv', { crew: 0, unitCostUsdM: 0.25, mobility: { speedKph: 40, rangeKm: 800, fuelTonsPerHour: 0 }, firepower: { ship: 0.05 } }),
   ship('n_minelayer', 'corvette', { loadout: [mun('n_mine', 60)] }),
+  P({ id: 'n_ssk', name: 'Diesel submarine', class: 'ssk', domain: 'subsurface', unitCostUsdM: 500, crew: 50, mobility: { speedKph: 37, rangeKm: 1e6, fuelTonsPerHour: 0 }, protection: { armor: 0.2, stealth: 0.85 }, sensors: { detectionKm: 40 }, firepower: { ship: 0.3 }, loadout: [{ munition: 't_torpedo' as MunitionId, count: 18 }] }),
   P({ id: 'n_coastal', name: 'Coastal ASBM launcher', class: 'coastal_asm', domain: 'land', unitCostUsdM: 5, crew: 4, mobility: { speedKph: 60, rangeKm: 600, fuelTonsPerHour: 0.05 }, protection: { armor: 0.1, stealth: 0.35 }, sensors: { detectionKm: 0 }, firepower: {}, loadout: [mun('n_asbm', 4)] }),
   ship('n_carrier', 'carrier', { crew: 3000, mobility: { speedKph: 55, rangeKm: 1e6, fuelTonsPerHour: 0 }, engagementChannels: 4, capacity: { aircraft: 60 }, loadout: [mun('t_sam', 16)] }),
   P({ id: 'n_helo', name: 'ASW helicopter', class: 'asw_helo', domain: 'air', unitCostUsdM: 40, crew: 4, mobility: { speedKph: 250, rangeKm: 300, fuelTonsPerHour: 0.5 }, protection: { armor: 0.1, stealth: 0.1 }, sensors: { detectionKm: 50 }, firepower: {}, loadout: [mun('n_lwt', 2)] }),
@@ -86,7 +87,8 @@ function runUntil(t: ReturnType<typeof navalWorld>, done: () => boolean, maxTick
 describe('naval salvo combat', () => {
   const southChinaSea = (t: ReturnType<typeof navalWorld>) => t.nodeAt(15, 114);
 
-  it('a salvo inside the defense capacity leaks nothing and sinks nothing', () => {
+  it('a two-missile salvo at a destroyer with SAMs to spare is mostly stopped, but not always', () => {
+    let leakers = 0;
     for (let seed = 1; seed <= 8; seed++) {
       const t = navalWorld(seed);
       const at = southChinaSea(t);
@@ -96,12 +98,26 @@ describe('naval salvo combat', () => {
       us.order = { posture: 'attack', issuedTick: 0 };
       const fired = runUntil(t, () => (led(t, 'USA')?.missilesFired ?? 0) >= 2, 10);
       expect(fired).toBeGreaterThan(0);
-      const usLedger = led(t, 'USA')!;
-      expect(usLedger.leakers).toBe(0);
-      expect(led(t, 'CHN')?.hullsSunk ?? 0).toBe(0);
-      expect(led(t, 'CHN')?.hullsDamaged ?? 0).toBe(0);
+      leakers += led(t, 'USA')!.leakers;
       expect(led(t, 'CHN')!.interceptorsFired).toBeGreaterThan(0);
     }
+    expect(leakers).toBeGreaterThan(0);
+    expect(leakers).toBeLessThan(8);
+  });
+
+  it('a salvo inside the fire channels leaks only the threats both interceptors miss; one that saturates them leaks its excess', () => {
+    const t = navalWorld();
+    const hhq9: Munition = { ...t.catalog.munition(mid('t_sam')), pk: { missile: 0.7 } };
+    const harpoon: Munition = { ...t.catalog.munition(mid('t_asm')), interceptDifficulty: 0.3 };
+    const leak = (fired: number) => {
+      let n = 0;
+      for (let s = 1; s <= 100; s++) n += resolveSalvo(new Rng(s), harpoon, fired, { channels: 12, interceptors: [{ munition: hhq9, available: 200 }], pointDefense: 0, capShots: 0 }, 'ship').leakers;
+      return n / (100 * fired);
+    };
+    const small = leak(8), saturating = leak(60);
+    expect(small).toBeGreaterThan(0.02);
+    expect(small).toBeLessThan(0.15);
+    expect(saturating).toBeGreaterThan(small * 3);
   });
 
   it('a salvo that saturates the defense leaks and sinks the target', () => {
@@ -126,11 +142,11 @@ describe('naval salvo combat', () => {
       subsonic += resolveSalvo(new Rng(s), t.catalog.munition(mid('t_asm')), 6, defense(), 'ship').leakers;
       ballistic += resolveSalvo(new Rng(s), t.catalog.munition(mid('n_asbm')), 6, defense(), 'ship').leakers;
     }
-    expect(subsonic).toBe(0);
-    expect(ballistic / 20).toBeGreaterThan(3);
+    expect(subsonic / 120).toBeLessThan(0.35);
+    expect(ballistic / 120).toBeGreaterThan(0.7);
   });
 
-  it('spends about two interceptors per one-way drone, as in the Red Sea 2023-24', () => {
+  it('spends two to three interceptors per one-way drone it kills (Red Sea 2023-24: about two per engaged threat)', () => {
     const t = navalWorld();
     const sm2: Munition = { ...t.catalog.munition(mid('t_sam')), pk: { missile: 0.7 } };
     const drone: Munition = { ...t.catalog.munition(mid('t_asm')), kind: 'drone_oneway', speedMach: 0.4, interceptDifficulty: 0.25 };
@@ -140,9 +156,9 @@ describe('naval salvo combat', () => {
       used += [...out.interceptorsUsed.values()].reduce((a, b) => a + b, 0);
       killed += out.intercepted;
     }
-    expect(killed).toBe(90);
-    expect(used / killed).toBeGreaterThan(1.5);
-    expect(used / killed).toBeLessThan(2.5);
+    expect(killed).toBeGreaterThanOrEqual(81);
+    expect(used / killed).toBeGreaterThan(1.8);
+    expect(used / killed).toBeLessThan(3);
   });
 
   it('two Neptunes sink a poorly kept cruiser (Moskva) but a well-drilled crew saves the ship', () => {
@@ -188,7 +204,7 @@ describe('submarine warfare', () => {
     s.order = { posture: 'reserve', issuedTick: 0 };
     return s;
   };
-  const detectionRate = (screen: Record<string, number>, firing = false) => {
+  const detectionRate = (screen: Record<string, number>) => {
     const t = navalWorld(11);
     const at = t.nodeAt(20, 125);
     t.war('USA', 'CHN');
@@ -197,7 +213,6 @@ describe('submarine warfare', () => {
     let seen = 0;
     const ticks = 200;
     for (let i = 0; i < ticks; i++) {
-      if (firing) t.world.slices.naval.lastFired[ssn.id] = t.world.tick - 1;
       t.engine.step(t.world);
       if (t.world.slices.naval.tracks[ssn.id]?.includes(CHN)) seen++;
     }
@@ -216,11 +231,42 @@ describe('submarine warfare', () => {
     expect(massed).toBeGreaterThan(bare * 3);
   });
 
-  it('a submarine that has just fired is found by the screen it attacked far more often than one lying quiet', () => {
-    const quiet = detectionRate({ t_destroyer: 1, n_frigate: 2, n_helo: 4 });
-    const datum = detectionRate({ t_destroyer: 1, n_frigate: 2, n_helo: 4 }, true);
-    expect(datum).toBeGreaterThan(0.1);
-    expect(datum).toBeGreaterThan(quiet * 3);
+  /** ASW torpedoes a frigate screen fires in ten days at a pack of SSNs in its zone, and the most boats one counterattack sank. */
+  const counterattacks = (attacking: boolean) => {
+    const t = navalWorld(3);
+    const at = t.nodeAt(20, 125);
+    t.war('USA', 'CHN');
+    const pack = t.add({ nation: USA, name: 'SSN squadron', kind: 'submarine', echelon: 'squadron', node: at, equipment: t.eq({ t_ssn: 8 }) });
+    pack.order = { posture: attacking ? 'patrol' : 'reserve', issuedTick: 0 };
+    const force = t.add({ nation: CHN, name: 'Amphibious force', kind: 'surface_group', node: at, equipment: t.eq({ n_lhd: 40 }) });
+    const screen = t.add({ nation: CHN, name: 'ASW screen', kind: 'surface_group', node: at, equipment: t.eq({ n_frigate: 6, n_helo: 12 }) });
+    screen.order = { posture: 'escort', targetFormation: force.id, issuedTick: 0 };
+    let worst = 0;
+    for (let i = 0; i < 40; i++)
+      for (const e of t.engine.step(t.world)) if (e.type === 'battle' && e.defender === USA) worst = Math.max(worst, e.losses[USA]?.['t_ssn' as PlatformId] ?? 0);
+    return { torpedoes: led(t, 'CHN')?.torpedoesFired ?? 0, worst };
+  };
+
+  it('boats that attack a screened group draw far more counterattacks than boats lying quiet, and each sinks at most the boat that attacked', () => {
+    const quiet = counterattacks(false), attacking = counterattacks(true);
+    expect(attacking.torpedoes).toBeGreaterThan(Math.max(4, quiet.torpedoes * 3));
+    expect(attacking.worst).toBeLessThanOrEqual(1);
+  });
+
+  it('a nuclear boat strikes a group one sea zone over and a diesel boat does not', () => {
+    const sank = (boat: string) => {
+      const t = navalWorld(5);
+      const at = t.nodeAt(20, 125);
+      const next = [...t.map.neighbors(at)].find((n) => t.map.isSea(n))!;
+      t.war('USA', 'CHN');
+      const sub = t.add({ nation: USA, name: 'Boat', kind: 'submarine', echelon: 'squadron', node: next, equipment: t.eq({ [boat]: 1 }) });
+      sub.order = { posture: 'patrol', issuedTick: 0 };
+      t.add({ nation: CHN, name: 'LHD', kind: 'surface_group', node: at, equipment: t.eq({ n_lhd: 4 }) });
+      for (let i = 0; i < 12; i++) t.engine.step(t.world);
+      return led(t, 'CHN')?.hullsSunk ?? 0;
+    };
+    expect(sank('t_ssn')).toBeGreaterThan(0);
+    expect(sank('n_ssk')).toBe(0);
   });
 
   it('an SSN ambush sinks an unescorted amphibious ship and the submarine survives', () => {
@@ -408,7 +454,11 @@ describe('mine warfare', () => {
     probe.order = { posture: 'defend', issuedTick: 0 };
     t.order(probe, { posture: 'move', target: to });
     expect(probe.order.path).toBeUndefined();
-    expect(t.world.events.some((e) => e.type === 'message' && e.text.includes('no sea route'))).toBe(true);
+    // Only a player is told why: an AI nation's refused orders stay out of every log.
+    expect(t.world.events.some((e) => e.type === 'message' && e.text.includes('no sea route'))).toBe(false);
+    t.world.nations[USA].controlledBy = 'human';
+    t.order(probe, { posture: 'move', target: to });
+    expect(t.world.events.some((e) => e.type === 'message' && e.nation === USA && e.text.includes('no sea route'))).toBe(true);
 
     const mcm = t.add({ nation: USA, name: 'MCM group', kind: 'surface_group', node: mined, equipment: t.eq({ n_mcm: 4 }), magazine: {} });
     mcm.order = { posture: 'patrol', issuedTick: 0 };
@@ -417,6 +467,20 @@ describe('mine warfare', () => {
     t.order(probe, { posture: 'move', target: to });
     expect(probe.order.path).toContain(mined);
     expect(led(t, 'USA')!.minesSwept).toBeGreaterThan(2);
+  });
+
+  it('dived submarines strike hostile mines far less often than surface ships in the same field', () => {
+    const t = navalWorld(11);
+    t.war('USA', 'RUS');
+    const mined = nearestSea(t.map, 55.5, 13.5);
+    t.world.slices.naval.mines[mined] = { [RUS]: 400 };
+    const boats = t.add({ nation: USA, name: 'Boats', kind: 'submarine', echelon: 'squadron', node: mined, equipment: t.eq({ t_ssn: 40 }), magazine: {} });
+    const ships = t.add({ nation: USA, name: 'Ships', kind: 'surface_group', node: mined, equipment: t.eq({ t_destroyer: 40 }), magazine: {} });
+    boats.order = ships.order = { posture: 'reserve', issuedTick: 0 };
+    for (let i = 0; i < 4; i++) t.engine.step(t.world);
+    const struck = (f: Formation, pid: string) => 40 - count(f.equipment, pid) + (f.damaged[pid as PlatformId] ?? 0);
+    expect(struck(ships, 't_destroyer')).toBeGreaterThan(5);
+    expect(struck(boats, 't_ssn')).toBeLessThan(struck(ships, 't_destroyer') / 2);
   });
 
   it('a minelayer on blockade lays its mines and they interdict trade', () => {
@@ -515,6 +579,7 @@ describe('naval movement and lift', () => {
     expect(team.equipment['t_inf' as never] + big.equipment['t_inf' as never]).toBe(inf);
 
     const second = t.add({ nation: CHN, name: 'Second brigade', kind: 'maneuver', echelon: 'brigade', node: port, equipment: t.eq({ t_inf: 100 }) });
+    t.world.nations[CHN].controlledBy = 'human';
     t.order(second, { posture: 'embark', targetFormation: lift.id });
     expect(second.status).toBe('active');
     expect(t.world.events.some((e) => e.type === 'message' && e.text.includes('lacks lift capacity'))).toBe(true);

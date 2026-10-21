@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { relationMut, type System } from '../src/core/engine';
-import type { Command, NodeId, SimEvent } from '../src/core/types';
+import { atWar, relationMut, type System } from '../src/core/engine';
+import type { Command, MunitionId, NationId, NodeId, SimEvent } from '../src/core/types';
+import { createSession } from '../src/scenarios';
 import { createAi } from '../src/systems/ai';
 import { landSlice } from '../src/systems/land';
 import { createDiplomacy } from '../src/systems/diplomacy';
-import { strategic } from '../src/systems/strategic';
+import { isrFactor, strategic } from '../src/systems/strategic';
 import { id, testWorld } from '../src/testkit';
 
 const N = id.nation;
@@ -245,6 +246,38 @@ describe('strikes on a neutral host', () => {
   });
 });
 
+describe('strike wing basing', () => {
+  it('long-range bombers in the continental US forward-deploy across the Pacific once at war with China, then fly strikes from there', () => {
+    const s = createSession('taiwan-2027', 1);
+    const [wing, other] = ['7th Bomb Wing', '28th Bomb Wing'].map((name) => Object.values(s.world.formations).find((f) => f.name === name)!);
+    const home = wing.node;
+    const perDay = 24 / s.world.dtHours;
+    for (let i = 0; i < 30 * perDay && !atWar(s.world, 'USA' as NationId, 'CHN' as NationId); i++) s.engine.step(s.world);
+    expect(atWar(s.world, 'USA' as NationId, 'CHN' as NationId)).toBe(true);
+    // Both B-1B wings move together; LRASMs are rationed, so either may be the one a salvo draws.
+    // Counted from strike events: a magazine refilled in the same tick hides the shots.
+    let firedAbroad = 0;
+    for (let i = 0; i < 14 * perDay; i++) {
+      const events = s.engine.step(s.world);
+      if (s.map.distanceKm(wing.node, home) > 8000 && s.map.distanceKm(other.node, home) > 8000)
+        for (const e of events) if (e.type === 'strike' && e.by === 'USA' && e.munition === 'lrasm') firedAbroad += e.fired;
+    }
+    expect(s.map.distanceKm(wing.node, home)).toBeGreaterThan(8000);
+    expect(firedAbroad).toBeGreaterThan(0);
+  }, 120_000);
+});
+
+describe('grid campaign', () => {
+  it("Russia's strikes cut the grid serving Ukraine's largest cities; Ukraine, with no such doctrine, leaves Russia's grid alone", () => {
+    const s = createSession('ukraine-2026', 1);
+    s.engine.run(s.world, (21 * 24) / s.world.dtHours);
+    const grid = s.world.theater.power ?? {};
+    const cities = s.map.cities.filter((c) => c.nation === 'UKR').sort((a, b) => b.pop - a.pop).slice(0, 3);
+    expect(cities.filter((c) => (grid[c.node] ?? 1) < 0.9).length).toBeGreaterThanOrEqual(2);
+    expect(Object.keys(grid).filter((n) => s.world.control[Number(n)] === 'RUS')).toEqual([]);
+  }, 120_000);
+});
+
 describe('coalition allocation', () => {
   const NATO = ['POL', 'LTU', 'LVA', 'EST', 'FIN', 'DEU'];
   /** NATO at war with Russia, Russian brigades on the Estonian and Lithuanian borders, and a Polish army at Warsaw. */
@@ -309,4 +342,39 @@ describe('homeland defence', () => {
     const beyond = new Set([...t.map.neighbors(lost)].filter((m) => m < t.map.landCount && t.map.owner[m] === N('RUS') && t.world.control[m] === N('RUS')));
     expect(army.some((f) => last.get(f.id)?.order.posture === 'defend' && beyond.has(last.get(f.id)!.order.target!))).toBe(true);
   });
+});
+
+describe('counter-space strikes', () => {
+  it('ASAT units at war with a space power shoot down its satellites, each interceptor only within its ceiling', () => {
+    const s = createSession('ww3-2027', 1);
+    const gps = Object.values(s.world.formations).find((f) => f.name.startsWith('GPS constellation'))!;
+    const kills: Record<string, number> = {};
+    s.engine.run(s.world, (9 * 24) / s.world.dtHours, (_w, events) => {
+      for (const e of events) {
+        if (e.type !== 'strike') continue;
+        for (const x of e.effects) if (x.kind === 'satellites_destroyed') kills[`${e.munition}@${e.target === gps.node ? 'gps' : 'leo'}`] = (kills[`${e.munition}@${e.target === gps.node ? 'gps' : 'leo'}`] ?? 0) + x.count;
+      }
+    });
+    expect(Object.values(kills).reduce((a, n) => a + n, 0)).toBeGreaterThan(5);
+    expect(isrFactor(s.world, N('USA'))).toBeLessThan(1);
+    // SC-19 and Nudol top out near 1,000-1,500 km; only the DN-3 climbs to GPS at 20,200 km.
+    expect(Object.keys(kills).filter((k) => k.endsWith('@gps') && !k.startsWith('dn3'))).toEqual([]);
+  }, 180_000);
+
+  it('moves its interceptors off a constellation shot down to its last satellite', () => {
+    const s = createSession('ww3-2027', 1);
+    const fs = Object.values(s.world.formations);
+    const nro = fs.find((f) => f.name.startsWith('NRO imaging'))!;
+    const brigade = fs.find((f) => f.nation === 'CHN' && f.name.includes('ASAT'))!;
+    nro.equipment = { [id.platform('kh11')]: 1 };
+    const r = relationMut(s.world, N('CHN'), N('USA'));
+    Object.assign(r, { atWar: true, escalation: 'conventional', warSince: s.world.tick });
+    s.world.nations[N('CHN')].status = s.world.nations[N('USA')].status = 'war';
+    const targets = new Set<string>();
+    s.engine.run(s.world, 4, (w) => {
+      for (const c of w.pending) if (c.type === 'order' && c.formation === brigade.id && c.order.targetFormation) targets.add(c.order.targetFormation);
+    });
+    expect(targets.size).toBeGreaterThan(0);
+    expect(targets.has(nro.id)).toBe(false);
+  }, 60_000);
 });

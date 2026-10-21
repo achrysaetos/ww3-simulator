@@ -5,6 +5,7 @@
  */
 import type { SimContext, System } from '../../core/engine';
 import type { Command, Formation, FormationKind, MunitionId, PlatformId, Posture, World } from '../../core/types';
+import { navalPosition } from '../naval';
 import { combatRadiusKm } from './combat';
 import { buildPicture } from './picture';
 import { rearm } from './rearm';
@@ -14,7 +15,8 @@ import { AIRFRAME, LAUNCHER, OFFENSIVE_POSTURES, STRIKE_ROLES, TUNING } from './
 
 export { combatRadiusKm, resolveAirBattle, visibility } from './combat';
 export { engagementCycles, interceptSalvo, type SalvoDefense, type SalvoResult, type SalvoThreat, type ShotDoctrine } from './intercept';
-export { dailyRounds, effectPk, type AirSlice } from './strike';
+export { aimKey, dailyRounds, effectPk, futileAim, type AirSlice, type Assessment } from './strike';
+export { ATTRITABLE_COST_USD_M } from './tables';
 
 declare module '../../core/types' {
   interface Slices {
@@ -30,7 +32,7 @@ const POSTURES: Partial<Record<FormationKind, ReadonlySet<Posture>>> = {
 };
 
 /** Ferry range with drop tanks, roughly 2.5x combat radius (manufacturer ferry vs radius figures, F-16/Su-27). */
-const FERRY_FACTOR = 2.5;
+export const FERRY_FACTOR = 2.5;
 
 export const airWar: System = {
   id: 'air',
@@ -55,6 +57,12 @@ function recover(world: World, slice: AirSlice) {
     const delta = OFFENSIVE_POSTURES.has(f.order.posture) ? TUNING.surgeFatiguePerDay * days : -TUNING.restRecoveryPerDay * days;
     f.fatigue = Math.max(0, Math.min(1, f.fatigue + delta));
   }
+  const grid = world.theater.power ?? {};
+  for (const [node, g] of Object.entries(grid)) {
+    const next = g + (1 - g) * Math.min(1, TUNING.powerRepairPerDay * days);
+    if (next >= 0.999) delete grid[Number(node)];
+    else grid[Number(node)] = next;
+  }
   for (const [node, r] of Object.entries(slice.runway)) {
     const next = r + TUNING.runwayRepairPerDay * days;
     if (next >= 1) delete slice.runway[Number(node)];
@@ -75,7 +83,8 @@ export function applyAirOrder(world: World, cmd: Command, ctx: SimContext): bool
   const allowed = f && POSTURES[f.kind];
   if (!f || !allowed) return false;
   const refuse = (why: string) => {
-    ctx.emit({ type: 'message', tick: world.tick, nation: cmd.nation, text: `${f.name}: order refused, ${why}` });
+    // Only a player reads why an order was refused; an AI nation re-plans from the world as it is.
+    if (world.nations[cmd.nation]?.controlledBy === 'human') ctx.emit({ type: 'message', tick: world.tick, nation: cmd.nation, text: `${f.name}: order refused, ${why}` });
     return true;
   };
   if (f.nation !== cmd.nation) return refuse('not your formation');
@@ -86,9 +95,12 @@ export function applyAirOrder(world: World, cmd: Command, ctx: SimContext): bool
   const needsTarget = order.posture === 'strike' || order.posture === 'air_superiority' || (order.posture === 'move' && f.kind === 'air_wing');
   if (needsTarget && target === undefined) return refuse(`${order.posture} needs a target`);
 
-  if (target !== undefined && (order.posture === 'strike' || order.posture === 'air_superiority')) {
+  // A strike on a satellite formation is an ASAT engagement, resolved by orbit in the strategic system.
+  const aimed = order.targetFormation ? world.formations[order.targetFormation] : undefined;
+  if (target !== undefined && aimed?.kind !== 'space' && (order.posture === 'strike' || order.posture === 'air_superiority')) {
     const reach = maxReachKm(f, order.posture === 'strike', ctx);
-    const dist = ctx.map.distanceKm(f.node, target);
+    const ship = aimed;
+    const dist = ctx.map.distanceKm(f.node, ship?.node === target ? navalPosition(ctx.map, ship) : target);
     if (dist > reach) return refuse(`target is ${Math.round(dist)} km away, beyond reach of ${Math.round(reach)} km`);
   }
 

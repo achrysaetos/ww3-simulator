@@ -151,7 +151,7 @@ export function resolveSalvos(world: World, ctx: SimContext, onWarning: LaunchOn
       const m = ctx.catalog.munition(sv.munition);
       const intercepted = defend(world, ctx, sv, m.kind, victimOf(world, sv.target, byNode, sv.by));
       const arriving = sv.warheads - intercepted;
-      ctx.emit({ type: 'strike', tick: world.tick, by: sv.by, munition: sv.munition, fired: sv.warheads, intercepted, target: sv.target, damage: `${arriving} nuclear detonations` });
+      ctx.emit({ type: 'strike', tick: world.tick, by: sv.by, munition: sv.munition, fired: sv.warheads, intercepted, target: sv.target, effects: [{ kind: 'nuclear_detonations', count: arriving }] });
       if (arriving > 0) detonate(world, ctx, sv.by, sv.target, m, arriving, sv.burst ?? defaultBurst(byNode.get(sv.target) ?? [], sv.by, ctx.catalog), byNode);
     }
   }

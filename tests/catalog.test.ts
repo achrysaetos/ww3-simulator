@@ -137,6 +137,14 @@ describe('spot-checked facts', () => {
     expect(cells).toBe(96);
   });
 
+  it('arms PLARF DF-21D and DF-26 brigades with seeker-guided anti-ship rounds, and keeps the DF-26 land-attack round off ships at sea (DoD CMPR 2024)', () => {
+    for (const tel of ['df21d_tel', 'df26_tel']) {
+      const rounds = P(tel).loadout.map((l) => M(l.munition));
+      expect(rounds.some((m) => m.kind === 'antiship_ballistic' && (m.pk.ship ?? 0) > 0), tel).toBe(true);
+    }
+    expect(M('df26').pk.ship ?? 0).toBe(0);
+  });
+
   it('carries four missiles on an S-400 launcher and twelve PAC-3 MSE on a Patriot launcher', () => {
     expect(P('s400').loadout.reduce((n, l) => n + l.count, 0)).toBe(4);
     expect(load(P('patriot_pac3'), 'pac3_mse')).toBe(12);

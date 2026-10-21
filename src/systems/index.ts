@@ -8,6 +8,7 @@ import { createDiplomacy } from './diplomacy';
 import { shiftOdds } from './diplomacy/wars';
 import type { AllianceTreaty, StrategicProfile, TreatyMember } from './diplomacy/types';
 import { economy } from './economy';
+import { intel } from './intel';
 import { applyLandOrder, landCombat, landMovement } from './land';
 import { logistics } from './logistics';
 import { applyNavalOrder, isNavalOrder, navalWar } from './naval';
@@ -82,7 +83,8 @@ const orders = createOrderRouter([
  * Tick order. Commands are applied first (by whichever system owns each type),
  * then every system steps in this order: the air picture is settled before
  * ground and sea combat read it, combat before logistics refills, economy before
- * diplomacy reads economic stress, and AI last so its orders queue for next tick.
+ * diplomacy reads economic stress, intelligence after every sensor has moved, and AI last so
+ * its orders queue for next tick.
  */
 export const SYSTEMS: System[] = [
   orders,
@@ -94,6 +96,7 @@ export const SYSTEMS: System[] = [
   logistics,
   economy,
   createDiplomacy({ alliances: warTreaties(alliances, strategicProfile), profiles: decision }),
+  intel,
   createAi(decision),
 ];
 

@@ -77,7 +77,7 @@ describe('escalation', () => {
   const strikesOn = (target: (t: ReturnType<typeof testWorld>) => NodeId) => {
     let node = 0 as NodeId;
     const t = testWorld([
-      emitter((tick) => [{ type: 'strike', tick, by: N('USA'), munition: id.munition('t_cruise'), fired: 4, intercepted: 1, target: node, damage: 'hit' }]),
+      emitter((tick) => [{ type: 'strike', tick, by: N('USA'), munition: id.munition('t_cruise'), fired: 4, intercepted: 1, target: node, effects: [] }]),
       createDiplomacy(),
     ]);
     node = target(t);
@@ -284,7 +284,7 @@ describe('who joins a war', () => {
     const strikeOn = (host: string, opinion: number) => {
       let node = 0 as NodeId;
       const t = testWorld([
-        emitter((tick) => (tick === 2 ? [{ type: 'strike', tick, by: N('CHN'), munition: id.munition('t_cruise'), fired: 4, intercepted: 1, target: node, damage: 'hit' }] : [])),
+        emitter((tick) => (tick === 2 ? [{ type: 'strike', tick, by: N('CHN'), munition: id.munition('t_cruise'), fired: 4, intercepted: 1, target: node, effects: [] }] : [])),
         createDiplomacy(),
       ]);
       node = t.world.nations[N(host)].capital;

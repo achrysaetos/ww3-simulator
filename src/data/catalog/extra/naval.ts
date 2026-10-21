@@ -191,8 +191,10 @@ const corvettes: PlatformSpec<Key>[] = [
 const patrol: PlatformSpec<Key>[] = [
   // Generic coastal patrol boat (30-60 m, 20-40 mm guns); the bulk of small-navy and coast-guard fleets.
   { id: 'patrol_craft', name: 'Coastal patrol craft (generic)', cls: 'patrol', crew: 20, producers: [], inService: 2000, unitCostUsdM: 10, speedKph: 55, rangeKm: 1500, fuelTph: 0.2, detectionKm: 40, q: 0.5 },
-  // Gun and torpedo boats (Ku Song / Sin Hung, IRGCN Seraj / Ashura): no anti-ship missiles.
-  { id: 'fast_attack_craft', name: 'Fast attack craft, gun/torpedo (generic)', cls: 'patrol', crew: 12, producers: ['IRN', 'PRK'], inService: 1995, unitCostUsdM: 2, speedKph: 80, rangeKm: 600, fuelTph: 0.15, armor: 0.05, stealth: 0.5, detectionKm: 20, q: 0.6 },
+  // Gun and torpedo boats (Ku Song / Sin Hung, IRGCN Seraj / Ashura): no anti-ship missiles. Both navies
+  // sow mines from small craft: Iran Ajr was caught laying them in the Gulf in September 1987, and Iran
+  // holds over 5,000 naval mines (DIA, "Iran Military Power", 2019). One mine a boat (estimate).
+  { id: 'fast_attack_craft', name: 'Fast attack craft, gun/torpedo (generic)', cls: 'patrol', crew: 12, producers: ['IRN', 'PRK'], inService: 1995, unitCostUsdM: 2, speedKph: 80, rangeKm: 600, fuelTph: 0.15, armor: 0.05, stealth: 0.5, detectionKm: 20, q: 0.6, load: { sea_mine: 1 } },
   // Osa / Soju (PRK, P-15 or Kumsong-3) and Kaman / Houdong / Sina (IRN, C-802 / Noor): loaded as Noor.
   { id: 'missile_boat', name: 'Missile boat (Osa/Soju/Kaman/Houdong)', cls: 'patrol', crew: 30, producers: ['IRN', 'PRK'], inService: 1985, unitCostUsdM: 20, speedKph: 65, rangeKm: 1500, fuelTph: 0.3, stealth: 0.4, detectionKm: 40, load: { noor: 4 } },
   // China Coast Guard ocean cutters (Zhaotou, Type 818): 76 mm gun, 3,000-12,000 t.

@@ -31,11 +31,11 @@ const daily: string[] = [];
 for (let t = 0; t < Number(days) * ticksPerDay; t++) {
   for (const e of engine.step(world) as SimEvent[]) {
     if (e.type === 'strike' && e.by !== invader) {
-      const m = /^(\d+) hits on (.*)$/.exec(e.damage);
-      if (m && amphibGroupNames.has(m[2])) {
+      const hit = e.effects.find((x) => x.kind === 'ship_hits');
+      if (hit && amphibGroupNames.has(world.formations[hit.formation]?.name)) {
         const k = `${e.by}:${e.munition as MunitionId}`;
         const w = (byWeapon[k] ??= { fired: 0, intercepted: 0, hits: 0 });
-        w.fired += e.fired; w.intercepted += e.intercepted; w.hits += Number(m[1]);
+        w.fired += e.fired; w.intercepted += e.intercepted; w.hits += hit.hits;
       }
     }
     if (e.type === 'battle' && e.defender === invader && map.isSea(e.node))

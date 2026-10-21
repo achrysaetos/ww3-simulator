@@ -3,10 +3,11 @@ import type { Formation, FormationId, Munition, MunitionId, NationId, PlatformId
 import { tracked } from './detection';
 import type { TickEnv } from './env';
 import { resolveSalvo, type SalvoDefense, type SalvoOutcome } from './salvo';
-import { effectiveHitsToKill, ledger, recordFleetLoss } from './state';
+import { type Composition, effectiveHitsToKill, type HullStack, ledger, recordFleetLoss } from './state';
 import { ANTISHIP_KINDS, CREW_LOSS_SUNK, INTERCEPTOR_KINDS, LAUNCHES_PER_HULL, SORTIES_PER_HOUR, TORPEDO_SPREAD, USV_RAID_HOURS, USV_STRIKE, USV_WAVE } from './tables';
 
 type Tracks = Map<FormationId, Set<NationId>>;
+type Queue = (target: Formation, by: NationId, hits: number[]) => void;
 
 /** Postures in which a group initiates fire; others only defend. */
 const ENGAGING = new Set(['attack', 'patrol', 'blockade', 'escort', 'defend', 'strike']);
@@ -25,12 +26,24 @@ const ASW_SALVO = 2;
  */
 const SUB_REATTACK_TICKS = 4;
 /**
+ * A torpedo launch, or an approach the screen detects, is a flaming datum: the escorts search
+ * around it at once, before the boat clears. Localized search, not area search, so it is not
+ * scaled by ASW_K (detection.ts). WWII escorts found about one U-boat in six that attacked a convoy
+ * from 1-2 km; a modern SSN fires a wire-guided heavyweight from 10-20 km, outside most hull sonar
+ * ranges, and runs. So a boat at stealth 0.85 is caught about one attack in eleven, a Virginia at
+ * 0.95 one in thirty, a noisy boat at 0.6 one in five (Falklands 1982: Conqueror was never found
+ * after sinking Belgrano; judgment). The datum marks the boat that attacked, not the boats it
+ * patrols with, and is cold by the next tick.
+ */
+const DATUM_EFFORT = 0.6;
+/**
  * Chance per unit of screen ASW effort x (1 - stealth) that a target group's own screen catches a
  * submarine closing to firing range. Fleet exercises still see quiet boats reach carriers (Saphir
  * vs Theodore Roosevelt 2015, Gotland vs Ronald Reagan 2005), so a carrier group's screen (destroyers
  * and a dozen MH-60Rs, ~8 units) should foil about half the attacks by a 0.9-stealth SSN (estimate).
  */
 const SCREEN_K = 0.9;
+const NUCLEAR_ATTACK: ReadonlySet<string> = new Set(['ssn', 'ssgn']);
 /** Decoy/evasion chance for a surface ship against one torpedo (Nixie-type towed decoys; estimate). */
 const SHIP_TORPEDO_DEFENSE = 0.15;
 
@@ -43,11 +56,11 @@ export interface Losses { sunk: Record<PlatformId, number>; damaged: Record<Plat
  */
 export function navalCombat(env: TickEnv, tracks: Tracks): void {
   const pending = new Map<FormationId, { target: Formation; hits: number[]; by: NationId }>();
-  const queue = (target: Formation, by: NationId, out: SalvoOutcome) => {
-    if (!out.hits.length) return;
+  const queue: Queue = (target, by, hits) => {
+    if (!hits.length) return;
     const p = pending.get(target.id);
-    if (p) p.hits.push(...out.hits);
-    else pending.set(target.id, { target, hits: [...out.hits], by });
+    if (p) p.hits.push(...hits);
+    else pending.set(target.id, { target, hits: [...hits], by });
   };
 
   for (const f of env.naval) {
@@ -55,33 +68,30 @@ export function navalCombat(env: TickEnv, tracks: Tracks): void {
     const c = env.comp(f);
     if (!c.submerged || c.hulls.every((h) => h.platform.class === 'ssbn')) continue;
     if (env.world.tick - (env.world.slices.naval.lastFired[f.id] ?? -Infinity) < SUB_REATTACK_TICKS / c.hullCount) continue;
-    const target = pickTarget(env, tracks, f, (t) => t.node === f.node && !env.comp(t).submerged);
+    // Nuclear boats keep station outside a screen and sprint in to attack groups in the next zone, then clear
+    // the datum (shoot and scoot). A diesel boat on its battery makes a few knots and lies in wait where it is.
+    const sprint = c.hulls.every((h) => NUCLEAR_ATTACK.has(h.platform.class));
+    const target = pickTarget(env, tracks, f, (t) => (sprint || t.node === f.node) && !env.comp(t).submerged);
     if (!target) continue;
     for (let attacks = Math.max(1, Math.round(c.hullCount / SUB_REATTACK_TICKS)); attacks > 0; attacks--) {
       const torp = bestMunition(env, f, 'ship', 0, (m) => m.kind === 'torpedo');
       if (!torp) break;
       env.world.slices.naval.lastFired[f.id] = env.world.tick;
-      // A boat caught on its approach breaks off; it is a datum the screen searches next tick.
-      if (env.ctx.rng.chance(1 - Math.exp(-screen(env, target) * (1 - c.stealth) * SCREEN_K))) continue;
-      const n = Math.min(Math.floor(f.magazine[torp.id]), TORPEDO_SPREAD);
-      queue(target, f.nation, fire(env, f, target, torp, n, 'ship'));
+      // The boats take turns; this attack is one boat's, as quiet as that boat is.
+      const quiet = 1 - attackingBoat(env, c).platform.protection.stealth;
+      // A boat caught on its approach breaks off without firing.
+      if (!env.ctx.rng.chance(1 - Math.exp(-screen(env, target) * quiet * SCREEN_K))) {
+        const n = Math.min(Math.floor(f.magazine[torp.id]), TORPEDO_SPREAD);
+        queue(target, f.nation, fire(env, f, target, torp, n, 'ship').hits);
+      }
+      if (env.ctx.rng.chance(1 - Math.exp(-DATUM_EFFORT * quiet))) prosecute(env, f, screenOf(env, target), queue);
     }
   }
 
   for (const sub of env.naval) {
     if (!env.comp(sub).submerged) continue;
     const hunters = tracks.get(sub.id);
-    if (!hunters) continue;
-    let salvo = ASW_SALVO;
-    for (const h of env.byNode.get(sub.node) ?? []) {
-      if (salvo <= 0) break;
-      if (h === sub || !hunters.has(h.nation) || !atWar(env.world, h.nation, sub.nation)) continue;
-      const w = bestMunition(env, h, 'submarine', 0, (m) => m.kind === 'torpedo');
-      if (!w) continue;
-      const n = Math.min(Math.floor(h.magazine[w.id]), salvo);
-      salvo -= n;
-      queue(sub, h.nation, fire(env, h, sub, w, n, 'submarine'));
-    }
+    if (hunters) prosecute(env, sub, (env.byNode.get(sub.node) ?? []).filter((h) => hunters.has(h.nation) && atWar(env.world, h.nation, sub.nation)), queue);
   }
 
   for (const f of env.naval) {
@@ -96,7 +106,7 @@ export function navalCombat(env: TickEnv, tracks: Tracks): void {
     const defense = poolDefense(env, target);
     const need = Math.ceil(defense.channels * 1.5 + 2 * env.comp(target).hullCount);
     const n = Math.min(f.magazine[m.id], launchCapacity(env, f, m), need);
-    if (n > 0) queue(target, f.nation, fire(env, f, target, m, n, 'ship', defense));
+    if (n > 0) queue(target, f.nation, fire(env, f, target, m, n, 'ship', defense).hits);
   }
 
   for (const f of env.naval) if (ENGAGING.has(f.order.posture)) usvAttack(env, tracks, f, queue);
@@ -105,11 +115,31 @@ export function navalCombat(env: TickEnv, tracks: Tracks): void {
 }
 
 /**
+ * Hunters holding a contact put ASW_SALVO torpedoes on one localized boat, so every hit lands
+ * on that boat rather than on the boats it patrols with.
+ */
+function prosecute(env: TickEnv, sub: Formation, hunters: Formation[], queue: Queue): void {
+  let salvo = ASW_SALVO, hit = 0;
+  let by: NationId | undefined;
+  for (const h of hunters) {
+    if (salvo <= 0) break;
+    if (h === sub) continue;
+    const w = bestMunition(env, h, 'submarine', 0, (m) => m.kind === 'torpedo');
+    if (!w) continue;
+    const n = Math.min(Math.floor(h.magazine[w.id]), salvo);
+    salvo -= n;
+    for (const x of fire(env, h, sub, w, n, 'submarine').hits) hit += x;
+    by ??= h.nation;
+  }
+  if (by) queue(sub, by, hit > 0 ? [hit] : []);
+}
+
+/**
  * Strike USVs in the group raid the best tracked hostile surface group within their range,
  * expending themselves. A raid is a planned operation, so a group mounts one every
  * USV_RAID_HOURS at most.
  */
-function usvAttack(env: TickEnv, tracks: Tracks, f: Formation, queue: (t: Formation, by: NationId, out: SalvoOutcome) => void): void {
+function usvAttack(env: TickEnv, tracks: Tracks, f: Formation, queue: Queue): void {
   const boats = env.comp(f).hulls.filter((h) => h.platform.class === 'usv' && (h.platform.firepower.ship ?? 0) > 0);
   if (!boats.length) return;
   const { lastFired } = env.world.slices.naval;
@@ -131,14 +161,28 @@ function usvAttack(env: TickEnv, tracks: Tracks, f: Formation, queue: (t: Format
   lb.leakers += out.leakers;
   env.ctx.emit({ type: 'message', tick: env.world.tick, nation: f.nation, text: `${launched} strike USVs from ${f.name} attacked ${target.name}: ${out.hits.length} hits` });
   // Operators steer the whole wave onto one ship: Ivanovets and Sergei Kotov each took several boats.
-  if (out.hits.length) queue(target, f.nation, { ...out, hits: [out.hits.reduce((a, h) => a + h, 0)] });
+  if (out.hits.length) queue(target, f.nation, [out.hits.reduce((a, h) => a + h, 0)]);
+}
+
+/** One of the formation's boats, drawn in proportion to their numbers. */
+function attackingBoat(env: TickEnv, c: Composition): HullStack {
+  let r = env.ctx.rng.next() * c.hullCount;
+  for (const h of c.hulls) if ((r -= h.count) < 0) return h;
+  return c.hulls[c.hulls.length - 1];
+}
+
+/** A group and the groups escorting it. */
+function screenOf(env: TickEnv, target: Formation): Formation[] {
+  const out = [target];
+  for (const g of env.byNode.get(target.node) ?? [])
+    if (g !== target && g.nation === target.nation && g.order.posture === 'escort' && g.order.targetFormation === target.id) out.push(g);
+  return out;
 }
 
 /** ASW effort screening a group against an approaching submarine: its own sensors and those of the groups escorting it. */
 function screen(env: TickEnv, target: Formation): number {
-  let asw = env.comp(target).aswSearch;
-  for (const g of env.byNode.get(target.node) ?? [])
-    if (g !== target && g.nation === target.nation && g.order.posture === 'escort' && g.order.targetFormation === target.id) asw += env.comp(g).aswSearch;
+  let asw = 0;
+  for (const g of screenOf(env, target)) asw += env.comp(g).aswSearch;
   return asw;
 }
 
@@ -276,7 +320,7 @@ export function fire(env: TickEnv, shooter: Formation | null, target: Formation,
       if (!left) break;
     }
   }
-  env.ctx.emit({ type: 'strike', tick: env.world.tick, by, munition: m.id, fired: n, intercepted: out.intercepted, target: target.node, damage: `${out.hits.length} hits on ${target.name}` });
+  env.ctx.emit({ type: 'strike', tick: env.world.tick, by, munition: m.id, fired: n, intercepted: out.intercepted, target: target.node, effects: [{ kind: 'ship_hits', formation: target.id, hits: out.hits.length }] });
   return out;
 }
 

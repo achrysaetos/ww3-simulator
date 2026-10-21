@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { atWar, relationMut } from '../src/core/engine';
 import { Rng } from '../src/core/rng';
-import type { Formation, NodeId } from '../src/core/types';
+import type { Formation, NodeId, SimEvent } from '../src/core/types';
+import { createSession } from '../src/scenarios';
 import { applyAirOrder, combatRadiusKm, interceptSalvo, resolveAirBattle } from '../src/systems/air';
 import { airWorld, battery, launchers, mid, nation, pid, wing } from './air.fixture';
 
@@ -118,6 +120,66 @@ describe('integrated air defense', () => {
     expect(t.world.theater.infrastructure[kyiv]).toBeLessThan(1);
   });
 
+  it('a strike order left standing after a peace fires nothing at the former enemy or its airfields', () => {
+    const t = airWorld();
+    t.war('RUS', 'UKR');
+    const kyiv = t.node(...KYIV);
+    wing(t, 'UKR', kyiv, { t_fighter: 12 });
+    const city = launchers(t, 'RUS', t.node(53.9, 27.6), { x_mrbm_tel: 20 }, { posture: 'strike', target: kyiv, targetClass: 'structure' });
+    const base = launchers(t, 'RUS', t.node(53.9, 27.6), { x_mrbm_tel: 20 }, { posture: 'strike', target: kyiv, targetClass: 'aircraft' });
+    expect(t.strikes(t.tick()).length).toBeGreaterThan(0);
+    relationMut(t.world, RUS, UKR).atWar = false;
+    const rounds = (f: Formation) => f.magazine[mid('x_mrbm')];
+    const before = [rounds(city), rounds(base)], runway = t.world.slices.air?.runway?.[kyiv];
+    expect(t.strikes(t.tick(4))).toEqual([]);
+    expect([rounds(city), rounds(base)]).toEqual(before);
+    expect(t.world.slices.air?.runway?.[kyiv]).toBe(runway);
+  });
+
+  it('a strike order whose raids all vanish into the defences stops after two; one that lands keeps striking', () => {
+    const raids = (defended: boolean) => {
+      const t = airWorld(5);
+      t.war('RUS', 'UKR');
+      const kyiv = t.node(...KYIV);
+      if (defended) battery(t, 'UKR', kyiv, { x_patriot: 6 });
+      launchers(t, 'RUS', t.node(53.9, 27.6), { x_cruise_tel: 2 }, { posture: 'strike', target: kyiv, targetClass: 'structure' });
+      const s = t.strikes(t.tick(8));
+      return s;
+    };
+    const blocked = raids(true);
+    expect(blocked.every((e) => e.intercepted === e.fired)).toBe(true);
+    expect(blocked.length).toBe(2);
+    expect(raids(false).length).toBeGreaterThan(2);
+  });
+
+  it('attritable drones keep coming at an aim the defences stop, drawing down its interceptors', () => {
+    const t = airWorld(5);
+    t.war('RUS', 'UKR');
+    const kyiv = t.node(...KYIV);
+    const ad = battery(t, 'UKR', kyiv, { x_shorad: 4 });
+    const stock = ad.magazine[mid('x_shorad_msl')];
+    launchers(t, 'RUS', t.node(53.9, 27.6), { x_drone_rack: 1 }, { posture: 'strike', target: kyiv, targetClass: 'structure' });
+    const s = t.strikes(t.tick(8));
+    expect(s.slice(0, 2).every((e) => e.intercepted === e.fired)).toBe(true);
+    expect(s.length).toBeGreaterThan(2);
+    expect(ad.magazine[mid('x_shorad_msl')]).toBeLessThan(stock);
+  });
+
+  it('a raid on the power grid cuts the grid serving the cell and leaves its other infrastructure alone; the grid then mends', () => {
+    const t = airWorld(5);
+    t.war('RUS', 'UKR');
+    const kyiv = t.node(...KYIV);
+    const infra = t.world.theater.infrastructure[kyiv];
+    launchers(t, 'RUS', t.node(53.9, 27.6), { x_cruise_tel: 4 }, { posture: 'strike', target: kyiv, targetClass: 'power' });
+    expect(t.strikes(t.tick()).length).toBeGreaterThan(0);
+    const cut = t.world.theater.power?.[kyiv] ?? 1;
+    expect(cut).toBeLessThan(0.95);
+    expect(t.world.theater.infrastructure[kyiv]).toBe(infra);
+    for (const f of Object.values(t.world.formations)) if (f.nation === 'RUS') f.order = { posture: 'defend', issuedTick: t.world.tick };
+    t.tick(40);
+    expect(t.world.theater.power?.[kyiv] ?? 1).toBeGreaterThan(cut);
+  });
+
   it('runs interceptor stocks down until only the counter-drone belt stops drones', () => {
     const t = airWorld();
     t.war('RUS', 'UKR');
@@ -173,7 +235,7 @@ describe('strikes', () => {
     const events = t.strikes(t.tick());
     expect(t.world.theater.infrastructure[fz]).toBeLessThan(0.99);
     expect(t.world.theater.infrastructure[busan]).toBe(1);
-    expect(events.find((e) => e.target === fz)?.damage).toMatch(/infrastructure/);
+    expect(events.find((e) => e.target === fz)?.effects).toContainEqual(expect.objectContaining({ kind: 'infrastructure' }));
   });
 
   it('never strikes beyond range: the order is refused and a forced order fires nothing', () => {
@@ -182,6 +244,7 @@ describe('strikes', () => {
     const kyiv = t.node(...KYIV), moscow = t.node(55.75, 37.6);
     expect(t.map.distanceKm(moscow, kyiv)).toBeGreaterThan(500);
     const far = launchers(t, 'RUS', moscow, { t_tel: 20 });
+    t.world.nations[RUS].controlledBy = 'human';
     const ctx = t.ctx();
     expect(applyAirOrder(t.world, { type: 'order', nation: RUS, formation: far.id, order: { posture: 'strike', target: kyiv, targetClass: 'structure' } }, ctx)).toBe(true);
     expect(far.order.posture).toBe('defend');
@@ -271,3 +334,31 @@ describe('strikes', () => {
   });
 });
 
+
+describe('air battle reports', () => {
+  it('name two nations at war as attacker and defender, never one nation against itself', () => {
+    const s = createSession('baltic-2027', 1);
+    const battles: Extract<SimEvent, { type: 'battle' }>[] = [];
+    s.engine.run(s.world, (10 * 24) / s.world.dtHours, (_w, events) => {
+      for (const e of events) if (e.type === 'battle' && e.domain === 'air') battles.push(e);
+    });
+    expect(battles.length).toBeGreaterThan(10);
+    expect(battles.filter((b) => !atWar(s.world, b.attacker, b.defender)).map((b) => `${b.attacker}-${b.defender}`)).toEqual([]);
+  }, 120_000);
+});
+
+describe('coastal batteries on defend', () => {
+  it('take a warship bound for a neutral shore for what it is, not for a landing', () => {
+    const t = airWorld();
+    t.war('CHN', 'USA');
+    const shore = t.node(24.15, 120.5);
+    const off = [...t.map.neighbors(shore)].find((n) => t.map.isSea(n))!;
+    const coast = t.map.nodesOf(nation('CHN')).sort((a, b) => t.map.distanceKm(a, shore) - t.map.distanceKm(b, shore))[0];
+    const battery = launchers(t, 'CHN', coast, { t_tel: 4 });
+    battery.magazine[mid('t_asm')] = 8;
+    const group = t.add({ nation: nation('USA'), name: 'US destroyers', kind: 'surface_group', echelon: 'task_group', node: off, equipment: { [pid('t_destroyer')]: 2 }, order: { posture: 'patrol', target: shore, issuedTick: 0 } });
+    expect(t.map.distanceKm(coast, shore)).toBeLessThan(250);
+    t.tick();
+    expect(battery.order.targetFormation).not.toBe(group.id);
+  });
+});

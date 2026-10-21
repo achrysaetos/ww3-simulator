@@ -1,9 +1,12 @@
+import { atWar as isAtWar } from '../../core/engine';
 import type { GameMap } from '../../core/map';
 import type { Formation, FormationId, NationId, NodeId, PlatformClass, PlatformId } from '../../core/types';
 import { liftShare } from '../naval/amphibious';
-import { geography, seaNeighbour } from '../naval/geography';
+import { geography, sameWaters, seaNeighbour } from '../naval/geography';
+import { sailable } from '../naval/movement';
+import { boardable } from '../naval/orders';
 import { compose, fleetLosses } from '../naval/state';
-import { dominant, isGround, issue } from './forces';
+import { dominant, isGround, issue, sighted } from './forces';
 import { enemyPowerAt, landMass } from './fronts';
 import { reachKm } from './strikes';
 import type { Plan } from './types';
@@ -41,6 +44,26 @@ function chokepoints(map: GameMap): Choke[] {
     chokeCache.set(map, c);
   }
   return c;
+}
+
+/** Own seaborne trade interdicted, and distance of an enemy warship from a strait, at which its shore state closes it. */
+const CLOSURE = { tradeBlocked: 0.25, fleetKm: 1000 };
+
+/**
+ * A shore state at war closes the passage it commands, whoever's trade runs through it, once
+ * its own exports are cut or an enemy navy operates off it: the world's shipping is its
+ * leverage. In the 1980-88 Tanker War Iran began attacking Gulf shipping after Iraq struck its
+ * oil exports at Kharg (1984) and mined the Gulf once the US Navy escorted reflagged Kuwaiti
+ * tankers (1987-88); "if Iran's oil cannot be exported, no country's oil will be" (Rouhani, July
+ * 2018; ONI, "Iran's Naval Forces", 2017). Thresholds are judgment.
+ */
+function coerciveClosure(p: Plan, c: Choke): boolean {
+  if (!c.shores.has(p.nation)) return false;
+  if ((p.world.theater.tradeBlocked[p.nation] ?? 0) >= CLOSURE.tradeBlocked) return true;
+  for (const e of p.enemies)
+    for (const f of p.index.byNation.get(e) ?? [])
+      if ((f.kind === 'surface_group' || f.kind === 'submarine') && f.status === 'active' && p.ctx.map.distanceKm(f.node, c.node) <= CLOSURE.fleetKm) return true;
+  return false;
 }
 
 const coastCache = new WeakMap<GameMap, NodeId[]>();
@@ -139,7 +162,7 @@ function planAssault(p: Plan, lifts: Formation[]): Assault | undefined {
     if (!targets.some((o) => near(o, n))) continue;
     let port = ports[0], km = Infinity;
     for (const pt of ports) {
-      if (Math.abs(map.lat[pt.node] - map.lat[n]) * 111 > ASSAULT_RANGE_KM) continue;
+      if (Math.abs(map.lat[pt.node] - map.lat[n]) * 111 > ASSAULT_RANGE_KM || !sameWaters(map, pt.node, seaNeighbour(map, n)!)) continue;
       const d = map.distanceKm(pt.node, n);
       if (d < km) { km = d; port = pt; }
     }
@@ -163,15 +186,15 @@ function maritimeFocus(p: Plan, assault: Assault | undefined): { node: NodeId; e
   const capitals = [...p.friends].map((n) => p.world.nations[n].capital);
   let best: NodeId | undefined, bestScore = 0;
   for (const e of p.enemies)
-    for (const f of p.index.byNation.get(e) ?? []) {
+    for (const { f, node } of sighted(p, e)) {
       // Boats ashore in a port cell (shore-launched USVs) are struck from the air, not hunted at sea.
-      if (f.kind !== 'surface_group' || !map.isSea(f.node)) continue;
+      if (f.kind !== 'surface_group' || !map.isSea(node)) continue;
       let value = 0;
       for (const [pid, n] of Object.entries(f.equipment)) value += n * p.ctx.catalog.platform(pid as PlatformId).unitCostUsdM;
       let d = Infinity;
-      for (const c of capitals) d = Math.min(d, map.distanceKm(f.node, c));
+      for (const c of capitals) d = Math.min(d, map.distanceKm(node, c));
       const score = value / (1 + d / 500);
-      if (score > bestScore) { bestScore = score; best = f.node; }
+      if (score > bestScore) { bestScore = score; best = node; }
     }
   if (best !== undefined) return { node: nearestSea(map, best), enemyFleet: true };
   return { node: nearestSea(map, p.sectors.length ? p.sectors[0].key : p.world.nations[p.nation].capital), enemyFleet: false };
@@ -194,38 +217,73 @@ function batteredFleets(p: Plan, groups: Formation[]): Set<NodeId> {
 }
 
 /**
- * Where carriers hold station when the focus lies off an enemy coast: sea zones up to two
- * zones (~300-600 km) from the focus, farthest from enemy-held shore first, outside the
- * densest land-based missile and fighter coverage. CSIS 2023 kept US carriers east of Taiwan
- * and still lost two in the base case; the carriers fought by aircraft, not in the strait.
- * Capital groups pair off, one pair to a zone, as in the USN's dual-carrier operations in the
- * Philippine and South China Seas in 2020-24, rather than stacking every carrier in one zone
- * whose escorts would then pool every interceptor against each salvo (judgment).
+ * Distance from hostile-held shore below which a surface group does not take station unless it
+ * covers its own landing: the reach of shore-based anti-ship cruise missiles and of the strike
+ * aircraft over the enemy's own coast. China's YJ-62 coastal batteries reach about 400 km and
+ * its JH-7A and J-16 carry YJ-83K and YJ-12 out from the coast; CSIS 2023 kept US surface groups
+ * east of Taiwan, out of the strait, and still lost 7-20 of them. The figure is judgment.
  */
-function standoffZones(p: Plan, focus: NodeId): NodeId[] {
+const SURFACE_STANDOFF_KM = 400;
+
+/** Distance from each sea zone to the nearest coast cell held by an enemy of the planning nation; Infinity with none. */
+function shoreClearance(p: Plan): (z: NodeId) => number {
   const { map } = p.ctx;
   const hostileShore = coast(map).filter((n) => p.enemies.has(p.world.control[n]));
-  if (!hostileShore.length) return [focus];
-  const clearance = (z: NodeId) => {
-    let d = Infinity;
-    for (const n of hostileShore) if (Math.abs(map.lat[n] - map.lat[z]) * 111 < d) d = Math.min(d, map.distanceKm(n, z));
+  const memo = new Map<NodeId, number>();
+  return (z) => {
+    let d = memo.get(z);
+    if (d === undefined) {
+      d = Infinity;
+      for (const n of hostileShore) if (Math.abs(map.lat[n] - map.lat[z]) * 111 < d) d = Math.min(d, map.distanceKm(n, z));
+      memo.set(z, d);
+    }
     return d;
   };
-  const zones: { z: NodeId; d: number }[] = [{ z: focus, d: clearance(focus) }];
+}
+
+/** Rings of sea zones searched around the focus for stations outside SURFACE_STANDOFF_KM (~150-300 km a ring). */
+const STATION_RINGS = 5;
+
+/**
+ * Where carriers and unassigned escorts hold station: the sea zones within STATION_RINGS of the
+ * focus that lie at least SURFACE_STANDOFF_KM from enemy-held shore, nearest the focus first;
+ * with none, the zones farthest from that shore. The carriers fight by aircraft, not in the
+ * strait. Capital groups pair off, one pair to a zone, as in the USN's dual-carrier operations in
+ * the Philippine and South China Seas in 2020-24, rather than stacking every carrier in one zone
+ * whose escorts would then pool every interceptor against each salvo (judgment).
+ */
+function standoffZones(p: Plan, focus: NodeId, clearance: (z: NodeId) => number): NodeId[] {
+  const { map } = p.ctx;
+  if (clearance(focus) >= SURFACE_STANDOFF_KM) return [focus];
+  const zones: { z: NodeId; ring: number; d: number }[] = [{ z: focus, ring: 0, d: clearance(focus) }];
   let ring: NodeId[] = [focus];
   const seen = new Set<number>(ring);
-  for (let depth = 0; depth < 2; depth++) {
+  for (let depth = 1; depth <= STATION_RINGS; depth++) {
     const next: NodeId[] = [];
     for (const z of ring)
       for (const m of map.neighbors(z)) {
         if (!map.isSea(m) || seen.has(m)) continue;
         seen.add(m);
         next.push(m);
-        zones.push({ z: m, d: clearance(m) });
+        zones.push({ z: m, ring: depth, d: clearance(m) });
       }
     ring = next;
   }
-  return zones.sort((a, b) => b.d - a.d || a.z - b.z).map((x) => x.z);
+  const clear = zones.filter((x) => x.d >= SURFACE_STANDOFF_KM).sort((a, b) => a.ring - b.ring || b.d - a.d || a.z - b.z);
+  return (clear.length ? clear : zones.sort((a, b) => b.d - a.d || a.z - b.z)).map((x) => x.z);
+}
+
+/**
+ * Where attack submarines wait when the focus holds an enemy fleet: the sea zone next to it
+ * farthest from hostile shore, away from the enemy's home-water ASW, from which nuclear boats
+ * run in, attack and withdraw (naval combat lets them strike groups one zone over). A submarine
+ * that stays among the massed escorts of an invasion fleet is found by area search sooner or
+ * later; SSNs attack from the edges of a screen and clear the datum (judgment).
+ */
+function submarineStation(map: GameMap, focus: NodeId, clearance: (z: NodeId) => number): NodeId {
+  let best = focus, bestD = -1;
+  for (const z of map.neighbors(focus)) if (map.isSea(z) && (clearance(z) > bestD || (clearance(z) === bestD && z < best))) { best = z; bestD = clearance(z); }
+  return best;
 }
 
 /**
@@ -277,12 +335,22 @@ function runAssault(p: Plan, a: Assault, lifts: Formation[]): void {
     if (!atPort) continue;
     for (const f of pending) {
       if (load >= SAIL_LOAD) break;
+      if (!boardable(1 - load, liftShare(catalog, f, comp))) continue;
       p.out.push({ type: 'order', nation: p.nation, formation: f.id, order: { posture: 'embark', targetFormation: l.id } });
       boarding.add(f);
       load += liftShare(catalog, f, comp);
     }
   }
 }
+
+/**
+ * Readiness below which a group is in a shipyard availability and cannot sail: a carrier in
+ * refuelling overhaul (about four years) or a docking availability. Under the US Navy's Optimized
+ * Fleet Response Plan a ship in its maintenance phase is not surge-ready; one in the basic phase
+ * between deployments is (GAO-21-366, 2021). The threshold is judgment: it separates the yard
+ * availabilities in the orders of battle (0.05-0.2) from ships working up (0.4 and above).
+ */
+const SEAWORTHY = 0.25;
 
 /**
  * Naval groups: SSBNs hold a bastion in home waters; a nation able to invade across the sea
@@ -295,40 +363,55 @@ function runAssault(p: Plan, a: Assault, lifts: Formation[]): void {
 export function planNaval(p: Plan): void {
   const { map } = p.ctx;
   const km = (a: number, b: number) => map.distanceKm(a as NodeId, b as NodeId);
-  const groups = (p.index.byNation.get(p.nation) ?? []).filter((f) => (f.kind === 'surface_group' || f.kind === 'submarine') && f.status === 'active');
+  const groups = (p.index.byNation.get(p.nation) ?? []).filter((f) => (f.kind === 'surface_group' || f.kind === 'submarine') && f.status === 'active' && f.readiness >= SEAWORTHY);
   if (!groups.length) return;
   const liftCapable = groups.filter((g) => g.kind === 'surface_group' && compose(g, p.ctx.catalog).troopLift > 0);
   const assault = planAssault(p, liftCapable);
   const { node: focus, enemyFleet } = maritimeFocus(p, assault);
-  const stations = assault ? [focus] : standoffZones(p, focus);
+  const clearance = shoreClearance(p);
+  const stations = assault ? [focus] : standoffZones(p, focus, clearance);
+  const subStation = enemyFleet && !assault ? submarineStation(map, focus, clearance) : focus;
   let capitals = 0;
   const inPort = enemyFleet ? new Set<NodeId>() : batteredFleets(p, groups);
   // A belligerent may not fight in neutral waters, so it blockades only passages a party to the war borders (San Remo Manual 1994, paras 14-16).
-  const enemyChokes = chokepoints(map).filter((c) => [...c.users].some((u) => p.enemies.has(u as NationId)) && [...c.shores].some((n) => p.enemies.has(n) || p.friends.has(n)));
+  const enemyChokes = chokepoints(map).filter(
+    (c) => ([...c.users].some((u) => p.enemies.has(u as NationId)) && [...c.shores].some((n) => p.enemies.has(n) || p.friends.has(n))) || coerciveClosure(p, c),
+  );
   const claimed = new Map<NodeId, number>();
+  const atWar = [...p.enemies].some((e) => isAtWar(p.world, p.nation, e));
+  // A fleet in a closed sea (the Caspian Flotilla, a Black Sea squadron with the Straits shut to it)
+  // fights where open water takes it; a station it cannot reach falls back to its home waters.
+  const sails = (g: Formation, n: NodeId) => sailable(p.world, map, g, n);
+  const patrol = (g: Formation, target: NodeId) => issue(p, g, { posture: 'patrol', target: sails(g, target) ? target : nearestSea(map, g.home) });
 
   const blockade = (f: Formation): boolean => {
     const range = reachKm(p, f);
     let best: NodeId | undefined, bestScore = Infinity;
     for (const c of enemyChokes) {
       const d = km(f.node, c.node);
-      if (d > range) continue;
+      // Surface groups do not hold another state's strait under the enemy's shore missiles; submarines
+      // can, and a shore state fights in its own strait under its own shore defences (Iran at Hormuz).
+      if (d > range || !sails(f, c.node) || (f.kind === 'surface_group' && !c.shores.has(p.nation) && clearance(c.node) < SURFACE_STANDOFF_KM)) continue;
       const score = d * (1 + (claimed.get(c.node) ?? 0));
       if (score < bestScore) { bestScore = score; best = c.node; }
     }
     if (best === undefined) return false;
     claimed.set(best, (claimed.get(best) ?? 0) + 1);
-    issue(p, f, { posture: 'blockade', target: best });
+    // Before war a group only takes station: a blockade posture lays mines and interdicts trade.
+    issue(p, f, { posture: atWar ? 'blockade' : 'patrol', target: best });
     return true;
   };
 
   const lift = new Set(liftCapable);
   const roles = new Map(groups.map((g) => [g, roleOf(p, g, lift.has(g))]));
-  if (assault) runAssault(p, assault, liftCapable);
+  if (assault) runAssault(p, assault, liftCapable.filter((l) => sails(l, assault.port)));
   const unescorted = [...(assault ? liftCapable.filter((g) => g.order.posture !== 'reserve') : []), ...groups.filter((g) => roles.get(g) === 'capital')];
   for (const g of groups) {
     // Groups with no fighting role (sealift) sail under naval/sealift.ts.
     if (!roles.get(g)) continue;
+    // Before entering a war only submarines deploy: quiet, they take station unseen, while surface
+    // groups sent forward would sit in the enemy's opening salvo (judgment).
+    if (!atWar && roles.get(g) !== 'submarine') continue;
     if (inPort.has(g.home) && roles.get(g) !== 'raider' && roles.get(g) !== 'ssbn') {
       issue(p, g, { posture: 'patrol', target: nearestSea(map, g.home) });
       continue;
@@ -338,11 +421,11 @@ export function planNaval(p: Plan): void {
         issue(p, g, { posture: 'patrol', target: nearestSea(map, g.home) });
         break;
       case 'submarine':
-        if (km(g.node, focus) <= FOCUS_SUB_KM) issue(p, g, { posture: 'patrol', target: focus });
-        else if (!blockade(g)) issue(p, g, { posture: 'patrol', target: focus });
+        if (km(g.node, focus) <= FOCUS_SUB_KM) patrol(g, subStation);
+        else if (!blockade(g)) patrol(g, subStation);
         break;
       case 'capital':
-        issue(p, g, { posture: 'patrol', target: stations[(capitals++ >> 1) % stations.length] });
+        patrol(g, stations[(capitals++ >> 1) % stations.length]);
         break;
       // Without a landing to make, amphibious groups stay out of the missile zone in home waters.
       case 'lift':
@@ -356,12 +439,12 @@ export function planNaval(p: Plan): void {
         let ward: Formation | undefined, bestD = Infinity;
         for (const c of unescorted) {
           const d = km(g.node, c.node);
-          if (d < bestD) { bestD = d; ward = c; }
+          if (d < bestD && sails(g, c.node)) { bestD = d; ward = c; }
         }
         if (ward) {
           unescorted.splice(unescorted.indexOf(ward), 1);
           issue(p, g, { posture: 'escort', targetFormation: ward.id });
-        } else if (!blockade(g)) issue(p, g, { posture: 'patrol', target: focus });
+        } else if (!blockade(g)) patrol(g, assault ? focus : stations[0]);
         break;
       }
     }

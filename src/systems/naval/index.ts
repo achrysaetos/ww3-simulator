@@ -1,14 +1,17 @@
 import type { SimContext, System } from '../../core/engine';
-import type { Formation, FormationId, MunitionId, NationId, World } from '../../core/types';
+import type { GameMap } from '../../core/map';
+import type { Formation, FormationId, MunitionId, NationId, NodeId, World } from '../../core/types';
 import { landings } from './amphibious';
 import { computeSeaControl, computeTradeBlocked } from './blockade';
 import { applyHits, fire, navalCombat, targetValue } from './combat';
 import { detect } from './detection';
+import { harbour, seaNeighbour } from './geography';
 import { reindex, tickEnv } from './env';
 import { mineWarfare } from './mines';
 import { advance } from './movement';
 import { refreshOrders } from './orders';
 import { sealift } from './sealift';
+import { isNavalFormation } from './state';
 import type { SalvoOutcome } from './salvo';
 import { OCEAN_SURVEILLANCE } from './tables';
 
@@ -26,7 +29,11 @@ export { ANTISHIP_KINDS } from './tables';
  */
 export const navalWar: System = {
   id: 'naval',
-  init(world) {
+  init(world, ctx) {
+    for (const f of Object.values(world.formations)) {
+      if (!isNavalFormation(f) || ctx.map.isSea(f.node) || f.node !== f.home) continue;
+      f.node = f.home = harbour(ctx.map, f.home);
+    }
     world.slices.naval = {
       mines: {},
       oceanSurveillance: Object.fromEntries(Object.keys(world.nations).map((n) => [n, OCEAN_SURVEILLANCE[n] ?? 0])),
@@ -78,6 +85,17 @@ export function strikeNavalGroup(world: World, ctx: SimContext, by: NationId, mu
   const out = fire(env, null, t, m, count, against, undefined, by);
   if (out.hits.length) applyHits(env, t, out.hits, by);
   return out;
+}
+
+/**
+ * Where a naval group lies within its 3-degree sea zone, for weapon range: a group closing on a
+ * coast it is ordered to (a lift group making its landing, or returning to its port) lies off that
+ * cell; any other group is taken at the zone's centre. Ships unloading on a beach are within a few
+ * km of the shore batteries defending it, not the ~200 km to the zone's centre.
+ */
+export function navalPosition(map: GameMap, f: Formation): NodeId {
+  const t = f.order.target;
+  return t !== undefined && !map.isSea(t) && map.isSea(f.node) && seaNeighbour(map, t) === f.node ? t : f.node;
 }
 
 /** What sinking a naval group would cost its owner (see targetValue), for strikers choosing among ships. */

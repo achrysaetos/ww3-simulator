@@ -1,5 +1,5 @@
 import type { GameMap } from '../core/map';
-import type { FormationId, NationId, NodeId, SimEvent } from '../core/types';
+import type { FormationId, NationId, NodeId, SimEvent, StrikeEffect } from '../core/types';
 import { allianceById } from '../data/nations/alliances';
 
 export const EVENT_CATEGORIES = ['combat', 'strikes', 'nuclear', 'diplomacy', 'territory', 'economy', 'messages'] as const;
@@ -103,6 +103,23 @@ export const treatyName = (id: string) => allianceById[id]?.name ?? id;
 const total = (r: Record<string, number>) => Object.values(r).reduce((a, b) => a + b, 0);
 const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
 
+const pct = (x: number) => `${Math.round(x * 100)}%`;
+const level = (what: string, x: { before: number; after: number }) => `${what} cut from ${pct(x.before)} to ${pct(x.after)}`;
+
+function strikeEffect(x: StrikeEffect, n: Namer): string {
+  switch (x.kind) {
+    case 'losses': return `destroyed or damaged ${Object.entries(x.platforms).map(([id, k]) => `${k} ${n.known(id) ?? n.item(id)}`).join(', ')}`;
+    case 'ship_hits': return `${plural(x.hits, 'hit')} on ${n.formation(x.formation) ?? 'a naval group'}`;
+    case 'infrastructure': return level('infrastructure', x);
+    case 'grid': return level('power grid', x);
+    case 'runway': return level('runway capacity', x);
+    case 'sam_suppressed': return `suppressed ${plural(x.sites, 'SAM site')}`;
+    case 'nuclear_detonations': return plural(x.count, 'nuclear detonation');
+    case 'satellites_destroyed': return `${plural(x.count, 'satellite')} destroyed`;
+    case 'no_effect': return x.why === 'all_intercepted' ? 'nothing got through' : x.why === 'not_hostile' ? 'nothing hostile there' : 'no targets hit';
+  }
+}
+
 function fight(e: Extract<SimEvent, { type: 'battle' }>, n: Namer): string {
   const where = n.place.at(e.node);
   const unit = e.domain === 'sea' ? 'ship' : e.domain === 'air' ? 'aircraft' : 'platform';
@@ -173,7 +190,7 @@ export function describeEvent(e: SimEvent, n: Namer): string {
     }
     case 'peace': return `Peace between ${n.nation(e.a)} and ${n.nation(e.b)} (${e.terms})`;
     case 'battle': return fight(e, n);
-    case 'strike': return `${n.nation(e.by)} fires ${e.fired} × ${n.item(e.munition)} ${n.place.at(e.target)}, ${e.intercepted} intercepted: ${e.damage.replace(/[a-z][a-z0-9_]*/g, (t) => n.known(t) ?? t)}`;
+    case 'strike': return `${n.nation(e.by)} fires ${e.fired} × ${n.item(e.munition)} ${n.place.at(e.target)}, ${e.intercepted} intercepted: ${e.effects.map((x) => strikeEffect(x, n)).join('; ') || 'no effect'}`;
     case 'node_captured': return `${n.nation(e.to)} takes ${n.place.name(e.node)} from ${n.nation(e.from)}`;
     case 'formation_destroyed': return `${n.nation(e.nation)}: ${n.formation(e.formation) ?? 'a formation'} destroyed`;
     case 'nuclear_detonation': return `NUCLEAR DETONATION ${n.place.at(e.node)}: ${n.nation(e.by)}, ${e.yieldKt.toLocaleString()} kt, est. ${e.casualties.toLocaleString()} casualties`;

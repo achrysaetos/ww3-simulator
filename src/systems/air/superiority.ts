@@ -105,7 +105,7 @@ function fightOver(world: World, ctx: SimContext, pic: AirPicture, node: NodeId,
       if (level >= 0.1) world.theater.airControl[node] = { nation: winner, level: Math.round(level * 1000) / 1000 };
     }
   }
-  emitBattle(world, ctx, node, blue, red[0] ?? (world.control[node] || blue), tally);
+  emitBattle(world, ctx, pic, node, blue, tally, red[0]);
 }
 
 function airSide(ctx: SimContext, pic: AirPicture, node: NodeId, nations: NationId[], flights: ExposedFlight[]): AirSide {
@@ -144,9 +144,23 @@ function hostileTo(world: World, ctx: SimContext, pic: AirPicture, node: NodeId,
   return hostileDefenders(world, ctx, pic, node, nation).length > 0;
 }
 
-export function emitBattle(world: World, ctx: SimContext, node: NodeId, attacker: NationId, defender: NationId, tally: LossTally) {
+/**
+ * An air battle at `node`: `attacker` is the side that flew in, the defender whoever it fought
+ * there (the enemy flying against it, a nation it lost aircraft to or shot down, else the hostile holder of the cell, the
+ * hostile forces on it, or the SAMs covering it). No hostile party, no battle.
+ */
+export function emitBattle(world: World, ctx: SimContext, pic: AirPicture, node: NodeId, attacker: NationId, tally: LossTally, opponent?: NationId) {
   const nations = Object.keys(tally) as NationId[];
   if (!nations.length) return;
+  const hostile = (n: NationId | undefined): n is NationId => !!n && pic.atWar(n, attacker);
+  const owner = world.control[node];
+  const defender =
+    (hostile(opponent) ? opponent : undefined) ??
+    nations.find(hostile) ??
+    (hostile(owner) ? owner : undefined) ??
+    pic.atNode.get(node)?.find((f) => hostile(f.nation))?.nation ??
+    pic.defenders.find((d) => hostile(d.f.nation) && nodeDistance(ctx, d.f.node, node) <= d.rangeKm)?.f.nation;
+  if (!defender) return;
   const casualties: Record<NationId, number> = {};
   for (const n of nations) casualties[n] = Object.entries(tally[n]).reduce((s, [pid, c]) => s + c * ctx.catalog.platform(pid as PlatformId).crew, 0);
   ctx.emit({ type: 'battle', tick: world.tick, node, attacker, defender, losses: tally, casualties, domain: 'air' });

@@ -2,7 +2,7 @@ import { atWar } from '../../core/engine';
 import type { GameMap } from '../../core/map';
 import { findPath } from '../../core/path';
 import type { Formation, NationId, NodeId, World } from '../../core/types';
-import { geography, seaNeighbour } from './geography';
+import { geography, sameWaters, seaNeighbour } from './geography';
 import type { Composition } from './state';
 import { MINE_CLOSURE } from './tables';
 
@@ -27,6 +27,12 @@ export function navalDestination(world: World, map: GameMap, nation: NationId, t
   const owner = world.control[target];
   if (geography(map).portZone.has(target) && !atWar(world, owner, nation)) return target;
   return seaNeighbour(map, target);
+}
+
+/** Whether `f` can be sent toward `target` at all: a destination exists and open water joins it (orders refuse the rest). */
+export function sailable(world: World, map: GameMap, f: Formation, target: NodeId): boolean {
+  const dest = navalDestination(world, map, f.nation, target);
+  return dest !== undefined && sameWaters(map, f.node, dest);
 }
 
 /** A* over sea zones, canals, and the start/end port. Hostile minefields are impassable except as the destination. */

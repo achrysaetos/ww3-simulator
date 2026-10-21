@@ -10,6 +10,13 @@ const MINE_HIT = 1.5;
 /** MCM hulls hunt deliberately and suffer fewer strikes (Wonsan 1950 still cost four sweepers). */
 const MCM_STRIKE_FACTOR = 0.3;
 
+/**
+ * A dived submarine passes under moored mines and below most ground mines' influence fields: the
+ * generic influence mine's kill chance is 0.1 against a submarine and 0.35 against a surface ship
+ * (catalog sea_mine; NWP 3-15 mine warfare; estimate).
+ */
+const SUBMERGED_STRIKE_FACTOR = 0.3;
+
 /** Lay, sweep, then roll strikes on every hull sitting in a hostile minefield. */
 export function mineWarfare(env: TickEnv): void {
   const { world, ctx } = env;
@@ -48,7 +55,7 @@ export function mineWarfare(env: TickEnv): void {
     let hostile = 0;
     for (const [layer, n] of Object.entries(laid)) if (atWar(world, layer as NationId, f.nation)) hostile += n;
     if (!hostile) continue;
-    const p = 1 - Math.exp(-hostile / MINE_DENSITY);
+    const p = (1 - Math.exp(-hostile / MINE_DENSITY)) * (env.comp(f).submerged ? SUBMERGED_STRIKE_FACTOR : 1);
     let strikes = 0;
     for (const h of env.comp(f).hulls) strikes += ctx.rng.binomial(h.count, h.platform.class === 'mine_warfare' ? p * MCM_STRIKE_FACTOR : p);
     if (strikes) applyHits(env, f, new Array(strikes).fill(MINE_HIT), Object.keys(laid)[0] as NationId);

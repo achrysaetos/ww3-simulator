@@ -4,9 +4,9 @@ import type { Formation, FormationId, FormationKind, Munition, MunitionId, Natio
 import { isOverseas } from '../../data/territories';
 import { HOSTILE_OPINION } from '../diplomacy/escalation';
 import { rung } from '../diplomacy/wars';
-import { dailyRounds, effectPk } from '../air';
-import { ANTISHIP_KINDS } from '../naval';
-import { isGround, issue } from './forces';
+import { aimKey, ATTRITABLE_COST_USD_M, dailyRounds, effectPk, futileAim } from '../air';
+import { ANTISHIP_KINDS, navalPosition } from '../naval';
+import { isGround, issue, sighted } from './forces';
 import type { Plan } from './types';
 
 export interface StrikeTarget {
@@ -16,6 +16,8 @@ export interface StrikeTarget {
   formation?: FormationId;
   /** A naval group away from its home port: only a weapon with a terminal seeker finds it (air strikeShips). */
   afloat?: boolean;
+  /** Where a naval target lies within its sea zone (naval navalPosition); weapon range is measured to it. */
+  at?: NodeId;
   assigned: number;
 }
 
@@ -47,6 +49,15 @@ const SHIP_WORTH = { min: 0.5, max: 3 };
 const FRONT_FORCES = { value: 2, cls: 'armor' as TargetClass };
 const RAIL_HUB = { value: 1.5, cls: 'structure' as TargetClass, minRailKm: 50 };
 const CAPITAL = { value: 2.5, cls: 'structure' as TargetClass };
+/**
+ * Nations whose doctrine strikes the enemy's power grid as a campaign of its own. Russia did it
+ * from October 2022: waves of Kh-101, Kalibr, Iskander and Shaheds on thermal and hydro plants and
+ * the substations serving Kyiv, Kharkiv, Odesa, Dnipro and Lviv, about a third of its long-range
+ * launches in the winter of 2022-23 and again from March 2024 (Ukrenergo; UN HRMMU). The grid
+ * serving each of the enemy's largest cities is a target worth what is still standing (judgment).
+ */
+const GRID_CAMPAIGN: ReadonlySet<NationId> = new Set(['RUS' as NationId]);
+const GRID = { value: 5, cls: 'power' as TargetClass, cities: 12 };
 /** Leadership willing to risk deep strikes on a nuclear power's homeland before the ladder sanctions them. */
 const DEEP_STRIKE_RISK = 0.7;
 
@@ -131,18 +142,23 @@ export class TargetGrid {
 export function strikeTargets(p: Plan, battleArea: Set<number>): TargetGrid {
   const { map } = p.ctx;
   const out: StrikeTarget[] = [];
+  // Aimed where intelligence last fixed each formation, worth less as the fix goes stale.
   for (const e of p.enemies)
-    for (const f of p.index.byNation.get(e) ?? []) {
-      const v = VALUE_BY_KIND[f.kind] ?? (isGround(f) && battleArea.has(f.node) ? FRONT_FORCES : undefined);
+    for (const { f, node, confidence } of sighted(p, e)) {
+      const v = VALUE_BY_KIND[f.kind] ?? (isGround(f) && battleArea.has(node) ? FRONT_FORCES : undefined);
       if (!v) continue;
-      if (f.kind !== 'surface_group') out.push({ node: f.node, cls: v.cls, value: v.value, formation: f.id, assigned: 0 });
-      else out.push({ node: f.node, cls: v.cls, value: v.value * shipWorth(p, f), formation: f.id, afloat: f.node !== f.home || !!f.order.path?.length, assigned: 0 });
+      if (f.kind !== 'surface_group') out.push({ node, cls: v.cls, value: v.value * confidence, formation: f.id, assigned: 0 });
+      else {
+        const fresh = node === f.node && confidence === 1;
+        out.push({ node, at: fresh ? navalPosition(map, f) : node, cls: v.cls, value: v.value * shipWorth(p, f) * confidence, formation: f.id, afloat: node !== f.home || (fresh && !!f.order.path?.length), assigned: 0 });
+      }
     }
   for (const n of battleArea)
     if (map.railKm[n] >= RAIL_HUB.minRailKm) out.push({ node: n as NodeId, cls: RAIL_HUB.cls, value: RAIL_HUB.value * Math.min(2, map.railKm[n] / 200), assigned: 0 });
   for (const e of p.enemies) {
     const cap = p.world.nations[e].capital;
     if (p.world.control[cap] === e) out.push({ node: cap, cls: CAPITAL.cls, value: CAPITAL.value, assigned: 0 });
+    if (GRID_CAMPAIGN.has(p.nation)) for (const n of gridNodes(p, e)) out.push({ node: n, cls: GRID.cls, value: GRID.value * (p.world.theater.power?.[n] ?? 1), assigned: 0 });
   }
   const deep = new Map<NationId, boolean>();
   const allowed = (t: StrikeTarget) => {
@@ -154,7 +170,19 @@ export function strikeTargets(p: Plan, battleArea: Set<number>): TargetGrid {
     if (ok === undefined) deep.set(owner, (ok = deepStrikeAllowed(p, owner)));
     return ok && (p.enemies.has(owner) || nearEnemyCapital(p, t.node));
   };
-  return new TargetGrid(out.filter(allowed).sort((a, b) => b.value - a.value || a.node - b.node), map);
+  // Aims recent raids could not touch wait for reassessment (air BDA).
+  const live = (t: StrikeTarget) => !futileAim(p.world, p.nation, aimKey(t.node, t.formation, t.cls));
+  return new TargetGrid(out.filter((t) => allowed(t) && live(t)).sort((a, b) => b.value - a.value || a.node - b.node), map);
+}
+
+/** The cells holding the enemy's largest cities it still controls, largest first. */
+function gridNodes(p: Plan, e: NationId): NodeId[] {
+  const nodes = new Set<NodeId>();
+  for (const c of [...p.ctx.map.cities].filter((c) => c.nation === e && p.world.control[c.node] === e).sort((a, b) => b.pop - a.pop)) {
+    nodes.add(c.node);
+    if (nodes.size === GRID.cities) break;
+  }
+  return [...nodes];
 }
 
 /**
@@ -175,11 +203,6 @@ function launchable(p: Plan, f: Formation, m: MunitionId): boolean {
   return false;
 }
 
-/**
- * Precision weapons above this unit cost are rationed; drones, glide kits, bombs
- * and rockets are fired as fast as launchers and sorties allow.
- */
-const RATIONED_COST_USD_M = 0.3;
 /**
  * Days a nation spreads its precision-munition stocks over, on top of new
  * production. Against an enemy across a land front (a war of attrition), Russia's 2023-25 launches
@@ -211,9 +234,14 @@ export class FireBudget {
 
   constructor(private readonly p: Plan) {}
 
-  /** Strike now if the cheapest weapon for it is not rationed, else queue it for `settle`. */
+  /**
+   * Strike now if the cheapest weapon for it is not rationed or the target is an enemy landing on
+   * friendly soil, else queue it for `settle`. Coastal anti-ship batteries exist for the hours an
+   * invasion fleet lies off the beaches; holding them back for a later salvo loses them to the
+   * landing (CSIS 2023: Taiwan's shore-based Harpoons were among the main killers of PLA lift).
+   */
   propose(f: Formation, options: Munition[], t: StrikeTarget, order: Omit<Order, 'issuedTick'>): void {
-    if (!options.length || options[0].unitCostUsdM < RATIONED_COST_USD_M) return issue(this.p, f, order);
+    if (!options.length || options[0].unitCostUsdM < ATTRITABLE_COST_USD_M || this.landingOnFriends(t)) return issue(this.p, f, order);
     this.proposals.push({ f, options, t, order });
   }
 
@@ -241,6 +269,11 @@ export class FireBudget {
       }
     }
     this.proposals.length = 0;
+  }
+
+  private landingOnFriends(t: StrikeTarget): boolean {
+    const { world, ctx, friends } = this.p;
+    return t.at !== undefined && !ctx.map.isSea(t.at) && friends.has(world.control[t.at]);
   }
 
   private salvoDay(): boolean {

@@ -43,6 +43,15 @@ export const AIRFRAME: Partial<Record<PlatformClass, AirframeProfile>> = {
 };
 
 /** Roles whose sorties carry strike munitions to order.target. */
+/**
+ * Unit cost below which a strike weapon is attritable: drones, glide kits, bombs and rockets are
+ * fired as fast as launchers and sorties allow, and kept coming at an aim the defences stop, since
+ * each one shot down costs the defender an interceptor worth more (Russia's Shahed and decoy waves
+ * from 2023; Ukraine's Lyutyi raids on Russia). Dearer precision weapons are rationed, and stop at
+ * an aim battle damage assessment calls futile.
+ */
+export const ATTRITABLE_COST_USD_M = 0.3;
+
 export const STRIKE_ROLES: ReadonlySet<AirRole> = new Set(['counter_air', 'strike', 'bomber', 'helo']);
 /** Roles that take on tanker fuel. */
 export const RECEIVER_ROLES: ReadonlySet<AirRole> = new Set(['counter_air', 'strike', 'bomber', 'ew', 'awacs']);
@@ -272,6 +281,16 @@ export const TUNING = {
    * capacity concentrated in ~30 cells, i.e. ~0.5 % per hit (estimate).
    */
   structurePerHit: 0.005,
+  /**
+   * Grid capacity a cell loses per 450 kg-class hit aimed at its power plants and substations
+   * (the 'power' class). Russia's 2022-23 and 2024 campaigns: roughly a quarter of ~1,000-2,000
+   * missiles and Shaheds got through, onto ~30 grid cells, and took out 40-50 % of Ukraine's
+   * generation (Ukrenergo; UN HRMMU 2024: ~9 of 18 GW by summer 2024), ~8 leaked hits a cell,
+   * so ~6 % per hit (estimate).
+   */
+  powerPerHit: 0.06,
+  /** Share of a cell's lost grid capacity restored per day: Ukraine got most supply back over the spring after each winter campaign (judgment). */
+  powerRepairPerDay: 0.02,
   /** Runway capacity cut per cratering hit, and rapid runway repair per day (USAF RADR: ~8 h to restore a MOS). */
   runwayPerHit: 0.08,
   runwayRepairPerDay: 1,

@@ -36,3 +36,17 @@ const satellites: PlatformSpec<MunitionKey>[] = [
 ];
 
 export const spacePlatforms = satellites.map(toPlatform);
+
+/**
+ * Altitude, km, a direct-ascent interceptor must reach to engage each satellite type: LEO imagers
+ * and proliferated layers 500-1,100 km, navigation constellations in MEO at 19,100-23,200 km, relay
+ * and early-warning satellites at GEO (35,786 km) or a Molniya/Tundra apogee near 39,000 km (UCS
+ * Satellite Database orbits; SWF "Global Counterspace Capabilities" 2025).
+ */
+export const ORBIT_KM: Readonly<Record<string, number>> = {
+  gps3: 20200, glonass_k2: 19100, beidou3: 21500, galileo: 23200,
+  kh11: 600, us_sar_sat: 1100, sbirs_geo: 35786, sda_tracking: 1000, persona: 700, tundra_eks: 39000,
+  yaogan_elint: 1100, yaogan_sar: 700, ofek16: 600,
+  aehf: 35786, wgs: 35786, starshield: 550, sda_transport: 1000, meridian: 39000, tianlian: 35786, skynet5: 35786, syracuse4: 35786,
+  nivelir: 600, shijian21: 35786,
+};

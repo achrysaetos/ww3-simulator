@@ -1,6 +1,7 @@
 import { atWar, type SimContext } from '../../core/engine';
 import { platformCount } from '../../core/forces';
-import type { Formation, Munition, MunitionKind, NationId, PlatformId, World } from '../../core/types';
+import type { Formation, Munition, MunitionId, MunitionKind, NationId, PlatformId, World } from '../../core/types';
+import { ORBIT_KM } from '../../data/catalog/space';
 import { SAT_CLASSES, type SatClass, type SatCount } from './state';
 import { ASAT_PK, COLLISION_RATE, DEBRIS_EXPOSURE, DEBRIS_LIFE_YEARS, FRAGMENTS_PER_COLLISION, FRAGMENTS_PER_KILL } from './tables';
 
@@ -48,19 +49,27 @@ export function resolveAsat(world: World, ctx: SimContext, shooters: Formation[]
   for (const f of shooters) {
     const target = f.order.targetFormation && world.formations[f.order.targetFormation];
     if (f.order.posture !== 'strike' || !target || target.kind !== 'space' || target.status === 'destroyed' || !atWar(world, f.nation, target.nation)) continue;
-    let launchers = 0, munition: keyof typeof f.magazine | undefined;
+    // The ordered interceptor if the unit has it loaded, else the first one it has; each launcher fires its own.
+    let munition: MunitionId | undefined = f.order.munition && (f.magazine[f.order.munition] ?? 0) > 0 ? f.order.munition : undefined;
     for (const [pid, n] of Object.entries(f.equipment)) {
       const p = ctx.catalog.platform(pid as PlatformId);
-      if (p.class !== 'asat' || n <= 0) continue;
-      launchers += n;
-      munition ??= p.loadout.find((l) => (f.magazine[l.munition] ?? 0) > 0)?.munition;
+      if (p.class === 'asat' && n > 0) munition ??= p.loadout.find((l) => (f.magazine[l.munition] ?? 0) > 0)?.munition;
     }
     if (!munition) continue;
-    const shots = Math.min(launchers, f.magazine[munition], platformCount(target));
+    let launchers = 0;
+    for (const [pid, n] of Object.entries(f.equipment)) {
+      const p = ctx.catalog.platform(pid as PlatformId);
+      if (p.class === 'asat' && n > 0 && p.loadout.some((l) => l.munition === munition)) launchers += n;
+    }
+    // A direct-ascent interceptor reaches only the satellites orbiting below its ceiling.
+    const ceiling = ctx.catalog.munition(munition).rangeKm;
+    const inReach = () => Object.entries(target.equipment).filter(([pid, n]) => n > 0 && (ORBIT_KM[pid] ?? 0) <= ceiling);
+    const shots = Math.min(launchers, f.magazine[munition], inReach().reduce((a, [, n]) => a + n, 0));
+    if (shots <= 0) continue;
     f.magazine[munition] -= shots;
     let kills = 0;
     for (let i = 0; i < shots; i++) {
-      const sats = Object.entries(target.equipment).filter(([, n]) => n > 0);
+      const sats = inReach();
       if (sats.length === 0) break;
       if (!ctx.rng.chance(ASAT_PK)) continue;
       const pid = ctx.rng.pick(sats)[0] as PlatformId;
@@ -68,7 +77,7 @@ export function resolveAsat(world: World, ctx: SimContext, shooters: Formation[]
       world.slices.strategic.debris += FRAGMENTS_PER_KILL;
       kills++;
     }
-    ctx.emit({ type: 'strike', tick: world.tick, by: f.nation, munition, fired: shots, intercepted: shots - kills, target: target.node, damage: `${kills} satellites destroyed` });
+    ctx.emit({ type: 'strike', tick: world.tick, by: f.nation, munition, fired: shots, intercepted: shots - kills, target: target.node, effects: [{ kind: 'satellites_destroyed', count: kills }] });
   }
 }
 

@@ -45,8 +45,8 @@ describe('event wording', () => {
   });
 
   it('names platforms in strike damage reports', () => {
-    const e: SimEvent = { type: 'strike', tick: 1, by: N('CHN'), munition: id.munition('t_cruise'), fired: 6, intercepted: 2, target: kyiv, damage: 'runway 1.00 -> 0.78; hit f16v 1' };
-    expect(describeEvent(e, namer)).toMatch(/hit F-16V 1$/);
+    const e: SimEvent = { type: 'strike', tick: 1, by: N('CHN'), munition: id.munition('t_cruise'), fired: 6, intercepted: 2, target: kyiv, effects: [{ kind: 'runway', before: 1, after: 0.78 }, { kind: 'losses', platforms: { [id.platform('f16v')]: 1 } }] };
+    expect(describeEvent(e, namer)).toMatch(/runway capacity cut from 100% to 78%; destroyed or damaged 1 F-16V$/);
   });
 });
 

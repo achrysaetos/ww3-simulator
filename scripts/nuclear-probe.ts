@@ -19,7 +19,7 @@ for (const seed of seeds.length ? seeds : ['1']) {
         const why = e.text.replace('nuclear release refused: ', '');
         t.refused[why] = (t.refused[why] ?? 0) + 1;
       }
-      if (e.type === 'strike' && e.damage?.includes('nuclear detonations')) {
+      if (e.type === 'strike' && e.effects.some((x) => x.kind === 'nuclear_detonations')) {
         const t = get(e.by);
         t.salvos++;
         t.warheads += e.fired;
