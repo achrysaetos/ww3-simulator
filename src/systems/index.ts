@@ -74,11 +74,7 @@ export function warTreaties(table: readonly Alliance[], profiles: Readonly<Recor
 const decision = Object.fromEntries(Object.entries(strategicProfile).map(([k, p]) => [k, decisionProfile(p)]));
 
 const orders = createOrderRouter([
-  (w, c, ctx) => {
-    if (!isNavalOrder(w, c)) return false;
-    applyNavalOrder(w, c, ctx);
-    return true;
-  },
+  (w, c, ctx) => (isNavalOrder(w, c) ? applyNavalOrder(w, c, ctx) : undefined),
   applyAirOrder,
   applyLandOrder,
 ]);

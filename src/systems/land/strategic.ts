@@ -135,8 +135,8 @@ export function transportRadiusKm(world: World, catalog: Catalog, nation: Nation
 export type LiftMode = 'air' | 'sea';
 
 /** How a formation crosses: by air when it can fly, its nation has airlift and its order does not ask for ships; otherwise by sea. */
-export function liftMode(world: World, catalog: Catalog, f: Formation): LiftMode {
-  return f.order.lift !== 'sea' && airPortable(catalog, f) && airliftTonsPerDay(world, catalog, f.nation) > 0 ? 'air' : 'sea';
+export function liftMode(world: World, catalog: Catalog, f: Formation, lift = f.order.lift): LiftMode {
+  return lift !== 'sea' && airPortable(catalog, f) && airliftTonsPerDay(world, catalog, f.nation) > 0 ? 'air' : 'sea';
 }
 
 /** Whether a land formation is standing at its gateway waiting for lift to `order.target`. */

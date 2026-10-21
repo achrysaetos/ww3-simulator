@@ -67,25 +67,25 @@ describe('airborne insertion', () => {
     const t = setup();
     const contested = t.nodeAt(...KHARKIV);
     t.airOver(contested, 'UKR');
-    t.order(t.paras, { posture: 'air_assault', target: contested });
+    const refused = [t.order(t.paras, { posture: 'air_assault', target: contested })];
     expect(t.paras.node).toBe(t.airfield);
 
     const far = t.nodeAt(48.5, -2.5);
     t.world.control[far] = N('UKR');
     t.airOver(far, 'RUS');
-    t.order(t.paras, { posture: 'air_assault', target: far });
+    refused.push(t.order(t.paras, { posture: 'air_assault', target: far }));
     expect(t.paras.node).toBe(t.airfield);
 
     const neutral = t.nodeAt(52.2, 21.0);
     t.airOver(neutral, 'RUS');
-    t.order(t.paras, { posture: 'air_assault', target: neutral });
+    refused.push(t.order(t.paras, { posture: 'air_assault', target: neutral }));
     expect(t.paras.node).toBe(t.airfield);
 
     const legs = t.add({ nation: N('RUS'), name: 'Motor rifle brigade', kind: 'maneuver', echelon: 'brigade', node: t.airfield, equipment: { [P('t_inf')]: 100 } });
     t.airOver(t.nodeAt(...POLTAVA), 'RUS');
-    t.order(legs, { posture: 'air_assault', target: t.nodeAt(...POLTAVA) });
+    refused.push(t.order(legs, { posture: 'air_assault', target: t.nodeAt(...POLTAVA) }));
     expect(legs.node).toBe(t.airfield);
-    expect(t.messages.filter((m) => m.includes('cannot be inserted by air'))).toHaveLength(4);
+    expect(refused.map((r) => r?.ok === false && r.code)).toEqual(['no_air_cover', 'out_of_range', 'neutral_territory', 'wrong_role']);
   });
 
   it('flies into a sky nobody fought over only when no enemy fighter squadron can reach it', () => {

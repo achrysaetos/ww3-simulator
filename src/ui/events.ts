@@ -1,5 +1,5 @@
 import type { GameMap } from '../core/map';
-import type { FormationId, NationId, NodeId, SimEvent, StrikeEffect } from '../core/types';
+import type { CommandResult, FormationId, NationId, NodeId, SimEvent, StrikeEffect } from '../core/types';
 import { allianceById } from '../data/nations/alliances';
 import { geography } from '../systems/naval/geography';
 
@@ -20,6 +20,7 @@ export const CATEGORY_OF: Record<SimEvent['type'], EventCategory> = {
   production: 'economy',
   shortage: 'economy',
   message: 'messages',
+  command_result: 'messages',
 };
 
 const FIGHT_TAG = { land: 'ground', sea: 'naval', air: 'air' } as const;
@@ -45,6 +46,7 @@ export function eventNations(e: SimEvent): NationId[] {
     case 'shortage': return [e.nation];
     case 'capitulation': return [e.nation, ...e.to];
     case 'message': return e.nation ? [e.nation] : [];
+    case 'command_result': return [e.nation];
   }
 }
 
@@ -196,6 +198,7 @@ const nation = (s: string, n: Namer) => n.nation(s as NationId);
 /** Plain-words versions of the engine's refusal reasons. */
 const REASONS: Rule[] = [
   [/^no sea route to node (\d+)$/, (m, n) => `no sea route to ${node(m[1], n)}`],
+  [/^no land route to node (\d+)(;.*)?$/, (m, n) => `no land route to ${node(m[1], n)}. It lies across the sea or past territory closed to you; ground units cross water by embarking at a port or with a Move order`],
   [/^embark needs an own active surface group as targetFormation$/, () => 'pick one of your own lift groups to embark on'],
   [/^must stand in a port with the lift group in port or offshore$/, () => 'the unit must be in a port, with the lift group in that port or just offshore'],
   [/^embarked formations land by ordering their lift group to attack or move to a coast$/, () => 'it is at sea. Send its lift group to a friendly port to unload, or attack a coast to land under fire'],
@@ -204,15 +207,11 @@ const REASONS: Rule[] = [
 ];
 
 const MESSAGES: Rule[] = [
-  [/^order to (\S+) refused: (.*)$/, (m, n) => `${n.formation(m[1] as FormationId) ?? 'a formation'}: order refused, ${reason(m[2], n)}`],
-  [/^(.+): order refused, (.*)$/, (m, n) => `${m[1]}: order refused, ${reason(m[2], n)}`],
-  [/^(.+): no land route to node (\d+)$/, (m, n) => `${m[1]}: no land route to ${node(m[2], n)}. It lies across the sea or past territory closed to you; ground units cross water by embarking at a port`],
   [/^(.+) landed at node (\d+), losing (\d+)% in the assault$/, (m, n) => `${m[1]} landed ${n.place.at(+m[2] as NodeId)}, losing ${m[3]}% in the assault`],
   [/^([A-Z]{3}) offers peace to ([A-Z]{3})$/, (m, n) => `${nation(m[1], n)} offers peace to ${nation(m[2], n)}, which has not accepted`],
   [/^([A-Z]{3}) declines to honour (\S+) for ([A-Z]{3})$/, (m, n) => `${nation(m[1], n)} declines to honour the ${treatyName(m[2])} for ${nation(m[3], n)}`],
   [/^([A-Z]{3}) let the (\S+) deadline pass without answering ([A-Z]{3})$/, (m, n) => `${nation(m[1], n)} let the deadline pass on the ${treatyName(m[2])} call from ${nation(m[3], n)} and stays out`],
   [/^([A-Z]{3}) has no industry to build (\S+)$/, (m, n) => `${nation(m[1], n)} has no industry to build ${n.item(m[2])}`],
-  [/^([A-Z]{3}) cannot order (.+)$/, (m, n) => `${nation(m[1], n)} cannot order ${m[2]}, which belongs to another nation`],
   [/^nuclear release refused: (.*)$/, (m) => `Nuclear release refused: ${m[1]}`],
 ];
 
@@ -231,6 +230,29 @@ function reason(text: string, n: Namer): string {
 /** Engine messages in the player's words: names for ids, places for node numbers. */
 export function humanizeMessage(text: string, n: Namer): string {
   return apply(MESSAGES, text, n) ?? text.replace(/\bnode (\d+)/g, (_, id) => node(id, n));
+}
+
+/** About how long until an accepted order is carried out, in the player's units. */
+export function etaText(hours: number): string {
+  if (hours < 1) return 'now';
+  if (hours < 36) return `in about ${Math.round(hours)} h`;
+  return `in about ${Math.round(hours / 24)} days`;
+}
+
+const COMMAND_LABEL: Record<CommandResult['command'], string> = {
+  order: 'Order', declare_war: 'Declaration of war', offer_peace: 'Peace offer', sanction: 'Sanctions', set_mobilization: 'Mobilisation',
+  produce: 'Production order', nuclear_release: 'Nuclear release', nuclear_alert: 'Nuclear alert', delegate: 'Delegation', hold: 'Command change',
+  answer_treaty: 'Treaty answer',
+};
+
+/** The answer to a command in the player's words: who, accepted or refused, and why or when. */
+export function describeResult(e: CommandResult, n: Namer): string {
+  const who = e.formation ? (n.formation(e.formation) ?? 'Formation') : COMMAND_LABEL[e.command];
+  if (!e.ok) return `${who}: ${e.command === 'order' ? 'order ' : ''}refused, ${reason(e.reason, n)}`;
+  if (e.code === 'relayed') return `${who}: order relayed down a degraded chain of command, arrives ${etaText(e.etaHours ?? 0)}`;
+  if (e.command !== 'order') return `${who}: ${e.reason}`;
+  const when = e.etaHours === undefined ? '' : `, ${e.etaHours < 1 ? 'carried out now' : `there ${etaText(e.etaHours)}`}`;
+  return `${who}: order accepted${when}${e.note ? `, but ${e.note}` : ''}`;
 }
 
 export function describeEvent(e: SimEvent, n: Namer): string {
@@ -253,6 +275,7 @@ export function describeEvent(e: SimEvent, n: Namer): string {
     case 'production': return `${n.nation(e.nation)} produces ${e.count} × ${n.item(e.item)}`;
     case 'shortage': return `${n.nation(e.nation)} shortage: ${e.what}`;
     case 'capitulation': return `${n.nation(e.nation)} capitulates to ${e.to.map(n.nation).join(', ')}`;
+    case 'command_result': return describeResult(e, n);
     case 'message': {
       const text = humanizeMessage(e.text, n);
       const who = e.nation ? n.nation(e.nation) : '';

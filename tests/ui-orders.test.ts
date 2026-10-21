@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { FormationId, NodeId, SimEvent } from '../src/core/types';
+import type { FormationId, NodeId, RefusalCode, SimEvent } from '../src/core/types';
 import { geography } from '../src/systems/naval/geography';
 import { id, testWorld } from '../src/testkit';
 import { describeEvent, humanizeMessage, PlaceNamer, type Namer } from '../src/ui/events';
@@ -23,6 +23,9 @@ const battle = (over: Partial<Extract<SimEvent, { type: 'battle' }>>): SimEvent 
   type: 'battle', tick: 4, node: kyiv, attacker: N('RUS'), defender: N('UKR'), losses: {}, casualties: {}, ...over,
 });
 
+const refusal = (tick: number, code: RefusalCode = 'no_route', reason = 'no sea route to node 17677'): SimEvent =>
+  ({ type: 'command_result', tick, nation: N('USA'), command: 'order', formation: 'f264' as FormationId, byPlayer: true, ok: false, code, reason });
+
 describe('event wording', () => {
   it('names nations and places, never prints "-0", and gives each fight its domain', () => {
     const ground = describeEvent(battle({ losses: { [N('RUS')]: { [id.platform('t_mbt')]: 3 }, [N('UKR')]: {} }, casualties: { [N('RUS')]: 120, [N('UKR')]: 0 } }), namer);
@@ -43,11 +46,14 @@ describe('event wording', () => {
     expect(p.name(busan)).toMatch(/^off .*Busan/);
   });
 
-  it('turns refusals with internal ids into names, places and a reason', () => {
-    const text = humanizeMessage('order to f264 refused: no sea route to node ' + warsaw, namer);
+  it('turns command results with internal ids into names, places, a reason or an arrival time', () => {
+    const text = describeEvent(refusal(3, 'no_route', `no sea route to node ${warsaw}`), namer);
     expect(text).toBe('1st Armored Brigade Combat Team: order refused, no sea route to Warsaw');
-    const land = humanizeMessage(`1st Armored Brigade Combat Team: no land route to node ${warsaw}`, namer);
-    expect(land).toMatch(/^1st Armored Brigade Combat Team: no land route to Warsaw\. .*embarking at a port$/);
+    const land = describeEvent(refusal(3, 'no_route', `no land route to node ${warsaw}`), namer);
+    expect(land).toMatch(/^1st Armored Brigade Combat Team: order refused, no land route to Warsaw\. .*embarking at a port/);
+    const accepted: SimEvent = { type: 'command_result', tick: 3, nation: N('USA'), command: 'order', formation: 'f264' as FormationId, byPlayer: true, ok: true, code: 'accepted', reason: 'order accepted', etaHours: 60 };
+    expect(describeEvent(accepted, namer)).toBe('1st Armored Brigade Combat Team: order accepted, there in about 3 days');
+    expect(describeEvent({ ...accepted, code: 'relayed', etaHours: 12 }, namer)).toBe('1st Armored Brigade Combat Team: order relayed down a degraded chain of command, arrives in about 12 h');
     expect(humanizeMessage('USA offers peace to CHN', namer)).toBe('United States offers peace to China, which has not accepted');
     expect(humanizeMessage('USA declines to honour US-TWN-TRA for TWN', namer)).toBe('United States declines to honour the Taiwan Relations Act for Taiwan');
     for (const s of [text, land]) expect(s).not.toMatch(/\bf\d+\b|node \d+/);
@@ -60,7 +66,6 @@ describe('event wording', () => {
 });
 
 describe('event feed', () => {
-  const refusal = (tick: number): SimEvent => ({ type: 'message', tick, nation: N('USA'), text: 'order to f264 refused: no sea route to node 17677' });
 
   it('folds a repeated line into one row with a count, and starts a new row after a week', () => {
     const feed = new EventFeed();

@@ -2,7 +2,8 @@ import type { Catalog } from '../../core/catalog';
 import { atWar, type SimContext, type System } from '../../core/engine';
 import type { GameMap } from '../../core/map';
 import { findPath } from '../../core/path';
-import type { Command, Formation, NationId, NodeId, PlatformId, World } from '../../core/types';
+import type { Formation, NationId, NodeId, Order, PlatformId, World } from '../../core/types';
+import type { OrderCommand, OrderOutcome } from '../orders';
 import { allied, canEnter, indexByNode, isLandFormation, landSlice } from './state';
 import { cannotDrop, insert, supplyAirheads } from './airborne';
 import { airlift, embarkation, liftMode, overseas } from './strategic';
@@ -12,7 +13,6 @@ import {
   MARCH_HOURS_PER_DAY, MARCH_SPEED_FACTOR, MORALE_RECOVERY_PER_DAY, NO_FUEL_SPEED, RAIL_BOOST_MAX, RAIL_KM_FULL, RALLY_MORALE, TERRAIN,
 } from './tables';
 
-type OrderCommand = Extract<Command, { type: 'order' }>;
 
 /** Only manoeuvre formations on an attack order push into enemy-held ground; support echelons stay behind the line. */
 const canSeize = (f: Formation) => f.kind === 'maneuver' && f.order.posture === 'attack';
@@ -43,68 +43,61 @@ function railBoost(world: World, map: GameMap, nation: NationId, node: NodeId): 
 }
 
 /** Effective km of entering `to`: terrain friction, hostile ground, minus rail boost, and today's mud or snow there. Infinity when closed to this nation. */
-function edgeKm(world: World, map: GameMap, f: Formation, to: NodeId, km: number): number {
+function edgeKm(world: World, map: GameMap, f: Formation, to: NodeId, km: number, seize = canSeize(f)): number {
   if (!canEnter(world, map, f.nation, to)) return Infinity;
   const holder = world.control[to];
   const hostile = !!holder && atWar(world, f.nation, holder);
-  if (hostile && !canSeize(f)) return Infinity;
+  if (hostile && !seize) return Infinity;
   return (km * TERRAIN[map.terrain[to]].moveCost * (hostile ? HOSTILE_GROUND_COST : 1)) / railBoost(world, map, f.nation, to) / groundFactorAt(world, map, to);
 }
 
 /**
- * Handle an 'order' command for a land formation. Returns false when the
- * formation is not a land formation, so the caller can route it elsewhere.
+ * Handle an 'order' command for a land formation. Returns undefined when the
+ * formation is not a land formation, so the router can offer it elsewhere. A refused
+ * order leaves the formation on the order it had.
  */
-export function applyLandOrder(world: World, cmd: OrderCommand, ctx: SimContext): boolean {
+export function applyLandOrder(world: World, cmd: OrderCommand, ctx: SimContext): OrderOutcome | undefined {
   const f = world.formations[cmd.formation];
-  if (!f || !isLandFormation(f, ctx.map)) return false;
-  if (f.nation !== cmd.nation) {
-    ctx.emit({ type: 'message', tick: world.tick, nation: cmd.nation, text: `${cmd.nation} cannot order ${f.name}` });
-    return true;
-  }
+  if (!f || !isLandFormation(f, ctx.map)) return undefined;
+  if (f.nation !== cmd.nation) return { ok: false, code: 'not_yours', reason: `${cmd.nation} cannot order ${f.name}` };
   const { posture, target } = cmd.order;
   if (posture === 'air_assault') {
-    const why = target === undefined ? 'no drop zone' : cannotDrop(world, ctx.map, ctx.catalog, f, target);
-    if (why === undefined && target !== undefined) insert(world, ctx, f, target);
-    else ctx.emit({ type: 'message', tick: world.tick, nation: f.nation, text: `${f.name}: cannot be inserted by air, ${why}` });
-    return true;
+    if (target === undefined) return { ok: false, code: 'no_target', reason: 'no drop zone' };
+    const why = cannotDrop(world, ctx.map, ctx.catalog, f, target);
+    if (why) return { ok: false, ...why };
+    insert(world, ctx, f, target);
+    return { ok: true, etaHours: 0 };
   }
-  f.order = { ...cmd.order, issuedTick: world.tick };
-  f.progressKm = 0;
-  if (!MARCHING.has(posture) || target === undefined || target === f.node) {
-    delete f.order.path;
-    return true;
-  }
+  const order: Order = { ...cmd.order, issuedTick: world.tick };
+  if (!MARCHING.has(posture) || target === undefined || target === f.node) return commit(f, order);
   // Across water the march ends at the gateway where the formation waits for lift (see strategic.ts).
   let goal = target;
   if (overseas(ctx.map, f.node, target)) {
-    const mode = posture === 'move' ? liftMode(world, ctx.catalog, f) : undefined;
-    const gate = mode && embarkation(world, ctx.map, f, target, mode);
-    if (gate === undefined) {
-      f.order = { posture: 'defend', issuedTick: world.tick };
-      ctx.emit({ type: 'message', tick: world.tick, nation: f.nation, text: `${f.name}: no ${mode ? `friendly ${mode === 'air' ? 'airfield' : 'port'} to embark at` : 'land route; order a move to deploy overseas'}` });
-      return true;
-    }
-    if (gate === f.node) {
-      f.order.path = [];
-      return true;
-    }
+    const mode = posture === 'move' ? liftMode(world, ctx.catalog, f, cmd.order.lift) : undefined;
+    if (!mode) return { ok: false, code: 'no_route', reason: `no land route to node ${target}; order a move to deploy overseas` };
+    const gate = embarkation(world, ctx.map, f, target, mode);
+    if (gate === undefined) return { ok: false, code: 'no_lift', reason: `no friendly ${mode === 'air' ? 'airfield' : 'port'} to embark at` };
+    if (gate === f.node) return commit(f, { ...order, path: [] });
     goal = gate;
   }
-  const path = route(world, ctx.map, f, goal);
-  if (!path) {
-    f.order = { posture: 'defend', issuedTick: world.tick };
-    ctx.emit({ type: 'message', tick: world.tick, nation: f.nation, text: `${f.name}: no land route to node ${target}` });
-    return true;
-  }
-  f.order.path = path;
-  return true;
+  const seize = posture === 'attack' && f.kind === 'maneuver';
+  const path = route(world, ctx.map, f, goal, seize);
+  if (!path) return { ok: false, code: 'no_route', reason: `no land route to node ${target}` };
+  const km = path.reduce((sum, n, i) => sum + edgeKm(world, ctx.map, f, n, ctx.map.distanceKm(i ? path[i - 1] : f.node, n), seize), 0);
+  const kmPerDay = marchKmPerDay(world, ctx.catalog, f);
+  return commit(f, { ...order, path }, kmPerDay > 0 ? (km / kmPerDay) * 24 : undefined);
+}
+
+function commit(f: Formation, order: Order, etaHours?: number): OrderOutcome {
+  f.order = order;
+  f.progressKm = 0;
+  return etaHours === undefined ? { ok: true } : { ok: true, etaHours };
 }
 
 /** Cheapest land route for this formation. The heuristic is straight-line km, so edge costs are scaled until the cheapest (full rail) edge never undercuts it. */
-function route(world: World, map: GameMap, f: Formation, to: NodeId): NodeId[] | null {
+function route(world: World, map: GameMap, f: Formation, to: NodeId, seize: boolean): NodeId[] | null {
   const scale = 1 + RAIL_BOOST_MAX;
-  return findPath(map, f.node, to, (_a, b, km) => edgeKm(world, map, f, b, km) * scale);
+  return findPath(map, f.node, to, (_a, b, km) => edgeKm(world, map, f, b, km, seize) * scale);
 }
 
 function rest(f: Formation, dtDays: number, isolated: boolean, engaged: boolean): void {
@@ -198,7 +191,7 @@ export const landMovement: System = {
       if (moving) march(world, ctx, f, byNode);
       else rest(f, dtDays, f.id in isolated, f.id in engaged);
     }
-    airlift(world, ctx, (f, to) => route(world, ctx.map, f, to));
+    airlift(world, ctx, (f, to) => route(world, ctx.map, f, to, canSeize(f)));
     supplyAirheads(world, ctx.map, ctx.catalog);
   },
 };
