@@ -7,6 +7,7 @@ import { initialStockpiles } from '../data/industry/stockpiles';
 import type { OrbatEntry } from '../data/orbat/types';
 import { HOSTILE_OPINION } from '../systems/diplomacy/escalation';
 import { allied } from '../systems/land';
+import { NAVAL_KINDS } from '../systems/naval/state';
 
 export interface PlacementReport {
   placed: number;
@@ -38,7 +39,7 @@ export function placeOrbat(world: World, map: GameMap, catalog: Catalog, entries
       name: e.name,
       kind: e.kind,
       echelon: e.echelon,
-      node: baseCell(world, map, e.nation as NationId, e.base.lat, e.base.lon),
+      node: baseCell(world, map, e.nation as NationId, e.base.lat, e.base.lon, !NAVAL_KINDS.has(e.kind) && e.kind !== 'strategic'),
       equipment,
       ...(e.readiness !== undefined && { readiness: e.readiness }),
       ...(e.experience !== undefined && { experience: e.experience }),
@@ -72,11 +73,14 @@ const BORDER_BASE_KM = 50;
  * troops, an ally's cell will do (Pabrade, Lithuania, shares a cell with Belarus).
  * Hosts are allies; a formation on its own soil held by the enemy, or next to the
  * enemy's soil it holds, is deliberately placed across a live front and stays.
+ * A land-based formation whose base point falls just offshore of the cells' coastline
+ * (Schofield Barracks, Camp Schwab) starts in the land cell nearest it.
  */
-function baseCell(world: World, map: GameMap, nation: NationId, lat: number, lon: number): NodeId {
+function baseCell(world: World, map: GameMap, nation: NationId, lat: number, lon: number, landBased: boolean): NodeId {
   const node = map.nodeAt(lat, lon);
+  if (map.isSea(node)) return landBased ? (shoreCell(world, map, nation, lat, lon) ?? node) : node;
   const holder = world.control[node];
-  if (map.isSea(node) || !holder || map.owner[node] === nation || allied(world, nation, holder)) return node;
+  if (!holder || map.owner[node] === nation || allied(world, nation, holder)) return node;
   const hostile = relation(world, nation, holder).opinion <= HOSTILE_OPINION;
   let best = node, bestKm = BORDER_BASE_KM, bestOwn = false;
   for (const m of map.neighbors(node)) {
@@ -87,6 +91,23 @@ function baseCell(world: World, map: GameMap, nation: NationId, lat: number, lon
     if (!own && !(hostile && h && allied(world, nation, h))) continue;
     const km = kmToCell(map, m, lat, lon);
     if (km < BORDER_BASE_KM && ((own && !bestOwn) || ((own || !bestOwn) && km < bestKm))) [best, bestKm, bestOwn] = [m, km, own];
+  }
+  return best;
+}
+
+/** A base point this far offshore of every cell is not a base ashore (judgment: Trapani, 45 km from its cell, is the farthest in the order of battle). */
+const OFFSHORE_KM = 60;
+
+/** The land cell within OFFSHORE_KM of (lat, lon) held by the nation, else by an ally, else by anyone, nearest first. */
+function shoreCell(world: World, map: GameMap, nation: NationId, lat: number, lon: number): NodeId | undefined {
+  let best: NodeId | undefined, bestRank = 3, bestKm = OFFSHORE_KM;
+  for (let n = 0 as NodeId; n < map.landCount; n++) {
+    if (Math.abs(map.lat[n] - lat) > 2) continue;
+    const km = kmToCell(map, n, lat, lon);
+    if (km > OFFSHORE_KM) continue;
+    const h = world.control[n];
+    const rank = h === nation ? 0 : h && allied(world, nation, h) ? 1 : 2;
+    if (rank < bestRank || (rank === bestRank && km < bestKm)) [best, bestRank, bestKm] = [n, rank, km];
   }
   return best;
 }
