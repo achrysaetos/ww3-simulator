@@ -37,6 +37,18 @@ export const SEABORNE_TRADE_SHARE: Record<string, number> = {
 };
 export const DEFAULT_SEABORNE_TRADE_SHARE = 0.8;
 
+const EU = ['AUT', 'BEL', 'BGR', 'HRV', 'CYP', 'CZE', 'DNK', 'EST', 'FIN', 'FRA', 'DEU', 'GRC', 'HUN', 'IRL', 'ITA', 'LVA', 'LTU', 'LUX', 'MLT', 'NLD', 'POL', 'PRT', 'ROU', 'SVK', 'SVN', 'ESP', 'SWE'];
+const WEST = [...EU, 'USA', 'GBR', 'CAN', 'AUS', 'NZL', 'JPN', 'KOR', 'NOR', 'CHE', 'ISL', 'TWN', 'SGP'];
+
+/**
+ * Sanctions in force in 2024, whose cost the baseline GDP in stats already carries: the 2014 and
+ * 2022 packages on Russia and Belarus (EU, US, UK, G7 partners, Taiwan's and Singapore's export
+ * controls; OFAC, EU Council) and the US, EU
+ * and allied regimes on Iran. The same pairs imposed in a run still cut trade and inputs, but take
+ * no further output away. Keyed by target, listing the sanctioning states.
+ */
+export const BASELINE_SANCTIONS: Record<string, readonly string[]> = { RUS: WEST, BLR: WEST, IRN: WEST };
+
 /**
  * One national stock of an import stream: its share of the resource's imports and the months of
  * national use of that stream it holds, as reserves are reported (days of LNG, of oil, of grain).
@@ -149,7 +161,9 @@ export const RESOURCE_SPECS: Record<Resource, ResourceSpec> = {
     // mature-node fabs; Russia relies on imported Western/Chinese chips (CAR, KSE 2024).
     selfSufficiency: { TWN: 1, KOR: 0.9, CHN: 0.6, USA: 0.35, JPN: 0.6, DEU: 0.3, FRA: 0.3, GBR: 0.2, ISR: 0.4, NLD: 0.3, RUS: 0.1, IND: 0.1, IRN: 0.05, PRK: 0.05, UKR: 0.05, TUR: 0.1 },
     defaultSelf: () => 0,
-    bufferMonths: 6,
+    // Chip users held a median ~40 days of key chips in 2019, under 5 days by late 2021 (US Commerce
+    // Department semiconductor supply chain RFI results, Jan 2022); with distributor stock, ~2 months.
+    bufferMonths: 2,
     // US, EU, Japanese, Korean and Taiwanese export controls on Russia from 2022; US controls on China from 2022.
     exportControlled: true,
     // Russia stockpiled microelectronics before 2022 (est.).

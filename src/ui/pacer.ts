@@ -12,22 +12,26 @@ export class Pacer {
   private timer: ReturnType<typeof setTimeout> | undefined;
   private lastStart = -Infinity;
   private readonly finished: number[] = [];
+  private runningSince = 0;
   /** Wall time of the latest tick. */
   stepMs = 0;
 
   constructor(private readonly runTick: () => void, private readonly now: () => number = () => performance.now()) {}
 
-  /** Ticks completed per second over the last few seconds while running; 0 when paused. */
+  /** Ticks completed per second over the last few seconds (or since the speed was set) while running; 0 when paused. */
   get achievedTps(): number {
     if (!this.ticksPerSec) return 0;
     const now = this.now(), f = this.finished;
     while (f.length && now - f[0] > RATE_WINDOW_MS) f.shift();
-    return f.length < 2 ? 0 : (f.length - 1) / ((f[f.length - 1] - f[0]) / 1000);
+    const span = Math.min(RATE_WINDOW_MS, now - this.runningSince);
+    // Ticks start no faster than requested, so a rate above it is only end times bunching up.
+    return span > 0 ? Math.min(this.ticksPerSec, f.length / (span / 1000)) : 0;
   }
 
   setSpeed(ticksPerSec: number) {
     this.ticksPerSec = ticksPerSec;
     this.finished.length = 0;
+    this.runningSince = this.now();
     this.schedule();
   }
 

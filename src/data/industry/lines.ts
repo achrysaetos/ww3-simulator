@@ -98,6 +98,10 @@ export const LINES: Record<string, LineSpec[]> = {
     L('shell_155', 200_000, 600_000),
     // Ukraine: ~1.5-2M FPV drones in 2024, 4.5M planned for 2025 (MoD).
     L('fpv_drone', 2_000_000, 4_500_000),
+    // Ministry of Strategic Industries (Jan 2025): ~2.4M artillery and mortar rounds made at home in 2024.
+    // Less the 155 mm line, ~2.2M mostly 82/120 mm mortar and 122 mm rounds at ~20 kg shipped (est.): ~44 kt;
+    // planned to roughly double in 2025.
+    L('ammo_generic', 44_000, 90_000),
   ],
   // EU target ~2M rounds/yr by end-2025 (European Commission); split by producer, est.
   DEU: [L('shell_155', 450_000, 900_000), L('leopard2a8', 50, 120)],

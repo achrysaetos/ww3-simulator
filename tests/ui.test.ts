@@ -52,7 +52,7 @@ describe('snapshot codec', () => {
     const s = setup();
     const tank = id.platform('t_mbt');
     const a = s.add({ nation: id.nation('POL'), name: 'Alpha', kind: 'maneuver', echelon: 'brigade', node: s.nodeAt(52.2, 21), equipment: { [tank]: 100 } });
-    expect(s.sync().roster?.map((r) => r.name)).toEqual(['Alpha']);
+    expect(s.sync().rosterAdd?.map((r) => r.name)).toEqual(['Alpha']);
 
     a.equipment[tank] = 25;
     a.order = { posture: 'attack', target: s.nodeAt(53.9, 27.6), issuedTick: 0 };
@@ -64,7 +64,9 @@ describe('snapshot codec', () => {
     expect(view.target).toBe(s.nodeAt(53.9, 27.6));
 
     s.add({ nation: id.nation('RUS'), name: 'Bravo', kind: 'artillery', echelon: 'brigade', node: s.nodeAt(54.8, 32), equipment: { [id.platform('t_spg')]: 18 } });
-    expect(s.sync().roster?.map((r) => r.name)).toEqual(['Alpha', 'Bravo']);
+    const grown = s.sync();
+    expect(grown.roster).toBeUndefined();
+    expect(grown.rosterAdd?.map((r) => r.name)).toEqual(['Bravo']);
     expect(s.client.formations.map((f) => [f.entry.name, f.target])).toEqual([['Alpha', s.nodeAt(53.9, 27.6)], ['Bravo', null]]);
   });
 

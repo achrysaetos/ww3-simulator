@@ -45,6 +45,8 @@ export const strategicMunitions = defineMunitions([
   { id: 'bulava', name: 'R-30 Bulava', kind: 'slbm', producers: ['RUS'], rangeKm: 9300, speedMach: 23, warheadKg: 1150, yieldKt: 100, cepM: 350, pk: nuclearPk(100, 350), interceptDifficulty: 0.96, unitCostUsdM: 30, weightKg: 36800 },
   { id: 'sineva', name: 'R-29RMU2 Sineva', kind: 'slbm', producers: ['RUS'], rangeKm: 8300, speedMach: 23, warheadKg: 2800, yieldKt: 100, cepM: 500, pk: nuclearPk(100, 500), interceptDifficulty: 0.95, unitCostUsdM: 25, weightKg: 40300 },
   { id: 'kh102', name: 'Kh-102 nuclear ALCM', kind: 'cruise', producers: ['RUS'], rangeKm: 4500, speedMach: 0.7, warheadKg: 400, yieldKt: 250, cepM: 20, pk: nuclearPk(250, 20), interceptDifficulty: 0.45, unitCostUsdM: 13, weightKg: 2400 },
+  // 3M14 Kalibr with a nuclear warhead; the yield is not public, 200 kt is the Soviet SS-N-21 Granat it replaced.
+  { id: 'kalibr_nuc', name: '3M14 Kalibr (nuclear)', kind: 'cruise', producers: ['RUS'], rangeKm: 2000, speedMach: 0.8, warheadKg: 450, yieldKt: 200, cepM: 10, pk: nuclearPk(200, 10), interceptDifficulty: 0.4, unitCostUsdM: 3, weightKg: 1800 },
   { id: 'iskander_m_nuc', name: '9M723 Iskander-M (nuclear)', kind: 'srbm', producers: ['RUS'], rangeKm: 500, speedMach: 6, warheadKg: 480, yieldKt: 10, cepM: 30, pk: nuclearPk(10, 30), interceptDifficulty: 0.75, unitCostUsdM: 3, weightKg: 3800 },
   // 2M39 Poseidon nuclear torpedo; yields reported 2 Mt up to fanciful 100 Mt, 2 Mt used.
   { id: 'poseidon', name: '2M39 Poseidon nuclear torpedo', kind: 'torpedo', producers: ['RUS'], rangeKm: 10000, speedMach: 0.08, warheadKg: 2000, yieldKt: 2000, cepM: 500, pk: { ...nuclearPk(2000, 500), ship: 1, submarine: 0.8 }, interceptDifficulty: 0.9, unitCostUsdM: 100, weightKg: 100000 },

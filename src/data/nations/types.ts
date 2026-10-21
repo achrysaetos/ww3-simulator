@@ -73,6 +73,22 @@ export interface NuclearThreshold {
   onChemBio: boolean;
   /** Extends the threshold to protect allies (its own Alliance.nuclearGuarantors entries). */
   coversAllies: boolean;
+  /** Naval losses that trigger use: shares of SSBNs and of attack submarines sunk, or a count of cruisers. */
+  navalLoss?: { ssbnShare: number; ssnShare: number; cruisers: number };
+  /** How it answers a nuclear attack. Default: tailored and counterforce. */
+  answer?: NuclearAnswer;
+}
+
+/**
+ * How a state answers a nuclear attack on it.
+ * - scale 'tailored': in kind, in the theatre of the attack, one rung of the ladder at a time
+ *   (limited, then theatre, then general); 'massive': straight to a general strike.
+ * - targets: what a general strike on the enemy homeland aims at, its nuclear forces and command
+ *   (counterforce) or its cities (countervalue).
+ */
+export interface NuclearAnswer {
+  scale: 'tailored' | 'massive';
+  targets: 'counterforce' | 'countervalue';
 }
 
 export const WAR_AIMS = [

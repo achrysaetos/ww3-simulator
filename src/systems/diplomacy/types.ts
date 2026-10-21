@@ -104,7 +104,13 @@ export interface WarRecord {
   nuclearHits: number;
   /** Nations that have detonated nuclear weapons on its homeland or forces. */
   nuclearStruckBy: NationId[];
+  /** Where the latest nuclear weapon against it landed; a tailored answer stays in that theatre. */
+  lastNuclearNode?: NodeId;
+  /** Nations that have hit its homeland with a strategic weapon: a large one, or one on a city. */
+  strategicStruckBy?: NationId[];
   ssbnLost: number;
+  /** Personnel of its ground formations when first assessed in this war; the yardstick for forces still in being. */
+  groundAtEntry?: number;
 }
 
 /** A nuclear guarantor deciding how to answer a nuclear attack on an ally it covers (see umbrella.ts). */

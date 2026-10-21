@@ -2,12 +2,13 @@ import { describe, expect, it, vi } from 'vitest';
 import { Engine, relationMut } from '../src/core/engine';
 import { addFormation } from '../src/core/forces';
 import type { NationId, NodeId, SimEvent } from '../src/core/types';
-import { initialStockpiles } from '../src/data/industry';
+import { DEFAULT_SEABORNE_TRADE_SHARE, SEABORNE_TRADE_SHARE, initialStockpiles } from '../src/data/industry';
 import { economicStress, economy } from '../src/systems/economy';
 import { sanctionDecisions } from '../src/systems/ai/strategy';
 import { profiles } from '../src/data/nations';
 import { createWorld } from '../src/core/world';
 import { loadMap } from '../src/data/load';
+import { loadCatalog } from '../src/data/catalog';
 import { id, testCatalog, testWorld } from '../src/testkit';
 
 // Several cases step the whole map daily for a simulated year; under a loaded machine they pass 5 s.
@@ -167,6 +168,22 @@ describe('economy: blockade by geography', () => {
   });
 });
 
+describe('economy: chips', () => {
+  it('costs chip importers output once a Taiwan blockade has run down their inventories', () => {
+    const t = dailyWorld(3);
+    t.world.theater.tradeBlocked[id.nation('TWN')] = 1;
+    t.days(30);
+    const us = t.world.slices.economy.nations[USA];
+    expect(us.supply.semiconductors).toBe(1);
+    t.days(330);
+    expect(us.supply.semiconductors).toBeLessThan(0.85);
+    // Nothing else cuts US output here: its own trade and energy are untouched.
+    expect(us.tradeLoss).toBe(0);
+    expect(us.gdpIndex).toBeLessThan(0.98);
+    expect(us.gdpIndex).toBeGreaterThan(0.9);
+  });
+});
+
 describe('economy: allied ammunition', () => {
   it('tops up a treaty ally at war from a partner rich in shells, and nothing flows from states with no obligation', () => {
     const t = dailyWorld();
@@ -183,6 +200,27 @@ describe('economy: allied ammunition', () => {
     // Ten days at most 10% a month of the US stock.
     expect(allied['USA>EST']).toBeLessThanOrEqual(160_000 * 0.1 * (10 / 30.4) * 1.01);
     expect(Object.keys(allied).some((k) => k.startsWith(`${CHN}>`) || k.startsWith(`${RUS}>`))).toBe(false);
+  });
+
+  it('ships allied ammunition only through the share of trade a blockade leaves open, at either end', () => {
+    const shipped = (blocked: { donor?: number; recipient?: number }) => {
+      const t = dailyWorld();
+      const EST = id.nation('EST');
+      const est = t.world.nations[EST];
+      t.add({ nation: EST, name: 'Estonian brigade', kind: 'maneuver', echelon: 'brigade', node: est.capital, equipment: { [id.platform('t_mbt')]: 30 }, personnel: 4_000 });
+      t.war('RUS', 'EST');
+      est.bulk.ammo = 0;
+      t.world.nations[USA].bulk.ammo = 160_000;
+      t.world.theater.tradeBlocked[USA] = blocked.donor ?? 0;
+      t.world.theater.tradeBlocked[EST] = blocked.recipient ?? 0;
+      t.days(10);
+      return t.world.slices.economy.allied['USA>EST'] ?? 0;
+    };
+    const open = shipped({});
+    expect(open).toBeGreaterThan(0);
+    // Estonia trades ~20% overland, the US ~30%; a full or 80% blockade leaves that much.
+    expect(shipped({ recipient: 1 }) / open).toBeCloseTo(1 - DEFAULT_SEABORNE_TRADE_SHARE, 1);
+    expect(shipped({ donor: 0.8 }) / open).toBeCloseTo(1 - 0.8 * SEABORNE_TRADE_SHARE.USA, 1);
   });
 });
 
@@ -252,6 +290,21 @@ describe('economy: military aid', () => {
     t.days(60);
     expect(ukr.stockpile[id.munition('pac3_mse')]).toBe(before);
   });
+
+  it("keeps Ukraine's 2024 ammunition inflow: home-made artillery and mortar rounds plus partners' shells", () => {
+    const t = dailyWorld();
+    const UKR = id.nation('UKR');
+    const ukr = t.world.nations[UKR];
+    t.war('RUS', 'UKR');
+    const ammo0 = ukr.bulk.ammo;
+    t.days(360);
+    // ~2.4M rounds made at home in 2024 (~55 kt) and ~2.5M+ partner rounds, 1.5M of them via the
+    // Czech initiative (~150 kt): a few hundred tons a day, against ~75 kt before either was counted.
+    const inflow = ukr.bulk.ammo - ammo0;
+    expect(inflow).toBeGreaterThan(150_000);
+    expect(inflow).toBeLessThan(260_000);
+    expect(t.world.slices.economy.aid['CZE>UKR:shell_155:market'].delivered).toBeGreaterThan(1_450_000);
+  });
 });
 
 describe('economy: sanctions', () => {
@@ -283,6 +336,18 @@ describe('economy: sanctions', () => {
     for (const s of bloc) t.world.pending.push({ type: 'sanction', nation: id.nation(s), target: RUS, on: false });
     t.days(2);
     expect(t.world.slices.economy.nations[RUS].supply.semiconductors).toBe(1);
+  });
+
+  it('takes no further output for sanctions the 2024 baseline GDP already carries, but does for new ones', () => {
+    const t = dailyWorld();
+    const IND = id.nation('IND');
+    for (const s of bloc) for (const target of [RUS, IND]) t.world.pending.push({ type: 'sanction', nation: id.nation(s), target, on: true });
+    t.days(5);
+    const rus = t.world.slices.economy.nations[RUS], ind = t.world.slices.economy.nations[IND];
+    expect(rus.tradeLoss).toBeGreaterThan(0.05);
+    expect(rus.gdpIndex).toBeGreaterThan(0.999);
+    expect(ind.tradeLoss).toBeGreaterThan(0.05);
+    expect(ind.gdpIndex).toBeLessThan(0.995);
   });
 });
 
@@ -406,6 +471,55 @@ describe('economy: produce command', () => {
     expect(pac3[1]).toBeLessThanOrEqual(11);
     expect(t.world.nations[USA].stockpile[id.platform('t_mbt')]).toBeUndefined();
     expect(t.events.some((e) => e.type === 'message' && e.text.includes('t_mbt'))).toBe(true);
+  });
+
+  /** A daily world on the real catalog, whose items name real producers and unit costs. */
+  function realWorld() {
+    const map = loadMap();
+    const engine = new Engine(map, loadCatalog(), [economy]);
+    const world = createWorld(map, { seed: 1 });
+    world.dtHours = 24;
+    engine.init(world);
+    return { engine, world };
+  }
+
+  it('builds a new line only as fast as the nation can put up plant, and charges the treasury for every unit', () => {
+    const { engine, world } = realWorld();
+    const b21 = id.platform('b21');
+    const treasury0 = world.nations[USA].treasuryUsdB;
+    world.pending.push({ type: 'produce', nation: USA, item: b21, ratePerMonth: 158 });
+    engine.run(world, 360);
+    const built = world.nations[USA].stockpile[b21] ?? 0;
+    // A first B-21 line is a few airframes a year at most, and none come in the first year of a greenfield plant ramp.
+    expect(built).toBeLessThanOrEqual(5);
+    const e = world.slices.economy.nations[USA];
+    expect(e.orderSpendUsdB).toBeCloseTo((built * 692) / 1000, 6);
+    expect(treasury0 - world.nations[USA].treasuryUsdB).toBeGreaterThanOrEqual(e.orderSpendUsdB - 1e-9);
+  });
+
+  it('charges for ordered shells beyond what the defence budget buys, and nothing for the budgeted rate', () => {
+    const { engine, world } = realWorld();
+    const UKR = id.nation('UKR');
+    const shell152 = id.munition('shell_152');
+    world.pending.push({ type: 'produce', nation: UKR, item: shell152, ratePerMonth: 1_000_000 });
+    engine.run(world, 90);
+    const e = world.slices.economy.nations[UKR];
+    const delivered = e.delivered[shell152] ?? 0;
+    // 0.1% of Ukraine's manufacturing value added buys a 152 mm plant of a few hundred thousand rounds a year at most.
+    expect(delivered).toBeLessThan(50_000);
+    expect(e.orderSpendUsdB).toBeCloseTo((delivered * 0.002) / 1000, 6);
+    const usa = world.slices.economy.nations[USA];
+    expect(usa.orderSpendUsdB).toBe(0);
+  });
+
+  it('refuses a rate that is negative or not a number', () => {
+    const { engine, world } = realWorld();
+    const pac3 = id.munition('pac3_mse');
+    const line = world.slices.economy.nations[USA].lines[pac3];
+    for (const ratePerMonth of [Number.NaN, -5, Number.POSITIVE_INFINITY]) world.pending.push({ type: 'produce', nation: USA, item: pac3, ratePerMonth });
+    const events = engine.step(world);
+    expect(line.orderPerMonth).toBeNull();
+    expect(events.filter((ev) => ev.type === 'message' && ev.text.includes('rate of zero or more')).length).toBe(3);
   });
 });
 

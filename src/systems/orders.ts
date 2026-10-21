@@ -67,7 +67,7 @@ export function clearTreatyAnswer(world: World, n: NationId, war: string, treaty
   delete world.slices.command?.[n]?.answers[`${war}|${treaty}`];
 }
 
-const STRATEGIC: ReadonlySet<Command['type']> = new Set(['declare_war', 'offer_peace', 'nuclear_release', 'sanction']);
+const STRATEGIC: ReadonlySet<Command['type']> = new Set(['declare_war', 'offer_peace', 'nuclear_release', 'nuclear_alert', 'sanction']);
 const HOME_FRONT: ReadonlySet<Command['type']> = new Set(['set_mobilization', 'produce']);
 
 /** Whether the AI may issue `cmd` on behalf of its nation. */

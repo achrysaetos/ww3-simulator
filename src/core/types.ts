@@ -148,6 +148,8 @@ export interface Order {
   path?: NodeId[];
   /** Restrict munition expenditure. */
   munition?: MunitionId;
+  /** For an overseas 'move': how to cross. 'sea' keeps an air-portable formation off the airlift; absent picks air when it can fly. */
+  lift?: 'air' | 'sea';
   issuedTick: number;
 }
 
@@ -299,6 +301,8 @@ export type Command =
   | { type: 'set_mobilization'; nation: NationId; level: number }
   | { type: 'produce'; nation: NationId; item: ItemId; ratePerMonth: number }
   | { type: 'nuclear_release'; nation: NationId; target: NodeId; warheads: number; munition: MunitionId }
+  /** Order stored warheads mated to their launchers (see strategic/alert.ts). */
+  | { type: 'nuclear_alert'; nation: NationId; reason?: string }
   /** A human nation hands a domain to its AI delegate, or takes it back. */
   | { type: 'delegate'; nation: NationId; domain: CommandDomain; ai: boolean }
   /** A human nation takes formations under its own command (the delegate leaves them alone) or hands them back. */

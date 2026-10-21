@@ -92,7 +92,7 @@ export class MapRenderer {
   private readonly sprites = new CounterSprites();
   private base: OffscreenCanvas | null = null;
   private baseAt: ViewTransform = IDENTITY;
-  private baseFor: { air: Float32Array | null; control: number; overlays: Overlays | null; topo: Path2D | null } = { air: null, control: -1, overlays: null, topo: null };
+  private baseFor: { air: Float32Array | null; contest: Float32Array | null; control: number; overlays: Overlays | null; topo: Path2D | null } = { air: null, contest: null, control: -1, overlays: null, topo: null };
   /** Projected width of one degree of longitude at zoom 1. */
   private degPx = 1;
   private byNode = new Map<NodeId, FormationView[]>();
@@ -297,10 +297,10 @@ export class MapRenderer {
     const { state, nationIds } = input;
     if (this.builtFor.control !== state.controlVersion || this.builtFor.wars !== state.warsKey) this.rebuildTerritory(state, nationIds);
     const dx = t.x - this.baseAt.x, dy = t.y - this.baseAt.y;
-    if (!this.base || this.baseAt.k !== t.k || Math.abs(dx) > PAN_MARGIN || Math.abs(dy) > PAN_MARGIN || this.baseFor.air !== state.air || this.baseFor.control !== state.controlVersion || this.baseFor.overlays !== input.overlays || this.baseFor.topo !== this.coast) {
+    if (!this.base || this.baseAt.k !== t.k || Math.abs(dx) > PAN_MARGIN || Math.abs(dy) > PAN_MARGIN || this.baseFor.air !== state.air || this.baseFor.contest !== state.contest || this.baseFor.control !== state.controlVersion || this.baseFor.overlays !== input.overlays || this.baseFor.topo !== this.coast) {
       this.renderBase(input);
       this.baseAt = { ...t };
-      this.baseFor = { air: state.air, control: state.controlVersion, overlays: input.overlays, topo: this.coast };
+      this.baseFor = { air: state.air, contest: state.contest, control: state.controlVersion, overlays: input.overlays, topo: this.coast };
     }
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = '#05080d';
@@ -378,6 +378,7 @@ export class MapRenderer {
     }
     if (overlays.infra) this.fillPairs(ctx, state.infra, (v) => `rgba(255,110,40,${Math.min(0.85, (1 - v) * 1.1)})`);
     if (overlays.fallout) this.fillPairs(ctx, state.fallout, (v) => `rgba(190,255,60,${Math.min(0.75, v * 0.8)})`);
+    this.drawContest(ctx, state, nationAt);
 
     if (this.coast) {
       ctx.strokeStyle = 'rgba(150,185,220,0.45)';
@@ -400,6 +401,51 @@ export class MapRenderer {
 
     ctx.setTransform(dpr, 0, 0, dpr, dpr * PAN_MARGIN, dpr * PAN_MARGIN);
     if (overlays.cities) this.drawCities(ctx);
+  }
+
+  /**
+   * Fronts moving inside a cell: the share an attacker has pushed across it, filled in its
+   * colour from the side its own cells border, with the cell outlined while it is contested.
+   */
+  private drawContest(ctx: CanvasRenderingContext2D, state: ClientState, nationAt: (i: number) => string) {
+    const v = state.contest, c = this.center, px = 1 / this.t.k;
+    for (let i = 0; i < v.length; i += 3) {
+      const n = v[i], by = v[i + 1], share = v[i + 2];
+      const cell = new Path2D();
+      this.quad(cell, n);
+      const cx = c[n * 2], cy = c[n * 2 + 1];
+      let dx = 0, dy = 0;
+      for (const m of this.map.neighbors(n as NodeId)) if (state.control[m] === by) { dx += c[m * 2] - cx; dy += c[m * 2 + 1] - cy; }
+      const len = Math.hypot(dx, dy);
+      const color = this.palette.of(nationAt(by)).rgb;
+      ctx.save();
+      ctx.clip(cell);
+      ctx.fillStyle = rgba(color, 0.75);
+      if (len === 0) {
+        ctx.globalAlpha = 0.2 + 0.6 * share;
+        ctx.fill(cell);
+      } else {
+        // Fill the half-plane facing the attacker, its edge `share` of the way across the cell.
+        const ux = dx / len, uy = dy / len;
+        let r = 0;
+        for (let k = 0; k < 4; k++) r = Math.max(r, Math.abs((this.corners[n * 8 + k * 2] - cx) * ux + (this.corners[n * 8 + k * 2 + 1] - cy) * uy));
+        const s0 = r * (1 - 2 * share), w = 2 * r;
+        const at = (s: number, t: number): [number, number] => [cx + ux * s - uy * t, cy + uy * s + ux * t];
+        const band = new Path2D();
+        band.moveTo(...at(s0, -w));
+        band.lineTo(...at(r * 1.5, -w));
+        band.lineTo(...at(r * 1.5, w));
+        band.lineTo(...at(s0, w));
+        band.closePath();
+        ctx.fill(band);
+      }
+      ctx.restore();
+      ctx.setLineDash([3 * px, 2 * px]);
+      ctx.strokeStyle = rgba(color, 0.95);
+      ctx.lineWidth = 1.2 * px;
+      ctx.stroke(cell);
+      ctx.setLineDash([]);
+    }
   }
 
   /** Fill each node of a flat (node, value) list. */

@@ -3,7 +3,7 @@ import { atWar, hostility, setSanctions } from '../../core/engine';
 import type { GameMap } from '../../core/map';
 import type { ItemId, MunitionId, Nation, NationId, PlatformId, World } from '../../core/types';
 import {
-  AID_FLOWS, CATEGORIES, DEFAULT_SEABORNE_TRADE_SHARE, ITEMS, MIL_FUEL_TONS_PER_USD_M, SEABORNE_TRADE_SHARE, OIL_CONSUMPTION_MT, OIL_TONS_PER_PPP_USD_M, RATION_TONS_PER_DAY, RESOURCES, RESOURCE_SPECS, SHIPBUILDING_GT_PER_YEAR, SHIPYARD_WARSHIP_SHARE,
+  AID_FLOWS, BASELINE_SANCTIONS, CATEGORIES, DEFAULT_SEABORNE_TRADE_SHARE, ITEMS, MIL_FUEL_TONS_PER_USD_M, SEABORNE_TRADE_SHARE, OIL_CONSUMPTION_MT, OIL_TONS_PER_PPP_USD_M, RATION_TONS_PER_DAY, RESOURCES, RESOURCE_SPECS, SHIPBUILDING_GT_PER_YEAR, SHIPYARD_WARSHIP_SHARE,
   itemSpec, type AidFlow, type ItemCategory, type Resource,
 } from '../../data/industry';
 import { defenseObligations } from '../../data/nations';
@@ -72,6 +72,12 @@ const MAX_ENERGY_PRICE = 4;
 const ENERGY_BILL_SHARE = 0.04;
 const ENERGY_PRICE_PASSTHROUGH = 0.5;
 const FOOD_GDP_ELASTICITY = 0.3;
+/**
+ * Output lost per unit of chip supply short, once inventories are gone. Est., set so the shortfall a
+ * Taiwan blockade leaves the US (~30% of its chips) costs ~4% of GDP, against Bloomberg Economics'
+ * 2024 estimate of -3.3% for the US and -5% for the world in a blockade's first year.
+ */
+const SEMI_GDP_ELASTICITY = 0.15;
 /** Peacetime under-arms ceiling: standing forces plus 1% of the population as reserves (createWorld's default). */
 const BASE_RESERVE_SHARE = 0.01;
 /**
@@ -334,10 +340,19 @@ function drawSupply(e: NationEconomy, id: NationId, r: Resource, raw: number, ne
   return (raw + shortfall * covered) / need;
 }
 
-function tradeLossOf(world: World, s: Scan, n: Nation): number {
+/**
+ * Share of a nation's foreign trade lost to blockade, sanctions and war, 0..1. With `beyondBaseline`,
+ * sanctions already in force in the 2024 baseline (BASELINE_SANCTIONS) are not counted, for the
+ * output lost against a baseline GDP that already carries them.
+ */
+function tradeLossOf(world: World, s: Scan, n: Nation, beyondBaseline: boolean): number {
   let lost = 0;
   const gdpOthers = s.worldGdp - (n.stats.gdp ?? 0);
-  for (const [p, breach] of s.cut.get(n.id) ?? []) lost += ((world.nations[p]?.stats.gdp ?? 0) / gdpOthers) * (1 - STILL_ARRIVES[breach].goods);
+  const baseline = beyondBaseline ? BASELINE_SANCTIONS[n.id] : undefined;
+  for (const [p, breach] of s.cut.get(n.id) ?? []) {
+    if (breach === 'sanctions' && baseline?.includes(p)) continue;
+    lost += ((world.nations[p]?.stats.gdp ?? 0) / gdpOthers) * (1 - STILL_ARRIVES[breach].goods);
+  }
   const blocked = seaCut(world, n.id);
   return clamp01(1 - (1 - blocked) * (1 - clamp01(lost)));
 }
@@ -348,8 +363,13 @@ function categoryFactor(e: NationEconomy, cat: ItemCategory): number {
   return Math.max(0, f);
 }
 
-function runLine(n: Nation, e: NationEconomy, line: LineState, spendMultiple: number, dtMonths: number): void {
-  const pull = Math.max(line.baselinePerMonth * spendMultiple, line.orderPerMonth ?? 0);
+/**
+ * Runs one line for a tick. The defence budget buys the baseline rate scaled by spending; output
+ * an order pulls beyond that is bought from the treasury at the catalog unit cost on delivery.
+ */
+function runLine(n: Nation, e: NationEconomy, line: LineState, spendMultiple: number, dtMonths: number, unitCostUsdM: number): void {
+  const budgetRate = line.baselinePerMonth * spendMultiple;
+  const pull = Math.max(budgetRate, line.orderPerMonth ?? 0);
   const target = Math.min(line.surgePerMonth, pull);
   line.capacityPerMonth += (target - line.capacityPerMonth) * lag(dtMonths, line.rampMonths);
   const rate = line.orderPerMonth === null ? line.capacityPerMonth : Math.min(line.capacityPerMonth, line.orderPerMonth);
@@ -359,6 +379,9 @@ function runLine(n: Nation, e: NationEconomy, line: LineState, spendMultiple: nu
   line.carry = out - whole;
   if (line.maxTotal !== null) whole = Math.min(whole, line.maxTotal - line.built);
   if (whole <= 0) return;
+  const paidUsdB = (whole * Math.max(0, rate - budgetRate) / rate * unitCostUsdM) / 1000;
+  n.treasuryUsdB -= paidUsdB;
+  e.orderSpendUsdB = (e.orderSpendUsdB ?? 0) + paidUsdB;
   line.built += whole;
   e.produced[line.item] = (e.produced[line.item] ?? 0) + whole;
   e.delivered[line.item] = (e.delivered[line.item] ?? 0) + whole;
@@ -383,8 +406,9 @@ function stepNation(world: World, ctx: SimContext, s: Scan, n: Nation, e: Nation
     n.mobilization += (e.mobilizationTarget - n.mobilization) * lag(dtMonths, tau);
   }
   e.integrity = s.integrity.get(n.id) ?? 1;
-  e.tradeLoss = tradeLossOf(world, s, n);
-  const tradeOutput = 1 - ((n.stats.importsPctGdp ?? 30) / 100) * e.tradeLoss * IMPORT_GDP_LOSS;
+  e.tradeLoss = tradeLossOf(world, s, n, false);
+  const newTradeLoss = BASELINE_SANCTIONS[n.id] ? tradeLossOf(world, s, n, true) : e.tradeLoss;
+  const tradeOutput = 1 - ((n.stats.importsPctGdp ?? 30) / 100) * newTradeLoss * IMPORT_GDP_LOSS;
   for (const r of RESOURCES) e.supply[r] = drawSupply(e, n.id, r, rawAccess(world, s, n, r), r === 'energy' ? tradeOutput : 1, dtMonths);
   e.supply.energy *= 1 - ELECTRICITY_SHARE * (1 - (s.grid.get(n.id) ?? 1));
   announceShortages(world, ctx, n.id, e);
@@ -395,6 +419,7 @@ function stepNation(world: World, ctx: SimContext, s: Scan, n: Nation, e: Nation
     (1 - ENERGY_GDP_ELASTICITY * (1 - e.supply.energy)) *
     (1 - ENERGY_BILL_SHARE * energyImported * (world.slices.economy.energyPrice - 1) * ENERGY_PRICE_PASSTHROUGH) *
     (1 - FOOD_GDP_ELASTICITY * (1 - e.supply.food)) *
+    (1 - SEMI_GDP_ELASTICITY * (1 - e.supply.semiconductors)) *
     tradeOutput;
 
   const gdpB = ((n.stats.gdp ?? 0) / 1e9) * e.gdpIndex;
@@ -405,7 +430,7 @@ function stepNation(world: World, ctx: SimContext, s: Scan, n: Nation, e: Nation
   n.treasuryUsdB -= deficitB * (dtMonths / 12);
 
   const spendMultiple = share / s0;
-  for (const line of Object.values(e.lines)) runLine(n, e, line, spendMultiple, dtMonths);
+  for (const line of Object.values(e.lines)) runLine(n, e, line, spendMultiple, dtMonths, unitCostOf(ctx, line.item));
 
   // Refills are the larger of what the budget buys abroad and what the state can commandeer from
   // national oil supply, which in war far exceeds the peacetime budget. Forces are priority demand
@@ -447,9 +472,9 @@ function stepNation(world: World, ctx: SimContext, s: Scan, n: Nation, e: Nation
   n.reserves += recallReservists(n, dtMonths);
 }
 
-export const aidKey = (f: AidFlow) => `${f.donor}>${f.recipient}:${f.item}`;
+export const aidKey = (f: AidFlow) => `${f.donor}>${f.recipient}:${f.item}${f.source === 'market' ? ':market' : ''}`;
 
-/** Ships each arms pipeline's monthly quota from the donor's stocks while the recipient fights a war the donor is not fighting against it. */
+/** Ships each arms pipeline's monthly quota, from the donor's stocks or bought abroad, while the recipient fights a war the donor is not fighting against it. */
 function shipAid(world: World, dtMonths: number): void {
   const state = world.slices.economy;
   for (const flow of AID_FLOWS) {
@@ -457,15 +482,19 @@ function shipAid(world: World, dtMonths: number): void {
     if (!donor || !recipient || recipient.status !== 'war' || donor.status === 'capitulated' || donor.status === 'collapsed') continue;
     if (atWar(world, donor.id, recipient.id)) continue;
     const a = (state.aid[aidKey(flow)] ??= { carry: 0, delivered: 0 });
-    const due = (flow.perYear / 12) * dtMonths + a.carry;
+    const due = (flow.perYear / 12) * dtMonths * (1 - seaCut(world, donor.id)) * (1 - seaCut(world, recipient.id)) + a.carry;
     const spec = ITEMS[flow.item];
     const sink = spec.sink;
-    const have = sink.kind === 'bulk_ammo' ? Math.max(0, donor.bulk.ammo) / sink.tonsPerUnit : (donor.stockpile[spec.id] ?? 0);
+    const fromStocks = flow.source === 'stocks';
+    const have = !fromStocks ? Infinity : sink.kind === 'bulk_ammo' ? Math.max(0, donor.bulk.ammo) / sink.tonsPerUnit : (donor.stockpile[spec.id] ?? 0);
     const units = Math.min(Math.floor(due), Math.floor(have));
     a.carry = Math.min(due - units, 1);
     if (units <= 0) continue;
     a.delivered += units;
-    if (sink.kind === 'bulk_ammo') {
+    if (!fromStocks) {
+      if (sink.kind === 'bulk_ammo') recipient.bulk.ammo += units * sink.tonsPerUnit;
+      else recipient.stockpile[spec.id] = (recipient.stockpile[spec.id] ?? 0) + units;
+    } else if (sink.kind === 'bulk_ammo') {
       donor.bulk.ammo = Math.max(0, donor.bulk.ammo - units * sink.tonsPerUnit);
       recipient.bulk.ammo += units * sink.tonsPerUnit;
     } else {
@@ -481,7 +510,8 @@ function shipAid(world: World, dtMonths: number): void {
  * month, more by sea). A donor is a co-belligerent or a treaty ally bound to fight (commitment of
  * at least ALLY_COMMITMENT); it tops up any such partner at war whose stock per soldier is below
  * CROSS_LEVEL_SHARE of its own, releasing at most RELEASE_PER_MONTH of its stock a month in all.
- * A pair with a standing shell pipeline in AID_FLOWS ships at that observed rate instead.
+ * A pair with a standing shell pipeline in AID_FLOWS ships at that observed rate instead. A naval
+ * blockade of either end cuts what moves by the share of its trade that goes by sea, as it does aid.
  */
 const ALLY_COMMITMENT = 0.5;
 const CROSS_LEVEL_SHARE = 0.5;
@@ -505,7 +535,7 @@ function crossLevelAmmo(world: World, s: Scan, dtMonths: number): void {
   const perHead = (n: Nation) => Math.max(0, n.bulk.ammo) / Math.max(1, s.personnel.get(n.id) ?? 0);
   for (const donor of Object.values(world.nations)) {
     if (!usable(donor) || donor.bulk.ammo <= 0) continue;
-    let budget = donor.bulk.ammo * RELEASE_PER_MONTH * dtMonths;
+    let budget = donor.bulk.ammo * RELEASE_PER_MONTH * dtMonths * (1 - seaCut(world, donor.id));
     for (const [rid, foes] of enemies) {
       if (budget <= 0) break;
       const r = world.nations[rid];
@@ -513,7 +543,7 @@ function crossLevelAmmo(world: World, s: Scan, dtMonths: number): void {
       const coBelligerent = [...foes].some((f) => enemies.get(donor.id)?.has(f));
       if (!coBelligerent && !treatyAlly(donor.id, rid)) continue;
       const gap = (CROSS_LEVEL_SHARE * perHead(donor) - perHead(r)) * (s.personnel.get(rid) ?? 0);
-      const tons = Math.min(gap, budget);
+      const tons = Math.min(gap, budget) * (1 - seaCut(world, rid));
       if (tons <= 0) continue;
       budget -= tons;
       donor.bulk.ammo -= tons;
@@ -536,13 +566,46 @@ function report(world: World, ctx: SimContext): void {
 
 // ---------------------------------------------------------------- commands
 
+const unitCostOf = (ctx: SimContext, item: ItemId): number =>
+  (ctx.catalog.platforms.get(item as PlatformId) ?? ctx.catalog.munitions.get(item as MunitionId))?.unitCostUsdM ?? 0;
+
+/**
+ * Value a new production line can turn out per year at full rate, as a share of the nation's
+ * manufacturing value added. General Dynamics' greenfield 155 mm shell plant at Mesquite, Texas
+ * (2023-25) reached ~30k shells a month, ~USD 2-3B a year at ~USD 8k a round, about 0.1% of US
+ * manufacturing value added (~USD 2.5T, World Bank).
+ */
+const GREENFIELD_MFG_SHARE = 0.001;
+
+/**
+ * Most a greenfield line for `item` can make a month once built: the plant the nation can put up
+ * (GREENFIELD_MFG_SHARE of manufacturing value added at the item's unit cost) and, for hulls, its
+ * yards' warship tonnage. What a `produce` order for an item with no line can reach; the UI shows it.
+ */
+export function greenfieldCeilingPerMonth(n: Nation, unitCostUsdM: number, item: ItemId): number {
+  const mfgUsdM = (n.stats.manufacturing ?? (n.stats.gdp ?? 0) * 0.12) / 1e6;
+  let perYear = (mfgUsdM * GREENFIELD_MFG_SHARE) / Math.max(1e-6, unitCostUsdM);
+  const tons = itemSpec(item)?.tons;
+  if (tons) perYear = Math.min(perYear, ((SHIPBUILDING_GT_PER_YEAR[n.id] ?? 0) * SHIPYARD_WARSHIP_SHARE) / tons);
+  return perYear / 12;
+}
+
+/**
+ * Sets an ordered rate. An existing line runs toward it within its surge ceiling; an item with no
+ * line gets a greenfield one whose ceiling is what plant the nation can build (GREENFIELD_MFG_SHARE,
+ * and yard tonnage for hulls) and which ramps in at twice its category's lag.
+ */
 function produce(world: World, ctx: SimContext, nation: NationId, item: ItemId, ratePerMonth: number): void {
   const e = world.slices.economy.nations[nation];
-  if (!e) return;
-  const rate = Math.max(0, ratePerMonth);
+  const n = world.nations[nation];
+  if (!e || !n) return;
+  if (!Number.isFinite(ratePerMonth) || ratePerMonth < 0) {
+    ctx.emit({ type: 'message', tick: world.tick, nation, text: `${nation}: production order for ${item} needs a rate of zero or more a month` });
+    return;
+  }
   const existing = e.lines[item];
   if (existing) {
-    existing.orderPerMonth = rate;
+    existing.orderPerMonth = ratePerMonth;
     return;
   }
   const entry = ctx.catalog.platforms.get(item as PlatformId) ?? ctx.catalog.munitions.get(item as MunitionId);
@@ -551,11 +614,8 @@ function produce(world: World, ctx: SimContext, nation: NationId, item: ItemId, 
     return;
   }
   const spec = itemSpec(item);
-  let surgePerYear = rate * 12;
-  if (spec?.tons) surgePerYear = Math.min(surgePerYear, ((SHIPBUILDING_GT_PER_YEAR[nation] ?? 0) * SHIPYARD_WARSHIP_SHARE) / spec.tons);
-  // Greenfield lines take twice their category's ramp: new plant, tooling, and a trained workforce.
-  const line = newLine(item, 0, surgePerYear, 2 * CATEGORIES[spec?.category ?? 'cruise_missile'].rampMonths);
-  line.orderPerMonth = rate;
+  const line = newLine(item, 0, Math.min(ratePerMonth, greenfieldCeilingPerMonth(n, entry.unitCostUsdM, item)) * 12, 2 * CATEGORIES[spec?.category ?? 'cruise_missile'].rampMonths);
+  line.orderPerMonth = ratePerMonth;
   e.lines[item] = line;
 }
 
