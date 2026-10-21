@@ -231,13 +231,16 @@ describe('logistics', () => {
     expect(supplyFactor(t.world, t.map, poznan, id.nation('POL'))).toBeGreaterThan(bombed);
   });
 
-  it('does not repair infrastructure on the front line', () => {
+  it('repairs infrastructure on the front line at half the rate of the rear', () => {
     const t = setup();
     const kharkiv = t.nodeAt(50, 36.2); // borders Russian-held cells
+    const kyiv = t.nodeAt(50.45, 30.5);
     t.war('UKR', 'RUS');
-    t.world.theater.infrastructure[kharkiv] = 0.2;
+    t.world.theater.infrastructure[kharkiv] = t.world.theater.infrastructure[kyiv] = 0.2;
     t.engine.run(t.world, 5 * DAY);
-    expect(t.world.theater.infrastructure[kharkiv]).toBe(0.2);
+    const front = t.world.theater.infrastructure[kharkiv] - 0.2, rear = t.world.theater.infrastructure[kyiv] - 0.2;
+    expect(front).toBeGreaterThan(0);
+    expect(front).toBeCloseTo(rear / 2, 5);
   });
 
   it('drains national bulk stocks and reports a shortage once', () => {
