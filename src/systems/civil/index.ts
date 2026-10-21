@@ -35,7 +35,7 @@ const HAZARD_PER_DAY = { battle: 0.02, front: 0.003, occupied: 0.002, capitalThr
 const SHOCK_DAYS = 30;
 const SHOCK_REACH_KM = 600;
 const OCCUPATION_RUSH = 0.1;
-/** Danger moves half as many people once a cell has lived with it this long (est.). */
+/** Danger moves half as many people once a cell has lived with it this long, and a fifth as many at twice as long (est.): front towns that held on through 2023-25 kept most of their remaining people. */
 const EXPOSURE_HALF_DAYS = 90;
 /** Exposure of cells already on a front or occupied when the scenario opens: the war began in 2022 or 2014. */
 const LONG_WAR_EXPOSURE_DAYS = 1000;
@@ -96,12 +96,14 @@ const INJURED_PER_KILLED = 3;
  * Partisans in occupied cells, per million residents a day: a few rail sabotage acts a
  * week across the ~3-4M people of occupied Ukraine in 2023-24 (Atesh and Ukrainian military
  * intelligence claims; Russian railway reports). Partisans are far quieter once their own
- * state has stopped fighting (Crimea 2014-21). A successful act cuts the cell's rail and
- * road capacity by SABOTAGE_CUT, which repair crews then restore.
+ * state has stopped fighting (Crimea 2014-21). They strike the occupier's rear, not the front
+ * line itself: a successful act cuts the cell's rail and road capacity by SABOTAGE_CUT, which
+ * repair crews restore in about a week (Russian Railways reported most relay-cabinet arsons
+ * cleared within hours to days).
  */
 const SABOTAGE_PER_MILLION_DAY = 0.07;
 const SABOTAGE_AT_PEACE = 0.2;
-const SABOTAGE_CUT = 0.35;
+const SABOTAGE_CUT = 0.2;
 const MIN_RAIL_KM = 20;
 
 interface TickInputs {
@@ -398,7 +400,7 @@ function step(world: World, ctx: SimContext): void {
 
     if (occupied) {
       civilNation(s, owner).underOccupation += here;
-      if (relation(world, owner, ctrl).opinion <= HOSTILE_OPINION) sabotage(world, map, s, c, owner, ctrl, here, dtDays);
+      if (!front && relation(world, owner, ctrl).opinion <= HOSTILE_OPINION) sabotage(world, map, s, c, owner, ctrl, here, dtDays);
     }
     if (local <= 0 && shock < 1e-6 && !contaminated && !t.captured.has(c)) {
       const cell = s.cells[c];
