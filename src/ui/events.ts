@@ -239,7 +239,7 @@ export function etaText(hours: number): string {
   return `in about ${Math.round(hours / 24)} days`;
 }
 
-const COMMAND_LABEL: Record<CommandResult['command'], string> = {
+export const COMMAND_LABEL: Record<CommandResult['command'], string> = {
   order: 'Order', declare_war: 'Declaration of war', offer_peace: 'Peace offer', sanction: 'Sanctions', set_mobilization: 'Mobilisation',
   produce: 'Production order', nuclear_release: 'Nuclear release', nuclear_alert: 'Nuclear alert', delegate: 'Delegation', hold: 'Command change',
   answer_treaty: 'Treaty answer',

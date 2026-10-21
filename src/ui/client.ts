@@ -1,6 +1,6 @@
 import { loadMap } from '../data/load';
 import type { Command, FormationId, NationId, SimEvent } from '../core/types';
-import { PlaceNamer, type Namer } from './events';
+import { describeResult, PlaceNamer, type Namer } from './events';
 import { EventFeed } from './feed';
 import { readSlot, writeSlot, type SlotInfo } from './slot';
 import {
@@ -21,7 +21,7 @@ export class SimClient {
   scenarios: ScenarioCard[] = [];
   nationCards = new Map<NationId, NationCard>();
   meta: SessionMeta | null = null;
-  /** The nation the player commands. */
+  /** The nation the player commands, fixed for the session: a new game is how you play another. */
   playing: NationId | null = null;
   starting = false;
   /** Bumped each time a game starts or loads, so the UI remounts with fresh state. */
@@ -33,7 +33,7 @@ export class SimClient {
   stats: RunStats = { stepMs: 0, achievedTps: 0 };
   ticksPerSec = 0;
   error: string | null = null;
-  /** The latest thing the command boundary or a save or load reported, for a toast. */
+  /** The latest thing the engine answered to a command, or a save or load reported, for a toast. */
   notice: Notice | null = null;
   /** The quick-save slot's contents, when one exists. */
   slot: SlotInfo | null = null;
@@ -92,6 +92,7 @@ export class SimClient {
         applySnapshot(this.state, msg.snapshot, this.meta!.nationIds, this.nationCards);
         this.send({ type: 'ack' });
         this.record(msg.snapshot.events);
+        this.answer(msg.snapshot.events);
         break;
     }
     this.notify();
@@ -112,6 +113,18 @@ export class SimClient {
       this.namesVersion = this.state.rosterVersion;
     }
     this.feed.record(events, this.namer);
+  }
+
+  /**
+   * Toast the engine's answers to the player's commands: every refusal, and the acceptance of an order
+   * with when it takes effect. Other acceptances were already announced when the command was sent.
+   */
+  private answer(events: readonly SimEvent[]) {
+    for (const e of events) {
+      if (e.type !== 'command_result' || e.nation !== this.playing) continue;
+      if (!e.ok) this.say(describeResult(e, this.namer), 'error');
+      else if (e.command === 'order') this.say(describeResult(e, this.namer), 'info');
+    }
   }
 
   private say(text: string, tone: Notice['tone']) {
@@ -212,11 +225,6 @@ export class SimClient {
 
   command(c: Command) {
     this.send({ type: 'command', command: c });
-  }
-
-  playAs(nation: NationId) {
-    this.playing = nation;
-    this.send({ type: 'play_as', nation });
   }
 
   focus(nation?: NationId, formation?: FormationId) {
