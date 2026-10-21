@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Command, Formation, NodeId } from '../src/core/types';
-import { createAi } from '../src/systems/ai';
+import { createAi, type Plan } from '../src/systems/ai';
+import { issue } from '../src/systems/ai/forces';
 import { applyLandOrder, landMovement } from '../src/systems/land';
 import { landMass } from '../src/systems/land/strategic';
 import { navalWar } from '../src/systems/naval';
@@ -133,5 +134,70 @@ describe('strategic deployment planning', () => {
     expect(t.map.ports[port]).toBeGreaterThan(0);
     expect(movesOf(cmds, guard)).toHaveLength(0);
     expect(movesOf(cmds, militia)).toHaveLength(0);
+  });
+
+  it("sends ready brigades to the front its allies hold thinly, not to the bigger enemy army an ally's army already matches", () => {
+    const t = testWorld([createAi()]);
+    nato(t);
+    for (const n of ['USA', 'KOR']) t.world.nations[N(n)].blocs.push('US-KOR');
+    t.war('PRK', 'KOR');
+    t.war('USA', 'PRK');
+    t.war('RUS', 'EST');
+    t.war('USA', 'RUS');
+    const border = (a: string, b: string) => t.map.nodesOf(N(a)).filter((n) => [...t.map.neighbors(n)].some((m) => !t.map.isSea(m) && t.world.control[m] === N(b)));
+    const dmz = border('PRK', 'KOR'), south = border('KOR', 'PRK'), narva = border('RUS', 'EST');
+    for (let i = 0; i < 12; i++) heavyBrigade(t, 'PRK', dmz[i % dmz.length]);
+    for (let i = 0; i < 12; i++) heavyBrigade(t, 'KOR', south[i % south.length]);
+    for (let i = 0; i < 4; i++) heavyBrigade(t, 'RUS', narva[i % narva.length]);
+    heavyBrigade(t, 'EST', border('EST', 'RUS')[0]);
+    const us = Array.from({ length: 6 }, () => heavyBrigade(t, 'USA', t.nodeAt(...FORT_HOOD), { readiness: 0.9 }));
+    const cmds: Command[] = [];
+    t.engine.run(t.world, 4 * 6, (w) => cmds.push(...w.pending));
+
+    const bound = us.flatMap((f) => movesOf(cmds, f).slice(-1).map((c) => c.order.target!));
+    const toKorea = bound.filter((n) => t.map.owner[n] === N('KOR')).length;
+    expect(bound.length).toBeGreaterThanOrEqual(4);
+    expect(bound.length - toKorea).toBeGreaterThan(toKorea);
+  });
+});
+
+describe('refused orders', () => {
+  it('sends a refused order once, and again only when the formation moves or three days pass', () => {
+    const t = testWorld([createAi()]);
+    t.war('USA', 'RUS');
+    const brigade = heavyBrigade(t, 'USA', t.nodeAt(...FORT_HOOD));
+    for (let n = 0; n < t.map.landCount; n++) if (t.world.control[n] === N('USA') && t.map.ports[n]) t.world.control[n] = N('RUS');
+    const p = { world: t.world, ai: t.world.slices.ai, out: [] as Command[] } as unknown as Plan;
+    const ctx = t.engine.context(t.world);
+    const overseas = { posture: 'move', target: t.nodeAt(...BREMERHAVEN) } as const;
+    const pass = () => {
+      const before = p.out.length;
+      issue(p, brigade, overseas);
+      for (const c of p.out.slice(before)) if (c.type === 'order') applyLandOrder(t.world, c, ctx);
+      t.world.tick += 2;
+      return p.out.length - before;
+    };
+    expect(pass()).toBe(1);
+    expect(brigade.order.posture).toBe('defend');
+    let resent = 0;
+    for (let i = 0; i < 4; i++) resent += pass();
+    expect(resent).toBe(0);
+    brigade.node = t.nodeAt(32.5, -97.3);
+    expect(pass()).toBe(1);
+    for (let i = 0; i < 6; i++) resent += pass();
+    expect(resent).toBe(1);
+  });
+
+  it('sends an order again once the formation carried it out, as a wing re-flies a strike on the same target', () => {
+    const t = testWorld([createAi()]);
+    const wing = t.add({ nation: N('USA'), name: 'Bomb wing', kind: 'air_wing', echelon: 'wing', node: t.nodeAt(...FORT_HOOD), equipment: { [P('t_inf')]: 1 } });
+    const p = { world: t.world, ai: t.world.slices.ai, out: [] as Command[] } as unknown as Plan;
+    const strike = { posture: 'strike', target: t.nodeAt(...BREMERHAVEN) } as const;
+    issue(p, wing, strike);
+    wing.order = { ...strike, issuedTick: t.world.tick + 1 };
+    wing.order = { posture: 'defend', issuedTick: t.world.tick + 3 };
+    t.world.tick += 4;
+    issue(p, wing, strike);
+    expect(p.out).toHaveLength(2);
   });
 });

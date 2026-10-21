@@ -42,12 +42,13 @@ export function createAi(profiles: Readonly<Record<string, StrategicProfile>> = 
   return {
     id: 'ai',
     init(world) {
-      world.slices.ai = { baseStrength: {}, aims: {}, nuclear: {}, lastPeaceOffer: {}, deployments: {}, airborne: {} };
+      world.slices.ai = { baseStrength: {}, aims: {}, nuclear: {}, lastPeaceOffer: {}, deployments: {}, airborne: {}, sent: {} };
     },
     step(world, ctx) {
       if (world.events.some((e) => FRONT_CHANGES.has(e.type))) {
         fronts.delete(world);
         memos.delete(world);
+        world.slices.ai.sent = {};
       }
       let memo = memos.get(world);
       if (!memo) memos.set(world, (memo = new Map()));
@@ -109,7 +110,12 @@ export function createAi(profiles: Readonly<Record<string, StrategicProfile>> = 
           planMissiles(p, targets);
           planNaval(p);
         }
-        if (human) for (const c of out) if (aiMayIssue(world, c)) world.pending.push(c);
+        if (human)
+          for (const c of out) {
+            if (aiMayIssue(world, c)) world.pending.push(c);
+            // Never sent, as the player keeps the domain: not to be taken for a refusal.
+            else if (c.type === 'order') delete world.slices.ai.sent[c.formation];
+          }
       }
     },
   };

@@ -63,17 +63,23 @@ export function enemyPowerAt(node: number, index: ForceIndex, enemies: Set<Natio
 }
 
 /**
- * Border cells of formal allies outside the war (sharing a bloc with `nation`)
- * that touch the enemy: a front the nation can stage on and attack from, as
- * Russia did from Belarus in 2022. One sector, or none.
+ * States outside a war that let a partner mount it from their soil, by guest. A defence pact
+ * alone gives no such consent: Turkey's parliament refused the US 4th Infantry Division passage
+ * into Iraq on 1 March 2003, and the Turkey-Azerbaijan Shusha Declaration (2021) promises help
+ * if attacked, not a staging right. Belarus let Russia attack Ukraine from its soil in
+ * February 2022 (Union State; the Allied Resolve exercise forces stayed and crossed).
+ */
+const STAGING_HOSTS: Readonly<Partial<Record<string, readonly string[]>>> = { RUS: ['BLR'] };
+
+/**
+ * Border cells of states outside the war that host the nation's forces and touch the enemy:
+ * a front the nation can stage on and attack from. One sector, or none.
  */
 export function stagingSector(world: World, map: GameMap, nation: NationId, friends: Set<NationId>, enemies: Set<NationId>, index: ForceIndex): Sector | undefined {
-  const blocs = world.nations[nation]?.blocs ?? [];
-  if (!blocs.length) return undefined;
   const hosts = new Set<NationId>();
-  for (const n of Object.values(world.nations)) {
-    if (friends.has(n.id) || enemies.has(n.id) || n.status === 'war') continue;
-    if (n.blocs.some((b) => blocs.includes(b))) hosts.add(n.id);
+  for (const h of STAGING_HOSTS[nation] ?? []) {
+    const n = world.nations[h as NationId];
+    if (n && !friends.has(n.id) && !enemies.has(n.id) && n.status !== 'war') hosts.add(n.id);
   }
   if (!hosts.size) return undefined;
   const nodes: number[] = [];
