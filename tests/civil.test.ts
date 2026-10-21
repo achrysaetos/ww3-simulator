@@ -80,6 +80,8 @@ describe('civilians', () => {
     const south = (lat: number, lon: number) => lon > 33 && lat < 47.6;
     const run = (systems: System[]) => {
       const t = invasion(systems, south);
+      // An occupation the world opens with, whose railways the occupier already runs, not ground freshly taken.
+      t.engine.init(t.world);
       for (const n of Object.values(t.world.nations)) n.bulk = { ...PLENTY };
       const melitopol = t.nodeAt(46.85, 35.37);
       t.add({ nation: RUS, name: 'RUS brigade', kind: 'maneuver', echelon: 'brigade', node: melitopol, equipment: { [id.platform('t_mbt')]: 90, [id.platform('t_ifv')]: 100, [id.platform('t_inf')]: 60 } });
