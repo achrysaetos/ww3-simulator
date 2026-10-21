@@ -29,7 +29,8 @@ describe('national satellite constellations', () => {
     const imaging = find(/NRO imaging/), asat = find(/SC-19/);
     relationMut(w.world, N('CHN'), N('USA')).atWar = true;
     asat.order = { posture: 'strike', targetFormation: imaging.id as FormationId, issuedTick: 0 };
-    for (let i = 0; i < 8; i++) w.engine.step(w.world);
+    // Stop at the first kill: once the imagers thin out, the AI may rightly turn the brigade on GPS.
+    for (let i = 0; i < 8 && !sats(w.world, 'USA')?.recon_satellite.lost; i++) w.engine.step(w.world);
     const recon = sats(w.world, 'USA').recon_satellite;
     expect(recon.lost).toBeGreaterThan(0);
     expect(w.world.slices.strategic.debris).toBeGreaterThan(0);

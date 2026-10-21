@@ -215,6 +215,20 @@ describe('terrain follows relief', () => {
   });
 });
 
+describe('fronts drawn finer than 1 degree', () => {
+  it.each([
+    ['Pokrovsk, Kramatorsk and Bakhmut', [[48.28, 37.18], [48.72, 37.56], [48.6, 38.0]]],
+    ['Seoul, Kaesong and Chuncheon', [[37.57, 126.98], [37.97, 126.55], [37.88, 127.73]]],
+    ['Zaporizhzhia and Huliaipole', [[47.84, 35.14], [47.66, 36.26]]],
+    ['Kursk and Belgorod', [[51.73, 36.19], [50.6, 36.59]]],
+    ['the two ends of the Suwalki gap', [[54.1, 22.93], [54.0, 23.6]]],
+  ] as [string, Point[]][])('gives %s each a cell', (_, points) => {
+    const cells = points.map(at);
+    expect(cells.some((n) => map.isSea(n))).toBe(false);
+    expect(new Set(cells).size).toBe(points.length);
+  });
+});
+
 describe('land inside one nation crosses water only by bridge or tunnel', () => {
   it.each([
     ['Sicily from Calabria', [37.6, 14.2], [38.11, 15.65]], ['Hainan from Leizhou', [19.6, 110.0], [21.27, 110.36]],

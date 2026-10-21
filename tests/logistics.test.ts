@@ -72,7 +72,7 @@ describe('logistics', () => {
     t.war('RUS', 'UKR');
     const rus = id.nation('RUS');
     const home = t.nodeAt(50.5, 37.5); // Belgorod oblast, beside Kharkiv oblast
-    const contested = t.nodeAt(49.5, 36.5); // Kharkiv
+    const contested = t.nodeAt(50.15, 36.9); // Kharkiv oblast on the Russian border
     const deep = t.nodeAt(48.5, 34.5); // Dnipro region, no Russian ground next to it
     expect([t.world.control[home], t.world.control[contested], t.world.control[deep]]).toEqual([rus, id.nation('UKR'), id.nation('UKR')]);
     const assault = t.brigade('RUS', contested), spearhead = t.brigade('RUS', deep);

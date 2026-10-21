@@ -84,7 +84,7 @@ const KPN = { readiness: 0.4, experience: 0.15 };
 const navy: OrbatEntry[] = [
   unit(PRK, 'West Sea Fleet Surface Group', 'surface_group', 'flotilla', at('Nampo naval base', 38.73, 125.4), { choe_hyon: 1, missile_boat: 20, fast_attack_craft: 100 }, KPN),
   unit(PRK, 'East Sea Fleet Surface Group', 'surface_group', 'flotilla', at('Toejo-dong', 40.1, 128.1), { najin: 2, choe_hyon: 1, missile_boat: 20, fast_attack_craft: 100 }, KPN),
-  unit(PRK, 'West Sea Fleet Submarine Group', 'submarine', 'flotilla', at('Pipa-got', 38.8, 125.3), { romeo: 8, sang_o: 20, yono: 5 }, KPN),
+  unit(PRK, 'West Sea Fleet Submarine Group', 'submarine', 'flotilla', at('Pipa-got', 38.74, 125.33), { romeo: 8, sang_o: 20, yono: 5 }, KPN),
   unit(PRK, 'East Sea Fleet Submarine Group', 'submarine', 'flotilla', at('Mayang-do', 40.0, 128.18), { romeo: 12, sang_o: 20, yono: 5 }, KPN),
   // Sinpo-B (Gorae) and the Hero Kim Kun Ok (Sinpo-C), launched 2023: ballistic-missile submarines.
   unit(PRK, 'Sinpo SLBM Submarine Group', 'strategic', 'flotilla', at('Sinpo', 40.03, 128.18), { gorae: 1, sinpo_c: 1 }, KPN),
