@@ -182,15 +182,25 @@ function navalLost(p: Plan, t: NonNullable<NuclearThreshold['navalLoss']>): numb
   return Math.max(share('ssbn') / t.ssbnShare, share('ssn') / t.ssnShare, cruisers / t.cruisers);
 }
 
-/** A conventional attack has destroyed launchers of the nation's strategic forces. */
+/**
+ * Share of its strategic launchers a conventional attack must destroy before the nation reads it as an attack on its
+ * deterrent. Drone strikes destroyed about a tenth of Russia's heavy bombers at Engels, Olenya and Belaya (Operation
+ * Spiderweb, June 2025) without a nuclear answer, so the loss of a few airframes does not reach it.
+ */
+const STRATEGIC_LOSS_SHARE = 0.25;
+
+/** A conventional attack has sunk a ballistic-missile submarine or destroyed a large share of the strategic launchers. */
 function strategicForcesHit(p: Plan, rec: WarRecord | undefined): boolean {
   if ((rec?.ssbnLost ?? 0) > 0) return true;
+  let base = 0;
+  let now = 0;
   for (const f of Object.values(p.world.formations)) {
     if (f.nation !== p.nation || f.kind !== 'strategic') continue;
-    const now = platformCount(f);
-    if (now < (p.ai.baseStrength[f.id] ??= now)) return true;
+    const n = platformCount(f);
+    base += p.ai.baseStrength[f.id] ??= n;
+    now += n;
   }
-  return false;
+  return base > 0 && base - now >= STRATEGIC_LOSS_SHARE * base;
 }
 
 /** Distance from the capital to the nearest homeland cell an enemy holds; Infinity when it holds none. */

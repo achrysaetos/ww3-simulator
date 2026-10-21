@@ -288,6 +288,21 @@ describe('nuclear release', () => {
     expect(releases(later, 'RUS')).toEqual([]);
   });
 
+  // Operation Spiderweb (June 2025) destroyed about a tenth of Russia's heavy bombers and drew no nuclear answer.
+  it('Russia shrugs off the loss of a few bombers and alerts once a large share of its strategic launchers is gone', () => {
+    const t = airWorld(42, [strategic, createDiplomacy(), createAi({ RUS: bold })]);
+    t.world.nations[N('RUS')].nuclear = { warheads: 4000, deployed: 1500, doctrine: 'escalate_to_deescalate' };
+    t.war('RUS', 'UKR');
+    const icbm = id.platform('t_icbm');
+    const rockets = t.add({ nation: N('RUS'), name: 'Strategic Rocket Forces', kind: 'strategic', echelon: 'division', node: t.node(56.0, 50.0), equipment: { [icbm]: 300 } });
+    const bombers = t.add({ nation: N('RUS'), name: 'heavy bombers', kind: 'strategic', echelon: 'wing', node: t.node(51.48, 46.21), equipment: { [id.platform('x_bomber')]: 40 } });
+    commandsOver(t, 4);
+    bombers.equipment[id.platform('x_bomber')] = 30;
+    expect(commandsOver(t, 8).some((c) => c.type === 'nuclear_alert' && c.nation === 'RUS')).toBe(false);
+    rockets.equipment[icbm] = 150;
+    expect(commandsOver(t, 8).some((c) => c.type === 'nuclear_alert' && c.nation === 'RUS')).toBe(true);
+  });
+
   it('Pakistan holds while Indian forces stand near Islamabad and uses first once a Kidwai threshold is crossed', () => {
     const t = testWorld([createDiplomacy(), createAi({ PAK: bold })]);
     t.world.nations[N('PAK')].nuclear = { warheads: 170, deployed: 170, doctrine: 'escalate_to_deescalate' };
