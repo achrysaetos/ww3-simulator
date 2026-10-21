@@ -31,7 +31,7 @@ const POSTURES: Partial<Record<FormationKind, ReadonlySet<Posture>>> = {
 };
 
 /** Ferry range with drop tanks, roughly 2.5x combat radius (manufacturer ferry vs radius figures, F-16/Su-27). */
-const FERRY_FACTOR = 2.5;
+export const FERRY_FACTOR = 2.5;
 
 export const airWar: System = {
   id: 'air',

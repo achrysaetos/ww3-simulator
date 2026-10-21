@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { relationMut, type System } from '../src/core/engine';
 import type { Command, NodeId, SimEvent } from '../src/core/types';
+import { createSession } from '../src/scenarios';
 import { createAi } from '../src/systems/ai';
 import { createDiplomacy } from '../src/systems/diplomacy';
 import { id, testWorld } from '../src/testkit';
@@ -184,4 +185,18 @@ describe('strikes on a neutral host', () => {
   it('leaves them alone on a host that is not hostile', () => {
     expect(strikesOnJapan(20)).toEqual([]);
   });
+});
+
+describe('strike wing basing', () => {
+  it('long-range bombers in the continental US forward-deploy across the Pacific once at war with China, then fly strikes from there', () => {
+    const s = createSession('taiwan-2027', 1);
+    const wing = Object.values(s.world.formations).find((f) => f.name === '7th Bomb Wing')!;
+    const home = wing.node;
+    let strikesAbroad = 0;
+    s.engine.run(s.world, (14 * 24) / s.world.dtHours, () => {
+      if (wing.order.posture === 'strike' && s.map.distanceKm(wing.node, home) > 8000) strikesAbroad++;
+    });
+    expect(s.map.distanceKm(wing.node, home)).toBeGreaterThan(8000);
+    expect(strikesAbroad).toBeGreaterThan(0);
+  }, 120_000);
 });
