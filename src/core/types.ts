@@ -361,8 +361,13 @@ export interface Theater {
   airControl: Record<number, { nation: NationId; level: number }>;
   /** Writer: naval. Which nation controls a sea node and how firmly (0..1). */
   seaControl: Record<number, { nation: NationId; level: number }>;
-  /** Writers: any strike (air, missile, strategic) multiplies down; logistics repairs up. Per node 0..1, 1 = intact. */
+  /** Writers: any strike (air, missile, strategic) and demolition of ground taken in war (logistics) multiply down; logistics repairs up. Per node 0..1, 1 = intact. */
   infrastructure: number[];
+  /**
+   * Writers: strikes close (logistics/chokepoints.ts strikeChokepoint); logistics repairs. Share of each
+   * chokepoint's capacity open (GameMap.chokepoints, by id), 0..1; absent = intact. Absent in older saves.
+   */
+  chokepoints?: Record<string, number>;
   /** Writer: naval. Share of each nation's seaborne trade currently interdicted, 0..1. */
   tradeBlocked: Record<NationId, number>;
   /** Writer: strategic. Radiation/fallout intensity per node, decays over time. */

@@ -6,6 +6,7 @@ import type { Echelon, Formation, FormationId, FormationKind, MunitionId, Nation
 import { AIRFRAME } from '../air/tables';
 import { NAVAL_KINDS } from '../naval/state';
 import { delegated } from '../orders';
+import { repairChokepoints } from './chokepoints';
 import type { NetworkSearch } from './network';
 import { refreshNetworks, searchesOf, snapshotInputs, type NetworkState } from './refresh';
 import {
@@ -14,6 +15,7 @@ import {
   REPAIR_FRACTION_PER_DAY, REPLACE_FRACTION_PER_DAY, RESERVE_REPLACE_MULTIPLIER, SUPPLY_CLASSES, type SupplyClass,
 } from './tables';
 
+export { chokepointLevel, strikeChokepoint } from './chokepoints';
 export { depotsOf } from './network';
 export type { NetworkInputs } from './refresh';
 export type { SupplyClass } from './tables';
@@ -101,6 +103,7 @@ export const logistics: System = {
     demolishCaptured(world, ctx, s);
     refreshNetworks(world, ctx.map, s, forces);
     repairInfrastructure(world, ctx, s, dtDays);
+    repairChokepoints(world, ctx.map, dtDays);
     sustain(world, ctx, s, forces, dtDays);
   },
 };

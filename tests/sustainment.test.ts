@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { NationId, PlatformId } from '../src/core/types';
 import { createSession } from '../src/scenarios';
-import { supplyFactor } from '../src/systems/logistics';
+import { chokepointLevel, strikeChokepoint, supplyFactor } from '../src/systems/logistics';
 
 /** Steps a session `days` days, handing each tick's events to `on`. */
 function runDays(s: ReturnType<typeof createSession>, days: number, on?: (events: ReturnType<typeof s.engine.step>, day: number) => void): void {
@@ -142,5 +142,38 @@ describe('end of the supply line (LE-3)', () => {
     }
     for (const phi of deepSupply) expect(phi).toBeLessThan(0.3);
     expect(supplyFactor(world, map, border, rus)).toBeGreaterThan(2 * deepSupply[3]);
+  }, 120_000);
+});
+
+describe('bridges and chokepoints (LE-4, AS-8)', () => {
+  // On main a bridge was only its cell's infrastructure: 455 weapons fired at Kerch, 86 leaking, moved it 1.00 -> 0.98.
+  // The October 2022 truck bomb and the July 2023 sea drones each closed a Kerch span for weeks to months.
+  it('ukraine-2026: a handful of hits closes the Kerch bridge and Crimea loses supply; closing every link leaves it to the sea', () => {
+    const s = createSession('ukraine-2026', 1);
+    const { world, map } = s;
+    const rus = 'RUS' as NationId;
+    const sevastopol = map.nodeAt(44.6, 33.5);
+    runDays(s, 2);
+    const intact = supplyFactor(world, map, sevastopol, rus);
+    expect(intact).toBeGreaterThan(0.9);
+
+    expect(strikeChokepoint(world, map, 'kerch', 450, 5)).toEqual({ before: 1, after: 0 });
+    runDays(s, 1);
+    const kerchCut = supplyFactor(world, map, sevastopol, rus);
+    expect(kerchCut).toBeLessThan(intact - 0.1);
+
+    for (let day = 0; day < 7; day++) {
+      strikeChokepoint(world, map, 'kerch', 450, 2);
+      strikeChokepoint(world, map, 'chonhar', 450, 2);
+      strikeChokepoint(world, map, 'perekop', 450, 4);
+      runDays(s, 1);
+    }
+    expect(supplyFactor(world, map, sevastopol, rus)).toBeLessThan(0.35);
+
+    // Engineers rebuild: the Chonhar bridges in about three weeks, the Kerch spans over months.
+    runDays(s, 22);
+    expect(chokepointLevel(world, 'chonhar')).toBe(1);
+    expect(chokepointLevel(world, 'kerch')).toBeLessThan(0.4);
+    expect(supplyFactor(world, map, sevastopol, rus)).toBeGreaterThan(0.35);
   }, 120_000);
 });
