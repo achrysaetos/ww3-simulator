@@ -132,10 +132,24 @@ const DEPOT_MONTHS = 6;
  */
 const MIL_OIL_SHARE_PEACE = 0.02;
 const MIL_OIL_SHARE_FULL = 0.3;
+/**
+ * Output, relative to baseline, at which an economy can no longer carry a war on its own: Japan in
+ * 1945 near half its 1941 GNP, Germany in 1918 about two thirds of 1913 with its people starving
+ * (Harrison, The Economics of World War II, 1998; Broadberry and Harrison, 2005). Ukraine fought on
+ * at about 0.7 in 2022 with foreign aid, which arrives separately.
+ */
+// param: tag=estimated range=[0.3,0.6] source=Harrison 1998; Broadberry and Harrison 2005
+const COLLAPSE_GDP = 0.45;
 const SHORT_BELOW = 0.8;
 const RECOVERED_ABOVE = 0.95;
 
 const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
+const milOilShareOf = (n: Nation) => MIL_OIL_SHARE_PEACE + (MIL_OIL_SHARE_FULL - MIL_OIL_SHARE_PEACE) * n.mobilization;
+/** Share of the oil its forces are owed that reaches them, once essential civilian use is kept. */
+const forcesOilShare = (n: Nation, oilSupply: number) => {
+  const mil = milOilShareOf(n);
+  return clamp01((oilSupply - ESSENTIAL_CIVIL_OIL * (1 - mil)) / mil);
+};
 const DAYS_PER_MONTH = 30.4;
 /** Months of peacetime fuel use a scenario's depots open with (initialStockpiles). */
 const OPENING_DEPOT_MONTHS = 3;
@@ -167,6 +181,19 @@ function peaceShare(n: Nation): number {
  */
 export function defenseShare(n: Nation): number {
   return Math.max(peaceShare(n), NORMAL_PEACE_SHARE + (MAX_DEFENSE_SHARE - NORMAL_PEACE_SHARE) * n.mobilization ** 2);
+}
+
+/**
+ * The economy's means to keep fighting, 0..1: the least of the oil reaching the forces, the food
+ * reaching the people, and output above the level where war economies have broken. Blockade
+ * ended the wars of Germany in 1918 and Japan in 1945 this way, whatever their will to go on.
+ * Pure; diplomacy can weigh it beside ground strength when it judges the means to fight.
+ */
+export function economicMeans(world: World, nation: NationId): number {
+  const e = world.slices.economy?.nations[nation];
+  const n = world.nations[nation];
+  if (!e || !n) return 1;
+  return Math.min(forcesOilShare(n, e.oil?.supply ?? 1), e.supply.food, clamp01((e.gdpIndex - COLLAPSE_GDP) / (1 - COLLAPSE_GDP)));
 }
 
 /**
@@ -526,11 +553,10 @@ function stepNation(world: World, ctx: SimContext, s: Scan, n: Nation, e: Nation
   const budgetFuelPerMonth = peaceFuelPerMonth * (1 + (FUEL_MOBILIZATION_MULTIPLE - 1) * n.mobilization);
   const oilMt = OIL_CONSUMPTION_MT[n.id];
   const oilTonsPerYear = oilMt !== undefined ? oilMt * 1e6 : ((n.stats.gdpPpp ?? n.stats.gdp ?? 0) / 1e6) * OIL_TONS_PER_PPP_USD_M;
-  const milOilShare = MIL_OIL_SHARE_PEACE + (MIL_OIL_SHARE_FULL - MIL_OIL_SHARE_PEACE) * n.mobilization;
-  const commandeeredPerMonth = (oilTonsPerYear / 12) * milOilShare;
+  const commandeeredPerMonth = (oilTonsPerYear / 12) * milOilShareOf(n);
   const fuelPerMonth = Math.max(budgetFuelPerMonth, commandeeredPerMonth);
   const fuelBefore = n.bulk.fuel;
-  const served = clamp01((oilSupply - ESSENTIAL_CIVIL_OIL * (1 - milOilShare)) / milOilShare);
+  const served = forcesOilShare(n, oilSupply);
   n.bulk.fuel = Math.min(Math.max(n.bulk.fuel, DEPOT_MONTHS * peaceFuelPerMonth), n.bulk.fuel + fuelPerMonth * dtMonths * served);
   e.fuelDelivered += n.bulk.fuel - fuelBefore;
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { NationId, PlatformId } from '../src/core/types';
 import { createSession } from '../src/scenarios';
 import { chokepointLevel, strikeChokepoint, supplyFactor } from '../src/systems/logistics';
+import { economicMeans } from '../src/systems/economy';
 import { geography } from '../src/systems/naval/geography';
 
 /** Steps a session `days` days, handing each tick's events to `on`. */
@@ -213,6 +214,9 @@ describe('oil blockade (LE-5)', () => {
     expect(blockaded30).toBeGreaterThan(0.9 * open30);
     expect(blockaded30 - fuel(blockaded)).toBeGreaterThan(3 * (open30 - fuel(open)));
     expect(fuel(blockaded)).toBeLessThan(0.6 * fuel(open));
+    // LE-15: the economy reports it can no longer keep its forces fighting.
+    expect(economicMeans(world, pak)).toBeLessThan(0.2);
+    expect(economicMeans(open.world, pak)).toBeGreaterThan(0.8);
   }, 240_000);
 });
 
