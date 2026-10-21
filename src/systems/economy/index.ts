@@ -125,6 +125,20 @@ const SHORT_BELOW = 0.8;
 const RECOVERED_ABOVE = 0.95;
 
 const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
+const DAYS_PER_MONTH = 30.4;
+/** Months of peacetime fuel use a scenario's depots open with (initialStockpiles). */
+const OPENING_DEPOT_MONTHS = 3;
+
+/**
+ * Fuel a military buys a month at peace: what its budget buys, and never less than its fielded
+ * forces burn at peacetime readiness. Peacetime forces are funded for their own training fuel,
+ * whether the bill sits in a defence budget or, for gendarmeries and security forces with no
+ * reported defence spending (Costa Rica, Panama, Iceland), in an interior ministry's.
+ */
+function peaceFuelPerMonthOf(world: World, n: Nation): number {
+  const budget = ((n.stats.milexUsd ?? 0) / 1e6) * MIL_FUEL_TONS_PER_USD_M / 12;
+  return Math.max(budget, (world.slices.logistics?.peaceBurn?.[n.id] ?? 0) * DAYS_PER_MONTH);
+}
 const lag = (dtMonths: number, tauMonths: number) => 1 - Math.exp(-dtMonths / tauMonths);
 
 function peaceShare(n: Nation): number {
@@ -437,7 +451,7 @@ function stepNation(world: World, ctx: SimContext, s: Scan, n: Nation, e: Nation
   // under rationing, so energy reaches them first. Depots are tanks built in peacetime:
   // they hold DEPOT_MONTHS of the peacetime budget's fuel whatever the mobilization, so war raises
   // the flow through them, not the stock they can keep.
-  const peaceFuelPerMonth = ((n.stats.milexUsd ?? 0) / 1e6) * MIL_FUEL_TONS_PER_USD_M / 12;
+  const peaceFuelPerMonth = peaceFuelPerMonthOf(world, n);
   const budgetFuelPerMonth = peaceFuelPerMonth * (1 + (FUEL_MOBILIZATION_MULTIPLE - 1) * n.mobilization);
   const oilMt = OIL_CONSUMPTION_MT[n.id];
   const oilTonsPerYear = oilMt !== undefined ? oilMt * 1e6 : ((n.stats.gdpPpp ?? n.stats.gdp ?? 0) / 1e6) * OIL_TONS_PER_PPP_USD_M;
@@ -630,6 +644,7 @@ export const economy: System = {
       const e = newNationEconomy(n);
       e.baseIntegrity = integrity.get(n.id) ?? 1;
       world.slices.economy.nations[n.id] = e;
+      n.bulk.fuel = Math.max(n.bulk.fuel, OPENING_DEPOT_MONTHS * peaceFuelPerMonthOf(world, n));
     }
   },
 

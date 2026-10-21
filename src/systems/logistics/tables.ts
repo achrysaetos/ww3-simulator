@@ -62,6 +62,27 @@ export const READINESS_HOURS_PER_DAY: Record<PlatformClass, number> = {
 };
 
 /**
+ * Readiness hours for ground and air-defence classes in a nation at peace, replacing the wartime
+ * figures above. A garrison army trains to a funded mileage rather than standing a defensive day:
+ * the US Army's ground OPTEMPO goal has been about 800 miles a year per M1 tank (Combined Arms
+ * Training Strategy), about 0.3 h/day of driving, and garrison generators, idling and admin moves
+ * roughly treble it. Half the wartime day, so the US total stays inside the DLA Energy band of
+ * 31-37k t/day (tests/realism-logistics); air-defence radars radiate for exercises, not around the
+ * clock. Aircraft and ship rates above are already peacetime flying-hour and OPTEMPO figures.
+ */
+// param: tag=estimated range=[0.3,2] source=US Army ground OPTEMPO ~800 tank-miles/yr (CATS); DLA Energy FY2019 total
+export const PEACETIME_GROUND_HOURS_PER_DAY = 1;
+// param: tag=estimated range=[1,4] source=judgment, exercise radiating time
+export const PEACETIME_AIR_DEFENSE_HOURS_PER_DAY = 2;
+const GROUND_CLASSES: readonly PlatformClass[] = ['infantry', 'mbt', 'ifv', 'apc', 'recon', 'sp_artillery', 'towed_artillery', 'mlrs', 'atgm', 'engineer', 'truck', 'fuel_truck'];
+const AIR_DEFENSE_CLASSES: readonly PlatformClass[] = ['sam_long', 'sam_medium', 'shorad', 'abm', 'ew', 'radar'];
+export const PEACETIME_READINESS_HOURS_PER_DAY: Record<PlatformClass, number> = {
+  ...READINESS_HOURS_PER_DAY,
+  ...Object.fromEntries(GROUND_CLASSES.map((c) => [c, PEACETIME_GROUND_HOURS_PER_DAY])),
+  ...Object.fromEntries(AIR_DEFENSE_CLASSES.map((c) => [c, PEACETIME_AIR_DEFENSE_HOURS_PER_DAY])),
+};
+
+/**
  * Most of a formation's carried load that the supply chain can push to it in one
  * day at a supply factor of 1. Formations carry three days of full-rate fuel
  * (core/forces.ts), so 0.5/day sustains continuous full-rate operations at a

@@ -10,7 +10,7 @@ import type { NetworkSearch } from './network';
 import { refreshNetworks, searchesOf, snapshotInputs, type NetworkState } from './refresh';
 import {
   FOOD_TONS_PER_PERSON_DAY, BEACH_CAPACITY, FRONT_REPAIR_SHARE, INFRA_REPAIR_PER_DAY, LIFT_TONS_PER_TROOP, LIFT_TONS_PER_VEHICLE, MAX_REFILL_FRACTION_PER_DAY, NODE_TONS_PER_DAY,
-  MIN_BRIGADE_PERSONNEL, RAISE_EVERY_DAYS, READINESS_HOURS_PER_DAY, REARM_PER_DAY, REARMS_IN_PORT_ONLY, RESERVE_BUFFER_SHARE, SEALIFT_CLASSES, RECONSTITUTE_DAYS, RECONSTITUTE_MIN_STRENGTH, RECONSTITUTED_KINDS, REGENERATED_CLASSES,
+  MIN_BRIGADE_PERSONNEL, PEACETIME_READINESS_HOURS_PER_DAY, RAISE_EVERY_DAYS, READINESS_HOURS_PER_DAY, REARM_PER_DAY, REARMS_IN_PORT_ONLY, RESERVE_BUFFER_SHARE, SEALIFT_CLASSES, RECONSTITUTE_DAYS, RECONSTITUTE_MIN_STRENGTH, RECONSTITUTED_KINDS, REGENERATED_CLASSES,
   REPAIR_FRACTION_PER_DAY, REPLACE_FRACTION_PER_DAY, RESERVE_REPLACE_MULTIPLIER, SUPPLY_CLASSES, type SupplyClass,
 } from './tables';
 
@@ -34,6 +34,8 @@ export interface LogisticsState extends NetworkState {
   short: Record<NationId, SupplyClass[]>;
   /** Formations each nation has raised from reserves, and the tick it last tried. */
   raised: Record<NationId, { count: number; tick: number }>;
+  /** Fuel tons a day each nation's fielded forces burn at peacetime readiness: what its peacetime budget must buy. */
+  peaceBurn: Record<NationId, number>;
 }
 
 declare module '../../core/types' {
@@ -58,7 +60,7 @@ function forcesFactor(s: LogisticsState, search: NetworkSearch, node: NodeId, na
 }
 
 const initialState = (world: World): LogisticsState => ({
-  networks: {}, networkOf: {}, seen: snapshotInputs(world), establishment: {}, fallen: {}, lift: {}, short: {}, raised: {},
+  networks: {}, networkOf: {}, seen: snapshotInputs(world), establishment: {}, fallen: {}, lift: {}, short: {}, raised: {}, peaceBurn: {},
 });
 
 export const logistics: System = {
@@ -68,6 +70,7 @@ export const logistics: System = {
     // The opening networks belong to a ready-to-run world, so they are searched at setup rather than on the first tick.
     const forces = Object.values(world.formations).filter((f) => f.status !== 'destroyed' && f.status !== 'embarked');
     refreshNetworks(world, ctx.map, s, forces);
+    s.peaceBurn = peaceBurn(forces, upkeepOf(ctx.catalog));
   },
   step(world, ctx) {
     const s = (world.slices.logistics ??= initialState(world));
@@ -148,9 +151,10 @@ function sustain(world: World, ctx: SimContext, s: LogisticsState, forces: Forma
   const refill = MAX_REFILL_FRACTION_PER_DAY * dtDays, food = FOOD_TONS_PER_PERSON_DAY * dtDays;
   const { networkOf } = s, searches = searchesOf(s, ctx.map).byKey, upkeep = upkeepOf(ctx.catalog);
 
+  s.peaceBurn = peaceBurn(forces, upkeep);
   for (let i = 0; i < n; i++) {
     const f = forces[i];
-    consumeBaseline(f, upkeep, dtDays, food);
+    consumeBaseline(f, upkeep, dtDays, food, world.nations[f.nation].status === 'war');
     const search = searches.get(networkOf[f.nation]);
     const supply = search ? forcesFactor(s, search, f.node, f.nation) : undefined;
     const phi = (factor[i] = supply?.phi ?? 0);
@@ -423,29 +427,42 @@ function drawBulk(world: World, ctx: SimContext, s: LogisticsState, id: NationId
 
 /**
  * Readiness fuel and rations. Each platform burns its own fuel rate for its class's
- * readiness hours, except where another system already burns fuel for what it does:
- * the naval model charges a fleet's station-keeping for everything aboard, and the air
- * model flies an air wing's aircraft every day.
+ * readiness hours, at wartime rates once its nation is at war, except where another system
+ * already burns fuel for what it does: the naval model charges a fleet's station-keeping for
+ * everything aboard, and the air model flies an air wing's aircraft every day.
  */
-function consumeBaseline(f: Formation, upkeep: Upkeep, dtDays: number, foodPerPerson: number): void {
+function consumeBaseline(f: Formation, upkeep: Upkeep, dtDays: number, foodPerPerson: number, war: boolean): void {
   if (!NAVAL_KINDS.has(f.kind)) {
     const flown = f.kind === 'air_wing';
     let fuel = 0;
     for (const pid in f.equipment) {
       const u = upkeep.get(pid as PlatformId)!;
-      if (!(flown && u.airframe)) fuel += u.readinessFuel * f.equipment[pid as PlatformId];
+      if (!(flown && u.airframe)) fuel += (war ? u.readinessFuel : u.peaceFuel) * f.equipment[pid as PlatformId];
     }
     f.supply.fuel = Math.max(0, f.supply.fuel - fuel * dtDays);
   }
   f.supply.food = Math.max(0, f.supply.food - f.personnel * foodPerPerson);
 }
 
+/** Fuel tons a day each nation's forces burn at peacetime readiness, every platform counted whichever system charges it. */
+function peaceBurn(forces: readonly Formation[], upkeep: Upkeep): Record<NationId, number> {
+  const out: Record<NationId, number> = {};
+  for (const f of forces) {
+    let fuel = 0;
+    for (const pid in f.equipment) fuel += upkeep.get(pid as PlatformId)!.peaceFuel * f.equipment[pid as PlatformId];
+    out[f.nation] = (out[f.nation] ?? 0) + fuel;
+  }
+  return out;
+}
+
 /** What sustain reads of each platform, by id. */
 type Upkeep = ReadonlyMap<PlatformId, PlatformUpkeep>;
 
 interface PlatformUpkeep {
-  /** Fuel tons a day at readiness: the platform's hourly burn times its class's readiness hours. */
+  /** Fuel tons a day at readiness in war: the platform's hourly burn times its class's readiness hours. */
   readinessFuel: number;
+  /** The same at peacetime readiness. */
+  peaceFuel: number;
   /** Flown by the air model, which charges its own fuel. */
   airframe: boolean;
   /** Re-formed without stock (REGENERATED_CLASSES). */
@@ -463,6 +480,7 @@ function upkeepOf(catalog: Catalog): Upkeep {
     for (const [id, p] of catalog.platforms)
       out.set(id, {
         readinessFuel: p.mobility.fuelTonsPerHour * READINESS_HOURS_PER_DAY[p.class],
+        peaceFuel: p.mobility.fuelTonsPerHour * PEACETIME_READINESS_HOURS_PER_DAY[p.class],
         airframe: !!AIRFRAME[p.class],
         regenerated: REGENERATED_CLASSES.has(p.class),
         loadout: p.loadout,
