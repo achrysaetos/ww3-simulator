@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { MunitionId, NationId, PlatformId } from '../src/core/types';
 import { nuclearForces } from '../src/data/nations/nuclear';
 import { createSession } from '../src/scenarios';
+import { detonate } from '../src/systems/strategic';
 
 const N = (s: string) => s as NationId;
 const NINE = ['USA', 'RUS', 'CHN', 'FRA', 'GBR', 'IND', 'PAK', 'ISR', 'PRK'];
@@ -22,6 +23,23 @@ describe('nuclear forces as fielded (FAS 2025)', () => {
       && Object.keys(f.equipment).some((p) => s.catalog.platform(p as PlatformId).class === 'ssbn'));
     expect(atSea.length).toBeGreaterThan(0);
     for (const f of atSea) expect(f.magazine['bulava' as MunitionId] ?? 0).toBeGreaterThanOrEqual(64);
+  });
+});
+
+describe('city casualties', () => {
+  it('kills about as many as Hiroshima with a Hiroshima-size air burst on a city of Hiroshima\'s 1945 size', () => {
+    const s = createSession('peace-2027', 1);
+    const alone = (node: number) => s.map.cities.filter((c) => c.node === node).length === 1;
+    const city = s.map.cities.filter((c) => c.pop >= 300_000 && c.pop <= 380_000 && alone(c.node)).sort((a, b) => a.node - b.node)[0];
+    const ctx = s.engine.context(s.world);
+    const nodong = s.catalog.munition('nodong' as MunitionId);
+    expect(nodong.yieldKt).toBe(15);
+    const before = s.world.slices.strategic.totals.deaths;
+    detonate(s.world, ctx, N('PRK'), city.node, nodong, 1, 'air');
+    // RERF: 70-80k immediate deaths in Hiroshima (15 kt air burst, ~340k people).
+    const dead = s.world.slices.strategic.totals.deaths - before;
+    expect(dead, `${city.name}, ${city.pop}`).toBeGreaterThan(55_000);
+    expect(dead).toBeLessThan(110_000);
   });
 });
 
