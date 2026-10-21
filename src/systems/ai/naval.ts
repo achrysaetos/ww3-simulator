@@ -298,6 +298,15 @@ function runAssault(p: Plan, a: Assault, lifts: Formation[]): void {
 }
 
 /**
+ * Readiness below which a group is in a shipyard availability and cannot sail: a carrier in
+ * refuelling overhaul (about four years) or a docking availability. Under the US Navy's Optimized
+ * Fleet Response Plan a ship in its maintenance phase is not surge-ready; one in the basic phase
+ * between deployments is (GAO-21-366, 2021). The threshold is judgment: it separates the yard
+ * availabilities in the orders of battle (0.05-0.2) from ships working up (0.4 and above).
+ */
+const SEAWORTHY = 0.25;
+
+/**
  * Naval groups: SSBNs hold a bastion in home waters; a nation able to invade across the sea
  * shuttles troops in its lift groups; carriers concentrate on the maritime focus, standing off
  * from a hostile shore unless covering their own landing; attack
@@ -308,7 +317,7 @@ function runAssault(p: Plan, a: Assault, lifts: Formation[]): void {
 export function planNaval(p: Plan): void {
   const { map } = p.ctx;
   const km = (a: number, b: number) => map.distanceKm(a as NodeId, b as NodeId);
-  const groups = (p.index.byNation.get(p.nation) ?? []).filter((f) => (f.kind === 'surface_group' || f.kind === 'submarine') && f.status === 'active');
+  const groups = (p.index.byNation.get(p.nation) ?? []).filter((f) => (f.kind === 'surface_group' || f.kind === 'submarine') && f.status === 'active' && f.readiness >= SEAWORTHY);
   if (!groups.length) return;
   const liftCapable = groups.filter((g) => g.kind === 'surface_group' && compose(g, p.ctx.catalog).troopLift > 0);
   const assault = planAssault(p, liftCapable);

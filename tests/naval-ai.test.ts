@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { atWar } from '../src/core/engine';
 import type { NationId } from '../src/core/types';
 import { createSession } from '../src/scenarios';
 import { recordFleetLoss } from '../src/systems/naval/state';
@@ -57,6 +58,20 @@ describe('coastal defence against a landing', () => {
     }
     expect(atLift).toBeGreaterThan(0);
     expect(start - rounds()).toBeGreaterThanOrEqual(60);
+  }, 120_000);
+});
+
+describe('naval AI fleet readiness', () => {
+  it('carriers in a shipyard stay there when the US goes to war; a carrier between deployments sails', () => {
+    const s = createSession('taiwan-2027', 2);
+    const named = (prefix: string) => Object.values(s.world.formations).find((f) => f.name.startsWith(prefix))!;
+    const yard = [named('USS John C. Stennis'), named('USS Ronald Reagan')];
+    const ike = named('Carrier Strike Group 8');
+    const perDay = 24 / s.world.dtHours;
+    for (let i = 0; i < 30 * perDay && !atWar(s.world, 'USA' as NationId, 'CHN' as NationId); i++) s.engine.step(s.world);
+    for (let i = 0; i < 10 * perDay; i++) s.engine.step(s.world);
+    expect(yard.map((f) => f.node)).toEqual(yard.map((f) => f.home));
+    expect(s.map.distanceKm(ike.node, ike.home)).toBeGreaterThan(1000);
   }, 120_000);
 });
 
