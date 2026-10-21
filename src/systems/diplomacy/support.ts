@@ -38,7 +38,6 @@ const RALLY_HALF_LIFE_DAYS = 60;
 const WEARINESS_PER_YEAR = 0.05;
 const TERRITORY_WEIGHT = 0.6;
 const CAPITAL_LOSS = 0.2;
-const TRADE_WEIGHT = 0.2;
 const NUCLEAR_SHOCK = 0.08;
 
 const CAPITULATE_BELOW = 0.1;
@@ -63,17 +62,24 @@ export function warSupport(nation: World['nations'][NationId], rec: WarRecord, a
   const rally = rec.rally * 0.5 ** ((((world.tick - rec.rallyTick) * world.dtHours) / 24) / RALLY_HALF_LIFE_DAYS);
   const casualties = MUELLER_PER_DECADE * sensitivity * Math.log10(1 + perCapita);
   const territory = regime.elite * (TERRITORY_WEIGHT * (a?.popLost ?? 0) + (a?.capitalLost ? CAPITAL_LOSS : 0));
-  const economy = regime.elite * TRADE_WEIGHT * (world.theater.tradeBlocked[nation.id] ?? 0);
   const nuclear = nation.nuclear.warheads > 0 ? 0 : NUCLEAR_SHOCK * (0.5 + 0.5 * sensitivity) * Math.min(3, rec.nuclearHits);
   const weariness = WEARINESS_PER_YEAR * sensitivity * (days / 365);
-  return Math.min(1, Math.max(0, rec.baseline + rally - casualties - territory - economy - nuclear - weariness));
+  return Math.min(1, Math.max(0, rec.baseline + rally - casualties - territory - nuclear - weariness));
 }
 
+/**
+ * War support is warSupport's own terms plus the home front's (politics `supportShift`), each
+ * cost counted once: trade lost reaches the public through output (economy gdpIndex, in the
+ * politics economy driver), and casualties through Mueller's cumulative curve here, so the
+ * politics marginal-loss driver, which equals it in a war's first weeks, is left out.
+ */
 export function updateSupport(world: World, s: DiplomacyState, profiles: Readonly<Record<string, StrategicProfile>>): void {
   for (const [n, rec] of Object.entries(s.records) as [NationId, WarRecord][]) {
     const nation = world.nations[n];
     if (nation.status !== 'war' || rec.enteredTick < 0) continue;
-    nation.warSupport = Math.min(1, Math.max(0, warSupport(nation, rec, s.assessment[n], profiles[n] ?? DEFAULT_PROFILE, world) + (world.slices.politics?.nations[n]?.supportShift ?? 0)));
+    const home = world.slices.politics?.nations[n];
+    const shift = home ? home.supportShift - home.drivers.losses : 0;
+    nation.warSupport = Math.min(1, Math.max(0, warSupport(nation, rec, s.assessment[n], profiles[n] ?? DEFAULT_PROFILE, world) + shift));
   }
 }
 
