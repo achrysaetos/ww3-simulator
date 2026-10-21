@@ -20,7 +20,7 @@ export { matedShare, type AlertDoctrine } from './alert';
 export type { LaunchOnWarningHook } from './nuclear';
 export { release, detonate, interceptSalvo } from './nuclear';
 export { targetList, type Target, type TargetKind, type TargetMode } from './targeting';
-export { isrFactor, cepFactor } from './space';
+export { isrFactor, cepFactor, spaceSupport } from './space';
 export { globalFoodShock, globalCoolingC } from './climate';
 export { falloutDenied } from './fallout';
 export { cyberCapability } from './tables';
