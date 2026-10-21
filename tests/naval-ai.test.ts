@@ -52,13 +52,13 @@ describe('coastal defence against a landing', () => {
     const rounds = () => Object.values(battery.magazine).reduce((a, n) => a + n, 0);
     const start = rounds();
     let atLift = 0;
-    for (let i = 0; i < (10 * 24) / s.world.dtHours; i++) {
+    for (let i = 0; i < (14 * 24) / s.world.dtHours; i++) {
       s.engine.step(s.world);
       const t = battery.order.targetFormation ? s.world.formations[battery.order.targetFormation] : undefined;
       if (battery.order.posture === 'strike' && t?.nation === 'CHN' && t.kind === 'surface_group') atLift++;
     }
     expect(atLift).toBeGreaterThan(0);
-    expect(start - rounds()).toBeGreaterThanOrEqual(60);
+    expect(start - rounds()).toBeGreaterThanOrEqual(150);
   }, 120_000);
 });
 

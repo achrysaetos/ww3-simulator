@@ -164,6 +164,7 @@ function planPackage(world: World, ctx: SimContext, pic: AirPicture, f: Formatio
 }
 
 export function resolveStrikes(world: World, ctx: SimContext, pic: AirPicture, slice: AirSlice): void {
+  engageLandings(world, ctx, pic);
   const raids = new Map<string, Package[]>();
   for (const f of Object.values(world.formations)) {
     if (f.status !== 'active' || f.order.posture !== 'strike' || !hostileTarget(world, pic, f)) continue;
@@ -177,6 +178,34 @@ export function resolveStrikes(world: World, ctx: SimContext, pic: AirPicture, s
   for (const [key, pkgs] of raids) {
     const [t, attacker] = key.split('|');
     resolveRaid(world, ctx, pic, slice, Number(t) as NodeId, attacker as NationId, pkgs);
+  }
+}
+
+/**
+ * A coastal anti-ship battery standing on 'defend' holds pre-delegated authority to fire on an
+ * invasion fleet putting troops onto a friendly shore it can reach, without waiting for the
+ * next tasking: the lift lies off the beaches for hours, not days (CSIS 2023: Taiwan's shore-based
+ * anti-ship missiles were among the main killers of PLA lift; the delegation is judgment).
+ */
+function engageLandings(world: World, ctx: SimContext, pic: AirPicture): void {
+  for (const f of Object.values(world.formations)) {
+    if (f.kind !== 'missile' || f.status !== 'active' || f.order.posture !== 'defend') continue;
+    let reach = 0;
+    for (const [id, n] of Object.entries(f.magazine)) {
+      const m = ctx.catalog.munition(id as MunitionId);
+      if (n >= 1 && ANTISHIP_KINDS.has(m.kind)) reach = Math.max(reach, m.rangeKm);
+    }
+    if (!reach) continue;
+    let best: Formation | undefined, bestKm = reach;
+    for (const g of Object.values(world.formations)) {
+      if (g.kind !== 'surface_group' || g.status !== 'active' || !pic.atWar(g.nation, f.nation)) continue;
+      const at = navalPosition(ctx.map, g);
+      const shore = world.control[at];
+      if (ctx.map.isSea(at) || !shore || pic.atWar(shore, f.nation)) continue;
+      const d = nodeDistance(ctx, f.node, at);
+      if (d <= bestKm) { bestKm = d; best = g; }
+    }
+    if (best) f.order = { posture: 'strike', target: best.node, targetClass: 'ship', targetFormation: best.id, issuedTick: world.tick };
   }
 }
 
