@@ -1,7 +1,7 @@
 import type { Catalog } from '../../core/catalog';
 import { atWar, type SimContext } from '../../core/engine';
 import type { GameMap } from '../../core/map';
-import type { Formation, FormationId, NationId, NodeId, PlatformId, World } from '../../core/types';
+import type { Formation, FormationId, NationId, NodeId, PlatformId, RefusalCode, World } from '../../core/types';
 import { AIRFRAME } from '../air/tables';
 import { supplyFactor } from '../logistics';
 import { allied, canEnter, landSlice } from './state';
@@ -126,15 +126,15 @@ function fieldsNear(map: GameMap, node: NodeId): NodeId[] {
 }
 
 /** Why the formation cannot be dropped on `target`, or undefined when it can. */
-export function cannotDrop(world: World, map: GameMap, catalog: Catalog, f: Formation, target: NodeId): string | undefined {
-  if (!f.airborne) return 'not an airborne or air-assault formation';
-  if (target >= map.landCount) return 'no drop zone at sea';
-  if (!canEnter(world, map, f.nation, target)) return 'the drop zone is neutral ground';
+export function cannotDrop(world: World, map: GameMap, catalog: Catalog, f: Formation, target: NodeId): { code: RefusalCode; reason: string } | undefined {
+  if (!f.airborne) return { code: 'wrong_role', reason: 'not an airborne or air-assault formation' };
+  if (target >= map.landCount) return { code: 'bad_target', reason: 'no drop zone at sea' };
+  if (!canEnter(world, map, f.nation, target)) return { code: 'neutral_territory', reason: 'the drop zone is neutral ground' };
   const from = departure(world, map, f);
-  if (from === undefined) return 'no friendly airfield within a day’s move';
-  if (map.distanceKm(from, target) > transportRadiusKm(world, catalog, f.nation)) return 'beyond the transports’ radius';
-  if (liftTons(world, catalog, f.nation) * LIFTS < airTons(catalog, f)) return 'not enough airlift to land it in a day';
-  if (!friendlyAir(world, map, catalog, f.nation, target)) return 'no friendly air control over the drop zone';
+  if (from === undefined) return { code: 'no_airfield', reason: 'no friendly airfield within a day’s move' };
+  if (map.distanceKm(from, target) > transportRadiusKm(world, catalog, f.nation)) return { code: 'out_of_range', reason: 'beyond the transports’ radius' };
+  if (liftTons(world, catalog, f.nation) * LIFTS < airTons(catalog, f)) return { code: 'no_lift', reason: 'not enough airlift to land it in a day' };
+  if (!friendlyAir(world, map, catalog, f.nation, target)) return { code: 'no_air_cover', reason: 'no friendly air control over the drop zone' };
   return undefined;
 }
 

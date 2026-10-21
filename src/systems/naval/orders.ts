@@ -1,5 +1,6 @@
 import { newId, type SimContext } from '../../core/engine';
-import type { Command, Formation, NodeId, PlatformId, World } from '../../core/types';
+import type { Command, Formation, NodeId, PlatformId, RefusalCode, World } from '../../core/types';
+import type { OrderOutcome } from '../orders';
 import { engages } from '../air/tables';
 import { canBoard, liftShare, liftUsed } from './amphibious';
 import { tickEnv } from './env';
@@ -29,48 +30,46 @@ export function isNavalOrder(world: World, cmd: Command): cmd is OrderCommand {
   return !!f && (isNavalFormation(f) || f.status === 'embarked' || cmd.order.posture === 'embark');
 }
 
-export function applyNavalOrder(world: World, cmd: OrderCommand, ctx: SimContext): void {
+export function applyNavalOrder(world: World, cmd: OrderCommand, ctx: SimContext): OrderOutcome {
   const f = world.formations[cmd.formation];
-  // Only a player reads why an order was refused; an AI nation re-plans from the world as it is.
-  const refuse = (why: string) => {
-    if (world.nations[cmd.nation]?.controlledBy === 'human') ctx.emit({ type: 'message', tick: world.tick, nation: cmd.nation, text: `order to ${cmd.formation} refused: ${why}` });
-  };
-  if (!f || f.nation !== cmd.nation) return refuse('no such formation of yours');
-  if (f.status === 'destroyed') return refuse('formation destroyed');
+  const refuse = (code: RefusalCode, reason: string): OrderOutcome => ({ ok: false, code, reason });
+  if (!f || f.nation !== cmd.nation) return refuse('not_yours', 'no such formation of yours');
+  if (f.status === 'destroyed') return refuse('destroyed', 'formation destroyed');
   const order = { ...cmd.order, issuedTick: world.tick };
 
   if (order.posture === 'embark') {
     const lift = order.targetFormation ? world.formations[order.targetFormation] : undefined;
-    if (!lift || lift.status !== 'active' || lift.kind !== 'surface_group' || lift.nation !== f.nation) return refuse('embark needs an own active surface group as targetFormation');
-    if (f.status !== 'active') return refuse('already embarked');
+    if (!lift || lift.status !== 'active' || lift.kind !== 'surface_group' || lift.nation !== f.nation) return refuse('bad_target', 'embark needs an own active surface group as targetFormation');
+    if (f.status !== 'active') return refuse('not_ready', 'already embarked');
     const env = tickEnv(world, ctx);
     const comp = env.comp(lift);
-    if (!canBoard(env, f, lift)) return refuse('must stand in a port with the lift group in port or offshore');
+    if (!canBoard(env, f, lift)) return refuse('not_in_port', 'must stand in a port with the lift group in port or offshore');
     const room = 1 - liftUsed(env, lift, comp);
     const share = liftShare(ctx.catalog, f, comp);
-    if (!boardable(room, share)) return refuse(`${lift.name} lacks lift capacity`);
+    if (!boardable(room, share)) return refuse('no_lift', `${lift.name} lacks lift capacity`);
     const boarding = share > room + 1e-9 ? detach(world, ctx, f, room / share) : f;
     boarding.status = 'embarked';
     boarding.embarkedOn = lift.id;
     boarding.node = lift.node;
     boarding.order = { posture: 'embark', targetFormation: lift.id, issuedTick: world.tick };
     (env.embarked.get(lift.id) ?? env.embarked.set(lift.id, []).get(lift.id)!).push(boarding);
-    return;
+    return { ok: true, etaHours: 0 };
   }
-  if (f.status === 'embarked') return refuse('embarked formations land by ordering their lift group to attack or move to a coast');
-  if (!isNavalFormation(f)) return refuse('not a naval formation');
+  if (f.status === 'embarked') return refuse('embarked', 'embarked formations land by ordering their lift group to attack or move to a coast');
+  if (!isNavalFormation(f)) return refuse('wrong_role', 'not a naval formation');
 
-  if (f.readiness < SEAWORTHY && order.posture !== 'reserve' && f.node === f.home) return refuse(`${f.name} is in a shipyard availability and cannot sail`);
+  if (f.readiness < SEAWORTHY && order.posture !== 'reserve' && f.node === f.home) return refuse('not_ready', `${f.name} is in a shipyard availability and cannot sail`);
   const goal = order.posture === 'reserve' ? f.home : goalNode(world, order.target, order.targetFormation);
   if (goal === undefined) {
     f.order = { ...order, path: [] };
-    return;
+    return { ok: true };
   }
   const dest = navalDestination(world, ctx.map, f.nation, goal);
   const path = dest === undefined ? null : transitPath(world, ctx.map, f.nation, f.node, dest);
-  if (!path) return refuse(`no sea route to node ${goal}`);
+  if (!path) return refuse('no_route', `no sea route to node ${goal}`);
   f.order = { ...order, target: goal, path };
   f.progressKm = 0;
+  return { ok: true };
 }
 
 /**

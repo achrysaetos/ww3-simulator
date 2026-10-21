@@ -111,7 +111,10 @@ export function assessHqs(world: World, ctx: SimContext, s: C2State): void {
     tallyOf(s, hq.nation).hqHits++;
     ctx.emit({ type: 'message', tick: world.tick, nation: hq.nation, text: `${hq.name} ${why}` });
   };
-  world.events.forEach((e, i) => {
+  // Answers to commands are bookkeeping: they do not count toward the event index the hit draws are keyed by.
+  let i = -1;
+  world.events.forEach((e) => {
+    if (e.type !== 'command_result') i++;
     if (e.type !== 'strike' && e.type !== 'nuclear_detonation') return;
     for (const hq of at.get(e.type === 'strike' ? e.target : e.node) ?? []) {
       if (hq.integrity <= 0 || !atWar(world, e.by, hq.nation)) continue;

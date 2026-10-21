@@ -248,11 +248,9 @@ describe('strikes', () => {
     const kyiv = t.node(...KYIV), moscow = t.node(55.75, 37.6);
     expect(t.map.distanceKm(moscow, kyiv)).toBeGreaterThan(500);
     const far = launchers(t, 'RUS', moscow, { t_tel: 20 });
-    t.world.nations[RUS].controlledBy = 'human';
     const ctx = t.ctx();
-    expect(applyAirOrder(t.world, { type: 'order', nation: RUS, formation: far.id, order: { posture: 'strike', target: kyiv, targetClass: 'structure' } }, ctx)).toBe(true);
+    expect(applyAirOrder(t.world, { type: 'order', nation: RUS, formation: far.id, order: { posture: 'strike', target: kyiv, targetClass: 'structure' } }, ctx)).toMatchObject({ ok: false, code: 'out_of_range', reason: expect.stringMatching(/beyond reach/) });
     expect(far.order.posture).toBe('defend');
-    expect(t.world.events.some((e) => e.type === 'message' && /beyond reach/.test(e.text))).toBe(true);
 
     far.order = { posture: 'strike', target: kyiv, targetClass: 'structure', issuedTick: 0 };
     const before = far.magazine[mid('t_srbm')];
@@ -261,7 +259,7 @@ describe('strikes', () => {
     expect(t.world.theater.infrastructure[kyiv]).toBe(1);
 
     const near = launchers(t, 'RUS', t.node(51.5, 31.3), { t_tel: 20 });
-    expect(applyAirOrder(t.world, { type: 'order', nation: RUS, formation: near.id, order: { posture: 'strike', target: kyiv, targetClass: 'structure' } }, t.ctx())).toBe(true);
+    expect(applyAirOrder(t.world, { type: 'order', nation: RUS, formation: near.id, order: { posture: 'strike', target: kyiv, targetClass: 'structure' } }, t.ctx())).toEqual({ ok: true });
     expect(near.order.posture).toBe('strike');
     expect(t.strikes(t.tick()).length).toBeGreaterThan(0);
   });
@@ -322,15 +320,15 @@ describe('strikes', () => {
   it('applyAirOrder ignores formations it does not own and rebases wings within ferry range', () => {
     const t = airWorld();
     const tank = t.add({ nation: UKR, name: 'tanks', kind: 'maneuver', echelon: 'brigade', node: t.node(...KYIV), equipment: { [pid('t_mbt')]: 30 } });
-    expect(applyAirOrder(t.world, { type: 'order', nation: UKR, formation: tank.id, order: { posture: 'attack', target: t.node(50, 36) } }, t.ctx())).toBe(false);
+    expect(applyAirOrder(t.world, { type: 'order', nation: UKR, formation: tank.id, order: { posture: 'attack', target: t.node(50, 36) } }, t.ctx())).toBeUndefined();
     expect(tank.order.posture).toBe('defend');
 
     const w = wing(t, 'USA', t.node(...TAIPEI), { t_fighter: 12 });
     const kyushu = t.node(33, 131);
     expect(t.map.isSea(kyushu)).toBe(false);
-    applyAirOrder(t.world, { type: 'order', nation: USA, formation: w.id, order: { posture: 'move', target: kyushu } }, t.ctx());
+    expect(applyAirOrder(t.world, { type: 'order', nation: USA, formation: w.id, order: { posture: 'move', target: kyushu } }, t.ctx())).toEqual({ ok: true, etaHours: 0 });
     expect(w.node).toBe(kyushu);
-    applyAirOrder(t.world, { type: 'order', nation: USA, formation: w.id, order: { posture: 'move', target: t.node(40, -100) } }, t.ctx());
+    expect(applyAirOrder(t.world, { type: 'order', nation: USA, formation: w.id, order: { posture: 'move', target: t.node(40, -100) } }, t.ctx())).toMatchObject({ ok: false, code: 'out_of_range' });
     expect(w.node).toBe(kyushu);
   });
 

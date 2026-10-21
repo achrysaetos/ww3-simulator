@@ -7,7 +7,7 @@ import { briefingFor, objectives as objectivesOf, outcome as outcomeOf } from '.
 import { Decisions } from './Decisions';
 import { BriefingDialog, ConfirmDialog, EndDialog, GameMenu, type Confirmation } from './GameFlow';
 import { EventLog } from './EventLog';
-import { FormationList, FormationPanel, GROUND_KINDS, type Command as CommandHolder } from './FormationPanel';
+import { FormationList, FormationPanel, GROUND_KINDS, postureLabel, type Command as CommandHolder } from './FormationPanel';
 import { MapView } from './MapView';
 import { DOMAIN_LABEL, NationPanel } from './NationPanel';
 import { NuclearDialog } from './NuclearDialog';
@@ -21,27 +21,24 @@ type Speed = (typeof SPEEDS)[number];
 const OVERLAY_LABELS: Record<keyof Overlays, string> = { air: 'Air control', sea: 'Sea control', infra: 'Infrastructure damage', fallout: 'Fallout', weather: 'Weather', cities: 'Cities', seaZones: 'Sea zones' };
 const TABS = [['nation', 'Nation'], ['forces', 'Forces'], ['log', 'Log']] as const;
 type Tab = (typeof TABS)[number][0];
-/** Ticks to watch for the engine refusing an order the player just gave. */
-const WATCH_TICKS = 8;
 const FORM_CONTROLS = new Set(['INPUT', 'SELECT', 'TEXTAREA', 'BUTTON']);
 
 interface Toast { text: string; tone: 'info' | 'error' }
-/** Waiting on the engine's word about something the player just did: a refused order, a landing team split off, a launch. */
+/** Waiting on the engine's word about a nuclear release: the launch, or nothing. */
 interface Watch { untilTick: number; seenSeq: number; match(row: LoggedEvent): Toast | null; timeout?: Toast }
 
 export function App({ client }: { client: SimClient }) {
   useSyncExternalStore(client.subscribe, client.getVersion);
   const palette = useMemo(() => new Palette((id) => client.nationCards.get(id as NationId)?.blocs ?? []), [client]);
   if (!client.meta || !client.playing) return <StartScreen client={client} palette={palette} />;
-  return <Command key={client.sessionId} client={client} palette={palette} initialNation={client.playing} />;
+  return <Command key={client.sessionId} client={client} palette={palette} playAs={client.playing} />;
 }
 
-function Command({ client, palette, initialNation }: { client: SimClient; palette: Palette; initialNation: NationId }) {
+function Command({ client, palette, playAs }: { client: SimClient; palette: Palette; playAs: NationId }) {
   const places = client.places;
   const routes = useMemo(() => new Routes(client.map), [client]);
   const focusHandle = useRef<((n: NodeId) => void) | null>(null);
 
-  const [playAs, setPlayAs] = useState<NationId>(initialNation);
   const [selected, setSelected] = useState<FormationId | null>(null);
   const [pending, setPending] = useState<{ posture: Posture; targetClass?: TargetClass; lift?: 'air' | 'sea' } | null>(null);
   const [confirm, setConfirm] = useState<Confirmation | null>(null);
@@ -57,10 +54,6 @@ function Command({ client, palette, initialNation }: { client: SimClient; palett
   const watch = useRef<Watch | null>(null);
   const lastSeq = () => client.feed.newest(new Set(), null, 1)[0]?.seq ?? -1;
 
-  const nationOptions = useMemo(
-    () => [...client.nationCards.values()].sort((a, b) => a.name.localeCompare(b.name)).map((n) => <option key={n.id} value={n.id}>{n.name}</option>),
-    [client.nationCards],
-  );
   const d = client.state.focusNation?.id === playAs ? client.state.focusNation : undefined;
   const ai = d?.authority.ai ?? DEFAULT_DELEGATION;
   const heldKey = d?.authority.held.join(',') ?? '';
@@ -103,7 +96,6 @@ function Command({ client, palette, initialNation }: { client: SimClient; palett
     }
   }, [client, callsKey]);
 
-  // Surface what the engine said about an order the player just gave (a refusal, a landing team split off).
   useEffect(() => {
     const w = watch.current;
     if (!w) return;
@@ -121,25 +113,6 @@ function Command({ client, palette, initialNation }: { client: SimClient; palett
       watch.current = null;
     }
   }, [client, client.feed.version, client.state.tick, playAs]);
-
-  const choose = (id: NationId) => {
-    const go = () => {
-      setPlayAs(id);
-      setSelected(null);
-      setPending(null);
-      everEnemies.current = new Set();
-      setEndSeen(null);
-      client.playAs(id);
-    };
-    const me = client.state.nations.get(playAs);
-    if (me?.status !== 'war') return go();
-    setConfirm({
-      title: `Switch to ${client.namer.nation(id)}?`,
-      text: `${me.name} is at war. Your AI delegate will take over all of ${me.name}'s forces and decisions, and you will command ${client.namer.nation(id)} from now on.`,
-      yes: `Play as ${client.namer.nation(id)}`,
-      onYes: go,
-    });
-  };
 
   const quit = () => setConfirm({
     title: 'Quit to the start screen?',
@@ -164,18 +137,10 @@ function Command({ client, palette, initialNation }: { client: SimClient; palett
     setToast({ tone: 'info', text: `${label}. Takes effect next tick.` });
   };
 
-  /** The player's order also takes the formation from the AI delegate. */
+  /** The engine answers next tick (client.answer): accepted, the order takes the formation from the AI delegate; refused, the delegate keeps it. */
   const sendOrder = (formation: FormationId, order: Omit<Order, 'issuedTick'>, label: string) => {
-    const name = client.state.formations.find((f) => f.entry.id === formation)?.entry.name ?? 'Formation';
-    const seenSeq = lastSeq();
-    client.command({ type: 'hold', nation: playAs, formations: [formation], held: true });
     client.command({ type: 'order', nation: playAs, formation, order });
-    watch.current = {
-      untilTick: client.state.tick + WATCH_TICKS,
-      seenSeq,
-      match: (r) => (r.event.type === 'message' && r.text.startsWith(name) ? { tone: /refused|no land route|cannot|no friendly/.test(r.text) ? 'error' : 'info', text: r.text } : null),
-    };
-    setToast({ tone: 'info', text: `${label}. Takes effect next tick; now under your command.` });
+    setToast({ tone: 'info', text: `${label}. Awaiting acknowledgement next tick.` });
   };
 
   const onTarget = (node: NodeId) => {
@@ -201,7 +166,8 @@ function Command({ client, palette, initialNation }: { client: SimClient; palett
       setPending(null);
       return;
     }
-    sendOrder(selected, { posture: pending.posture, target: node, targetClass: pending.targetClass }, `${pending.posture.replace(/_/g, ' ')} order sent → ${places.name(node)}`);
+    const what = f ? postureLabel(f.entry.kind, pending.posture) : pending.posture.replace(/_/g, ' ');
+    sendOrder(selected, { posture: pending.posture, target: node, targetClass: pending.targetClass }, `${what} order sent → ${places.name(node)}`);
     setPending(null);
   };
 
@@ -285,11 +251,8 @@ function Command({ client, palette, initialNation }: { client: SimClient; palett
           <button onClick={() => client.step()} disabled={speed !== 0} title="Advance one tick (.)" data-testid="step">Step ▸</button>
         </div>
         <GameMenu client={client} onBriefing={() => setBriefingOpen(true)} onQuit={quit} />
-        <div className="play-as">
-          <span>Playing</span>
-          <select value={playAs} onChange={(e) => choose(e.target.value as NationId)} data-testid="play-as">
-            {nationOptions}
-          </select>
+        <div className="play-as" data-testid="play-as" title="You command one nation for the whole game. Start a new game to play another.">
+          <span>Playing</span> <b>{client.namer.nation(playAs)}</b>
         </div>
       </header>
 

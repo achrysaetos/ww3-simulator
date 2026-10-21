@@ -16,13 +16,16 @@ export const POSTURES_BY_KIND: Record<FormationKind, readonly Posture[]> = {
   artillery: ['move', 'strike', 'defend', 'reserve'],
   air_defense: ['move', 'defend', 'reserve'],
   missile: ['move', 'strike', 'defend', 'reserve'],
-  air_wing: ['strike', 'air_superiority', 'patrol', 'defend', 'reserve'],
+  air_wing: ['move', 'strike', 'air_superiority', 'patrol', 'defend', 'reserve'],
   surface_group: ['move', 'attack', 'strike', 'patrol', 'blockade', 'defend', 'reserve'],
   submarine: ['move', 'strike', 'patrol', 'blockade', 'reserve'],
   strategic: ['defend', 'reserve'],
   logistics: ['move', 'defend', 'reserve'],
   space: ['patrol', 'reserve'],
 };
+
+/** A posture in the player's words: an air wing's move is a rebase to another airfield. */
+export const postureLabel = (kind: FormationKind, p: Posture): string => (kind === 'air_wing' && p === 'move' ? 'rebase' : p.replace(/_/g, ' '));
 
 export const NEEDS_TARGET: ReadonlySet<Posture> = new Set(['move', 'attack', 'strike', 'air_superiority', 'patrol', 'blockade', 'air_assault']);
 
@@ -84,7 +87,7 @@ export function FormationPanel({ client, palette, places, routes, playAs, comman
       {own && f.status !== 'destroyed' && (
         <div className={`command-line ${command}`} data-testid="command-line">
           {command === 'player' && <><span><b>Under your command.</b> The AI delegate leaves it alone.</span><button onClick={() => onHold(false)} data-testid="release">Hand to AI</button></>}
-          {command === 'delegate' && <><span><b>AI-managed.</b> The delegate commands your {domainLabel}. Any order you give takes it over.</span><button onClick={() => onHold(true)} data-testid="take">Take command</button></>}
+          {command === 'delegate' && <><span><b>AI-managed.</b> The delegate commands your {domainLabel}. An order of yours that is accepted takes it over.</span><button onClick={() => onHold(true)} data-testid="take">Take command</button></>}
           {command === 'none' && <span><b>Awaiting your orders.</b> You have not delegated {domainLabel} to the AI.</span>}
         </div>
       )}
@@ -110,7 +113,7 @@ export function FormationPanel({ client, palette, places, routes, playAs, comman
                 className={pending === p && !pendingLift ? 'active' : f.order.posture === p ? 'current' : ''}
                 onClick={() => (NEEDS_TARGET.has(p) ? onPickPosture(pending === p ? null : p, p === 'strike' ? tc : undefined) : onImmediate(p))}
               >
-                {p.replace(/_/g, ' ')}
+                {postureLabel(f.kind, p)}
               </button>
             ))}
           </div>
@@ -122,10 +125,10 @@ export function FormationPanel({ client, palette, places, routes, playAs, comman
               </select>
             </label>
           )}
-          {pending && <p className="hint">Click a map cell to {pending.replace(/_/g, ' ')}. Esc cancels.</p>}
+          {pending && <p className="hint">{f.kind === 'air_wing' && pending === 'move' ? 'Click the airfield to rebase to.' : `Click a map cell to ${pending.replace(/_/g, ' ')}.`} Esc cancels.</p>}
         </Section>
       ) : (
-        <p className="muted small pad">{own ? 'Formation destroyed.' : `Foreign formation. Play as ${nation?.name ?? f.nation} to command it.`}</p>
+        <p className="muted small pad">{own ? 'Formation destroyed.' : `${nation?.name ?? f.nation} formation. You command only your own nation's forces.`}</p>
       )}
 
       {own && detail.deploy && f.status === 'active' && (
@@ -284,7 +287,6 @@ function Deploy({ d, name, place, pendingLift, onPick }: { d: DeployView; name: 
   );
 }
 
-/** Refused or failed orders, as the log words them: prefixed with the formation's name. */
 /** Today's weather in a line: what matters on land or at sea. */
 function weatherLine(c: Conditions): string {
   const parts = [`${Math.round(c.tempC)}°C`, `low cloud ${Math.round(c.cloud * 100)}%`, `night ${c.nightHours.toFixed(1)} h`];
@@ -298,12 +300,16 @@ function weatherLine(c: Conditions): string {
   return parts.join(' · ');
 }
 
+/** The newest line the log has about this formation: the answer to its last order, or an engine message naming it. */
 function latestReport(client: SimClient, f: Formation): string | null {
   const prefix = `${f.name}: `;
+  const leads = [prefix, `${client.namer.nation(f.nation)}: ${prefix}`];
   const rows = client.feed.rows.messages;
   for (let i = rows.length - 1; i >= 0; i--) {
-    const r = rows[i];
-    if (r.event.type === 'message' && r.event.nation === f.nation && r.text.startsWith(prefix)) return r.text.slice(prefix.length);
+    const r = rows[i], e = r.event;
+    if (e.type === 'command_result' ? e.formation !== f.id : e.type !== 'message' || e.nation !== f.nation) continue;
+    const lead = leads.find((l) => r.text.startsWith(l));
+    if (lead) return r.text.slice(lead.length);
   }
   return null;
 }

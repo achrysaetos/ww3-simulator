@@ -1,9 +1,10 @@
-import type { FormationId, NationId, World } from '../core/types';
+import type { Command, CommandResult, FormationId, NationId, SimEvent, World } from '../core/types';
 import { loadMap } from '../data/load';
 import { profiles } from '../data/nations';
 import { createSession, SCENARIOS } from '../scenarios';
 import { resumeRun, saveRun, type ResumedSession } from '../scenarios/save';
 import { checkCommand } from './commands';
+import { COMMAND_LABEL } from './events';
 import { Pacer } from './pacer';
 import { nationCards, sessionMeta, SnapshotEncoder, type FromWorker, type ScenarioCard, type ToWorker } from './snapshot';
 
@@ -21,7 +22,8 @@ const setPlayer = (world: World, nation: NationId) => {
 
 /**
  * The simulation side of the worker: owns the running World, paces it against the UI's
- * acks, and treats every message from the page as untrusted input.
+ * acks, and treats every message from the page as untrusted input. The player commands one
+ * nation, chosen at start or by the save, for the whole session.
  */
 export class SimHost {
   private session: ResumedSession | null = null;
@@ -30,7 +32,7 @@ export class SimHost {
   private focus: { nation?: NationId; formation?: FormationId } = {};
   private readonly pacer = new Pacer(() => {
     if (!this.session || !this.encoder) return;
-    this.encoder.collect(this.session.engine.step(this.session.world));
+    this.encoder.collect(this.session.engine.step(this.session.world).filter((e) => this.forPlayer(e)));
     this.send();
   });
 
@@ -90,25 +92,43 @@ export class SimHost {
       case 'step':
         this.pacer.step();
         return;
-      case 'command': {
-        const { session, player } = this;
-        if (!session || !player) return;
-        const checked = checkCommand(session.world, session.map, session.catalog, player, msg.command);
-        if (checked.ok) session.world.pending.push(checked.command);
-        else this.post({ type: 'refused', reason: checked.reason });
-        return;
-      }
-      case 'play_as':
-        if (!this.session || !this.session.world.nations[msg.nation]) return;
-        setPlayer(this.session.world, msg.nation);
-        this.player = msg.nation;
-        this.send();
-        return;
+      case 'command':
+        return this.command(msg.command);
       case 'focus':
         this.focus = { nation: msg.nation, formation: msg.formation };
         this.send();
         return;
     }
+  }
+
+  /** Queue the player's command, or answer at once with the boundary's refusal. */
+  private command(raw: unknown): void {
+    const { session, player, encoder } = this;
+    if (!session || !player || !encoder) return;
+    const { world } = session;
+    const checked = checkCommand(world, session.map, session.catalog, player, raw);
+    if (checked.ok) {
+      world.pending.push(checked.command.type === 'order' ? { ...checked.command, byPlayer: true } : checked.command);
+      return;
+    }
+    const r = (typeof raw === 'object' && raw !== null ? raw : {}) as Record<string, unknown>;
+    if (typeof r.type !== 'string' || !Object.hasOwn(COMMAND_LABEL, r.type)) {
+      this.post({ type: 'refused', reason: checked.reason });
+      return;
+    }
+    const formation = typeof r.formation === 'string' && world.formations[r.formation as FormationId] ? (r.formation as FormationId) : undefined;
+    const foreign = r.nation !== player || (formation !== undefined && world.formations[formation].nation !== player);
+    const result: CommandResult = {
+      type: 'command_result', tick: world.tick, nation: player, command: r.type as Command['type'], ...(formation ? { formation } : {}), byPlayer: true,
+      ok: false, code: foreign ? 'not_yours' : 'invalid', reason: checked.reason,
+    };
+    encoder.collect([result]);
+    this.send();
+  }
+
+  /** The UI hears answers to the player's own commands only, not to the AI's. */
+  private forPlayer(e: SimEvent): boolean {
+    return e.type !== 'command_result' || (e.nation === this.player && !!e.byPlayer);
   }
 
   private open(session: ResumedSession, nation: NationId): void {

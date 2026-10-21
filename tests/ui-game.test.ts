@@ -7,7 +7,7 @@ import { createSession } from '../src/scenarios';
 import { briefingFor, objectives, outcome } from '../src/ui/briefing';
 import { checkCommand } from '../src/ui/commands';
 import { SimHost } from '../src/ui/host';
-import { emptyClientState, SnapshotEncoder, applySnapshot, type FromWorker } from '../src/ui/snapshot';
+import { emptyClientState, SnapshotEncoder, applySnapshot, type FromWorker, type ToWorker } from '../src/ui/snapshot';
 
 const N = id.nation;
 
@@ -173,6 +173,7 @@ describe('worker host', () => {
   const posts: FromWorker[] = [];
   const host = new SimHost((m) => posts.push(m));
   const last = <T extends FromWorker['type']>(t: T) => posts.filter((m) => m.type === t).at(-1) as Extract<FromWorker, { type: T }> | undefined;
+  const lastAnswer = () => posts.flatMap((m) => (m.type === 'snapshot' ? m.snapshot.events : [])).filter((e) => e.type === 'command_result').at(-1);
   afterAll(() => host.handle({ type: 'quit' }));
 
   it('starts, refuses a command for another nation, saves, quits and resumes the same war as the same nation', () => {
@@ -180,7 +181,7 @@ describe('worker host', () => {
     expect(last('ready')?.playing).toBe('KOR');
     const world = host.world!;
     host.handle({ type: 'command', command: { type: 'set_mobilization', nation: N('PRK'), level: 0 } });
-    expect(last('refused')?.reason).toMatch(/you command KOR/);
+    expect(lastAnswer()).toMatchObject({ command: 'set_mobilization', ok: false, code: 'not_yours', reason: expect.stringMatching(/you command KOR/) });
     expect(world.pending.some((c: Command) => c.type === 'set_mobilization' && c.nation === 'PRK' && c.level === 0)).toBe(false);
     host.handle({ type: 'command', command: { type: 'set_mobilization', nation: N('KOR'), level: 0.9 } });
     expect(world.pending.at(-1)).toEqual({ type: 'set_mobilization', nation: 'KOR', level: 0.9 });
@@ -201,9 +202,10 @@ describe('worker host', () => {
     expect(host.world!.tick).toBe(saved.tick);
   });
 
-  it('commands only the nation the player switched to', () => {
-    host.handle({ type: 'play_as', nation: N('PRK') as NationId });
-    host.handle({ type: 'command', command: { type: 'hold', nation: N('KOR'), formations: [] as FormationId[], held: true } });
-    expect(last('refused')?.reason).toMatch(/you command PRK/);
+  it('keeps the player on the nation chosen at the start: the old switch message does nothing', () => {
+    host.handle({ type: 'play_as', nation: N('PRK') as NationId } as ToWorker);
+    host.handle({ type: 'command', command: { type: 'hold', nation: N('PRK'), formations: [] as FormationId[], held: true } });
+    expect(lastAnswer()).toMatchObject({ command: 'hold', ok: false, code: 'not_yours', reason: expect.stringMatching(/you command KOR/) });
+    expect(host.world!.nations[N('PRK')].controlledBy).toBe('ai');
   });
 });

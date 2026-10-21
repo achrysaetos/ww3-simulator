@@ -134,13 +134,12 @@ describe('strategic deployment', () => {
 
   it('refuses an overseas move with nowhere to embark rather than dropping it silently', () => {
     const t = setup();
-    const events: string[] = [];
     const brigade = heavyBrigade(t, 'USA', t.nodeAt(...FORT_HOOD));
     // Every US port in enemy hands.
     for (let n = 0; n < t.map.landCount; n++) if (t.world.control[n] === N('USA') && t.map.ports[n]) t.world.control[n] = N('RUS');
-    applyLandOrder(t.world, { type: 'order', nation: N('USA'), formation: brigade.id, order: { posture: 'move', target: t.nodeAt(...BREMERHAVEN) } }, { ...t.engine.context(t.world), emit: (e) => { if (e.type === 'message') events.push(e.text); } });
+    const result = applyLandOrder(t.world, { type: 'order', nation: N('USA'), formation: brigade.id, order: { posture: 'move', target: t.nodeAt(...BREMERHAVEN) } }, t.engine.context(t.world));
     expect(brigade.order.posture).toBe('defend');
-    expect(events.some((e) => e.includes('port'))).toBe(true);
+    expect(result).toMatchObject({ ok: false, code: 'no_lift', reason: expect.stringContaining('port') });
   });
 });
 

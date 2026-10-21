@@ -291,10 +291,66 @@ export type SimEvent =
   | { type: 'production'; tick: number; nation: NationId; item: ItemId; count: number }
   | { type: 'shortage'; tick: number; nation: NationId; what: string }
   | { type: 'capitulation'; tick: number; nation: NationId; to: NationId[] }
-  | { type: 'message'; tick: number; nation?: NationId; text: string };
+  | { type: 'message'; tick: number; nation?: NationId; text: string }
+  | CommandResult;
+
+/** Why a command was refused. A closed set, so the UI can word and act on each one. */
+export type RefusalCode =
+  /** The command names a nation or formation the issuer does not command. */
+  | 'not_yours'
+  /** The command failed the boundary's checks: an unknown id, a malformed field. */
+  | 'invalid'
+  | 'unknown_formation'
+  | 'destroyed'
+  /** Not fit to act now: routed, in a shipyard, already embarked. */
+  | 'not_ready'
+  /** The formation's kind or equipment cannot carry out that posture. */
+  | 'wrong_role'
+  | 'no_target'
+  /** The target or lift named is not one the order can use. */
+  | 'bad_target'
+  | 'out_of_range'
+  | 'no_lift'
+  | 'no_route'
+  | 'no_airfield'
+  /** An air assault without friendly air control over the drop zone. */
+  | 'no_air_cover'
+  | 'not_in_port'
+  | 'embarked'
+  /** The target belongs to a nation the issuer is not at war with. */
+  | 'neutral_territory';
+
+/**
+ * The answer to one command, emitted by whichever system applied it. 'relayed' means the order is
+ * in transit down a degraded chain of command (c2) and a final answer follows when it arrives.
+ */
+export type CommandResult = {
+  type: 'command_result';
+  tick: number;
+  nation: NationId;
+  command: Command['type'];
+  formation?: FormationId;
+  /** The human player issued it (an order flagged `byPlayer`, or a command only players issue). */
+  byPlayer?: true;
+  reason: string;
+} & (
+  | {
+      ok: true;
+      code: 'accepted' | 'relayed';
+      /** Hours until the order takes effect or the formation arrives, when known. */
+      etaHours?: number;
+      /** A caveat the player should hear with the acceptance. */
+      note?: string;
+    }
+  | { ok: false; code: RefusalCode }
+);
 
 export type Command =
-  | { type: 'order'; nation: NationId; formation: FormationId; order: Omit<Order, 'issuedTick'> }
+  /**
+   * `byPlayer` marks the human player's own order: accepted, it takes the formation from the AI
+   * delegate; refused, the delegate keeps it. Only the session host sets it.
+   */
+  | { type: 'order'; nation: NationId; formation: FormationId; order: Omit<Order, 'issuedTick'>; byPlayer?: true }
   | { type: 'declare_war'; nation: NationId; target: NationId; reason?: string }
   | { type: 'offer_peace'; nation: NationId; target: NationId }
   | { type: 'sanction'; nation: NationId; target: NationId; on: boolean }

@@ -1,10 +1,14 @@
 import type { SimContext, System } from '../core/engine';
-import type { Command, CommandDomain, FormationId, FormationKind, NationId, World } from '../core/types';
-import { holdOrder } from './c2';
+import type { Command, CommandDomain, CommandResult, FormationId, FormationKind, NationId, RefusalCode, World } from '../core/types';
+import { holdOrder, orderDelayHours } from './c2';
 
 export type OrderCommand = Extract<Command, { type: 'order' }>;
-/** Returns true when it took the order; false passes it to the next handler. */
-export type OrderHandler = (world: World, cmd: OrderCommand, ctx: SimContext) => boolean;
+/** A domain's answer to an order it took. A refused order leaves the formation as it was. */
+export type OrderOutcome =
+  | { ok: true; etaHours?: number; note?: string }
+  | { ok: false; code: RefusalCode; reason: string };
+/** Answers an order it takes; undefined passes the order to the next handler. */
+export type OrderHandler = (world: World, cmd: OrderCommand, ctx: SimContext) => OrderOutcome | undefined;
 
 /**
  * What a human nation lets its AI delegate do. AI nations have no entry: their AI does everything.
@@ -14,6 +18,8 @@ export type OrderHandler = (world: World, cmd: OrderCommand, ctx: SimContext) =>
 export interface Authority {
   ai: Record<CommandDomain, boolean>;
   held: Record<FormationId, true>;
+  /** Held only until the player's order in transit is answered: a refusal hands the formation back. */
+  taking?: Record<FormationId, true>;
   /** The player's answers to treaty calls, keyed `${war}|${treaty}`, until diplomacy acts on them. */
   answers: Record<string, boolean>;
 }
@@ -99,29 +105,72 @@ export function createOrderRouter(handlers: readonly OrderHandler[]): System {
       switch (cmd.type) {
         case 'delegate':
           authorityMut(world, cmd.nation).ai[cmd.domain] = cmd.ai;
-          return;
+          return ctx.emit(answer(world, cmd, { ok: true }, `${cmd.domain} ${cmd.ai ? 'handed to the AI delegate' : 'under your command'}`));
         case 'hold': {
-          const held = authorityMut(world, cmd.nation).held;
+          const auth = authorityMut(world, cmd.nation);
+          const foreign = cmd.formations.filter((id) => world.formations[id]?.nation !== cmd.nation);
           for (const id of cmd.formations) {
-            if (world.formations[id]?.nation !== cmd.nation) continue;
-            if (cmd.held) held[id] = true;
-            else delete held[id];
+            if (foreign.includes(id)) continue;
+            if (cmd.held) auth.held[id] = true;
+            else delete auth.held[id];
+            if (auth.taking) delete auth.taking[id];
           }
-          return;
+          const formation = cmd.formations.length === 1 ? cmd.formations[0] : undefined;
+          const result = foreign.length
+            ? { ok: false as const, code: 'not_yours' as const, reason: `${foreign.length} of the formations are not yours` }
+            : { ok: true as const };
+          return ctx.emit(answer(world, cmd, result, cmd.held ? 'under your command' : 'handed to the AI delegate', formation));
         }
         case 'answer_treaty':
           authorityMut(world, cmd.nation).answers[`${cmd.war}|${cmd.treaty}`] = cmd.join;
-          return;
-        case 'order': {
-          const f = world.formations[cmd.formation];
-          if (!f || f.nation !== cmd.nation || f.status === 'destroyed') return;
-          if (holdOrder(world, cmd)) return;
-          if (handlers.some((h) => h(world, cmd, ctx))) return;
-          f.order = { ...cmd.order, issuedTick: world.tick };
-          return;
-        }
+          return ctx.emit(answer(world, cmd, { ok: true }, cmd.join ? 'will honour the treaty' : 'will stay out'));
+        case 'order':
+          return ctx.emit(applyOrder(world, cmd, ctx, handlers));
       }
     },
     step() {},
   };
+}
+
+/**
+ * The player's order takes the formation from the delegate at once, so the delegate cannot
+ * overrule it while it travels down the chain; if the order is then refused the delegate has it back.
+ */
+function applyOrder(world: World, cmd: OrderCommand, ctx: SimContext, handlers: readonly OrderHandler[]): CommandResult {
+  const f = world.formations[cmd.formation];
+  if (!f) return answer(world, cmd, { ok: false, code: 'unknown_formation', reason: 'no such formation' });
+  if (f.nation !== cmd.nation) return answer(world, cmd, { ok: false, code: 'not_yours', reason: `${f.name} belongs to ${f.nation}` });
+  if (f.status === 'destroyed') return answer(world, cmd, { ok: false, code: 'destroyed', reason: `${f.name} has been destroyed` });
+  const auth = cmd.byPlayer ? authorityMut(world, cmd.nation) : undefined;
+  if (auth && !auth.held[f.id]) {
+    auth.held[f.id] = true;
+    (auth.taking ??= {})[f.id] = true;
+  }
+  if (holdOrder(world, cmd)) return answer(world, cmd, { ok: true }, 'relayed down a degraded chain of command', undefined, orderDelayHours(world, f.id));
+  let outcome: OrderOutcome | undefined;
+  for (const h of handlers) if ((outcome = h(world, cmd, ctx))) break;
+  if (!outcome) {
+    f.order = { ...cmd.order, issuedTick: world.tick };
+    outcome = { ok: true };
+  }
+  if (auth?.taking?.[f.id]) {
+    if (!outcome.ok) delete auth.held[f.id];
+    delete auth.taking[f.id];
+  }
+  return answer(world, cmd, outcome);
+}
+
+function answer(world: World, cmd: Command, o: OrderOutcome, accepted = 'order accepted', formation?: FormationId, relayedEta?: number): CommandResult {
+  const base = {
+    type: 'command_result' as const,
+    tick: world.tick,
+    nation: cmd.nation,
+    command: cmd.type,
+    ...(cmd.type === 'order' ? { formation: cmd.formation } : formation ? { formation } : {}),
+    // Only the player issues anything but orders; an order says whether the player gave it.
+    ...(cmd.type !== 'order' || cmd.byPlayer ? { byPlayer: true as const } : {}),
+  };
+  if (!o.ok) return { ...base, ok: false, code: o.code, reason: o.reason };
+  if (relayedEta !== undefined) return { ...base, ok: true, code: 'relayed', reason: accepted, etaHours: relayedEta };
+  return { ...base, ok: true, code: 'accepted', reason: accepted, ...(o.etaHours !== undefined ? { etaHours: o.etaHours } : {}), ...(o.note ? { note: o.note } : {}) };
 }
