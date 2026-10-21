@@ -8,6 +8,7 @@ import { reindex, tickEnv } from './env';
 import { mineWarfare } from './mines';
 import { advance } from './movement';
 import { refreshOrders } from './orders';
+import { sealift } from './sealift';
 import type { SalvoOutcome } from './salvo';
 import { OCEAN_SURVEILLANCE } from './tables';
 
@@ -15,6 +16,7 @@ export { applyNavalOrder, isNavalOrder } from './orders';
 export { resolveSalvo, hitWeight } from './salvo';
 export type { NavalState, NavalLedger } from './state';
 export { CHOKEPOINTS } from './geography';
+export { isSealift } from './sealift';
 export { ANTISHIP_KINDS } from './tables';
 
 /**
@@ -39,6 +41,7 @@ export const navalWar: System = {
     const env = tickEnv(world, ctx, true);
     const prior = world.slices.naval.tracks;
     for (const f of env.naval) refreshOrders(world, ctx, f, isTrackedByOwnSide(prior, f.order.targetFormation, f.nation));
+    sealift(env);
     for (const f of env.naval) {
       const from = f.node;
       advance(world, ctx.map, f, env.comp(f));

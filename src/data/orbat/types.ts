@@ -18,4 +18,6 @@ export interface OrbatEntry {
   /** Munitions beyond the platforms' standard loadouts, e.g. a missile brigade's reloads. */
   extraMagazine?: Record<string, number>;
   source?: string;
+  /** Territorial or home-defence force that fights only on its own nation's soil. */
+  territorial?: true;
 }

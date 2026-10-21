@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { platformCount } from '../src/core/forces';
 import type { Formation, NodeId, Order, PlatformId, SimEvent } from '../src/core/types';
 import { applyLandOrder, combatPower, landCombat, landMovement, terrainDefense } from '../src/systems/land';
+import { marchKmPerDay } from '../src/systems/land/movement';
 import { loadMap } from '../src/data/load';
 import type { System } from '../src/core/engine';
 import { logistics } from '../src/systems/logistics';
@@ -89,6 +90,9 @@ describe('land combat', () => {
     expect(supplied.def.supply.fuel).toBeLessThan(supplied.def.supplyCapacity.fuel);
     const dry = assault({ ratio: 3, defNode: PLAIN_UKR, attNode: PLAIN_RUS, entrench: 1, days: 2, before: (_s, _a, def) => (def.supply.ammo = 0) });
     expect(dry.attLoss).toBeLessThan(supplied.attLoss * 0.3);
+    // Fuel-starved armour cannot shift to alternate positions or counter-attack: it fights worse before the last litre.
+    const hour = (fuel: number) => assault({ ratio: 3, defNode: PLAIN_UKR, attNode: PLAIN_RUS, entrench: 1, days: 0.25, before: (_s, _a, def) => (def.supply.fuel = def.supplyCapacity.fuel * fuel) }).attLoss;
+    expect(hour(0.01)).toBeLessThan(hour(1) * 0.9);
   });
 
   it('air control decides an even fight', () => {
@@ -207,6 +211,18 @@ describe('land movement', () => {
     const dry = ticksToArrive((_s, f) => (f.supply.fuel = 0));
     expect(rail).toBeLessThan(wrecked);
     expect(dry).toBeGreaterThan(wrecked * 3);
+  });
+
+  it('slows with the fuel on hand, not only once the tanks are empty', () => {
+    const s = setup();
+    const f = s.add({ nation: RUS, name: 'x', kind: 'maneuver', echelon: 'brigade', node: s.nodeAt(55.75, 37.6), equipment: brigade(1) });
+    const speedAt = (share: number) => {
+      f.supply.fuel = f.supplyCapacity.fuel * share;
+      return marchKmPerDay(s.world, s.catalog, f);
+    };
+    const full = speedAt(1), sliver = speedAt(0.01), dry = speedAt(0);
+    expect(sliver).toBeLessThan(full * 0.5);
+    expect(sliver).toBeGreaterThan(dry);
   });
 
   it('enemy air control slows movement', () => {

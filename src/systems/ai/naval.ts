@@ -327,6 +327,8 @@ export function planNaval(p: Plan): void {
   if (assault) runAssault(p, assault, liftCapable);
   const unescorted = [...(assault ? liftCapable.filter((g) => g.order.posture !== 'reserve') : []), ...groups.filter((g) => roles.get(g) === 'capital')];
   for (const g of groups) {
+    // Groups with no fighting role (sealift) sail under naval/sealift.ts.
+    if (!roles.get(g)) continue;
     if (inPort.has(g.home) && roles.get(g) !== 'raider' && roles.get(g) !== 'ssbn') {
       issue(p, g, { posture: 'patrol', target: nearestSea(map, g.home) });
       continue;

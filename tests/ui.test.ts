@@ -149,7 +149,7 @@ describe('dashboard detail', () => {
     const f = t.add({ nation: nation('UKR'), name: 'Bde', kind: 'maneuver', echelon: 'brigade', node: t.nodeAt(48.5, 37.9), equipment: { [id.platform('t_mbt')]: 30 } });
     const quiet = enc.encode(t.world, t.map, { formation: f.id }).focusFormation!;
     expect(quiet).toMatchObject({ engaged: false, isolatedDays: 0, supplyFlow: null, trackedBy: [] });
-    t.world.slices.land = { baseline: { [f.id]: 30 }, isolatedDays: { [f.id]: 3.5 }, contest: {}, fortified: {}, origin: [], shellsFired: {} };
+    t.world.slices.land = { baseline: { [f.id]: 30 }, isolatedDays: { [f.id]: 3.5 }, contest: {}, fortified: {}, origin: [], shellsFired: {}, airlifted: {} };
     expect(enc.encode(t.world, t.map, { formation: f.id }).focusFormation).toMatchObject({ engaged: true, isolatedDays: 3.5 });
   });
 });

@@ -173,7 +173,7 @@ const rows: Row[] = [
 ];
 
 export const ukr = [
-  ...rows.map(([name, at, kit]) => u(name, 'maneuver', 'brigade', sector[at], kit, { ...WAR, personnel: Math.round((kit.infantry_squad ?? 0) * 40 + 600) })),
+  ...rows.map(([name, at, kit]) => u(name, 'maneuver', 'brigade', sector[at], kit, { ...WAR, personnel: Math.round((kit.infantry_squad ?? 0) * 40 + 600), ...(kit === TDF && { territorial: true as const }) })),
 
   // Artillery, rocket and missile brigades
   u('26th Separate Artillery Brigade', 'artillery', 'brigade', sector.kramatorsk, { '2s19': 12, '2s3': 18, pzh2000: 6, caesar: 6, truck: 150 }, WAR),
