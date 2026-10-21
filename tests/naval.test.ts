@@ -234,6 +234,25 @@ describe('naval salvo combat', () => {
   });
 });
 
+describe('passage routing', () => {
+  // The US squadrons lost in transit after the map change: sent from the Sea of Japan to the Philippine Sea, they
+  // took the shortest route through the East China Sea past the PLA's bases. A task force on passage goes round.
+  it('routes a passage out of reach of the enemy coast when the open ocean offers a way round', () => {
+    const t = navalWorld();
+    t.war('USA', 'CHN');
+    const from = t.nodeAt(38.5, 134.5), to = t.nodeAt(19.5, 123.5);
+    const g = t.add({ nation: USA, name: 'DESRON', kind: 'surface_group', node: from, equipment: t.eq({ n_cruiser: 2 }) });
+    t.order(g, { posture: 'patrol', target: to });
+    const path = g.order.path ?? [];
+    expect(path.length).toBeGreaterThan(0);
+    expect(path[path.length - 1]).toBe(to);
+    const enemyCoast: NodeId[] = [];
+    for (let n = 0; n < t.map.landCount; n++) if (t.world.control[n] === CHN && [...t.map.neighbors(n as NodeId)].some((m) => t.map.isSea(m))) enemyCoast.push(n as NodeId);
+    const nearest = (z: NodeId) => Math.min(...enemyCoast.map((n) => t.map.distanceKm(n, z)));
+    for (const z of path.slice(0, -1)) expect(nearest(z)).toBeGreaterThan(450);
+  });
+});
+
 describe('submarine warfare', () => {
   const quietSsn = (t: ReturnType<typeof navalWorld>, at: NodeId) => {
     const s = t.add({ nation: USA, name: 'SSN', kind: 'submarine', echelon: 'squadron', node: at, equipment: t.eq({ t_ssn: 1 }), magazine: {} });

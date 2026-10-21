@@ -91,3 +91,43 @@ export function advance(world: World, map: GameMap, f: Formation, comp: Composit
   }
   f.supply.fuel = Math.max(0, f.supply.fuel - moved * burnPerKm);
 }
+
+/**
+ * Reach of shore-based anti-ship missiles and the coastal ASW forces around an enemy's bases
+ * that ships in transit route around, km: Bastion-P's P-800 (~450 km) and the YJ-12 and Noor
+ * batteries are of this order (judgment).
+ */
+const SHORE_THREAT_KM = 450;
+const threatMemo = new WeakMap<World, { tick: number; byNation: Map<NationId, (zone: number) => boolean> }>();
+
+/** Sea zones within SHORE_THREAT_KM of a coast held by an enemy of `nation`, memoized per tick. */
+export function shoreThreat(world: World, map: GameMap, nation: NationId): (zone: number) => boolean {
+  let memo = threatMemo.get(world);
+  if (!memo || memo.tick !== world.tick) threatMemo.set(world, (memo = { tick: world.tick, byNation: new Map() }));
+  let fn = memo.byNation.get(nation);
+  if (fn) return fn;
+  const coast: NodeId[] = [];
+  for (let n = 0; n < map.landCount; n++) {
+    const c = world.control[n];
+    if (!c || !atWar(world, nation, c)) continue;
+    for (const m of map.neighbors(n as NodeId)) if (map.isSea(m)) { coast.push(n as NodeId); break; }
+  }
+  const hits = new Map<number, boolean>();
+  fn = (zone) => {
+    let hit = hits.get(zone);
+    if (hit === undefined) hits.set(zone, (hit = coast.some((n) => map.distanceKm(n, zone as NodeId) <= SHORE_THREAT_KM)));
+    return hit;
+  };
+  memo.byNation.set(nation, fn);
+  return fn;
+}
+
+/**
+ * A route that keeps out of the enemy's shore threat between its start and its destination, as
+ * a submarine or task force on passage does (the US boats lost in transit past the PLA's
+ * submarine bases north of Taiwan), or the plain shortest route when no such route exists.
+ */
+export function transitPath(world: World, map: GameMap, nation: NationId, from: NodeId, to: NodeId): NodeId[] | null {
+  const threat = shoreThreat(world, map, nation);
+  return seaPath(world, map, nation, from, to, (z) => z !== from && threat(z)) ?? seaPath(world, map, nation, from, to);
+}
