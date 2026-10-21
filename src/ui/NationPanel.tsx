@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { COMMAND_DOMAINS, type Command, type CommandDomain, type ItemId, type NationId } from '../core/types';
 import type { SimClient } from './client';
 import type { Palette } from './colors';
-import type { EconomyView, MunitionGroup, NationDetail, WarEntry, WarView } from './snapshot';
+import type { EconomyView, NuclearAlertView, MunitionGroup, NationDetail, WarEntry, WarView } from './snapshot';
 import type { Objective } from './briefing';
 import { ObjectiveList } from './GameFlow';
 import { Bar, Section, Stat, fmtNum, fmtUsdB } from './widgets';
@@ -168,6 +168,7 @@ export function NationPanel({ client, palette, playAs, objectives, onCommand, on
           {d && <Stat label="Strategic launchers">{fmtNum(d.nuclear.launchers)}</Stat>}
           {d && <Stat label="Satellites">{fmtNum(d.nuclear.satellites)}</Stat>}
         </div>
+        {d && <NuclearAlert alert={d.nuclear.alert} nation={n.id} dtHours={client.meta?.dtHours ?? 6} tick={client.state.tick} onCommand={onCommand} />}
         {d && Object.keys(d.nuclear.bmd).length > 0 && (
           <table className="tbl">
             <thead><tr><th>Missile defence</th><th className="num">Interceptors</th></tr></thead>
@@ -251,6 +252,25 @@ function Delegation({ d, onCommand }: { d: NationDetail; onCommand: Props['onCom
   );
 }
 
+function NuclearAlert({ alert, nation, tick, dtHours, onCommand }: { alert: NuclearAlertView; nation: NationId; tick: number; dtHours: number; onCommand: Props['onCommand'] }) {
+  const { stored, mated, ordered } = alert;
+  if (!ordered && stored <= 0) return null;
+  return (
+    <div className="alert-status small" data-testid="nuclear-alert">
+      <p className="muted" data-testid="alert-status">
+        {fmtNum(mated)} warheads mated to launchers, {fmtNum(stored)} in storage.
+        {ordered && ` Alert ordered ${Math.max(0, Math.floor(((tick - ordered.tick) * dtHours) / 24))}d ago: ${fmtNum(ordered.mated)} of ${fmtNum(ordered.of)} stored warheads mated so far.`}
+        {!ordered && !alert.canOrder && ' No alert timeline is on record for this state.'}
+      </p>
+      {alert.canOrder && (
+        <button className="danger" onClick={() => onCommand({ type: 'nuclear_alert', nation }, 'Nuclear alert ordered: stored warheads are being mated')} data-testid="nuclear-alert-order">
+          Order nuclear alert
+        </button>
+      )}
+    </div>
+  );
+}
+
 function Production({ client, nation, eco, treasuryUsdB, onCommand }: { client: SimClient; nation: NationId; eco: EconomyView | null | undefined; treasuryUsdB: number; onCommand: Props['onCommand'] }) {
   const [item, setItem] = useState('');
   const [rate, setRate] = useState(10);
@@ -264,7 +284,8 @@ function Production({ client, nation, eco, treasuryUsdB, onCommand }: { client: 
   }, [meta, nation]);
   if (!options) return <p className="muted small">No domestic arms industry: this nation cannot open production lines.</p>;
   const line = item ? eco?.capacity[item] : undefined;
-  const max = line ? Math.max(0, Math.floor(line.surge)) : undefined;
+  const ceiling = item && !line ? eco?.greenfield[item] : undefined;
+  const max = line ? Math.max(0, Math.floor(line.surge)) : ceiling !== undefined ? Math.max(0, Math.floor(ceiling)) : undefined;
   const ordered = max === undefined ? rate : Math.min(rate, max);
   const unitUsdM = meta?.platforms[item]?.costUsdM ?? meta?.munitions[item]?.costUsdM ?? 0;
   const monthlyB = (ordered * unitUsdM) / 1000;
@@ -291,7 +312,7 @@ function Production({ client, nation, eco, treasuryUsdB, onCommand }: { client: 
           <p className="muted">
             {line
               ? `Your line makes ${fmtNum(line.perMonth)} a month now and can surge to ${fmtNum(line.surge)}; the order raises it toward that over months.`
-              : 'No line builds this yet. A new line takes months to tool up, and its size is limited by your industry.'}
+              : `No line builds this yet. A new line takes months to tool up${ceiling !== undefined ? ` and can reach at most ${fmtNum(ceiling)} a month, set by your industry` : ', and its size is limited by your industry'}.`}
           </p>
         </div>
       )}

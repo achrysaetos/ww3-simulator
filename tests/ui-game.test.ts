@@ -3,6 +3,7 @@ import type { Command, FormationId, NationId, NodeId } from '../src/core/types';
 import { geography } from '../src/systems/naval/geography';
 import { liftMode } from '../src/systems/land/strategic';
 import { id, testWorld } from '../src/testkit';
+import { createSession } from '../src/scenarios';
 import { briefingFor, objectives, outcome } from '../src/ui/briefing';
 import { checkCommand } from '../src/ui/commands';
 import { SimHost } from '../src/ui/host';
@@ -27,6 +28,11 @@ describe('command boundary', () => {
     expect(check({ type: 'delegate', nation: 'UKR', domain: 'everything', ai: true })).toMatchObject({ ok: false });
     expect(check({ type: 'hold', nation: 'UKR', formations: [mine.id, theirs.id], held: true })).toMatchObject({ ok: false });
     expect(check({ type: 'self_destruct', nation: 'UKR' })).toMatchObject({ ok: false });
+  });
+
+  it('passes a nuclear alert for the own nation only', () => {
+    expect(check({ type: 'nuclear_alert', nation: 'UKR' })).toEqual({ ok: true, command: { type: 'nuclear_alert', nation: 'UKR', reason: undefined } });
+    expect(check({ type: 'nuclear_alert', nation: 'RUS' })).toMatchObject({ ok: false });
   });
 
   it('passes a valid order through rebuilt, keeping only known fields', () => {
@@ -105,6 +111,27 @@ describe('nuclear options', () => {
     w.add({ nation: N('RUS'), name: 'Their silo', kind: 'strategic', echelon: 'squadron', node: w.nodeAt(55, 37), equipment: { [id.platform('t_icbm')]: 10 } }).magazine = { [id.munition('t_nuke_tac')]: 4 };
     const weapons = enc.encode(w.world, w.map, { nation: N('GBR') }).focusNation!.nuclear.weapons;
     expect(weapons).toEqual([{ munition: 't_nuke', sites: [{ node: silo.node, reachKm: 12000, rounds: 10 }] }]);
+  });
+});
+
+describe('nuclear alert and greenfield ceilings in the nation view', () => {
+  it('shows stored versus mated warheads and the ceiling for items with no line, and an alert changes the view', () => {
+    const s = createSession('south-asia-2027', 1);
+    const PAK = N('PAK');
+    const enc = new SnapshotEncoder(s.map.nationIds, s.catalog, s.map.size);
+    const view = () => enc.encode(s.world, s.map, { nation: PAK }).focusNation!;
+    const a = view().nuclear.alert;
+    expect(a.stored).toBeGreaterThan(0);
+    expect(a.mated).toBe(s.world.nations[PAK].nuclear.deployed);
+    expect(a).toMatchObject({ canOrder: true, ordered: null });
+    s.world.pending.push({ type: 'nuclear_alert', nation: PAK });
+    s.engine.step(s.world);
+    expect(view().nuclear.alert).toMatchObject({ canOrder: false, ordered: { of: a.stored } });
+    const lines = view().economy!;
+    const noLine = Object.keys(lines.greenfield);
+    expect(noLine.length).toBeGreaterThan(0);
+    expect(noLine.some((i) => lines.capacity[i])).toBe(false);
+    expect(Object.values(lines.greenfield).every((v) => v > 0)).toBe(true);
   });
 });
 
