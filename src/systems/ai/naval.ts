@@ -4,7 +4,7 @@ import type { Formation, FormationId, NationId, NodeId, PlatformClass, PlatformI
 import { liftShare } from '../naval/amphibious';
 import { geography, sameWaters, seaNeighbour } from '../naval/geography';
 import { sailable } from '../naval/movement';
-import { areaDefenseShare, boardable, REARMED } from '../naval/orders';
+import { areaDefenseShare, boardable, REARMED, SEAWORTHY } from '../naval/orders';
 import { compose, fleetLosses } from '../naval/state';
 import { dominant, isGround, issue, sighted } from './forces';
 import { enemyPowerAt, landMass } from './fronts';
@@ -342,15 +342,6 @@ function runAssault(p: Plan, a: Assault, lifts: Formation[]): void {
     }
   }
 }
-
-/**
- * Readiness below which a group is in a shipyard availability and cannot sail: a carrier in
- * refuelling overhaul (about four years) or a docking availability. Under the US Navy's Optimized
- * Fleet Response Plan a ship in its maintenance phase is not surge-ready; one in the basic phase
- * between deployments is (GAO-21-366, 2021). The threshold is judgment: it separates the yard
- * availabilities in the orders of battle (0.05-0.2) from ships working up (0.4 and above).
- */
-const SEAWORTHY = 0.25;
 
 /**
  * Naval groups: SSBNs hold a bastion in home waters; a nation able to invade across the sea

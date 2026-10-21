@@ -10,6 +10,15 @@ import { INTERCEPTOR_KINDS } from './tables';
 type OrderCommand = Extract<Command, { type: 'order' }>;
 
 /**
+ * Readiness below which a group is in a shipyard availability and cannot sail: a carrier in
+ * refuelling overhaul (about four years) or a docking availability. Under the US Navy's Optimized
+ * Fleet Response Plan a ship in its maintenance phase is not surge-ready; one in the basic phase
+ * between deployments is (GAO-21-366, 2021). The threshold is judgment: it separates the yard
+ * availabilities in the orders of battle (0.05-0.2) from ships working up (0.4 and above).
+ */
+export const SEAWORTHY = 0.25;
+
+/**
  * Whether the coordinator should route this 'order' to the naval system: orders to surface
  * groups and submarines, any 'embark' order (a land or air formation boarding a lift group),
  * and orders to formations currently embarked.
@@ -51,6 +60,7 @@ export function applyNavalOrder(world: World, cmd: OrderCommand, ctx: SimContext
   if (f.status === 'embarked') return refuse('embarked formations land by ordering their lift group to attack or move to a coast');
   if (!isNavalFormation(f)) return refuse('not a naval formation');
 
+  if (f.readiness < SEAWORTHY && order.posture !== 'reserve' && f.node === f.home) return refuse(`${f.name} is in a shipyard availability and cannot sail`);
   const goal = order.posture === 'reserve' ? f.home : goalNode(world, order.target, order.targetFormation);
   if (goal === undefined) {
     f.order = { ...order, path: [] };

@@ -213,6 +213,22 @@ describe('naval salvo combat', () => {
     expect(lift.status).toBe('destroyed');
     expect(troops.status).toBe('destroyed');
   });
+
+  it('sinking a cargo ship loses the vehicles aboard but not the troops, who fly', () => {
+    const t = navalWorld();
+    const port = t.portOf('USA', 36.9, -76.3);
+    const lift = t.add({ nation: USA, name: 'RO-RO group', kind: 'surface_group', node: port, equipment: t.eq({ t_lmsr: 2 }) });
+    const troops = t.add({ nation: USA, name: 'Armored battalion', kind: 'maneuver', echelon: 'battalion', node: port, equipment: t.eq({ t_inf: 30, t_mbt: 20 }) });
+    const people = troops.personnel;
+    // As naval/sealift.ts loads a waiting formation.
+    troops.status = 'embarked';
+    troops.embarkedOn = lift.id;
+    strikeNavalGroup(t.world, t.engine.context(t.world), RUS, mid('n_exocet'), 12, lift.id);
+    expect(lift.status).toBe('destroyed');
+    expect(troops.status).toBe('active');
+    expect(troops.personnel).toBe(people);
+    expect(troops.equipment[mid('t_mbt') as unknown as PlatformId] ?? 0).toBe(0);
+  });
 });
 
 describe('submarine warfare', () => {
@@ -551,6 +567,21 @@ describe('naval movement and lift', () => {
     expect(fuelled.node).not.toBe(a);
     expect(fuelled.supply.fuel).toBeLessThan(fuelled.supplyCapacity.fuel);
     expect(ssn.node).not.toBe(a);
+  });
+
+  it('a carrier in a refuelling overhaul refuses an order to sail, whoever gives it; one between deployments sails', () => {
+    const t = navalWorld();
+    const port = t.portOf('USA', 36.9, -76.3);
+    const at = t.nodeAt(35, -40);
+    const yard = t.add({ nation: USA, name: 'CVN in overhaul', kind: 'surface_group', node: port, equipment: t.eq({ n_carrier: 1 }) });
+    const ready = t.add({ nation: USA, name: 'CVN', kind: 'surface_group', node: port, equipment: t.eq({ n_carrier: 1 }) });
+    yard.readiness = 0.05;
+    ready.readiness = 0.6;
+    for (const f of [yard, ready]) t.order(f, { posture: 'patrol', target: at });
+    t.engine.run(t.world, 8);
+    expect(yard.node).toBe(port);
+    expect(yard.order.posture).not.toBe('patrol');
+    expect(ready.node).not.toBe(port);
   });
 
   it('routes through the Suez canal between the Mediterranean and the Red Sea', () => {
