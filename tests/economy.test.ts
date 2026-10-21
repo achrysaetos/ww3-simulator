@@ -8,6 +8,7 @@ import { sanctionDecisions } from '../src/systems/ai/strategy';
 import { profiles } from '../src/data/nations';
 import { createWorld } from '../src/core/world';
 import { loadMap } from '../src/data/load';
+import { loadCatalog } from '../src/data/catalog';
 import { id, testCatalog, testWorld } from '../src/testkit';
 
 // Several cases step the whole map daily for a simulated year; under a loaded machine they pass 5 s.
@@ -406,6 +407,55 @@ describe('economy: produce command', () => {
     expect(pac3[1]).toBeLessThanOrEqual(11);
     expect(t.world.nations[USA].stockpile[id.platform('t_mbt')]).toBeUndefined();
     expect(t.events.some((e) => e.type === 'message' && e.text.includes('t_mbt'))).toBe(true);
+  });
+
+  /** A daily world on the real catalog, whose items name real producers and unit costs. */
+  function realWorld() {
+    const map = loadMap();
+    const engine = new Engine(map, loadCatalog(), [economy]);
+    const world = createWorld(map, { seed: 1 });
+    world.dtHours = 24;
+    engine.init(world);
+    return { engine, world };
+  }
+
+  it('builds a new line only as fast as the nation can put up plant, and charges the treasury for every unit', () => {
+    const { engine, world } = realWorld();
+    const b21 = id.platform('b21');
+    const treasury0 = world.nations[USA].treasuryUsdB;
+    world.pending.push({ type: 'produce', nation: USA, item: b21, ratePerMonth: 158 });
+    engine.run(world, 360);
+    const built = world.nations[USA].stockpile[b21] ?? 0;
+    // A first B-21 line is a few airframes a year at most, and none come in the first year of a greenfield plant ramp.
+    expect(built).toBeLessThanOrEqual(5);
+    const e = world.slices.economy.nations[USA];
+    expect(e.orderSpendUsdB).toBeCloseTo((built * 692) / 1000, 6);
+    expect(treasury0 - world.nations[USA].treasuryUsdB).toBeGreaterThanOrEqual(e.orderSpendUsdB - 1e-9);
+  });
+
+  it('charges for ordered shells beyond what the defence budget buys, and nothing for the budgeted rate', () => {
+    const { engine, world } = realWorld();
+    const UKR = id.nation('UKR');
+    const shell152 = id.munition('shell_152');
+    world.pending.push({ type: 'produce', nation: UKR, item: shell152, ratePerMonth: 1_000_000 });
+    engine.run(world, 90);
+    const e = world.slices.economy.nations[UKR];
+    const delivered = e.delivered[shell152] ?? 0;
+    // 0.1% of Ukraine's manufacturing value added buys a 152 mm plant of a few hundred thousand rounds a year at most.
+    expect(delivered).toBeLessThan(50_000);
+    expect(e.orderSpendUsdB).toBeCloseTo((delivered * 0.002) / 1000, 6);
+    const usa = world.slices.economy.nations[USA];
+    expect(usa.orderSpendUsdB).toBe(0);
+  });
+
+  it('refuses a rate that is negative or not a number', () => {
+    const { engine, world } = realWorld();
+    const pac3 = id.munition('pac3_mse');
+    const line = world.slices.economy.nations[USA].lines[pac3];
+    for (const ratePerMonth of [Number.NaN, -5, Number.POSITIVE_INFINITY]) world.pending.push({ type: 'produce', nation: USA, item: pac3, ratePerMonth });
+    const events = engine.step(world);
+    expect(line.orderPerMonth).toBeNull();
+    expect(events.filter((ev) => ev.type === 'message' && ev.text.includes('rate of zero or more')).length).toBe(3);
   });
 });
 

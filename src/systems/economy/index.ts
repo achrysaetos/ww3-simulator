@@ -348,8 +348,13 @@ function categoryFactor(e: NationEconomy, cat: ItemCategory): number {
   return Math.max(0, f);
 }
 
-function runLine(n: Nation, e: NationEconomy, line: LineState, spendMultiple: number, dtMonths: number): void {
-  const pull = Math.max(line.baselinePerMonth * spendMultiple, line.orderPerMonth ?? 0);
+/**
+ * Runs one line for a tick. The defence budget buys the baseline rate scaled by spending; output
+ * an order pulls beyond that is bought from the treasury at the catalog unit cost on delivery.
+ */
+function runLine(n: Nation, e: NationEconomy, line: LineState, spendMultiple: number, dtMonths: number, unitCostUsdM: number): void {
+  const budgetRate = line.baselinePerMonth * spendMultiple;
+  const pull = Math.max(budgetRate, line.orderPerMonth ?? 0);
   const target = Math.min(line.surgePerMonth, pull);
   line.capacityPerMonth += (target - line.capacityPerMonth) * lag(dtMonths, line.rampMonths);
   const rate = line.orderPerMonth === null ? line.capacityPerMonth : Math.min(line.capacityPerMonth, line.orderPerMonth);
@@ -359,6 +364,9 @@ function runLine(n: Nation, e: NationEconomy, line: LineState, spendMultiple: nu
   line.carry = out - whole;
   if (line.maxTotal !== null) whole = Math.min(whole, line.maxTotal - line.built);
   if (whole <= 0) return;
+  const paidUsdB = (whole * Math.max(0, rate - budgetRate) / rate * unitCostUsdM) / 1000;
+  n.treasuryUsdB -= paidUsdB;
+  e.orderSpendUsdB = (e.orderSpendUsdB ?? 0) + paidUsdB;
   line.built += whole;
   e.produced[line.item] = (e.produced[line.item] ?? 0) + whole;
   e.delivered[line.item] = (e.delivered[line.item] ?? 0) + whole;
@@ -405,7 +413,7 @@ function stepNation(world: World, ctx: SimContext, s: Scan, n: Nation, e: Nation
   n.treasuryUsdB -= deficitB * (dtMonths / 12);
 
   const spendMultiple = share / s0;
-  for (const line of Object.values(e.lines)) runLine(n, e, line, spendMultiple, dtMonths);
+  for (const line of Object.values(e.lines)) runLine(n, e, line, spendMultiple, dtMonths, unitCostOf(ctx, line.item));
 
   // Refills are the larger of what the budget buys abroad and what the state can commandeer from
   // national oil supply, which in war far exceeds the peacetime budget. Forces are priority demand
@@ -536,13 +544,33 @@ function report(world: World, ctx: SimContext): void {
 
 // ---------------------------------------------------------------- commands
 
+const unitCostOf = (ctx: SimContext, item: ItemId): number =>
+  (ctx.catalog.platforms.get(item as PlatformId) ?? ctx.catalog.munitions.get(item as MunitionId))?.unitCostUsdM ?? 0;
+
+/**
+ * Value a new production line can turn out per year at full rate, as a share of the nation's
+ * manufacturing value added. General Dynamics' greenfield 155 mm shell plant at Mesquite, Texas
+ * (2023-25) reached ~30k shells a month, ~USD 2-3B a year at ~USD 8k a round, about 0.1% of US
+ * manufacturing value added (~USD 2.5T, World Bank).
+ */
+const GREENFIELD_MFG_SHARE = 0.001;
+
+/**
+ * Sets an ordered rate. An existing line runs toward it within its surge ceiling; an item with no
+ * line gets a greenfield one whose ceiling is what plant the nation can build (GREENFIELD_MFG_SHARE,
+ * and yard tonnage for hulls) and which ramps in at twice its category's lag.
+ */
 function produce(world: World, ctx: SimContext, nation: NationId, item: ItemId, ratePerMonth: number): void {
   const e = world.slices.economy.nations[nation];
-  if (!e) return;
-  const rate = Math.max(0, ratePerMonth);
+  const n = world.nations[nation];
+  if (!e || !n) return;
+  if (!Number.isFinite(ratePerMonth) || ratePerMonth < 0) {
+    ctx.emit({ type: 'message', tick: world.tick, nation, text: `${nation}: production order for ${item} needs a rate of zero or more a month` });
+    return;
+  }
   const existing = e.lines[item];
   if (existing) {
-    existing.orderPerMonth = rate;
+    existing.orderPerMonth = ratePerMonth;
     return;
   }
   const entry = ctx.catalog.platforms.get(item as PlatformId) ?? ctx.catalog.munitions.get(item as MunitionId);
@@ -551,11 +579,11 @@ function produce(world: World, ctx: SimContext, nation: NationId, item: ItemId, 
     return;
   }
   const spec = itemSpec(item);
-  let surgePerYear = rate * 12;
-  if (spec?.tons) surgePerYear = Math.min(surgePerYear, ((SHIPBUILDING_GT_PER_YEAR[nation] ?? 0) * SHIPYARD_WARSHIP_SHARE) / spec.tons);
-  // Greenfield lines take twice their category's ramp: new plant, tooling, and a trained workforce.
-  const line = newLine(item, 0, surgePerYear, 2 * CATEGORIES[spec?.category ?? 'cruise_missile'].rampMonths);
-  line.orderPerMonth = rate;
+  const mfgUsdM = (n.stats.manufacturing ?? (n.stats.gdp ?? 0) * 0.12) / 1e6;
+  let ceilingPerYear = (mfgUsdM * GREENFIELD_MFG_SHARE) / Math.max(1e-6, entry.unitCostUsdM);
+  if (spec?.tons) ceilingPerYear = Math.min(ceilingPerYear, ((SHIPBUILDING_GT_PER_YEAR[nation] ?? 0) * SHIPYARD_WARSHIP_SHARE) / spec.tons);
+  const line = newLine(item, 0, Math.min(ratePerMonth * 12, ceilingPerYear), 2 * CATEGORIES[spec?.category ?? 'cruise_missile'].rampMonths);
+  line.orderPerMonth = ratePerMonth;
   e.lines[item] = line;
 }
 
