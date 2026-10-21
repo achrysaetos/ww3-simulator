@@ -1,11 +1,13 @@
 import { atWar, type SimContext, type System } from '../../core/engine';
 import type { GameMap } from '../../core/map';
 import type { Formation, FormationId, MunitionId, NationId, NodeId, Platform, PlatformId, World } from '../../core/types';
+import { AIRFRAME } from '../air/tables';
+import { NAVAL_KINDS } from '../naval/state';
 import type { NetworkSearch } from './network';
 import { refreshNetworks, searchesOf, snapshotInputs, type NetworkState } from './refresh';
 import {
-  FOOD_TONS_PER_PERSON_DAY, IDLE_FUEL_HOURS_PER_DAY, BEACH_CAPACITY, INFRA_REPAIR_PER_DAY, LIFT_TONS_PER_TROOP, LIFT_TONS_PER_VEHICLE, MAX_REFILL_FRACTION_PER_DAY, NODE_TONS_PER_DAY,
-  REARM_PER_DAY, REARMS_IN_PORT_ONLY, SEALIFT_CLASSES, RECONSTITUTE_DAYS, RECONSTITUTE_MIN_STRENGTH, RECONSTITUTED_KINDS, REGENERATED_CLASSES,
+  FOOD_TONS_PER_PERSON_DAY, BEACH_CAPACITY, INFRA_REPAIR_PER_DAY, LIFT_TONS_PER_TROOP, LIFT_TONS_PER_VEHICLE, MAX_REFILL_FRACTION_PER_DAY, NODE_TONS_PER_DAY,
+  READINESS_HOURS_PER_DAY, REARM_PER_DAY, REARMS_IN_PORT_ONLY, SEALIFT_CLASSES, RECONSTITUTE_DAYS, RECONSTITUTE_MIN_STRENGTH, RECONSTITUTED_KINDS, REGENERATED_CLASSES,
   REPAIR_FRACTION_PER_DAY, REPLACE_FRACTION_PER_DAY, RESERVE_REPLACE_MULTIPLIER, SUPPLY_CLASSES, type SupplyClass,
 } from './tables';
 
@@ -137,12 +139,12 @@ function sustain(world: World, ctx: SimContext, s: LogisticsState, forces: Forma
   const nodeTons = new Map<number, number>(), nodeFactor = new Map<number, number>();
   const ashore = new Uint8Array(n), beachTons = new Map<NationId, number>();
   // Hoisted: dev loaders (vitest, tsx) compile imported bindings to getters, which dominates this loop.
-  const refill = MAX_REFILL_FRACTION_PER_DAY * dtDays, idleHours = IDLE_FUEL_HOURS_PER_DAY, food = FOOD_TONS_PER_PERSON_DAY * dtDays;
+  const refill = MAX_REFILL_FRACTION_PER_DAY * dtDays, hours = READINESS_HOURS_PER_DAY, food = FOOD_TONS_PER_PERSON_DAY * dtDays;
   const { networkOf } = s, searches = searchesOf(s, ctx.map).byKey;
 
   for (let i = 0; i < n; i++) {
     const f = forces[i];
-    consumeBaseline(f, ctx, idleHours[f.kind] * dtDays, food);
+    consumeBaseline(f, ctx, hours, dtDays, food);
     const search = searches.get(networkOf[f.nation]);
     const supply = search ? forcesFactor(s, search, f.node, f.nation) : undefined;
     const phi = (factor[i] = supply?.phi ?? 0);
@@ -314,10 +316,22 @@ function drawBulk(world: World, ctx: SimContext, s: LogisticsState, id: NationId
   return sh;
 }
 
-function consumeBaseline(f: Formation, ctx: SimContext, idleHours: number, foodPerPerson: number): void {
-  let fuelPerHour = 0;
-  for (const pid in f.equipment) fuelPerHour += ctx.catalog.platform(pid as PlatformId).mobility.fuelTonsPerHour * f.equipment[pid as PlatformId];
-  f.supply.fuel = Math.max(0, f.supply.fuel - fuelPerHour * idleHours);
+/**
+ * Readiness fuel and rations. Each platform burns its own fuel rate for its class's
+ * readiness hours, except where another system already burns fuel for what it does:
+ * the naval model charges a fleet's station-keeping for everything aboard, and the air
+ * model flies an air wing's aircraft every day.
+ */
+function consumeBaseline(f: Formation, ctx: SimContext, hours: typeof READINESS_HOURS_PER_DAY, dtDays: number, foodPerPerson: number): void {
+  if (!NAVAL_KINDS.has(f.kind)) {
+    const flown = f.kind === 'air_wing';
+    let fuel = 0;
+    for (const pid in f.equipment) {
+      const p = ctx.catalog.platform(pid as PlatformId);
+      if (!(flown && AIRFRAME[p.class])) fuel += p.mobility.fuelTonsPerHour * hours[p.class] * f.equipment[pid as PlatformId];
+    }
+    f.supply.fuel = Math.max(0, f.supply.fuel - fuel * dtDays);
+  }
   f.supply.food = Math.max(0, f.supply.food - f.personnel * foodPerPerson);
 }
 

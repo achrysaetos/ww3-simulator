@@ -142,3 +142,25 @@ describe.each([1, 2])('taiwan-2027 seed %i, 30 days', (seed) => {
     expect(twn(seed).okinawaSupply).toBeGreaterThan(0);
   });
 });
+
+/** Fuel a nation's forces burn per day: the drop in national bulk plus formation stocks, net of what the economy delivers. */
+function peacetimeFuelPerDay(nation: NationId, days: number): number {
+  const { world, engine } = createSession('peace-2027', 1);
+  const held = () => world.nations[nation].bulk.fuel + Object.values(world.formations).reduce((a, f) => a + (f.nation === nation && f.status !== 'destroyed' ? f.supply.fuel : 0), 0);
+  const delivered = () => world.slices.economy.nations[nation].fuelDelivered;
+  const perDay = Math.round(24 / world.dtHours);
+  engine.step(world);
+  const h0 = held(), d0 = delivered();
+  for (let i = 0; i < days * perDay; i++) engine.step(world);
+  return (h0 + delivered() - d0 - held()) / days;
+}
+
+describe('peace-2027, 30 days', () => {
+  // The US military burns about 85-100M barrels of operational fuel a year (DLA Energy FY2019; DoD Operational
+  // Energy reports FY2019-21), 31-37k t/day at 0.134 t/bbl. Judgment: 28-40k t/day.
+  it('US forces burn 28-40k t of fuel a day at peace', () => {
+    const burn = peacetimeFuelPerDay('USA' as NationId, 30);
+    expect(burn).toBeGreaterThan(28_000);
+    expect(burn).toBeLessThan(40_000);
+  });
+});

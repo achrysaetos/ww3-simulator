@@ -254,6 +254,30 @@ describe('logistics', () => {
     expect(events).toEqual(['fuel']);
   });
 
+  it('burns readiness fuel at each platform\'s own rate whatever formation it is filed under', () => {
+    const t = setup();
+    t.world.nations[id.nation('POL')].bulk.fuel = 0;
+    const lifters = { [id.platform('t_airlifter')]: 10 };
+    const wing = (kind: Formation['kind']) => t.add({ nation: id.nation('POL'), name: `POL ${kind} airlift`, kind, echelon: 'wing', node: t.nodeAt(52.4, 16.9), equipment: lifters });
+    const filed = [wing('logistics'), wing('strategic')];
+    const start = filed.map((f) => f.supply.fuel);
+    t.engine.run(t.world, DAY);
+    // A strategic airlifter flies about 800 h a year in peacetime (C-17 fleet), at 9 t/h.
+    const expected = (10 * 9 * 800) / 365;
+    for (const [i, f] of filed.entries()) expect(start[i] - f.supply.fuel).toBeCloseTo(expected, -1);
+  });
+
+  it('leaves the fuel of aircraft the air model flies and ships the naval model steams to those models', () => {
+    const t = setup();
+    t.world.nations[id.nation('POL')].bulk.fuel = 0;
+    const at = t.nodeAt(54.4, 18.6); // Gdansk
+    const wing = t.add({ nation: id.nation('POL'), name: 'POL fighter wing', kind: 'air_wing', echelon: 'wing', node: at, equipment: { [id.platform('t_fighter')]: 24 } });
+    const group = t.add({ nation: id.nation('POL'), name: 'POL destroyers', kind: 'surface_group', echelon: 'task_group', node: at, equipment: { [id.platform('t_destroyer')]: 3 } });
+    const full = [wing.supply.fuel, group.supply.fuel];
+    t.engine.run(t.world, DAY);
+    expect([wing.supply.fuel, group.supply.fuel]).toEqual(full);
+  });
+
   it('returns damaged platforms to service over days when supplied, not when cut off', () => {
     const t = setup();
     const mbt = id.platform('t_mbt');
