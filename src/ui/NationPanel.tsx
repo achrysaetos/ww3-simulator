@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { COMMAND_DOMAINS, type Command, type CommandDomain, type ItemId, type NationId } from '../core/types';
 import type { SimClient } from './client';
 import type { Palette } from './colors';
-import type { EconomyView, MunitionGroup, NationDetail, WarEntry, WarView } from './snapshot';
+import type { EconomyView, HomeFrontView, MunitionGroup, NationDetail, WarEntry, WarView } from './snapshot';
 import type { Objective } from './briefing';
 import { ObjectiveList } from './GameFlow';
 import { Bar, Section, Stat, fmtNum, fmtUsdB } from './widgets';
@@ -102,6 +102,8 @@ export function NationPanel({ client, palette, playAs, objectives, onCommand, on
         {eco && <Bar label="Industry intact and held" value={eco.integrity} tone="auto" />}
         {eco && <Bar label="Foreign trade lost" value={eco.tradeLoss} tone={eco.tradeLoss > 0.4 ? 'bad' : 'warn'} />}
       </Section>
+
+      {d && <HomeFront h={d.homeFront} />}
 
       {eco && (
         <Section title="Strategic resources" right={eco.short.length ? <span className="chip enemy">short: {eco.short.length}</span> : undefined}>
@@ -211,6 +213,42 @@ export function NationPanel({ client, palette, playAs, objectives, onCommand, on
         <Production client={client} nation={n.id} eco={eco} treasuryUsdB={n.treasuryUsdB} onCommand={onCommand} />
       </Section>
     </div>
+  );
+}
+
+const DRIVER_LABEL: Record<string, string> = {
+  economy: 'Cost of living', losses: 'Casualty rate', rally: 'Rally after strikes', refugees: 'Refugee burden',
+  mobilization: 'Mobilisation strain', unrest: 'Elite defection', election: 'Election verdict',
+};
+
+function HomeFront({ h }: { h: HomeFrontView }) {
+  const drivers = Object.entries(h.drivers ?? {}).filter(([, v]) => Math.abs(v) >= 0.005);
+  return (
+    <Section title="Home front" right={h.protesting ? <span className="chip enemy">protests</span> : undefined}>
+      <div className="stat-grid" data-testid="home-front">
+        <Stat label="Displaced at home">{fmtNum(h.idps)}</Stat>
+        <Stat label="Refugees abroad">{fmtNum(h.refugees)}</Stat>
+        <Stat label="Sheltering">{fmtNum(h.sheltering)}</Stat>
+        <Stat label="Under occupation">{fmtNum(h.underOccupation)}</Stat>
+        <Stat label="Civilians killed">{fmtNum(h.civiliansKilled)}</Stat>
+        <Stat label="Civilians injured">{fmtNum(h.civiliansInjured)}</Stat>
+        {h.sabotage > 0 && <Stat label="Partisan sabotage">{fmtNum(h.sabotage)}</Stat>}
+        {h.aid && <Stat label="Arms aid">{h.aid.continues ? 'funded' : 'lapsed'} · {Math.round(h.aid.support * 100)}% back it</Stat>}
+        {h.nextElection && <Stat label="Next election">{h.nextElection.date.slice(0, 10)} ({h.nextElection.kind})</Stat>}
+        {h.lastElection && <Stat label="Last election">{h.lastElection.incumbentWon ? 'government held' : 'government lost'}</Stat>}
+      </div>
+      {h.mobilizationTolerance !== null && <Bar label="Mobilisation the public bears" value={h.mobilizationTolerance} tone="warn" />}
+      {h.stability !== null && <Bar label="Regime stability" value={h.stability} tone="auto" />}
+      {drivers.length > 0 && (
+        <table className="tbl">
+          <tbody>
+            {drivers.map(([k, v]) => (
+              <tr key={k}><td>{DRIVER_LABEL[k] ?? k}</td><td className="num">{v > 0 ? '+' : ''}{Math.round(v * 100)} pts</td></tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </Section>
   );
 }
 

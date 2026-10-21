@@ -73,7 +73,7 @@ export function updateSupport(world: World, s: DiplomacyState, profiles: Readonl
   for (const [n, rec] of Object.entries(s.records) as [NationId, WarRecord][]) {
     const nation = world.nations[n];
     if (nation.status !== 'war' || rec.enteredTick < 0) continue;
-    nation.warSupport = warSupport(nation, rec, s.assessment[n], profiles[n] ?? DEFAULT_PROFILE, world);
+    nation.warSupport = Math.min(1, Math.max(0, warSupport(nation, rec, s.assessment[n], profiles[n] ?? DEFAULT_PROFILE, world) + (world.slices.politics?.nations[n]?.supportShift ?? 0)));
   }
 }
 
