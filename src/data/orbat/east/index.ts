@@ -1,5 +1,6 @@
 import type { OrbatEntry } from '../types';
 import { blr } from './blr';
+import { chnAirborne } from './chn-airborne';
 import { chnPlaa } from './chn-plaa';
 import { chnPlaaf } from './chn-plaaf';
 import { chnPlan } from './chn-plan';
@@ -21,6 +22,6 @@ import { rusStrategic } from './rus-strategic';
  */
 export const east: OrbatEntry[] = [
   ...rusGround, ...rusAirDefense, ...rusAerospace, ...rusNavy, ...rusStrategic,
-  ...chnPlaa, ...chnPlaaf, ...chnPlan, ...chnPlarf,
+  ...chnPlaa, ...chnAirborne, ...chnPlaaf, ...chnPlan, ...chnPlarf,
   ...prk, ...irn, ...blr, ...csto,
 ];

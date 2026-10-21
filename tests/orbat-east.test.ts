@@ -128,4 +128,14 @@ describe('eastern order of battle', () => {
     expect(total('RUS', (id) => id === 'tu160' || id === 'tu95ms')).toBeGreaterThan(50);
     expect(total('RUS', (id) => id === 'sarmat_silo')).toBe(0);
   });
+
+  it('fields the PLA Airborne Corps beside the Russian VDV: six airborne brigades, 180 ZBD-03, ~40,000 troops', () => {
+    const corps = east.filter((e) => e.nation === 'CHN' && /Airborne Corps/.test(e.name));
+    expect(corps.filter((e) => /Airborne Brigade/.test(e.name))).toHaveLength(6);
+    expect(total('CHN', (id) => id === 'zbd03')).toBe(180);
+    const personnel = corps.reduce((s, e) => s + (e.personnel ?? 0), 0);
+    expect(personnel).toBeGreaterThan(36_000);
+    expect(personnel).toBeLessThan(44_000);
+    expect(total('RUS', (id) => id === 'bmd4m' || id === 'bmd2')).toBeGreaterThan(0);
+  });
 });
