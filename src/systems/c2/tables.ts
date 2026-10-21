@@ -25,8 +25,9 @@ export const EMITTERS: Readonly<Record<string, EmitterSpec>> = {
   borisoglebsk2: { radiusKm: 25, gnss: 0, comms: 0.35, radar: 0 },
   // RB-341V Leer-3: Orlan-10 airborne GSM jammers, 6 km each, worked up to 120 km out (McDermott 2017). Area estimate.
   leer3: { radiusKm: 30, gnss: 0, comms: 0.2, radar: 0 },
-  // Bukovel-AD: counter-UAS GNSS and control-link jamming (Proximus; Ukrainian MoD). Radius estimate.
-  bukovel: { radiusKm: 20, gnss: 0.6, comms: 0.3, radar: 0 },
+  // Bukovel-AD: counter-UAS control-link and GNSS jamming (Proximus; Ukrainian MoD), built to protect a position
+  // from drones rather than deny an area; Ukraine's EW stayed far thinner than Russia's through 2023-25 (RUSI). Radius estimate.
+  bukovel: { radiusKm: 15, gnss: 0.3, comms: 0.3, radar: 0 },
   // TLS-BCT: US Army brigade signals-intelligence and EW system, fielded from 2024. Radius estimate.
   tls_bct: { radiusKm: 30, gnss: 0.3, comms: 0.3, radar: 0 },
   // EC-37B / EC-130H Compass Call: stand-off communications jamming. Radius estimate.

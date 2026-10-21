@@ -1,14 +1,13 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { Engine } from '../src/core/engine';
-import { addFormation } from '../src/core/forces';
+import { addFormation, platformCount } from '../src/core/forces';
 import type { Formation, FormationId, MunitionId, NationId, NodeId, PlatformId, World } from '../src/core/types';
 import { createSession, type Session } from '../src/scenarios';
 import { SYSTEMS } from '../src/systems';
+import { buildPicture } from '../src/systems/air/picture';
 import { c2, c2FireFactor, jamAgainst, jammedHits, orderDelayHours } from '../src/systems/c2';
 import { landCombat, landMovement } from '../src/systems/land';
-import { platformCount } from '../src/core/forces';
 import { id, testWorld } from '../src/testkit';
-import { buildPicture } from '../src/systems/air/picture';
 
 const UKR = 'UKR' as NationId, RUS = 'RUS' as NationId, USA = 'USA' as NationId;
 

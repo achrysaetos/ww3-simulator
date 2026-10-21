@@ -121,8 +121,10 @@ export const c2: System = {
       const b = BEARERS[f.nation] ?? DEFAULT_BEARERS;
       // Satellite terminals are harder to jam than line-of-sight radio, but Zhitel-class sets do reach them.
       const comms = b.satcom * satcomUp(s, f.nation) * (1 - 0.5 * jam.comms) + b.radio * (1 - jam.comms) + b.fibre * (world.theater.infrastructure[f.node] ?? 1);
-      coordination *= COMMS_FLOOR + (1 - COMMS_FLOOR) * comms;
-      delayH += COMMS_DELAY_H * (1 - comms);
+      // Redundant bearers absorb a partial loss; the cost climbs as the last links go.
+      const cut = (1 - comms) ** 2;
+      coordination *= 1 - (1 - COMMS_FLOOR) * cut;
+      delayH += COMMS_DELAY_H * cut;
       s.formations[f.id] = { coordination, delayH, guided: jam.gnss > 0 || jam.comms > 0 ? 1 - jammedFire(catalog, f, jam) : 1 };
     }
 
