@@ -133,7 +133,7 @@ export function newNationEconomy(nation: Nation): NationEconomy {
   const lines: Record<ItemId, LineState> = {};
   const mfgB = (nation.stats.manufacturing ?? (nation.stats.gdp ?? 0) * 0.12) / 1e9;
   const ammoPerYear = mfgB * GENERIC_AMMO_TONS_PER_MFG_USD_B;
-  if (ammoPerYear > 0) lines[ITEMS.ammo_generic.id] = newLine(ITEMS.ammo_generic.id, ammoPerYear, ammoPerYear * GENERIC_AMMO_SURGE_MULTIPLE, CATEGORIES.bulk_ammo.rampMonths);
+  if (ammoPerYear > 0) lines[ITEMS.ammo_generic.id] = newLine(ITEMS.ammo_generic.id, ammoPerYear, ammoPerYear * GENERIC_AMMO_SURGE_MULTIPLE, CATEGORIES.shell.rampMonths);
   for (const l of LINES[nation.id] ?? []) {
     const spec = ITEMS[l.item];
     lines[spec.id] = newLine(spec.id, l.baselinePerYear, l.surgePerYear, CATEGORIES[spec.category].rampMonths, l.maxTotal);

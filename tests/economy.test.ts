@@ -61,6 +61,10 @@ describe('economy: mobilization', () => {
     expect(later[10]).toBeLessThan(100_000);
     for (let i = 1; i < later.length; i++) expect(later[i]).toBeGreaterThanOrEqual(later[i - 1] * 0.99);
     expect(Math.abs(deLater[10] - de[0]) / de[0]).toBeLessThan(0.02);
+
+    // Generic ammunition is fired as shells and ramps like them (LE-13): on main it was 5.6x in a year.
+    const generic = t.series(first, 'USA:ammo_generic')[0], genericLater = t.series(rest, 'USA:ammo_generic')[10];
+    expect(genericLater / generic).toBeLessThan((later[10] / us[0]) * 1.25);
   });
 
   it('finances mobilization with debt that raises economic stress, and leaves a peacetime treasury alone', () => {
