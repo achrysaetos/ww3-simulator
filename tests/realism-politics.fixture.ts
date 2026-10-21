@@ -1,6 +1,7 @@
 import { atWar } from '../src/core/engine';
 import { platformCount } from '../src/core/forces';
-import type { NationId, World } from '../src/core/types';
+import type { Catalog } from '../src/core/catalog';
+import type { NationId, PlatformId, World } from '../src/core/types';
 import { alliances, strategicProfile } from '../src/data/nations';
 import { createSession } from '../src/scenarios';
 
@@ -22,22 +23,48 @@ export interface PoliticsRun {
 }
 
 /**
- * Whether `n` has crossed a first-use condition from its src/data/nations threshold,
- * or been struck by a nuclear weapon (every armed state retaliates).
+ * Whether `n` has crossed a first-use condition from its src/data/nations threshold (its naval
+ * losses included), been struck by a nuclear weapon (every armed state retaliates), or weighs an
+ * answer to a nuclear attack on an ally its threshold covers (coversAllies).
  */
-function thresholdCrossed(world: World, n: NationId): boolean {
+function thresholdCrossed(world: World, catalog: Catalog, n: NationId): boolean {
   const d = world.slices.diplomacy;
   const t = strategicProfile[n]?.nuclearThreshold;
   const a = d.assessment[n];
   const rec = d.records[n];
   if ((rec?.nuclearStruckBy.length ?? 0) > 0) return true;
+  if (t?.coversAllies && d.umbrella.some((c) => c.guarantor === n)) return true;
   if (!t?.firstUse || !a) return false;
   const gdp = world.slices.economy?.nations[n]?.gdpIndex;
   return a.capitalLost
     || (t.coreLossShare !== null && a.popLost >= t.coreLossShare)
     || (t.forceLossShare !== null && forcesLost(world, n) >= t.forceLossShare)
     || (t.economicLossShare !== null && gdp !== undefined && 1 - gdp >= t.economicLossShare)
+    || (!!t.navalLoss && navalLost(world, catalog, n, t.navalLoss) >= 1)
     || (t.onStrategicAttack && (a.capitalThreatened || (rec?.ssbnLost ?? 0) > 0));
+}
+
+/** How far the fleet's losses have gone toward the naval criteria, against the strength the AI first recorded for each hull type. */
+function navalLost(world: World, catalog: Catalog, n: NationId, t: { ssbnShare: number; ssnShare: number; cruisers: number }): number {
+  const seen = world.slices.ai.baseStrength;
+  const base = { ssbn: 0, ssn: 0 }, lost = { ssbn: 0, ssn: 0 };
+  let cruisers = 0;
+  for (const f of Object.values(world.formations)) {
+    if (f.nation !== n) continue;
+    for (const [pid, now] of Object.entries(f.equipment) as [PlatformId, number][]) {
+      const cls = catalog.platform(pid).class;
+      const k = cls === 'ssbn' ? 'ssbn' : cls === 'ssn' || cls === 'ssgn' ? 'ssn' : cls === 'cruiser' ? 'cruiser' : undefined;
+      const b = seen[`${f.id}/${pid}`];
+      if (!k || b === undefined) continue;
+      if (k === 'cruiser') cruisers += Math.max(0, b - now);
+      else {
+        base[k] += b;
+        lost[k] += Math.max(0, b - now);
+      }
+    }
+  }
+  const share = (k: 'ssbn' | 'ssn') => (base[k] > 0 ? lost[k] / base[k] : 0);
+  return Math.max(share('ssbn') / t.ssbnShare, share('ssn') / t.ssnShare, cruisers / t.cruisers);
 }
 
 /** Share of land and air platforms destroyed, against the strength the AI first recorded for each formation. */
@@ -64,13 +91,13 @@ export function runPolitics(scenario: string, seed: number, days: number): Polit
   for (let i = 0; i < ticks; i++) {
     const events = s.engine.step(s.world);
     const day = (s.world.tick * s.world.dtHours) / 24;
-    for (const n of Object.keys(s.world.slices.diplomacy.records) as NationId[]) if (thresholdCrossed(s.world, n)) crossed.add(n);
+    for (const n of Object.keys(s.world.slices.diplomacy.records) as NationId[]) if (thresholdCrossed(s.world, s.catalog, n)) crossed.add(n);
     for (const [n, a] of Object.entries(s.world.slices.diplomacy.assessment))
       if ((a.popLost >= 0.02 || a.capitalThreatened) && !seriouslyInvaded.has(n as NationId)) seriouslyInvaded.set(n as NationId, day);
     for (const e of events) {
       if (e.type === 'war_declared') entries.push({ by: e.by, on: e.on, day, reason: e.reason });
       else if (e.type === 'message' && /declines/.test(e.text)) declined.push({ text: e.text, day });
-      else if (e.type === 'nuclear_detonation') nukes.push({ by: e.by, day, thresholdCrossed: crossed.has(e.by) || thresholdCrossed(s.world, e.by) });
+      else if (e.type === 'nuclear_detonation') nukes.push({ by: e.by, day, thresholdCrossed: crossed.has(e.by) || thresholdCrossed(s.world, s.catalog, e.by) });
     }
   }
   return { world: s.world, entries, declined, nukes, seriouslyInvaded };

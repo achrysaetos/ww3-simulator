@@ -394,7 +394,7 @@ describe('coalition allocation', () => {
   const NATO = ['POL', 'LTU', 'LVA', 'EST', 'FIN', 'DEU'];
   /** NATO at war with Russia, Russian brigades on the Estonian and Lithuanian borders, and a Polish army at Warsaw. */
   function alliance(polish: { readiness: number; territorial?: true }[]) {
-    const t = testWorld([createAi()]);
+    const t = testWorld([createDiplomacy(), createAi()]);
     for (const n of NATO) t.world.nations[N(n)].blocs = ['NATO'];
     for (const n of NATO) t.war('RUS', n);
     for (const host of ['EST', 'LTU']) for (const n of border(t, 'RUS', host).slice(0, 3)) for (let i = 0; i < 3; i++) brigade(t, 'RUS', n);
@@ -499,7 +499,7 @@ describe('counter-space strikes', () => {
 
 describe('air wing basing', () => {
   it('fighters with nothing in reach deploy to a host airfield within reach of the war, one the enemy missiles do not reach', () => {
-    const t = airWorld(42, [navalWar, createAi()]);
+    const t = airWorld(42, [navalWar, createDiplomacy(), createAi()]);
     t.war('USA', 'CHN');
     for (const n of ['USA', 'CHN']) t.world.nations[N(n)].status = 'war';
     const w = wing(t, 'USA', t.node(13.5, 144.8), { x_stealth: 24, x_tanker: 4 });
@@ -521,7 +521,7 @@ describe('strike target value', () => {
   // A salvo's hits fall on a group's hulls one at a time, so a flotilla of cheap patrol hulls (a China Coast Guard
   // bureau: 210 cutters at 30-120m) is a poor target beside one destroyer however much the flotilla costs in all.
   it('aims anti-ship salvos at a warship before a larger, costlier flotilla of cheap hulls', () => {
-    const t = airWorld(42, [navalWar, createAi()]);
+    const t = airWorld(42, [navalWar, createDiplomacy(), createAi()]);
     t.war('CHN', 'TWN');
     for (const n of ['CHN', 'TWN']) t.world.nations[N(n)].status = 'war';
     const group = (name: string, lat: number, lon: number, equipment: Record<string, number>) =>
@@ -538,7 +538,7 @@ describe('strike target value', () => {
   // Ukrainian drones and missiles went after the Tu-95s and Tu-22M3s at Engels (December 2022) and four bases at once
   // in Operation Spiderweb (June 2025).
   it('strikes heavy bombers parked within reach', () => {
-    const t = airWorld(42, [navalWar, createAi()]);
+    const t = airWorld(42, [navalWar, createDiplomacy(), createAi()]);
     t.war('UKR', 'RUS');
     for (const n of ['UKR', 'RUS']) t.world.nations[N(n)].status = 'war';
     const bombers = t.add({ nation: N('RUS'), name: 'heavy bombers', kind: 'strategic', echelon: 'wing', node: t.node(51.48, 46.21), equipment: { [id.platform('x_bomber')]: 16 } });
@@ -550,7 +550,7 @@ describe('strike target value', () => {
 
   // 2022-23: Ukrainian HIMARS and Storm Shadow strikes went after Russian army and corps command posts (RUSI).
   it('strikes an enemy army headquarters within reach as a hardened aimpoint', () => {
-    const t = airWorld(42, [navalWar, createAi()]);
+    const t = airWorld(42, [navalWar, createDiplomacy(), createAi()]);
     t.war('UKR', 'RUS');
     for (const n of ['UKR', 'RUS']) t.world.nations[N(n)].status = 'war';
     const hq = t.node(50.6, 36.6);

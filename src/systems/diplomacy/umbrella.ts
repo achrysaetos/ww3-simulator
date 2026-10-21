@@ -71,7 +71,7 @@ export function openUmbrellaCases(world: World, ctx: SimContext, s: DiplomacySta
         }
         s.umbrella.push({ guarantor: u.guarantor, attacker: e.by, ally, treaty: u.treaty, reliability: u.reliability, detonations: 1, strategic, node: e.node, dueTick: world.tick + Math.ceil(DELIBERATION_HOURS / world.dtHours) });
         ctx.emit({ type: 'message', tick: world.tick, nation: u.guarantor, text: `extended deterrence: ${e.by} has used a nuclear weapon against ${ally}; ${u.guarantor} weighs its response under ${u.treaty}` });
-        declareWar(world, ctx, s, alliances, u.guarantor, e.by, `${u.treaty}: nuclear attack on ${ally}`);
+        declareWar(world, ctx, s, u.guarantor, e.by, `${u.treaty}: nuclear attack on ${ally}`);
         raiseEscalation(world, ctx, u.guarantor, e.by, 'tactical_nuclear');
       }
   }

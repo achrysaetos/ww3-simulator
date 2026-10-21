@@ -1,6 +1,5 @@
 import type { Formation, NationId, NodeId } from '../../core/types';
-import { allied, landSlice } from '../land';
-import { atWar } from '../../core/engine';
+import { landSlice, openTo } from '../land';
 import { aggressor, commitment, releasable } from './deploy';
 import { isGround, issue, strength } from './forces';
 import { enemyPowerAt, landMass, stagingSector } from './fronts';
@@ -59,9 +58,9 @@ function needsRetreat(p: Plan, f: Formation): boolean {
 
 /**
  * Connected regions of land the nation's troops can march through without fighting: own,
- * allied and open neutral ground. -1 elsewhere. Both the list of open holders and the flood
+ * co-belligerent and granted ground. -1 elsewhere. Both the list of open holders and the flood
  * fill over it are cached until control changes (Plan.memo); the list is re-read daily, since
- * alliances by opinion shift without an event.
+ * war membership and grants of passage change without an event.
  */
 function passableRegions(p: Plan): Int32Array {
   const { map } = p.ctx;
@@ -69,8 +68,8 @@ function passableRegions(p: Plan): Int32Array {
   const listKey = `open|${p.nation}`;
   let list = p.memo.get(listKey) as { tick: number; key: string; holders: NationId[] } | undefined;
   if (!list || (world.tick - list.tick) * world.dtHours >= 24) {
-    // canEnter's rule by holder: own, allied, unclaimed, or (not here) enemy ground.
-    const holders = (Object.keys(world.nations) as NationId[]).filter((c) => !p.enemies.has(c) && (allied(world, p.nation, c) || atWar(world, p.nation, c))).sort();
+    // canEnter's rule by holder: own, co-belligerent, granted passage, unclaimed, or (not here) enemy ground.
+    const holders = (Object.keys(world.nations) as NationId[]).filter((c) => !p.enemies.has(c) && openTo(world, p.nation, c)).sort();
     p.memo.set(listKey, (list = { tick: world.tick, key: `regions|${holders.join(',')}`, holders }));
   }
   const { key } = list;

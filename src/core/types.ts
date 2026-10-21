@@ -364,7 +364,11 @@ export type Command =
   /** A human nation takes formations under its own command (the delegate leaves them alone) or hands them back. */
   | { type: 'hold'; nation: NationId; formations: FormationId[]; held: boolean }
   /** A human nation's answer to a treaty call it has been asked to honour. */
-  | { type: 'answer_treaty'; nation: NationId; war: string; treaty: string; join: boolean };
+  | { type: 'answer_treaty'; nation: NationId; war: string; treaty: string; join: boolean }
+  /** The host `nation` opens its land to `target`'s troops, or closes it again. */
+  | { type: 'grant_access'; nation: NationId; target: NationId; on: boolean }
+  /** `nation` helps the belligerent `target` without joining its war: its air defence covers `target`. */
+  | { type: 'set_aid'; nation: NationId; target: NationId; on: boolean };
 
 /**
  * What a human player can delegate to the AI: the forces of each domain, the home front

@@ -24,7 +24,7 @@ export function warDays(world: World, nation: NationId, enemies: Iterable<Nation
 }
 
 /** Whether the planning nation started one of its wars: its forces stand where its own war plan put them. */
-export const aggressor = (p: Plan) => !!p.world.slices.diplomacy?.wars.some((w) => w.aggressor === p.nation);
+export const aggressor = (p: Plan) => !!p.world.slices.diplomacy?.wars.some((w) => w.sides.some((s) => s.members[p.nation]?.via === 'declared'));
 
 /**
  * Whether a formation may be sent to fight on another nation's soil. Territorial forces

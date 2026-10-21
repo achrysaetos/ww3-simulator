@@ -1,8 +1,8 @@
-import { atWar, enemiesOf, relationKey, type SimContext } from '../../core/engine';
+import { atWar, enemiesOf, relationKey, relationMut, type SimContext } from '../../core/engine';
 import type { Government, NationId, World } from '../../core/types';
-import { DEFAULT_PROFILE, type Assessment, type DiplomacyState, type StrategicProfile, type WarRecord } from './types';
+import { DEFAULT_PROFILE, type Assessment, type DiplomacyState, type Side, type StrategicProfile, type War, type WarRecord } from './types';
 import { delegated } from '../orders';
-import { makePeace } from './wars';
+import { endWar, leaveWar, members, sideOf, sideWith, warBetween } from './wars';
 
 /**
  * How each regime's war support responds, and when it yields. `casualty` scales the public's
@@ -38,7 +38,6 @@ const RALLY_HALF_LIFE_DAYS = 60;
 const WEARINESS_PER_YEAR = 0.05;
 const TERRITORY_WEIGHT = 0.6;
 const CAPITAL_LOSS = 0.2;
-const TRADE_WEIGHT = 0.2;
 const NUCLEAR_SHOCK = 0.08;
 
 const CAPITULATE_BELOW = 0.1;
@@ -63,17 +62,24 @@ export function warSupport(nation: World['nations'][NationId], rec: WarRecord, a
   const rally = rec.rally * 0.5 ** ((((world.tick - rec.rallyTick) * world.dtHours) / 24) / RALLY_HALF_LIFE_DAYS);
   const casualties = MUELLER_PER_DECADE * sensitivity * Math.log10(1 + perCapita);
   const territory = regime.elite * (TERRITORY_WEIGHT * (a?.popLost ?? 0) + (a?.capitalLost ? CAPITAL_LOSS : 0));
-  const economy = regime.elite * TRADE_WEIGHT * (world.theater.tradeBlocked[nation.id] ?? 0);
   const nuclear = nation.nuclear.warheads > 0 ? 0 : NUCLEAR_SHOCK * (0.5 + 0.5 * sensitivity) * Math.min(3, rec.nuclearHits);
   const weariness = WEARINESS_PER_YEAR * sensitivity * (days / 365);
-  return Math.min(1, Math.max(0, rec.baseline + rally - casualties - territory - economy - nuclear - weariness));
+  return Math.min(1, Math.max(0, rec.baseline + rally - casualties - territory - nuclear - weariness));
 }
 
+/**
+ * War support is warSupport's own terms plus the home front's (politics `supportShift`), each
+ * cost counted once: trade lost reaches the public through output (economy gdpIndex, in the
+ * politics economy driver), and casualties through Mueller's cumulative curve here, so the
+ * politics marginal-loss driver, which equals it in a war's first weeks, is left out.
+ */
 export function updateSupport(world: World, s: DiplomacyState, profiles: Readonly<Record<string, StrategicProfile>>): void {
   for (const [n, rec] of Object.entries(s.records) as [NationId, WarRecord][]) {
     const nation = world.nations[n];
     if (nation.status !== 'war' || rec.enteredTick < 0) continue;
-    nation.warSupport = Math.min(1, Math.max(0, warSupport(nation, rec, s.assessment[n], profiles[n] ?? DEFAULT_PROFILE, world) + (world.slices.politics?.nations[n]?.supportShift ?? 0)));
+    const home = world.slices.politics?.nations[n];
+    const shift = home ? home.supportShift - home.drivers.losses : 0;
+    nation.warSupport = Math.min(1, Math.max(0, warSupport(nation, rec, s.assessment[n], profiles[n] ?? DEFAULT_PROFILE, world) + shift));
   }
 }
 
@@ -99,8 +105,8 @@ export function meansToFight(forcesLeft: number, a: Assessment | undefined, alli
 /** Whether `n` has a co-belligerent in one of its wars that has not given up. */
 function allied(world: World, s: DiplomacyState, n: NationId): boolean {
   for (const w of s.wars) {
-    const side = w.sides.find((m) => m.includes(n));
-    if (side?.some((m) => m !== n && world.nations[m].status === 'war')) return true;
+    const side = sideOf(w, n);
+    if (side !== -1 && members(w.sides[side]).some((m) => m !== n && world.nations[m].status === 'war')) return true;
   }
   return false;
 }
@@ -111,7 +117,8 @@ function allied(world: World, s: DiplomacyState, n: NationId): boolean {
  * means to fight below what the regime yields at. Losing the capital is a heavy blow to support
  * (see warSupport) but a state whose army stands fights on. Occupation terms hand the occupier of
  * the capital the cells the capitulating state no longer holds with troops; elsewhere the front
- * freezes where it stands (armistice terms).
+ * freezes where it stands (armistice terms). The capitulating state leaves its wars; its allies
+ * fight on.
  */
 export function checkCapitulation(world: World, ctx: SimContext, s: DiplomacyState): void {
   let ground: Map<NationId, number> | undefined;
@@ -140,28 +147,29 @@ export function checkCapitulation(world: World, ctx: SimContext, s: DiplomacySta
       }
     }
     ctx.emit({ type: 'capitulation', tick: world.tick, nation: nation.id, to: victors });
-    for (const v of victors) makePeace(world, ctx, s, nation.id, v, occupied ? 'capitulation: occupation' : 'capitulation: armistice on current lines');
+    const terms = occupied ? 'capitulation: occupation' : 'capitulation: armistice on current lines';
+    for (const war of s.wars.filter((w) => sideOf(w, nation.id) !== -1)) leaveWar(world, ctx, s, war, nation.id, terms);
     nation.status = 'capitulated';
     s.joins = s.joins.filter((j) => j.nation !== nation.id && j.victim !== nation.id);
   }
 }
 
+const ARMISTICE = 'negotiated: armistice on current lines';
+
 /**
- * Both sides of a dyad worn out after a month or more: armistice on current lines. A human who
- * kept strategic decisions is not signed up for it; the other side's offer is put to the player.
+ * Both side leaders worn out after a month or more: armistice on current lines for the whole war.
+ * A human who kept strategic decisions is not signed up for it; the other side's offer is put to
+ * the player.
  */
 export function negotiatedPeace(world: World, ctx: SimContext, s: DiplomacyState): void {
-  for (const war of [...s.wars])
-    for (const a of [...war.sides[0]])
-      for (const b of [...war.sides[1]]) {
-        if (!atWar(world, a, b)) continue;
-        const since = world.relations[relationKey(a, b)].warSince ?? world.tick;
-        if (((world.tick - since) * world.dtHours) / 24 < MIN_WAR_DAYS_FOR_TERMS) continue;
-        if (world.nations[a].warSupport >= EXHAUSTED_BELOW || world.nations[b].warSupport >= EXHAUSTED_BELOW) continue;
-        const [da, db] = [delegated(world, a, 'strategic'), delegated(world, b, 'strategic')];
-        if (da && db) makePeace(world, ctx, s, a, b, 'negotiated: armistice on current lines');
-        else if (da !== db && !s.offers[relationKey(a, b)]) offerPeace(world, ctx, s, da ? a : b, da ? b : a);
-      }
+  for (const war of [...s.wars]) {
+    const [a, b] = [war.sides[0].leader, war.sides[1].leader];
+    if (((world.tick - war.since) * world.dtHours) / 24 < MIN_WAR_DAYS_FOR_TERMS) continue;
+    if (world.nations[a].warSupport >= EXHAUSTED_BELOW || world.nations[b].warSupport >= EXHAUSTED_BELOW) continue;
+    const [da, db] = [delegated(world, a, 'strategic'), delegated(world, b, 'strategic')];
+    if (da && db) endWar(world, ctx, s, war, ARMISTICE);
+    else if (da !== db && !s.offers[relationKey(a, b)]) offerPeace(world, ctx, s, da ? a : b, da ? b : a);
+  }
 }
 
 /** Whether `to`, its strategic decisions in the AI's hands, takes `from`'s offer: its own support is low, or it is losing ground. */
@@ -172,27 +180,93 @@ function aiAccepts(world: World, s: DiplomacyState, from: NationId, to: NationId
   return support < 0.4 || (losing && support < 0.55);
 }
 
+/** Whether an ally's ground forces stand on `n`'s homeland while an enemy holds part of it. */
+function defendedOnItsSoil(world: World, ctx: SimContext, s: DiplomacyState, side: Side, n: NationId): boolean {
+  if ((s.assessment[n]?.areaLost ?? 0) <= 0) return false;
+  const { map } = ctx;
+  return Object.values(world.formations).some((f) =>
+    f.nation !== n && f.nation in side.members && f.status === 'active' && f.node < map.landCount && map.owner[f.node] === n
+    && (f.kind === 'maneuver' || f.kind === 'artillery'));
+}
+
 /**
- * A target whose strategic decisions the AI makes accepts per aiAccepts; a human who kept
+ * Whether `n` may leave `war` on its own. Coalitions bind their members against a separate peace
+ * (Pact of London, Sept 1914; Declaration by United Nations, 1 Jan 1942), and members broke away
+ * only once spent: Russia at Brest-Litovsk in 1918, Finland in March 1940, Italy in 1943. So a
+ * member goes alone only with its will to fight gone, never while allies fight on its soil, and
+ * never while treaty allies are in the war on its behalf.
+ */
+export function mayLeaveAlone(world: World, ctx: SimContext, s: DiplomacyState, side: Side, n: NationId): boolean {
+  if (world.nations[n].warSupport >= CAPITULATE_BELOW) return false;
+  if (members(side).some((m) => side.members[m].defends === n)) return false;
+  return !defendedOnItsSoil(world, ctx, s, side, n);
+}
+
+/** Opinion each ally loses of a member that makes a separate peace; as for a refused treaty call (see wars.ts resolveJoins). */
+const SEPARATE_PEACE_COST = 30;
+
+/** What an offer between `from` and `to` settles: the whole war between the side leaders, or a separate peace for `leaver`. */
+type Deal = { war: War; leaver?: { nation: NationId; side: Side } } | { refused: string };
+
+function dealFor(world: World, ctx: SimContext, s: DiplomacyState, from: NationId, to: NationId): Deal | undefined {
+  const war = warBetween(s, from, to);
+  const [fromSide, toSide] = war ? [sideWith(war, from), sideWith(war, to)] : [];
+  if (!war || !fromSide || !toSide) return undefined;
+  const [fromLeads, toLeads] = [fromSide.leader === from, toSide.leader === to];
+  if (fromLeads && toLeads) return { war };
+  const leaver = fromLeads ? { nation: to, side: toSide } : toLeads ? { nation: from, side: fromSide } : undefined;
+  if (!leaver) return { refused: `peace in the ${war.name} is made between ${war.sides[0].leader} and ${war.sides[1].leader}` };
+  if (!mayLeaveAlone(world, ctx, s, leaver.side, leaver.nation)) return { refused: `${leaver.nation} cannot make a separate peace while its allies fight on` };
+  return { war, leaver };
+}
+
+function settle(world: World, ctx: SimContext, s: DiplomacyState, deal: { war: War; leaver?: { nation: NationId; side: Side } }): void {
+  if (!deal.leaver) return endWar(world, ctx, s, deal.war, ARMISTICE);
+  const { war, leaver: { nation: leaver, side } } = deal;
+  for (const m of members(side)) {
+    if (m === leaver) continue;
+    const r = relationMut(world, m, leaver);
+    r.opinion = Math.max(-100, r.opinion - SEPARATE_PEACE_COST);
+  }
+  ctx.emit({ type: 'message', tick: world.tick, nation: leaver, text: `${leaver} makes a separate peace and leaves the ${war.name}` });
+  leaveWar(world, ctx, s, war, leaver, `separate peace: armistice on current lines`);
+}
+
+/** An AI-run counterpart takes a separate peace from a spent member, and a peace between leaders per aiAccepts. */
+const accepts = (world: World, s: DiplomacyState, deal: { leaver?: unknown }, from: NationId, to: NationId) =>
+  delegated(world, to, 'strategic') && (deal.leaver !== undefined || aiAccepts(world, s, from, to));
+
+/**
+ * Peace is made between side leaders and ends the war for every member of both sides. A member
+ * that does not lead its side can only make a separate peace, and only when mayLeaveAlone allows.
+ * A target whose strategic decisions the AI makes accepts per `accepts`; a human who kept
  * strategic control accepts by sending its own offer back. A refused offer stays on the table
  * (see reviewOffers).
  */
 export function offerPeace(world: World, ctx: SimContext, s: DiplomacyState, from: NationId, to: NationId): void {
   if (!atWar(world, from, to)) return;
+  const deal = dealFor(world, ctx, s, from, to);
+  if (!deal) return;
+  if ('refused' in deal) {
+    ctx.emit({ type: 'message', tick: world.tick, nation: from, text: `${from} offers peace to ${to}, but ${deal.refused}` });
+    return;
+  }
   const k = relationKey(from, to);
-  if (s.offers[k] === to || aiAccepts(world, s, from, to)) makePeace(world, ctx, s, from, to, 'negotiated: armistice on current lines');
+  if (s.offers[k] === to || accepts(world, s, deal, from, to)) settle(world, ctx, s, deal);
   else {
     s.offers[k] = from;
     ctx.emit({ type: 'message', tick: world.tick, nation: from, text: `${from} offers peace to ${to}` });
   }
 }
 
-/** Open offers are weighed again as the war turns: an AI-run target takes one once aiAccepts holds. */
+/** Open offers are weighed again as the war turns: an AI-run target takes one once it would accept it. */
 export function reviewOffers(world: World, ctx: SimContext, s: DiplomacyState): void {
   for (const [k, from] of Object.entries(s.offers)) {
+    if (s.offers[k] !== from) continue;
     const [a, b] = k.split('|') as [NationId, NationId];
     const to = a === from ? b : a;
-    if (!atWar(world, from, to)) delete s.offers[k];
-    else if (aiAccepts(world, s, from, to)) makePeace(world, ctx, s, from, to, 'negotiated: armistice on current lines');
+    const deal = atWar(world, from, to) ? dealFor(world, ctx, s, from, to) : undefined;
+    if (!deal || 'refused' in deal) delete s.offers[k];
+    else if (accepts(world, s, deal, from, to)) settle(world, ctx, s, deal);
   }
 }

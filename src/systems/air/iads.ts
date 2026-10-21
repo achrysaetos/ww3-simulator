@@ -39,12 +39,23 @@ function pickInterceptor(f: Formation, cat: ThreatCategory, difficulty: number, 
   return cheap ?? best;
 }
 
+/**
+ * Whether `defender` engages `attacker` over ground `holder` holds: it is at war with the
+ * attacker, or it gives air-defence aid to a holder that is (diplomacy `aid`), as the US, UK,
+ * France and Jordan did over Israel on 13-14 Apr 2024 without being at war with Iran.
+ */
+function engagesOver(world: World, pic: AirPicture, defender: NationId, attacker: NationId, holder: NationId | undefined): boolean {
+  if (pic.atWar(defender, attacker)) return true;
+  return !!holder && pic.atWar(holder, attacker) && !!world.slices.diplomacy?.aid[defender]?.includes(holder);
+}
+
 /** Defenders hostile to `nation` whose envelope reaches `node`, longest range first. */
 export function hostileDefenders(world: World, ctx: SimContext, pic: AirPicture, node: NodeId, nation: NationId): Defender[] {
   const key = `${node}|${nation}`;
   let inRange = pic.defendersInRange.get(key);
   if (!inRange) {
-    inRange = pic.defenders.filter((d) => pic.atWar(d.f.nation, nation) && nodeDistance(ctx, d.f.node, node) <= d.rangeKm).sort((a, b) => b.rangeKm - a.rangeKm);
+    const holder = world.control[node] || undefined;
+    inRange = pic.defenders.filter((d) => engagesOver(world, pic, d.f.nation, nation, holder) && nodeDistance(ctx, d.f.node, node) <= d.rangeKm).sort((a, b) => b.rangeKm - a.rangeKm);
     pic.defendersInRange.set(key, inRange);
   }
   return inRange.filter((d) => d.f.status === 'active' && d.channels > 0);
@@ -68,14 +79,15 @@ function layers(ctx: SimContext, defenders: Defender[], node: NodeId, cat: Threa
   return out.sort((a, b) => a.shot.m.unitCostUsdM - b.shot.m.unitCostUsdM || b.d.rangeKm - a.d.rangeKm);
 }
 
-/** Fighters of nations at war with `attacker` that can reach `node` and still have intercept sorties. */
+/** Fighters defending `node` against `attacker` (see engagesOver) that can reach it and still have intercept sorties. */
 function interceptorFighters(world: World, ctx: SimContext, pic: AirPicture, node: NodeId, attacker: NationId): AirGroup[] {
+  const holder = world.control[node] || undefined;
   return pic.groups.filter(
     (g) =>
       g.interceptLeft > 0 &&
       g.f.status === 'active' &&
       (g.f.order.posture === 'defend' || (COUNTER_AIR_POSTURES.has(g.f.order.posture) && g.f.order.target === node)) &&
-      pic.atWar(g.f.nation, attacker) &&
+      engagesOver(world, pic, g.f.nation, attacker, holder) &&
       nodeDistance(ctx, g.f.node, node) <= g.radiusKm,
   );
 }
@@ -84,12 +96,14 @@ function interceptorFighters(world: World, ctx: SimContext, pic: AirPicture, nod
 export interface RaidStream { munition: Munition; count: number; overflightKm: number }
 
 /**
- * Km of the route from `from` to `to` that lies over land held by a nation at war
- * with `attacker`, sampled every COUNTER_DRONE.sampleKm (straight line, which is
- * close enough at theater scale; real drones dog-leg around known defenses).
+ * Km of the route from `from` to `to` that lies over land held by a nation defending
+ * against `attacker` there (see engagesOver: Jordan over its own airspace, aiding
+ * Israel), sampled every COUNTER_DRONE.sampleKm (straight line, which is close
+ * enough at theater scale; real drones dog-leg around known defenses).
  */
 export function overflightKm(world: World, ctx: SimContext, pic: AirPicture, from: NodeId, to: NodeId, attacker: NationId): number {
   const { map } = ctx;
+  const target = world.control[to] || undefined;
   const dist = nodeDistance(ctx, from, to);
   const steps = Math.max(1, Math.round(dist / COUNTER_DRONE.sampleKm));
   const lat0 = map.lat[from], lon0 = map.lon[from];
@@ -99,7 +113,7 @@ export function overflightKm(world: World, ctx: SimContext, pic: AirPicture, fro
     const t = i / steps;
     const n = i === steps ? to : map.nodeAt(lat0 + (map.lat[to] - lat0) * t, lon0 + dLon * t);
     const owner = map.isSea(n) ? undefined : world.control[n];
-    if (owner && pic.atWar(owner, attacker)) km += dist / steps;
+    if (owner && engagesOver(world, pic, owner, attacker, target)) km += dist / steps;
   }
   return km;
 }

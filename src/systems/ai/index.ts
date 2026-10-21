@@ -1,6 +1,7 @@
 import type { System } from '../../core/engine';
 import { COMMAND_DOMAINS, type Command, type NationId, type SimEvent, type World } from '../../core/types';
 import { enemyMap } from '../diplomacy/assess';
+import { members } from '../diplomacy/wars';
 import { aiMayIssue, delegated } from '../orders';
 import { DEFAULT_PROFILE, type DiplomacyState, type StrategicProfile } from '../diplomacy/types';
 import { planAir } from './air';
@@ -136,7 +137,7 @@ function prewarSurges(world: World): Map<NationId, { enemies: Set<NationId>; fri
   for (const j of d?.joins ?? []) {
     const war = d!.wars.find((w) => w.id === j.war);
     if (!war || world.nations[j.nation].status !== 'peace') continue;
-    out.set(j.nation, { enemies: new Set(war.sides[1 - j.side]), friends: new Set([j.nation, ...war.sides[j.side]]) });
+    out.set(j.nation, { enemies: new Set(members(war.sides[1 - j.side])), friends: new Set([j.nation, ...members(war.sides[j.side])]) });
   }
   return out;
 }

@@ -4,7 +4,7 @@ import type { Formation, FormationId, FormationKind, Munition, MunitionId, Natio
 import { isOverseas } from '../../data/territories';
 import { HOSTILE_OPINION } from '../diplomacy/escalation';
 import { delegated } from '../orders';
-import { rung } from '../diplomacy/wars';
+import { rung, sideOf } from '../diplomacy/wars';
 import { aimKey, ATTRITABLE_COST_USD_M, dailyRounds, effectPk, futileAim } from '../air';
 import { ANTISHIP_KINDS, navalPosition } from '../naval';
 import type { HqLevel } from '../c2/state';
@@ -124,19 +124,30 @@ function deepStrikeAllowed(p: Plan, owner: NationId): boolean {
 }
 
 /**
- * Enemy forces on a neutral's soil are struck only when the host is already
- * hostile and inside the theatre, which brings the host into the war (see
- * diplomacy processEvents). CSIS "The First Battle of the Next War" (2023) has
- * China strike US bases on Okinawa, ~650 km from Taipei, in most iterations;
- * mainland Japan and Korea, 1,300-1,500 km out, stay unstruck in its base case.
- * A friendly or ambivalent host is never struck: China would not hit Al Udeid
- * over Taiwan, nor Russia its own ally Belarus. Widening the war is a strategic
- * decision, so a player's delegate never makes it for a player who kept those.
+ * A war is fought in its theatre, within THEATRE_KM of the capital first attacked.
+ * Its original parties strike each other wherever deepStrikeAllowed lets them, but
+ * a state that joined the war fights the other side's joiners only inside the
+ * theatre: in Korea in 1950-53 the US kept Manchuria off limits while Soviet
+ * pilots fought over the Yalu. Enemy forces on a neutral's soil are struck only
+ * when the host is already hostile and inside the theatre, which brings the host
+ * into the war (see diplomacy processEvents). CSIS "The First Battle of the Next
+ * War" (2023) has China strike US bases on Okinawa, ~650 km from Taipei, in most
+ * iterations; mainland Japan and Korea, 1,300-1,500 km out, stay unstruck in its
+ * base case. A friendly or ambivalent host is never struck: China would not hit
+ * Al Udeid over Taiwan, nor Russia its own ally Belarus. Widening the war is a
+ * strategic decision, so a player's delegate never makes it for a player who kept those.
  */
 const THEATRE_KM = 1000;
+const PRINCIPAL: ReadonlySet<string> = new Set(['declared', 'attacked', 'scenario']);
 
-function nearEnemyCapital(p: Plan, node: NodeId): boolean {
-  for (const e of p.enemies) if (withinKm(p.ctx.map, node, p.world.nations[e].capital, THEATRE_KM)) return true;
+/** Whether a strike on `foe` at `node`, on `owner`'s soil, stays inside a war the planner fights `foe` in. */
+function inTheatre(p: Plan, owner: NationId, foe: NationId, node: NodeId): boolean {
+  for (const w of p.world.slices.diplomacy?.wars ?? []) {
+    const mine = sideOf(w, p.nation);
+    if (mine === -1 || sideOf(w, foe) !== 1 - mine) continue;
+    if (owner === foe && PRINCIPAL.has(w.sides[mine].members[p.nation].via) && PRINCIPAL.has(w.sides[1 - mine].members[foe].via)) return true;
+    if (withinKm(p.ctx.map, node, w.theatre, THEATRE_KM)) return true;
+  }
   return false;
 }
 
@@ -223,7 +234,8 @@ export function strikeTargets(p: Plan, battleArea: Set<number>): TargetGrid {
     if (p.enemies.has(owner) && isOverseas(map, t.node)) return true;
     let ok = deep.get(owner);
     if (ok === undefined) deep.set(owner, (ok = deepStrikeAllowed(p, owner)));
-    return ok && (p.enemies.has(owner) || nearEnemyCapital(p, t.node));
+    const foe = p.enemies.has(owner) ? owner : t.formation && p.world.formations[t.formation]?.nation;
+    return ok && !!foe && inTheatre(p, owner, foe, t.node);
   };
   // Aims recent raids could not touch wait for reassessment (air BDA).
   const live = (t: StrikeTarget) => !futileAim(p.world, p.nation, aimKey(t.node, t.formation, t.cls));

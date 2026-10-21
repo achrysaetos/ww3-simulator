@@ -1,4 +1,7 @@
 import type { FormationId, NationId, NodeId } from '../../core/types';
+import type { AirDefencePledge, PeaceTreaty, TreatyArea } from '../../data/nations/types';
+
+export type { AirDefencePledge, GeoBox, PeaceTreaty, TreatyArea } from '../../data/nations/types';
 
 /**
  * Inputs the nation-profile data supplies. Defined here so diplomacy and AI can
@@ -29,10 +32,15 @@ export interface TreatyMember {
   delayDays: number;
 }
 
+/** What an armed attack must hit to call the treaty: a member's territory, or its forces. */
+export type TreatyTrigger = 'territory' | 'forces';
+
 export interface AllianceTreaty {
   id: string;
   kind: CommitmentKind;
   members: Record<NationId, TreatyMember>;
+  triggers: readonly TreatyTrigger[];
+  area?: TreatyArea;
   /** Nuclear guarantors: their credibility across every alliance rides on honouring this one. */
   guarantors?: readonly NationId[];
 }
@@ -54,17 +62,38 @@ export const DEFAULT_PROFILE: StrategicProfile = { casualtyTolerance: 0.5, inter
 export interface DiplomacyInput {
   alliances?: readonly AllianceTreaty[];
   profiles?: Readonly<Record<string, StrategicProfile>>;
+  peace?: readonly PeaceTreaty[];
+  aid?: readonly AirDefencePledge[];
 }
 
 // ---------------------------------------------------------------- slice
 
-/** A coalition war. Every member of one side is at war with every member of the other. */
+export interface SideMember {
+  /** Tick it entered the war. */
+  joined: number;
+  /** How it entered: 'declared', 'attacked', 'opportunist', 'scenario', or the id of the treaty that called it. */
+  via: string;
+  /** The member whose treaty call it answered. */
+  defends?: NationId;
+}
+
+/** One side of a war. Its leader makes peace for every member. */
+export interface Side {
+  leader: NationId;
+  members: Record<NationId, SideMember>;
+}
+
+/**
+ * A coalition war. Every member of one side is at war with every member of the other.
+ * `sides[0]` opened it; defensive treaties never trigger in its favour.
+ */
 export interface War {
   id: string;
-  /** Who fired first; defensive treaties never trigger in the aggressor's favour. */
-  aggressor: NationId;
-  sides: [NationId[], NationId[]];
-  startTick: number;
+  name: string;
+  sides: [Side, Side];
+  since: number;
+  /** The capital first attacked; members that joined the war fight each other only near it (see ai/strikes.ts). */
+  theatre: NodeId;
 }
 
 export interface PendingJoin {
@@ -137,11 +166,17 @@ export interface DiplomacyState {
   assessment: Record<NationId, Assessment>;
   /** Escalation pressure per relationKey; crossing thresholds climbs the ladder. */
   pressure: Record<string, number>;
-  /** Open peace offers per relationKey, by offering nation. */
+  /** Open peace offers per relationKey, by offering nation: between side leaders, or a separate peace for one member. */
   offers: Record<string, NationId>;
+  /** Hosts that let a guest's troops onto their land: host -> guests. */
+  access: Record<NationId, NationId[]>;
+  /** Donors helping a belligerent without joining its war: donor -> recipients. */
+  aid: Record<NationId, NationId[]>;
+  /** Bumped whenever war membership or access changes, so readers can cache what they derive from them. */
+  rev: number;
   /** Formations carrying SSBNs, so their loss can be recognised after they are emptied. */
   ssbnFormations: FormationId[];
-  /** `${war}|${victim}` pairs whose defensive treaties have been called, so each is called once. */
+  /** `${war}|${victim}|${treaty}` calls already made, so each treaty is called once per victim. */
   invoked: string[];
   /** Open extended-deterrence decisions. */
   umbrella: UmbrellaCase[];

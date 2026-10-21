@@ -1,6 +1,8 @@
 import { atWar, relation, type SimContext } from '../../core/engine';
 import type { GameMap } from '../../core/map';
 import type { Formation, FormationId, NationId, NodeId, World } from '../../core/types';
+import type { DiplomacyState } from '../diplomacy/types';
+import { sideOf } from '../diplomacy/wars';
 import { ALLIED_OPINION, LAND_KINDS } from './tables';
 
 export interface LandState {
@@ -59,11 +61,35 @@ export function allied(world: World, a: NationId, b: NationId): boolean {
   return relation(world, a, b).opinion > ALLIED_OPINION;
 }
 
-/** Land a nation's troops may enter: its own, allies', enemies' (by force), or unclaimed. Neutrals' land is closed. */
+/** Per diplomacy slice: whether `${nation}|${holder}` fight on one side or hold a grant of passage, at its revision. */
+const passage = new WeakMap<DiplomacyState, { rev: number; open: Map<string, boolean> }>();
+
+/**
+ * Whether `nation`'s troops may enter ground `holder` controls: its own, an enemy's (by force), a
+ * co-belligerent's, or a host's that granted passage. A shared bloc or a warm opinion opens
+ * nothing: a belligerent's troops crossing a neutral breaks Hague Convention V (1907) Arts. 2
+ * and 5, and Turkey's parliament refused US passage on 1 Mar 2003.
+ */
+export function openTo(world: World, nation: NationId, holder: NationId): boolean {
+  if (holder === nation || atWar(world, nation, holder)) return true;
+  const d = world.slices.diplomacy;
+  if (!d) return false;
+  let memo = passage.get(d);
+  if (!memo || memo.rev !== d.rev) passage.set(d, (memo = { rev: d.rev, open: new Map() }));
+  const key = `${nation}|${holder}`;
+  let open = memo.open.get(key);
+  if (open === undefined) {
+    open = !!d.access[holder]?.includes(nation) || d.wars.some((w) => sideOf(w, nation) !== -1 && sideOf(w, nation) === sideOf(w, holder));
+    memo.open.set(key, open);
+  }
+  return open;
+}
+
+/** Land a nation's troops may enter: unclaimed, or held by a nation it is open to (see openTo). */
 export function canEnter(world: World, map: GameMap, nation: NationId, node: NodeId): boolean {
   if (map.isSea(node)) return false;
   const holder = world.control[node];
-  return !holder || allied(world, nation, holder) || atWar(world, nation, holder);
+  return !holder || openTo(world, nation, holder);
 }
 
 /** Land formations per node, built once per step so per-node lookups are O(1). */

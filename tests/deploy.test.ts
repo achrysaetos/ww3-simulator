@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import type { System } from '../src/core/engine';
 import type { Command, Formation, NodeId } from '../src/core/types';
+import { createDiplomacy, type AllianceTreaty } from '../src/systems/diplomacy';
 import { createAi, type Plan } from '../src/systems/ai';
 import { issue } from '../src/systems/ai/forces';
 import { applyLandOrder, landMovement } from '../src/systems/land';
@@ -22,8 +24,16 @@ const sealiftGroup = (t: T, node: NodeId, ships = 4) =>
 const NATO = ['USA', 'CAN', 'GBR', 'FRA', 'DEU', 'NLD', 'BEL', 'DNK', 'NOR', 'POL'];
 const nato = (t: T) => { for (const n of NATO) t.world.nations[N(n)].blocs = ['NATO']; };
 
-function setup() {
-  const t = testWorld([landMovement, navalWar]);
+/** NATO as a treaty: its members that are not fighting grant passage to members that are. */
+const natoTreaty = (extra: string[]): AllianceTreaty => ({
+  id: 'NATO',
+  kind: 'collective_defense',
+  triggers: ['territory', 'forces'],
+  members: Object.fromEntries([...NATO, ...extra].map((n) => [N(n), { role: 'mutual' as const, reliability: 1, delayDays: 1 }])),
+});
+
+function setup(systems: System[] = []) {
+  const t = testWorld([landMovement, navalWar, ...systems]);
   nato(t);
   t.war('USA', 'RUS');
   // Ships alongside at Norfolk refuel from the national stocks the base holds.
@@ -60,7 +70,7 @@ describe('strategic deployment', () => {
   });
 
   it('lands a brigade bound for Lithuania at a port out of Kaliningrad\'s missile reach, then marches it on to Vilnius', () => {
-    const t = setup();
+    const t = setup([createDiplomacy({ alliances: [natoTreaty(['LTU', 'LVA', 'EST'])] })]);
     const vilnius = t.nodeAt(54.69, 25.28), kaliningrad = t.nodeAt(54.7, 20.5);
     for (const n of ['LTU', 'LVA', 'EST']) t.world.nations[N(n)].blocs = ['NATO'];
     const brigade = heavyBrigade(t, 'USA', t.nodeAt(...FORT_HOOD));

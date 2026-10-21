@@ -23,7 +23,7 @@ describe('extended nuclear deterrence', () => {
   /** Russia at war with Poland; NATO's US guarantee covers Poland. Both sides hold ICBMs; Russian armour sits east of Smolensk. */
   function nato(reliability: number, usAtWar = true) {
     const treaty: AllianceTreaty = {
-      id: 'NATO', kind: 'collective_defense', guarantors: [USA],
+      id: 'NATO', kind: 'collective_defense', triggers: ['territory', 'forces'], guarantors: [USA],
       members: { [POL]: { role: 'mutual', reliability: 1, delayDays: 1 }, [USA]: { role: 'mutual', reliability, delayDays: 30 } },
     };
     const t = testWorld([createStrategic(), createDiplomacy({ alliances: [treaty] })]);

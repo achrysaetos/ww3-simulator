@@ -82,13 +82,20 @@ describe('treaty calls to a human nation', () => {
   const NATO: AllianceTreaty = {
     id: 'NATO',
     kind: 'collective_defense',
+    triggers: ['territory', 'forces'],
     members: {
       [N('POL')]: { role: 'mutual', reliability: 1, delayDays: 1 },
       [N('USA')]: { role: 'mutual', reliability: 1, delayDays: 3 },
     },
   };
   const attackOnPoland = () => {
-    const t = testWorld([createOrderRouter([]), createDiplomacy({ alliances: [NATO] })]);
+    const t = testWorld([createOrderRouter([]), {
+      id: 'assault',
+      step: (world, ctx) => {
+        const [rus, pol] = [N('RUS'), N('POL')];
+        if (atWar(world, rus, pol)) ctx.emit({ type: 'battle', tick: world.tick, node: world.nations[pol].capital, attacker: rus, defender: pol, losses: {}, casualties: {} });
+      },
+    }, createDiplomacy({ alliances: [NATO] })]);
     t.world.nations[N('USA')].controlledBy = 'human';
     t.world.pending.push({ type: 'declare_war', nation: N('RUS'), target: N('POL') });
     t.engine.step(t.world);
