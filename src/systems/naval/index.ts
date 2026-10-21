@@ -1,8 +1,8 @@
 import type { SimContext, System } from '../../core/engine';
-import type { FormationId, MunitionId, NationId, World } from '../../core/types';
+import type { Formation, FormationId, MunitionId, NationId, World } from '../../core/types';
 import { landings } from './amphibious';
 import { computeSeaControl, computeTradeBlocked } from './blockade';
-import { applyHits, fire, navalCombat } from './combat';
+import { applyHits, fire, navalCombat, targetValue } from './combat';
 import { detect } from './detection';
 import { reindex, tickEnv } from './env';
 import { mineWarfare } from './mines';
@@ -30,6 +30,7 @@ export const navalWar: System = {
       oceanSurveillance: Object.fromEntries(Object.keys(world.nations).map((n) => [n, OCEAN_SURVEILLANCE[n] ?? 0])),
       tracks: {},
       lastFired: {},
+      offshore: {},
       ledger: {},
       attrition: {},
     };
@@ -74,4 +75,9 @@ export function strikeNavalGroup(world: World, ctx: SimContext, by: NationId, mu
   const out = fire(env, null, t, m, count, against, undefined, by);
   if (out.hits.length) applyHits(env, t, out.hits, by);
   return out;
+}
+
+/** What sinking a naval group would cost its owner (see targetValue), for strikers choosing among ships. */
+export function shipValue(world: World, ctx: SimContext, f: Formation): number {
+  return targetValue(tickEnv(world, ctx), f);
 }

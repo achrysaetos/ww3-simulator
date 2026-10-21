@@ -7,7 +7,7 @@
 import type { Catalog } from '../../core/catalog';
 import type { SimContext } from '../../core/engine';
 import type { Formation, FormationId, Munition, MunitionId, NationId, NodeId, Platform, PlatformId, TargetClass, World } from '../../core/types';
-import { ANTISHIP_KINDS, strikeNavalGroup } from '../naval';
+import { ANTISHIP_KINDS, shipValue, strikeNavalGroup } from '../naval';
 import { defendRaid, envelopeExposure, hostileDefenders, overflightKm, samVsAircraft, type RaidStream } from './iads';
 import { takeLosses, type LossTally } from './losses';
 import { nodeDistance, type AirGroup, type AirPicture } from './picture';
@@ -247,8 +247,7 @@ function shipTarget(world: World, ctx: SimContext, pic: AirPicture, node: NodeId
   let best: Formation | undefined, bestValue = 0;
   for (const f of pic.atNode.get(node) ?? []) {
     if (!ok(f)) continue;
-    let v = 0;
-    for (const [pid, n] of Object.entries(f.equipment) as [PlatformId, number][]) v += n * ctx.catalog.platform(pid).unitCostUsdM;
+    const v = shipValue(world, ctx, f);
     if (v > bestValue) { bestValue = v; best = f; }
   }
   return best;

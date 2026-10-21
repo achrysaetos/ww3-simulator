@@ -10,8 +10,8 @@ const run = (scenario: string, days: number) => {
 };
 
 describe('naval AI amphibious assault', () => {
-  it('China stages troops at a Fujian port, embarks them as landing teams and puts them ashore on Taiwan within five days', () => {
-    const s = run('taiwan-2027', 5);
+  it('China stages troops at a Fujian port, embarks them as landing teams and puts them ashore on Taiwan within six days', () => {
+    const s = run('taiwan-2027', 6);
     const chn = s.world.slices.naval.ledger['CHN' as NationId];
     expect(chn.assaultLandings).toBeGreaterThan(0);
     expect(chn.troopsLanded).toBeGreaterThan(2000);

@@ -9,6 +9,7 @@ import { loadMap } from '../src/data/load';
 import { airWar } from '../src/systems/air';
 import { applyNavalOrder, CHOKEPOINTS, navalWar, resolveSalvo, strikeNavalGroup } from '../src/systems/naval';
 import { geography, nearestSea, seaNeighbour } from '../src/systems/naval/geography';
+import { OFFLOAD_HOURS } from '../src/systems/naval/tables';
 import { testMunitions, testPlatforms } from '../src/testkit';
 
 const M = (m: Omit<Munition, 'producers' | 'id'> & { id: string }): Munition => ({ producers: [], ...m, id: m.id as MunitionId });
@@ -257,6 +258,33 @@ describe('submarine warfare', () => {
     expect(bare.torpedoes).toBe(bare.attacks * 3);
     expect(attacksOn(true).attacks).toBeLessThan(bare.attacks * 0.6);
   });
+
+  it('a dozen boats massed on one sea zone make three attacks a tick, not one', () => {
+    const t = navalWorld(7);
+    const at = t.nodeAt(20, 125);
+    t.war('USA', 'CHN');
+    const pack = t.add({ nation: USA, name: 'SSN squadron', kind: 'submarine', echelon: 'squadron', node: at, equipment: t.eq({ t_ssn: 12 }) });
+    pack.order = { posture: 'patrol', issuedTick: 0 };
+    t.add({ nation: CHN, name: 'Amphibious force', kind: 'surface_group', node: at, equipment: t.eq({ n_lhd: 40 }) });
+    t.engine.step(t.world);
+    expect(led(t, 'USA')!.torpedoesFired).toBe(9);
+  });
+
+  it('a submarine goes for a loaded troopship before a costlier warship group beside it', () => {
+    const t = navalWorld(5);
+    const at = t.nodeAt(20, 125);
+    t.war('USA', 'CHN');
+    const ssn = t.add({ nation: USA, name: 'SSN', kind: 'submarine', echelon: 'squadron', node: at, equipment: t.eq({ t_ssn: 1 }) });
+    ssn.order = { posture: 'patrol', issuedTick: 0 };
+    const warships = t.add({ nation: CHN, name: 'Cruisers', kind: 'surface_group', node: at, equipment: t.eq({ n_cruiser: 6 }), magazine: {} });
+    const lift = t.add({ nation: CHN, name: 'Troopship', kind: 'surface_group', node: at, equipment: t.eq({ n_lhd: 1 }) });
+    const troops = t.add({ nation: CHN, name: 'Brigade', kind: 'maneuver', echelon: 'brigade', node: at, equipment: t.eq({ t_inf: 100 }) });
+    troops.status = 'embarked';
+    troops.embarkedOn = lift.id;
+    expect(runUntil(t, () => lift.status === 'destroyed', 12)).toBeGreaterThan(0);
+    expect(troops.status).toBe('destroyed');
+    expect(warships.equipment['n_cruiser' as PlatformId]).toBe(6);
+  });
 });
 
 describe('anti-ship strikes from shore', () => {
@@ -445,7 +473,10 @@ describe('naval movement and lift', () => {
       const before = brigade.personnel;
       t.engine.step(t.world);
       expect(brigade.node).toBe(lift.node);
+      runUntil(t, () => lift.node === seaNeighbour(t.map, beach), 30);
+      const offBeach = t.world.tick;
       expect(runUntil(t, () => brigade.status !== 'embarked', 30)).toBeGreaterThan(0);
+      expect((t.world.tick - offBeach) * t.world.dtHours).toBeGreaterThanOrEqual(OFFLOAD_HOURS);
       expect(brigade.node).toBe(beach);
       expect(brigade.embarkedOn).toBeUndefined();
       return 1 - brigade.personnel / before;

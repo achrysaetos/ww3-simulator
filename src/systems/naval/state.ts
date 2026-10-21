@@ -27,6 +27,8 @@ export interface NavalState {
   tracks: Record<FormationId, NationId[]>;
   /** Tick each formation last fired torpedoes or missiles: a firing submarine gives away its position ("flaming datum"). */
   lastFired: Record<FormationId, number>;
+  /** Tick each lift group arrived off a hostile beach; its troops are ashore OFFLOAD_HOURS later. */
+  offshore: Record<FormationId, number>;
   ledger: Record<NationId, NavalLedger>;
   /** Recent hull losses per fleet, keyed by fleetKey; read through fleetLosses. */
   attrition: Record<string, { hulls: number; tick: number }>;

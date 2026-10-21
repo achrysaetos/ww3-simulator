@@ -163,6 +163,14 @@ export const LAY_PER_HULL = 20;
  */
 export const LANDING_BASE_LOSS = 0.02;
 export const LANDING_OPPOSED_LOSS = 0.75;
+/**
+ * Hours a lift group lies off a hostile beach putting its troops and vehicles ashore, exposed to
+ * submarines and anti-ship strikes, before the landing force is ashore and the ships can turn back.
+ * One tide cycle: at Normandy from mid-June 1944 LSTs beached on the ebb, dried out, unloaded and
+ * refloated on the next flood (Ruppenthal, Logistical Support of the Armies, vol. 1); landing craft
+ * shuttling from LPDs and ferries discharging over floating causeways take as long (estimate).
+ */
+export const OFFLOAD_HOURS = 12;
 /** Support terms: own sea control of the coast zone and air control over the beach. */
 export const LANDING_SEA_SUPPORT = 0.5;
 export const LANDING_AIR_SUPPORT = 0.35;

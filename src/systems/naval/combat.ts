@@ -20,8 +20,8 @@ const ASW_SALVO = 2;
  * Ticks one boat needs after an attack before it attacks again: it clears the datum, evades
  * the counterattack and works back into a firing position (~a day; WWII U-boat and Falklands
  * 1982 experience; estimate). A formation's boats patrol dispersed and take turns, so a
- * formation of n boats makes one attack every SUB_REATTACK_TICKS / n ticks, never more than
- * one per tick.
+ * formation of n boats makes n / SUB_REATTACK_TICKS attacks per tick: one every few ticks for a
+ * pair of boats, three a tick for a dozen massed on an invasion's sea lanes.
  */
 const SUB_REATTACK_TICKS = 4;
 /**
@@ -57,15 +57,15 @@ export function navalCombat(env: TickEnv, tracks: Tracks): void {
     if (env.world.tick - (env.world.slices.naval.lastFired[f.id] ?? -Infinity) < SUB_REATTACK_TICKS / c.hullCount) continue;
     const target = pickTarget(env, tracks, f, (t) => t.node === f.node && !env.comp(t).submerged);
     if (!target) continue;
-    const torp = bestMunition(env, f, 'ship', 0, (m) => m.kind === 'torpedo');
-    if (!torp) continue;
-    // A boat caught on its approach breaks off; it is a datum the screen searches next tick.
-    if (env.ctx.rng.chance(1 - Math.exp(-screen(env, target) * (1 - c.stealth) * SCREEN_K))) {
+    for (let attacks = Math.max(1, Math.round(c.hullCount / SUB_REATTACK_TICKS)); attacks > 0; attacks--) {
+      const torp = bestMunition(env, f, 'ship', 0, (m) => m.kind === 'torpedo');
+      if (!torp) break;
       env.world.slices.naval.lastFired[f.id] = env.world.tick;
-      continue;
+      // A boat caught on its approach breaks off; it is a datum the screen searches next tick.
+      if (env.ctx.rng.chance(1 - Math.exp(-screen(env, target) * (1 - c.stealth) * SCREEN_K))) continue;
+      const n = Math.min(Math.floor(f.magazine[torp.id]), TORPEDO_SPREAD);
+      queue(target, f.nation, fire(env, f, target, torp, n, 'ship'));
     }
-    const n = Math.min(Math.floor(f.magazine[torp.id]), TORPEDO_SPREAD);
-    queue(target, f.nation, fire(env, f, target, torp, n, 'ship'));
   }
 
   for (const sub of env.naval) {
@@ -149,6 +149,27 @@ function isNeighbour(env: TickEnv, a: number, b: number): boolean {
 }
 
 /**
+ * A loaded lift group outranks every warship: troops at sea are an invasion's centre of gravity.
+ * In CSIS's 2023 Taiwan wargame the invasion failed because allied submarines, bombers and
+ * Taiwan's shore batteries sank most of the amphibious fleet early. USD millions, above any task force.
+ */
+const LOADED_LIFT_PRIORITY = 1e6;
+
+/**
+ * Target priority of a naval group: what sinking it would cost its owner (hulls and the formations
+ * aboard, USD millions), with troops at sea ahead of anything else.
+ */
+export function targetValue(env: TickEnv, t: Formation): number {
+  const { catalog } = env.ctx;
+  let v = 0;
+  for (const h of env.comp(t).hulls) v += h.platform.unitCostUsdM * h.count;
+  const aboard = env.embarked.get(t.id) ?? [];
+  for (const e of aboard)
+    for (const [pid, n] of Object.entries(e.equipment) as [PlatformId, number][]) v += n * catalog.platform(pid).unitCostUsdM;
+  return aboard.length ? v + LOADED_LIFT_PRIORITY : v;
+}
+
+/**
  * Most valuable tracked hostile formation the predicate allows; an ordered targetFormation wins if eligible.
  * Candidates are the groups at f's node and next door, or `among` when given.
  */
@@ -160,8 +181,7 @@ function pickTarget(env: TickEnv, tracks: Tracks, f: Formation, ok: (t: Formatio
   const consider = (candidates: Formation[]) => {
     for (const t of candidates) {
       if (!atWar(env.world, f.nation, t.nation) || !tracked(tracks, f.nation, t) || !ok(t)) continue;
-      let v = 0;
-      for (const h of env.comp(t).hulls) v += h.platform.unitCostUsdM * h.count;
+      const v = targetValue(env, t);
       if (v > bestValue) { bestValue = v; best = t; }
     }
   };
