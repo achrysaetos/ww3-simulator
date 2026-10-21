@@ -450,6 +450,20 @@ describe('mine warfare', () => {
     expect(led(t, 'USA')!.minesSwept).toBeGreaterThan(2);
   });
 
+  it('dived submarines strike hostile mines far less often than surface ships in the same field', () => {
+    const t = navalWorld(11);
+    t.war('USA', 'RUS');
+    const mined = nearestSea(t.map, 55.5, 13.5);
+    t.world.slices.naval.mines[mined] = { [RUS]: 400 };
+    const boats = t.add({ nation: USA, name: 'Boats', kind: 'submarine', echelon: 'squadron', node: mined, equipment: t.eq({ t_ssn: 40 }), magazine: {} });
+    const ships = t.add({ nation: USA, name: 'Ships', kind: 'surface_group', node: mined, equipment: t.eq({ t_destroyer: 40 }), magazine: {} });
+    boats.order = ships.order = { posture: 'reserve', issuedTick: 0 };
+    for (let i = 0; i < 4; i++) t.engine.step(t.world);
+    const struck = (f: Formation, pid: string) => 40 - count(f.equipment, pid) + (f.damaged[pid as PlatformId] ?? 0);
+    expect(struck(ships, 't_destroyer')).toBeGreaterThan(5);
+    expect(struck(boats, 't_ssn')).toBeLessThan(struck(ships, 't_destroyer') / 2);
+  });
+
   it('a minelayer on blockade lays its mines and they interdict trade', () => {
     const t = navalWorld();
     t.war('RUS', 'UKR');
