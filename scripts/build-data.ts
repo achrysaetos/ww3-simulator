@@ -3,6 +3,7 @@
  *  - Natural Earth country polygons (world-atlas npm package, public domain)
  *  - Natural Earth geography regions, populated places, ports, airports, railroads (public domain)
  *  - World Bank World Development Indicators API (CC BY 4.0)
+ *  - ETOPO 2022 global relief model (NOAA NCEI, public domain), for elevation, relief and terrain
  *
  * Run: npm run data   (downloads are cached in .cache/)
  */
@@ -14,6 +15,7 @@ import isoCountries from 'i18n-iso-countries';
 import type { FeatureCollection, Geometry, MultiPolygon, Polygon } from 'geojson';
 import { MANUAL_STATS, SOVEREIGN_OF } from './manual-stats';
 import { LandLabels, Raster } from './land-grid';
+import { cellRelief, loadDem } from './dem';
 import { SquareIndex, squareKey } from '../src/core/map';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
@@ -101,16 +103,18 @@ const BOREAL_BOXES: [number, number, number, number][] = [
   [48, 66, -170, -52], // Canadian boreal
   [58, 70, 5, 32], // Scandinavia / Finland
 ];
+/** A cell is hills or mountain when at least this share of its land has hill or mountain relief. */
+const RUGGED_SHARE = 0.5;
 const inBoxes = (lat: number, lon: number, boxes: [number, number, number, number][]) =>
   boxes.some(([a, b, c, d]) => lat >= a && lat <= b && lon >= c && lon <= d);
 
 // ---------- map refinements ----------
 /**
- * Squares drawn finer than 1 degree, as [south, north, west, east] in whole degrees and cells per degree.
- * At 1 degree Taiwan was four cells with Taipei at sea; at 1/4 degree its coast, the Taipei basin, Taoyuan,
- * Taichung, Tainan, Kaohsiung, Hualien and Taitung each have a cell. At 1 degree Kerch and Taman share a
- * square, which would carry armies across the strait inside one cell, Sevastopol is at sea, and Baltiysk,
- * the Baltic Fleet's base, is Polish.
+ * Squares drawn finer than 1 degree, as [south, north, west, east] in whole degrees and cells per degree; where
+ * boxes overlap the finer one wins. At 1 degree Taiwan was four cells with Taipei at sea; at 1/4 degree its
+ * coast, the Taipei basin, Taoyuan, Taichung, Tainan, Kaohsiung, Hualien and Taitung each have a cell. At 1
+ * degree Kerch and Taman share a square, which would carry armies across the strait inside one cell, Sevastopol
+ * is at sea, and Baltiysk, the Baltic Fleet's base, is Polish.
  */
 const REFINE: { name: string; box: [number, number, number, number]; k: number }[] = [
   { name: 'Taiwan and Penghu', box: [21, 25, 119, 122], k: 4 },
@@ -149,6 +153,7 @@ const EXTRA_FACILITIES: { name: string; kind: 'port' | 'airport'; lat: number; l
   { name: 'Diego Garcia naval support facility', kind: 'port', lat: -7.29, lon: 72.4 },
   { name: 'Baltiysk naval base', kind: 'port', lat: 54.64, lon: 19.91 },
   { name: "Izmail, Ukraine's Danube port", kind: 'port', lat: 45.34, lon: 28.84 },
+  { name: 'Primorsko-Akhtarsk air base', kind: 'airport', lat: 46.04, lon: 38.17 },
 ];
 
 /** Small islands whose garrisons, ports and airfields matter more than their area: each holds the cell at this point. */
@@ -182,6 +187,17 @@ const FIXED_LINKS: { name: string; a: [number, number]; b: [number, number] }[] 
   { name: 'Johor-Singapore Causeway', a: [1.5, 103.75], b: [1.4, 103.8] },
   { name: 'Seikan Tunnel', a: [41.17, 140.38], b: [41.42, 140.12] },
   { name: 'Confederation Bridge', a: [46.24, -63.66], b: [46.17, -63.78] },
+  { name: 'Kanmon tunnels and bridge', a: [34.02, 130.95], b: [33.88, 130.88] },
+  { name: 'Seto-Ohashi Bridge', a: [34.47, 133.8], b: [34.3, 133.83] },
+  { name: 'Akashi Kaikyo and Onaruto bridges', a: [34.63, 135.02], b: [34.2, 134.6] },
+  { name: 'Shimanami Kaido', a: [34.4, 133.1], b: [34.1, 133.0] },
+  { name: 'Little Belt bridges', a: [55.52, 9.72], b: [55.47, 9.79] },
+  { name: 'Storstrom and Faro bridges', a: [55.03, 11.9], b: [54.9, 11.88] },
+  { name: 'Rugen Bridge', a: [54.3, 13.08], b: [54.33, 13.14] },
+  { name: 'Oland Bridge', a: [56.68, 16.33], b: [56.69, 16.5] },
+  { name: 'Ganghwa bridges', a: [37.69, 126.55], b: [37.65, 126.6] },
+  { name: 'Geoga Bridge', a: [35.08, 128.83], b: [35.02, 128.73] },
+  { name: 'Penang bridges', a: [5.38, 100.31], b: [5.37, 100.39] },
 ];
 
 /** States with polygons that the game leaves out: none fields forces, and each would need a profile and an order of battle. */
@@ -196,6 +212,13 @@ const NE_ADM0: Record<string, string> = { KOS: 'XKX', SDS: 'SSD', PSX: 'PSE', SO
 const VOTE_SAMPLES = [[0, 0], [-0.3, -0.3], [0.3, -0.3], [-0.3, 0.3], [0.3, 0.3]];
 /** Islands too small to win a cell's majority vote still claim an open-water cell above this area. */
 const ISLAND_MIN_KM2 = 200;
+/** Two landmasses of one nation share no 1-degree cell when each has this much land in it (scaled to smaller cells). */
+const STRAIT_MIN_KM2 = 500;
+/** Finest cells drawn to part landmasses; in the polar archipelagos, where no war is fought, they stay joined. */
+const STRAIT_MAX_K = 4;
+const ARCTIC_LAT = 66;
+/** Share of a cell finer than 1 degree that must be land for the cell to be drawn. */
+const FINE_LAND_SHARE = 0.25;
 const EARTH_KM2 = 4 * Math.PI * 6371 ** 2;
 const LAT_MIN = -56;
 const LAT_MAX = 84;
@@ -241,6 +264,17 @@ async function main() {
     let best: string | undefined, bestV = 0;
     for (const [k, v] of votes) if (v > bestV) { best = k; bestV = v; }
     return bestV >= 2 ? best : undefined;
+  };
+  // A finer cell is land when a quarter of it is, and goes to the nation holding most of that land: five samples
+  // miss coastal towns on a sub-square that is mostly sea (Hamhung, Yeysk).
+  const areaVote = (lat: number, lon: number, size: number): string | undefined => {
+    const byOwner = new Map<number, number>();
+    for (const { owner, km2 } of raster.landmassesIn(lat - size / 2, lat + size / 2, lon - size / 2, lon + size / 2).values())
+      byOwner.set(owner, (byOwner.get(owner) ?? 0) + km2);
+    let best = -1, most = 0, total = 0;
+    for (const [o, km2] of byOwner) { total += km2; if (km2 > most) [best, most] = [o, km2]; }
+    const cellKm2 = (size * 111.2) ** 2 * Math.cos((lat * Math.PI) / 180);
+    return total >= FINE_LAND_SHARE * cellKm2 ? owners[best] : undefined;
   };
   const squareCentre = (key: number) => [89.5 - Math.floor(key / 360), (key % 360) - 179.5];
   const squareVote = new Map<number, string>();
@@ -290,7 +324,33 @@ async function main() {
   };
   const squareK = new Map<number, number>();
   for (const { box: [s, n, w, e], k } of REFINE)
-    for (let lat = s; lat < n; lat++) for (let lon = w; lon < e; lon++) squareK.set(squareKey(lat + 0.5, lon + 0.5), k);
+    for (let lat = s; lat < n; lat++) for (let lon = w; lon < e; lon++) {
+      const key = squareKey(lat + 0.5, lon + 0.5);
+      squareK.set(key, Math.max(k, squareK.get(key) ?? 1));
+    }
+  // A cell must not join two landmasses of one nation across water (Messina, Qiongzhou, the North Channel,
+  // Cook Strait): such a square is drawn finer until no cell holds two sizeable landmasses of one nation.
+  const splitsLandmasses = (north: number, west: number, size: number) => {
+    const byOwner = new Map<number, number>();
+    for (const { owner, km2 } of raster.landmassesIn(north - size, north, west, west + size).values())
+      if (km2 >= STRAIT_MIN_KM2 * size) byOwner.set(owner, (byOwner.get(owner) ?? 0) + 1);
+    return [...byOwner.values()].some((v) => v > 1);
+  };
+  let straitSquares = 0;
+  for (let lat = -ARCTIC_LAT; lat < ARCTIC_LAT; lat++)
+    for (let lon = -180; lon < 180; lon++) {
+      const key = squareKey(lat + 0.5, lon + 0.5), k0 = squareK.get(key) ?? 1;
+      const split = (k: number) => {
+        for (let j = 0; j < k; j++) for (let i = 0; i < k; i++) if (splitsLandmasses(lat + 1 - j / k, lon + i / k, 1 / k)) return true;
+        return false;
+      };
+      let k = k0;
+      while (k < STRAIT_MAX_K && split(k)) k *= 2;
+      if (k === k0) continue;
+      squareK.set(key, k);
+      straitSquares++;
+    }
+  console.log('squares refined where water parts one nation\'s land:', straitSquares);
   const claimsBySquare = new Map<number, Claim[]>();
   for (const c of claims) {
     const key = squareKey(c.lat, c.lon);
@@ -340,7 +400,7 @@ async function main() {
       for (let j = 0; j < k; j++)
         for (let i = 0; i < k; i++) {
           const lat = 90 - r - (j + 0.5) / k, lon = c - 180 + (i + 0.5) / k;
-          const o = vote(lat, lon, 1 / k);
+          const o = areaVote(lat, lon, 1 / k);
           if (o) cellAt.set(posKey(lat, lon), { lat, lon, half: 0.5 / k, iso3: o });
         }
     }
@@ -387,10 +447,12 @@ async function main() {
     landAdj[a].add(b);
     landAdj[b].add(a);
   }
+  const fixedLinks: { name: string; a: number; b: number }[] = [];
   for (const link of FIXED_LINKS) {
     const [a, b] = [link.a, link.b].map(([lat, lon]) => labels.pointLabel(lat, lon, 4));
     if (a < 0 || b < 0) throw new Error(`${link.name}: endpoint off the land grid`);
     if (a === b) { console.log(`fixed link ${link.name} lies inside one cell (${iso3Of(a)})`); continue; }
+    fixedLinks.push({ name: link.name, a, b });
     landAdj[a].add(b);
     landAdj[b].add(a);
     console.log(`fixed link ${link.name}: ${iso3Of(a)} ${cellList[a].lat},${cellList[a].lon} - ${iso3Of(b)} ${cellList[b].lat},${cellList[b].lon}`);
@@ -399,18 +461,21 @@ async function main() {
   // Points (cities, ports, airports, rail) belong to the cell owning the land at or next to them.
   const pointCell = (lat: number, lon: number) => labels.pointLabel(lat, lon, 4);
 
-  // terrain
+  // Terrain: relief from the elevation model decides mountains and hills; Natural Earth regions and the
+  // climate boxes decide the cover of the rest.
+  const dem = await loadDem(CACHE);
+  const relief = cellList.map(({ lat, lon, half, iso3 }) => {
+    const own = ownerIndex.get(iso3)!;
+    const r = cellRelief(dem, lat, lon, half, (la, lo) => raster.ownerAt(la, lo) === own);
+    return r.samples ? r : cellRelief(dem, lat, lon, half, (la, lo) => raster.ownerAt(la, lo) >= 0);
+  });
   const terrain: Terrain[] = [];
-  const regionClass: Record<string, Terrain> = {
-    'Range/mtn': 'mountain', Desert: 'desert', Tundra: 'arctic', Plateau: 'hills', Foothills: 'hills',
-    Wetlands: 'marsh', Delta: 'marsh',
-  };
+  const regionClass: Record<string, Terrain> = { Desert: 'desert', Tundra: 'arctic', Wetlands: 'marsh', Delta: 'marsh' };
   const regionPolys = regions.features
     .filter((f) => regionClass[(f.properties as any).FEATURECLA])
     .map((f) => ({ f, t: regionClass[(f.properties as any).FEATURECLA], b: geoBounds(f as any) }));
-  // smaller regions (e.g. a range inside a plateau) take precedence
   regionPolys.sort((a, b) => geoArea(b.f as any) - geoArea(a.f as any));
-  for (const { lat, lon } of cellList) {
+  cellList.forEach(({ lat, lon }, i) => {
     let t: Terrain = 'plain';
     if (inBoxes(lat, lon, JUNGLE_BOXES)) t = 'jungle';
     else if (inBoxes(lat, lon, BOREAL_BOXES)) t = 'forest';
@@ -419,9 +484,12 @@ async function main() {
       if (lat < s || lat > n || lon < w || lon > e) continue;
       if (geoContains(rp.f as any, [lon, lat])) t = rp.t;
     }
+    // Forest, jungle and marsh already defend and slow at least as well as hills.
+    if (relief[i].mountainShare >= RUGGED_SHARE) t = 'mountain';
+    else if (relief[i].hillShare >= RUGGED_SHARE && (t === 'plain' || t === 'desert')) t = 'hills';
     if (Math.abs(lat) > 66) t = 'arctic';
     terrain.push(t);
-  }
+  });
 
   // cities
   type City = { name: string; iso3: string; cell: number; lat: number; lon: number; pop: number; capital: boolean };
@@ -501,18 +569,17 @@ async function main() {
     }
     return out;
   });
-  // A coastal cell links to the sea zone past open water one cell (then one degree) away, else to the zone
+  // A coastal cell links to the sea zone of an open-water square next to it at its own size, else to the zone
   // over water inside its own square (Copenhagen on the Oresund). A cell with no land neighbour is an island
   // and always gets its nearest zone, so every cell can be reached.
   const coastZone = cellList.map(({ lat, lon, half }, n) => {
-    for (const step of [2 * half, 1])
-      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-        if (!dy && !dx) continue;
-        const la = lat + dy * step, lo = lon + dx * step;
-        if (isLand(la, lo)) continue;
-        const z = seaZoneAt(la, lo);
-        if (z >= 0) return z;
-      }
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      if (!dy && !dx) continue;
+      const la = lat + dy * 2 * half, lo = lon + dx * 2 * half;
+      if (isLand(la, lo)) continue;
+      const z = seaZoneAt(la, lo);
+      if (z >= 0) return z;
+    }
     for (let j = 0; j < 3; j++) for (let i = 0; i < 3; i++) {
       const la = lat + (j - 1) * half * 0.8, lo = lon + (i - 1) * half * 0.8;
       const z = raster.ownerAt(la, lo) < 0 ? seaZoneAt(la, lo) : -1;
@@ -558,6 +625,8 @@ async function main() {
     half: cellList.map((c) => c.half),
     owner: cellList.map((c) => nationIndex.get(c.iso3)!),
     terrain: terrain.map((t) => TERRAIN.indexOf(t)),
+    elevation: relief.map((r) => Math.round(r.elevation)),
+    ruggedness: relief.map((r) => Math.round(r.ruggedness)),
     popShare: cellList.map((c, n) => +(rawW[n] / weightBy.get(c.iso3)!).toFixed(5)),
     railKm: cellList.map((_, n) => Math.round(railKm.get(n) ?? 0)),
     ports: cellList.map((_, n) => portCount.get(n) ?? 0),
@@ -575,11 +644,13 @@ async function main() {
     sources: [
       'Natural Earth (public domain) via world-atlas and nvkelso/natural-earth-vector',
       'World Bank World Development Indicators (CC BY 4.0)',
+      'ETOPO 2022 15 arc-second global relief model, NOAA NCEI (public domain), via NOAA CoastWatch ERDDAP',
     ],
     terrainTypes: TERRAIN,
     nations,
     cells,
     cities: bigCities,
+    fixedLinks,
     sea: {
       res: SZ,
       lat: seaZones.map((z) => z.lat),

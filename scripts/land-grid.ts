@@ -18,6 +18,8 @@ const TOP = 84;
 const BOTTOM = -56;
 const W = 360 * PX;
 const H = (TOP - BOTTOM) * PX;
+/** Side of a pixel along a meridian, km. */
+const PX_KM = (6371 * Math.PI) / 180 / PX;
 /** A pixel joins its nation's nearest cell only within this distance, in degrees of latitude. */
 const NEAR_DEG = 1;
 
@@ -133,6 +135,24 @@ export class Raster {
     return -1;
   }
 
+  /** Land area in km2 per landmass inside a box of whole pixels, with each landmass's nation. */
+  landmassesIn(south: number, north: number, west: number, east: number): Map<number, { owner: number; km2: number }> {
+    const out = new Map<number, { owner: number; km2: number }>();
+    const xa = pixelX(west), xb = xa + Math.round((east - west) * PX) - 1;
+    for (let y = pixelY(north - 0.5 / PX); y <= pixelY(south + 0.5 / PX); y++) {
+      if (y < 0 || y >= H) continue;
+      const pxKm2 = PX_KM ** 2 * Math.cos((pixelLat(y) * Math.PI) / 180);
+      for (let run = this.rowStart[y]; run < this.rowStart[y + 1]; run++) {
+        const px = Math.min(this.x1[run], xb) - Math.max(this.x0[run], xa) + 1;
+        if (px <= 0) continue;
+        const m = out.get(this.comp[run]) ?? { owner: this.owner[run], km2: 0 };
+        m.km2 += px * pxKm2;
+        out.set(this.comp[run], m);
+      }
+    }
+    return out;
+  }
+
   /** Nation index of the land at a point, or -1 over water. */
   ownerAt(lat: number, lon: number): number {
     const run = this.runAt(pixelX(lon), pixelY(lat));
@@ -149,25 +169,37 @@ function boxDistance(c: Cell, lat: number, lon: number): number {
 /** Assigns land pixels to cells and finds the cell pairs whose land touches. */
 export class LandLabels {
   private readonly landmassesOf: Set<number>[];
+  /** The landmass holding most of each cell's own land. */
+  private readonly mainOf: Int32Array;
   /** Cell pairs whose land touches, keyed a * cells + b with a < b. */
   readonly contacts = new Set<number>();
 
   constructor(private readonly raster: Raster, private readonly grid: SquareIndex, private readonly cells: readonly Cell[]) {
     this.landmassesOf = cells.map(() => new Set());
-    this.walk((run, cell) => {
-      if (cell >= 0 && cells[cell].owner === raster.owner[run]) this.landmassesOf[cell].add(raster.comp[run]);
+    const px = cells.map(() => new Map<number, number>());
+    this.walk((run, cell, x0, x1) => {
+      if (cell < 0 || cells[cell].owner !== raster.owner[run]) return;
+      const comp = raster.comp[run];
+      this.landmassesOf[cell].add(comp);
+      px[cell].set(comp, (px[cell].get(comp) ?? 0) + x1 - x0 + 1);
     });
+    this.mainOf = Int32Array.from(px, (m) => { let best = -1, most = 0; for (const [c, n] of m) if (n > most) [best, most] = [c, n]; return best; });
     this.countContacts();
   }
 
-  /** The cell a land pixel belongs to, or -1. */
+  /**
+   * The cell a land pixel belongs to, or -1. Land of the square's own nation stays in the square's cell unless it
+   * is a second landmass there and a nearby cell of that nation stands on it: the tip of Sicily across the
+   * Strait of Messina joins Sicily's cell, not Calabria's.
+   */
   label(run: number, cell: number, lat: number, lon: number): number {
     const owner = this.raster.owner[run], comp = this.raster.comp[run];
-    if (cell >= 0 && this.cells[cell].owner === owner) return cell;
+    const home = cell >= 0 && this.cells[cell].owner === owner;
+    if (home && this.mainOf[cell] === comp) return cell;
     let best = cell, bestD = NEAR_DEG;
     for (const n of this.grid.nearby(lat, lon)) {
       const c = this.cells[n];
-      if (c.owner !== owner || !this.landmassesOf[n].has(comp)) continue;
+      if (c.owner !== owner || n === cell || !(home ? this.mainOf[n] === comp : this.landmassesOf[n].has(comp))) continue;
       const d = boxDistance(c, lat, lon);
       if (d < bestD) [best, bestD] = [n, d];
     }
@@ -176,15 +208,16 @@ export class LandLabels {
 
   /**
    * The cell for a point: the cell owning the land under it; over water, the containing cell when that
-   * cell's nation has shore within `radiusPx` pixels (Izmail's harbour on the Danube stays Ukrainian),
-   * else the cell owning the nearest land; the containing cell over open water; else -1.
+   * cell's nation holds the nearest shore within `radiusPx` pixels (Izmail's harbour on the Danube stays
+   * Ukrainian), else the cell owning that shore (Singapore's Jurong port, in a square Johor wins); the
+   * containing cell over open water; else -1.
    */
   pointLabel(lat: number, lon: number, radiusPx = 0): number {
     const x = pixelX(lon), y = pixelY(lat), home = this.grid.at(lat, lon);
     const onLand = this.raster.runAt(x, y);
     if (onLand >= 0) return this.label(onLand, home, lat, lon);
     const shore: [number, number, number][] = [];
-    for (let r = 1; r <= radiusPx; r++)
+    for (let r = 1; r <= radiusPx && !shore.length; r++)
       for (let dy = -r; dy <= r; dy++)
         for (let dx = -r; dx <= r; dx++) {
           if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
@@ -242,7 +275,10 @@ export class LandLabels {
         row = [];
         rowY = y;
       }
-      row.push(x0, x1, this.label(run, cell, lat, pixelLon((x0 + x1) >> 1)));
+      // Land left with another nation's cell (a strip of Slovakia between Polish and Hungarian squares, the
+      // Wakhan corridor) joins nothing: a border runs only where two nations' own land meets.
+      const label = this.label(run, cell, lat, pixelLon((x0 + x1) >> 1));
+      row.push(x0, x1, label >= 0 && this.cells[label].owner === this.raster.owner[run] ? label : -1);
     });
     flush();
   }
