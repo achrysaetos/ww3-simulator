@@ -27,4 +27,13 @@ describe('merged order of battle against IISS headline figures', () => {
     expect(tur.submarines).toBe(12);
     expect(arm.personnel).toBeLessThan(55_000);
   });
+
+  it('gives North Korea the ~14,100 guns and rocket launchers IISS counts besides its mortars', () => {
+    const tubes = new Set(['sp_artillery', 'towed_artillery', 'mlrs']);
+    let n = 0;
+    for (const f of Object.values(session.world.formations))
+      if (f.nation === 'PRK') for (const [pid, c] of Object.entries(f.equipment)) if (tubes.has(session.catalog.platform(pid as never).class)) n += c;
+    expect(n).toBeGreaterThan(14_100 * 0.85);
+    expect(n).toBeLessThan(14_100 * 1.15);
+  });
 });
