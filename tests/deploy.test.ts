@@ -135,6 +135,30 @@ describe('strategic deployment planning', () => {
     expect(movesOf(cmds, guard)).toHaveLength(0);
     expect(movesOf(cmds, militia)).toHaveLength(0);
   });
+
+  it("sends ready brigades to the front its allies hold thinly, not to the bigger enemy army an ally's army already matches", () => {
+    const t = testWorld([createAi()]);
+    nato(t);
+    for (const n of ['USA', 'KOR']) t.world.nations[N(n)].blocs.push('US-KOR');
+    t.war('PRK', 'KOR');
+    t.war('USA', 'PRK');
+    t.war('RUS', 'EST');
+    t.war('USA', 'RUS');
+    const border = (a: string, b: string) => t.map.nodesOf(N(a)).filter((n) => [...t.map.neighbors(n)].some((m) => !t.map.isSea(m) && t.world.control[m] === N(b)));
+    const dmz = border('PRK', 'KOR'), south = border('KOR', 'PRK'), narva = border('RUS', 'EST');
+    for (let i = 0; i < 12; i++) heavyBrigade(t, 'PRK', dmz[i % dmz.length]);
+    for (let i = 0; i < 12; i++) heavyBrigade(t, 'KOR', south[i % south.length]);
+    for (let i = 0; i < 4; i++) heavyBrigade(t, 'RUS', narva[i % narva.length]);
+    heavyBrigade(t, 'EST', border('EST', 'RUS')[0]);
+    const us = Array.from({ length: 6 }, () => heavyBrigade(t, 'USA', t.nodeAt(...FORT_HOOD), { readiness: 0.9 }));
+    const cmds: Command[] = [];
+    t.engine.run(t.world, 4 * 6, (w) => cmds.push(...w.pending));
+
+    const bound = us.flatMap((f) => movesOf(cmds, f).slice(-1).map((c) => c.order.target!));
+    const toKorea = bound.filter((n) => t.map.owner[n] === N('KOR')).length;
+    expect(bound.length).toBeGreaterThanOrEqual(4);
+    expect(bound.length - toKorea).toBeGreaterThan(toKorea);
+  });
 });
 
 describe('refused orders', () => {
