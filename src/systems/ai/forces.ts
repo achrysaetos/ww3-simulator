@@ -1,7 +1,33 @@
 import type { Catalog } from '../../core/catalog';
 import { platformCount } from '../../core/forces';
-import type { Formation, NationId, Order, PlatformId, World } from '../../core/types';
+import type { Formation, NationId, NodeId, Order, PlatformId, World } from '../../core/types';
+import { atBase, estimate, picture } from '../intel';
 import type { AiState, ForceIndex, Plan } from './types';
+
+/** Contacts older than this confidence are not planned against: a stale fix is somewhere else by now (intel STALENESS). */
+const MIN_CONFIDENCE = 0.25;
+
+/** An enemy formation as this nation's intelligence sees it: where it was fixed, how fresh the fix is (1 = this tick). */
+export interface Sighting { f: Formation; node: NodeId; confidence: number }
+
+/**
+ * `e`'s formations that `p.nation` knows of, at their believed positions. A world run without the
+ * intel system has perfect intelligence: every formation, where it is. Before its war a nation
+ * knows the garrisons, air bases and ports.
+ */
+export function sighted(p: Plan, e: NationId): Sighting[] {
+  const all = p.index.byNation.get(e) ?? [];
+  const pic = picture(p.world, p.nation);
+  if (!pic) return all.map((f) => ({ f, node: f.node, confidence: 1 }));
+  if (pic === 'peacetime') return all.filter((f) => atBase(p.ctx.map, f)).map((f) => ({ f, node: f.node, confidence: 1 }));
+  const out: Sighting[] = [];
+  for (const f of all) {
+    if (!pic[f.id]) continue;
+    const est = estimate(p.world, p.nation, f.id)!;
+    if (est.confidence >= MIN_CONFIDENCE) out.push({ f, node: est.node, confidence: est.confidence });
+  }
+  return out;
+}
 
 const GROUND_TARGETS = ['infantry', 'soft', 'armor'] as const;
 const groundValue = new WeakMap<Catalog, Map<PlatformId, number>>();

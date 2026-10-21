@@ -6,7 +6,7 @@ import { geography, sameWaters, seaNeighbour } from '../naval/geography';
 import { sailable } from '../naval/movement';
 import { boardable } from '../naval/orders';
 import { compose, fleetLosses } from '../naval/state';
-import { dominant, isGround, issue } from './forces';
+import { dominant, isGround, issue, sighted } from './forces';
 import { enemyPowerAt, landMass } from './fronts';
 import { reachKm } from './strikes';
 import type { Plan } from './types';
@@ -186,15 +186,15 @@ function maritimeFocus(p: Plan, assault: Assault | undefined): { node: NodeId; e
   const capitals = [...p.friends].map((n) => p.world.nations[n].capital);
   let best: NodeId | undefined, bestScore = 0;
   for (const e of p.enemies)
-    for (const f of p.index.byNation.get(e) ?? []) {
+    for (const { f, node } of sighted(p, e)) {
       // Boats ashore in a port cell (shore-launched USVs) are struck from the air, not hunted at sea.
-      if (f.kind !== 'surface_group' || !map.isSea(f.node)) continue;
+      if (f.kind !== 'surface_group' || !map.isSea(node)) continue;
       let value = 0;
       for (const [pid, n] of Object.entries(f.equipment)) value += n * p.ctx.catalog.platform(pid as PlatformId).unitCostUsdM;
       let d = Infinity;
-      for (const c of capitals) d = Math.min(d, map.distanceKm(f.node, c));
+      for (const c of capitals) d = Math.min(d, map.distanceKm(node, c));
       const score = value / (1 + d / 500);
-      if (score > bestScore) { bestScore = score; best = f.node; }
+      if (score > bestScore) { bestScore = score; best = node; }
     }
   if (best !== undefined) return { node: nearestSea(map, best), enemyFleet: true };
   return { node: nearestSea(map, p.sectors.length ? p.sectors[0].key : p.world.nations[p.nation].capital), enemyFleet: false };

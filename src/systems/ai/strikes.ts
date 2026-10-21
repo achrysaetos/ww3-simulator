@@ -6,7 +6,7 @@ import { HOSTILE_OPINION } from '../diplomacy/escalation';
 import { rung } from '../diplomacy/wars';
 import { aimKey, ATTRITABLE_COST_USD_M, dailyRounds, effectPk, futileAim } from '../air';
 import { ANTISHIP_KINDS, navalPosition } from '../naval';
-import { isGround, issue } from './forces';
+import { isGround, issue, sighted } from './forces';
 import type { Plan } from './types';
 
 export interface StrikeTarget {
@@ -142,12 +142,16 @@ export class TargetGrid {
 export function strikeTargets(p: Plan, battleArea: Set<number>): TargetGrid {
   const { map } = p.ctx;
   const out: StrikeTarget[] = [];
+  // Aimed where intelligence last fixed each formation, worth less as the fix goes stale.
   for (const e of p.enemies)
-    for (const f of p.index.byNation.get(e) ?? []) {
-      const v = VALUE_BY_KIND[f.kind] ?? (isGround(f) && battleArea.has(f.node) ? FRONT_FORCES : undefined);
+    for (const { f, node, confidence } of sighted(p, e)) {
+      const v = VALUE_BY_KIND[f.kind] ?? (isGround(f) && battleArea.has(node) ? FRONT_FORCES : undefined);
       if (!v) continue;
-      if (f.kind !== 'surface_group') out.push({ node: f.node, cls: v.cls, value: v.value, formation: f.id, assigned: 0 });
-      else out.push({ node: f.node, at: navalPosition(map, f), cls: v.cls, value: v.value * shipWorth(p, f), formation: f.id, afloat: f.node !== f.home || !!f.order.path?.length, assigned: 0 });
+      if (f.kind !== 'surface_group') out.push({ node, cls: v.cls, value: v.value * confidence, formation: f.id, assigned: 0 });
+      else {
+        const fresh = node === f.node && confidence === 1;
+        out.push({ node, at: fresh ? navalPosition(map, f) : node, cls: v.cls, value: v.value * shipWorth(p, f) * confidence, formation: f.id, afloat: node !== f.home || (fresh && !!f.order.path?.length), assigned: 0 });
+      }
     }
   for (const n of battleArea)
     if (map.railKm[n] >= RAIL_HUB.minRailKm) out.push({ node: n as NodeId, cls: RAIL_HUB.cls, value: RAIL_HUB.value * Math.min(2, map.railKm[n] / 200), assigned: 0 });
