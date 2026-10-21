@@ -35,7 +35,6 @@ const IISS: Record<string, [tanks: number, air: number, surface: number, subs: n
   ISR: [400, 310, 0, 5],
   SAU: [910, 300, 7, 0],
   ARE: [340, 137, 0, 0],
-  TUR: [2380, 275, 16, 12],
   EGY: [2500, 550, 11, 8],
   SYR: [150, 0, 0, 0],
   IRQ: [390, 85, 0, 0],
@@ -70,7 +69,7 @@ const has = (iso: string, id: string) => byNation(iso).some((e) => (e.equipment[
 const LAND_AIR = new Set<OrbatEntry['kind']>(['maneuver', 'artillery', 'air_defense', 'missile', 'air_wing', 'strategic', 'logistics']);
 
 describe('hand-modelled ORBAT: Asia-Pacific, Middle East, rest of world', () => {
-  it('models exactly the 32 assigned nations', () => {
+  it('models exactly the 31 assigned nations (Turkey is in orbat/west)', () => {
     expect(new Set(rest.map((e) => e.nation))).toEqual(new Set(Object.keys(IISS)));
   });
 

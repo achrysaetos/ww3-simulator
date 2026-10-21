@@ -92,7 +92,7 @@ const EXPERIENCE: Readonly<Record<string, number>> = {
 export const HAND_MODELLED_ELSEWHERE: ReadonlySet<string> = new Set([
   'USA', 'CAN', 'GBR', 'FRA', 'DEU', 'ITA', 'ESP', 'PRT', 'NLD', 'BEL', 'LUX', 'DNK', 'NOR', 'ISL', 'SWE', 'FIN', 'POL', 'CZE', 'SVK',
   'HUN', 'ROU', 'BGR', 'GRC', 'ALB', 'MKD', 'MNE', 'HRV', 'SVN', 'EST', 'LVA', 'LTU',
-  'RUS', 'BLR', 'UKR', 'CHN', 'PRK', 'IRN',
+  'TUR', 'RUS', 'BLR', 'UKR', 'CHN', 'PRK', 'IRN',
 ]);
 
 const SOURCE = 'Generated estimate: personnel from World Bank/IISS armed forces, scale from SIPRI military expenditure, kit by main supplier';

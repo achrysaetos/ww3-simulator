@@ -13,13 +13,12 @@ import { pakistan } from './pakistan';
 import { placeOnOwnLand } from './place';
 import { indonesia, philippines, singapore, thailand, vietnam } from './southeast-asia';
 import { taiwan } from './taiwan';
-import { turkey } from './turkey';
 
-/** Hand-modelled forces for Asia-Pacific, the Middle East, Latin America, Africa, the Caucasus and Serbia. */
+/** Hand-modelled forces for Asia-Pacific, the Middle East, Latin America, Africa, the Caucasus and Serbia. Turkey is in west/tur.ts. */
 export const rest: OrbatEntry[] = placeOnOwnLand(loadMap(), [
   ...japan, ...southKorea, ...taiwan, ...australia, ...india, ...pakistan,
   ...philippines, ...vietnam, ...indonesia, ...singapore, ...thailand,
-  ...israel, ...saudiArabia, ...uae, ...turkey, ...egypt, ...syria, ...iraq, ...jordan, ...qatar,
+  ...israel, ...saudiArabia, ...uae, ...egypt, ...syria, ...iraq, ...jordan, ...qatar,
   ...brazil, ...argentina, ...mexico,
   ...algeria, ...morocco, ...nigeria, ...southAfrica, ...ethiopia,
   ...azerbaijan, ...armenia, ...georgia, ...serbia,

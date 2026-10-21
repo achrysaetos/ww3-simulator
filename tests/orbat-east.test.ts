@@ -41,7 +41,6 @@ const REFERENCE: [nation: string, cls: ScaleClass, ref: number, source: string][
   ['BLR', 'tank', 500, 'IISS'],
   ['BLR', 'combat_aircraft', 58, 'IISS'],
   ['KAZ', 'tank', 350, 'IISS'],
-  ['ARM', 'tank', 110, 'IISS'],
   ['KGZ', 'tank', 150, 'IISS'],
   ['TJK', 'tank', 37, 'IISS'],
 ];
@@ -86,7 +85,7 @@ describe('eastern order of battle', () => {
       RUS: ['RUS', 'UKR', 'BLR', 'ARM', 'GEO', 'TJK', 'KGZ'], // occupied Ukraine, Abkhazia/S. Ossetia, foreign bases
       PRK: ['PRK', 'RUS'], // Kursk expeditionary force
       CHN: ['CHN'],
-      IRN: ['IRN'], BLR: ['BLR'], ARM: ['ARM'], KAZ: ['KAZ'], KGZ: ['KGZ'], TJK: ['TJK'],
+      IRN: ['IRN'], BLR: ['BLR'], KAZ: ['KAZ'], KGZ: ['KGZ'], TJK: ['TJK'],
     };
     const wrong = east.filter((e) => !isNaval(e) && !allowed[e.nation].includes(map.owner[nodeOf(e)]));
     expect(wrong.map((e) => `${e.nation} ${e.name} in ${map.owner[nodeOf(e)]}`)).toEqual([]);
