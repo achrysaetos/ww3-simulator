@@ -95,8 +95,8 @@ export interface SessionMeta {
   scenario: ScenarioCard;
   /** Index order used by every nation index in snapshots. */
   nationIds: NationId[];
-  platforms: Record<string, { name: string; class: string; domain: string; producers: NationId[] }>;
-  munitions: Record<string, { name: string; kind: MunitionKind; yieldKt?: number; rangeKm: number; producers: NationId[] }>;
+  platforms: Record<string, { name: string; class: string; domain: string; producers: NationId[]; costUsdM: number }>;
+  munitions: Record<string, { name: string; kind: MunitionKind; yieldKt?: number; rangeKm: number; producers: NationId[]; costUsdM: number }>;
   dtHours: number;
 }
 
@@ -183,6 +183,8 @@ export interface EconomyView {
   short: string[];
   /** Production lines with the highest output per month, then any line still ramping toward an order. */
   lines: { item: ItemId; perMonth: number; ordered: number | null; built: number }[];
+  /** Every line's output now and the most it can surge to, per month, keyed by item. */
+  capacity: Record<string, { perMonth: number; surge: number }>;
 }
 
 /** A treaty call waiting on a human nation's answer. */
@@ -512,6 +514,7 @@ export class SnapshotEncoder {
             gdpIndex: eco.gdpIndex, deficitPctGdp: eco.deficitPctGdp, integrity: eco.integrity, tradeLoss: eco.tradeLoss, inTraining: eco.inTraining,
             buffers: Object.fromEntries(Object.entries(eco.buffers).map(([r, tiers]) => [r, tiers.reduce((a, m) => a + m, 0)])), supply: eco.supply, short: eco.short,
             lines: productionLines(Object.values(eco.lines)),
+            capacity: Object.fromEntries(Object.values(eco.lines).map((l) => [l.item, { perMonth: l.capacityPerMonth, surge: l.surgePerMonth }])),
           }
         : null,
       munitions: [...groups.values()].filter((g) => g.warehoused || g.loaded || g.perMonth),
@@ -665,9 +668,9 @@ export function nationCards(map: GameMap, profiles: Readonly<Record<string, { bl
 
 export function sessionMeta(scenario: ScenarioCard, world: World, map: GameMap, catalog: Catalog): SessionMeta {
   const platforms: SessionMeta['platforms'] = {};
-  for (const p of catalog.platforms.values()) platforms[p.id] = { name: p.name, class: p.class, domain: p.domain, producers: p.producers };
+  for (const p of catalog.platforms.values()) platforms[p.id] = { name: p.name, class: p.class, domain: p.domain, producers: p.producers, costUsdM: p.unitCostUsdM };
   const munitions: SessionMeta['munitions'] = {};
-  for (const m of catalog.munitions.values()) munitions[m.id] = { name: m.name, kind: m.kind, yieldKt: m.yieldKt, rangeKm: m.rangeKm, producers: m.producers };
+  for (const m of catalog.munitions.values()) munitions[m.id] = { name: m.name, kind: m.kind, yieldKt: m.yieldKt, rangeKm: m.rangeKm, producers: m.producers, costUsdM: m.unitCostUsdM };
   return { scenario, nationIds: map.nationIds, platforms, munitions, dtHours: world.dtHours };
 }
 

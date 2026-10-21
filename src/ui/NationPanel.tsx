@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { COMMAND_DOMAINS, type Command, type CommandDomain, type ItemId, type NationId } from '../core/types';
 import type { SimClient } from './client';
 import type { Palette } from './colors';
-import type { MunitionGroup, NationDetail, WarEntry, WarView } from './snapshot';
+import type { EconomyView, MunitionGroup, NationDetail, WarEntry, WarView } from './snapshot';
 import type { Objective } from './briefing';
 import { ObjectiveList } from './GameFlow';
 import { Bar, Section, Stat, fmtNum, fmtUsdB } from './widgets';
@@ -208,7 +208,7 @@ export function NationPanel({ client, palette, playAs, objectives, onCommand, on
       </Section>
 
       <Section title="War production">
-        <Production client={client} nation={n.id} lines={eco?.lines ?? []} onCommand={onCommand} />
+        <Production client={client} nation={n.id} eco={eco} treasuryUsdB={n.treasuryUsdB} onCommand={onCommand} />
       </Section>
     </div>
   );
@@ -239,7 +239,7 @@ function Delegation({ d, onCommand }: { d: NationDetail; onCommand: Props['onCom
   );
 }
 
-function Production({ client, nation, lines, onCommand }: { client: SimClient; nation: NationId; lines: { item: ItemId; perMonth: number; built: number }[]; onCommand: Props['onCommand'] }) {
+function Production({ client, nation, eco, treasuryUsdB, onCommand }: { client: SimClient; nation: NationId; eco: EconomyView | null | undefined; treasuryUsdB: number; onCommand: Props['onCommand'] }) {
   const [item, setItem] = useState('');
   const [rate, setRate] = useState(10);
   const meta = client.meta;
@@ -251,7 +251,11 @@ function Production({ client, nation, lines, onCommand }: { client: SimClient; n
     return platforms.length || munitions.length ? { platforms, munitions } : null;
   }, [meta, nation]);
   if (!options) return <p className="muted small">No domestic arms industry: this nation cannot open production lines.</p>;
-  const current = lines.find((l) => l.item === item);
+  const line = item ? eco?.capacity[item] : undefined;
+  const max = line ? Math.max(0, Math.floor(line.surge)) : undefined;
+  const ordered = max === undefined ? rate : Math.min(rate, max);
+  const unitUsdM = meta?.platforms[item]?.costUsdM ?? meta?.munitions[item]?.costUsdM ?? 0;
+  const monthlyB = (ordered * unitUsdM) / 1000;
   return (
     <div className="production" data-testid="production">
       <label className="field">
@@ -263,14 +267,27 @@ function Production({ client, nation, lines, onCommand }: { client: SimClient; n
         </select>
       </label>
       <div className="row">
-        <input type="number" min={0} step={1} value={rate} onChange={(e) => setRate(Math.max(0, +e.target.value))} className="num-input" data-testid="produce-rate" />
-        <span className="muted small">per month</span>
-        <button disabled={!item} onClick={() => onCommand({ type: 'produce', nation, item: item as ItemId, ratePerMonth: rate }, `${itemName(client, item)}: ${rate} a month ordered`)} data-testid="produce">Order</button>
+        <input type="number" min={0} max={max} step={1} value={rate} onChange={(e) => setRate(Math.max(0, Math.min(max ?? Infinity, Math.floor(+e.target.value) || 0)))} className="num-input" data-testid="produce-rate" />
+        <span className="muted small">per month{max !== undefined ? ` (max ${fmtNum(max)})` : ''}</span>
+        <button disabled={!item} onClick={() => onCommand({ type: 'produce', nation, item: item as ItemId, ratePerMonth: ordered }, `${itemName(client, item)}: ${fmtNum(ordered)} a month ordered`)} data-testid="produce">Order</button>
       </div>
-      {item && <p className="muted small">{current ? `Line running at ${fmtNum(current.perMonth)} a month; the order changes its target.` : 'A new line takes months to tool up before it reaches the ordered rate.'}</p>}
+      {item && (
+        <div className="small" data-testid="produce-info">
+          <p className="muted">
+            {fmtUsd(unitUsdM)} each; {fmtNum(ordered)} a month costs {fmtUsdB(monthlyB)} a month{treasuryUsdB > 0 && monthlyB > 0 ? `, ${monthlyB >= treasuryUsdB ? 'more than' : `${Math.max(1, Math.round((monthlyB / treasuryUsdB) * 100))}% of`} the treasury` : ''}.
+          </p>
+          <p className="muted">
+            {line
+              ? `Your line makes ${fmtNum(line.perMonth)} a month now and can surge to ${fmtNum(line.surge)}; the order raises it toward that over months.`
+              : 'No line builds this yet. A new line takes months to tool up, and its size is limited by your industry.'}
+          </p>
+        </div>
+      )}
     </div>
   );
 }
+
+const fmtUsd = (usdM: number) => (usdM >= 1000 ? fmtUsdB(usdM / 1000) : usdM >= 1 ? `$${usdM.toFixed(usdM >= 10 ? 0 : 1)}M` : `$${Math.round(usdM * 1000)}k`);
 
 function itemName(client: SimClient, id: string): string {
   return client.meta?.platforms[id]?.name ?? client.meta?.munitions[id]?.name ?? id.replace(/_/g, ' ');
