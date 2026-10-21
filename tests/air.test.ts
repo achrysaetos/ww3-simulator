@@ -355,11 +355,17 @@ describe('air battle reports', () => {
   it('name two nations at war as attacker and defender, never one nation against itself', () => {
     const s = createSession('baltic-2027', 1);
     const battles: Extract<SimEvent, { type: 'battle' }>[] = [];
-    s.engine.run(s.world, (10 * 24) / s.world.dtHours, (_w, events) => {
-      for (const e of events) if (e.type === 'battle' && e.domain === 'air') battles.push(e);
+    const notAtWar: string[] = [];
+    // Judged when the battle is fought: a war may end in a ceasefire before the run does.
+    s.engine.run(s.world, (10 * 24) / s.world.dtHours, (w, events) => {
+      for (const e of events)
+        if (e.type === 'battle' && e.domain === 'air') {
+          battles.push(e);
+          if (!atWar(w, e.attacker, e.defender)) notAtWar.push(`${e.attacker}-${e.defender}`);
+        }
     });
     expect(battles.length).toBeGreaterThan(10);
-    expect(battles.filter((b) => !atWar(s.world, b.attacker, b.defender)).map((b) => `${b.attacker}-${b.defender}`)).toEqual([]);
+    expect(notAtWar).toEqual([]);
   }, 120_000);
 });
 

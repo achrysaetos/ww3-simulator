@@ -55,7 +55,9 @@ function edgeKm(world: World, map: GameMap, f: Formation, from: NodeId, to: Node
   const holder = world.control[to];
   const hostile = !!holder && atWar(world, f.nation, holder);
   if (hostile && !canSeize(f)) return Infinity;
-  return (km * TERRAIN[map.terrain[to]].moveCost * (hostile ? HOSTILE_GROUND_COST : 1) * riverCost(world, map, from, to, hostile)) / railBoost(world, map, f.nation, to) / groundFactorAt(world, map, to);
+  // Into enemy ground the march only carries the column to the cell's edge, half the way between centres; landCombat's contest then measures the push across the cell.
+  const reach = hostile ? 0.5 * HOSTILE_GROUND_COST : 1;
+  return (km * TERRAIN[map.terrain[to]].moveCost * reach * riverCost(world, map, from, to, hostile)) / railBoost(world, map, f.nation, to) / groundFactorAt(world, map, to);
 }
 
 /**

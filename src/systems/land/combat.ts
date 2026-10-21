@@ -286,6 +286,8 @@ interface BattleResult {
   ratio: number;
   /** The same with every weapon of both sides counted, those waiting in depth too. */
   mass: number;
+  /** Share of the attacking force inside the defender's kill zone at once, 0..1. */
+  committed: number;
   /** Share of the cell's front the defender has the platforms to hold, 0..1. */
   manned: number;
 }
@@ -377,7 +379,7 @@ function resolveBattle(world: World, ctx: SimContext, node: NodeId, att: Side, d
     casualties: { [att.nation]: ledgers.att.casualties, [def.nation]: ledgers.def.casualties } as Record<NationId, number>,
     ...(winner ? { winner } : {}),
   });
-  return { exchange, yielded, ratio: fireRatio(a, d), mass: fireRatio(a, d, true), manned: Math.min(1, d.total / (FRONTAGE_PLATFORMS * (cellDepthKm(map, node) / CELL_FRONT_KM))) };
+  return { exchange, yielded, ratio: fireRatio(a, d), mass: fireRatio(a, d, true), committed, manned: Math.min(1, d.total / (FRONTAGE_PLATFORMS * (cellDepthKm(map, node) / CELL_FRONT_KM))) };
 }
 
 /** Artillery formations in nodes adjacent to the battle, friendly to `nation`, not on the march, not yet firing elsewhere this tick. */
@@ -408,16 +410,20 @@ export function seize(world: World, ctx: SimContext, nation: NationId, node: Nod
 
 /**
  * Cells on either side of a standing line of occupation (territory held by a
- * nation other than its owner, bordering ground its owner still holds) start
- * fully fortified: the 2023-25 Ukrainian and Russian defensive belts, the
- * Abkhazia and South Ossetia lines. So does the rest of the border between the
+ * nation other than its owner, bordering ground its owner still holds), and the
+ * cells behind them, start fully fortified: the 2023-25 Ukrainian and Russian
+ * defensive belts, the Abkhazia and South Ossetia lines. So does the rest of the border between the
  * occupier and the occupied, which years of war have fortified too: Ukraine's
  * 2024-25 belts along the Sumy, Kharkiv and Chernihiv borders, Russia's in
  * Belgorod and Kursk. So does the Korean DMZ, held under arms since the 1953 armistice: the
  * ROK's forward barrier belts, anti-tank walls and minefields south of it, and the North's
- * fortified zone north of it.
+ * fortified zone north of it. So does the India-Pakistan border and Line of Control: India's
+ * 2003-04 LoC fence and bunker lines, Pakistan's ditch-cum-bund belts and canal defences in Punjab.
  */
-const STANDING_BORDERS: readonly (readonly [NationId, NationId])[] = [['KOR' as NationId, 'PRK' as NationId]];
+const STANDING_BORDERS: readonly (readonly [NationId, NationId])[] = [
+  ['KOR' as NationId, 'PRK' as NationId],
+  ['IND' as NationId, 'PAK' as NationId],
+];
 
 function fortifyStandingLines(world: World, map: GameMap): void {
   const { fortified } = landSlice(world);
@@ -436,6 +442,11 @@ function fortifyStandingLines(world: World, map: GameMap): void {
       fortified[m] = 1;
     }
   }
+  // Behind each line stand more belts, one cell deep here: Ukraine's 2024-25 rear lines from Pokrovsk through
+  // Kostiantynivka to Sloviansk and around Zaporizhzhia, Russia's three-belt Surovikin line, the ROK's barrier lines
+  // north of Seoul (ISW; CSIS; ROK MND).
+  for (const n of Object.keys(fortified).map(Number))
+    for (const m of map.neighbors(n as NodeId)) if (m < map.landCount && world.control[m] === world.control[n]) fortified[m] = 1;
 }
 
 /** Whether `nation`'s side reaches `node` only across a major river: it holds land next to the cell, and none of it joins the cell dry. */
@@ -473,10 +484,9 @@ function advanceKm(world: World, ctx: SimContext, node: NodeId, attackers: Forma
   const movers = attackers.filter((f) => isPressing(f) && mobility(world, f) > 0);
   if (!movers.length) return 0;
   const dtDays = world.dtHours / 24;
-  if (!defenders.length && !cover.length) {
-    // Unopposed: a road march through hostile ground (reconnaissance, obstacles, demolitions).
-    return (Math.max(...movers.map((f) => marchKmPerDay(world, ctx.catalog, f))) / (HOSTILE_GROUND_COST * moveCost)) * dtDays;
-  }
+  // Unopposed: a road march through hostile ground (reconnaissance, obstacles, demolitions).
+  const unopposed = Math.max(...movers.map((f) => marchKmPerDay(world, ctx.catalog, f))) / (HOSTILE_GROUND_COST * moveCost);
+  if (!defenders.length && !cover.length) return unopposed * dtDays;
   const pace = Math.max(...movers.map((f) => mobility(world, f))) * (river ? RIVER_TEMPO : 1);
   const fort = landSlice(world).fortified[node] ?? 0;
   if (!defenders.length) {
@@ -485,7 +495,10 @@ function advanceKm(world: World, ctx: SimContext, node: NodeId, attackers: Forma
     const { closed } = TERRAIN[ctx.map.terrain[node]];
     const side = (fs: Formation[]) => summarize(world, ctx.catalog, { nation: fs[0].nation, fighters: fs, support: [] }, node, closed);
     const ratio = fireRatio(side(movers), side(cover), true);
-    return ((pace * manoeuvreKmPerDay(ratio) * (1 - BELT_DRAG * fort)) / moveCost) * dtDays;
+    // Cover too weak to matter is no cover: from the deliberate-assault ratio to the massed one the pace climbs to the road march.
+    const exploit = Math.min(1, Math.max(0, (ratio - DELIBERATE_ASSAULT_RATIO) / (MASSED_ASSAULT_RATIO - DELIBERATE_ASSAULT_RATIO)));
+    const covered = (pace * manoeuvreKmPerDay(ratio)) / moveCost;
+    return Math.max(covered, (1 - exploit) * covered + exploit * pace * unopposed) * (1 - BELT_DRAG * fort) * dtDays;
   }
   if (defenders.every((f) => f.status === 'routed')) return ((pace * BREAKTHROUGH_KM_PER_DAY) / moveCost) * dtDays;
   const attrition = Math.min(ATTRITION_MAX_KM_PER_DAY, ATTRITION_KM_PER_DAY * Math.max(0, Math.log(battle.exchange)));
@@ -493,9 +506,12 @@ function advanceKm(world: World, ctx: SimContext, node: NodeId, attackers: Forma
   const dug = defenders.reduce((t, f) => t + f.entrenchment, 0) / defenders.length;
   const gaps = (1 - battle.manned) * (1 - Math.max(fort, HASTY_BARRIER * dug));
   const manoeuvre = battle.ratio > 1 ? manoeuvreKmPerDay(battle.ratio) : 0;
-  // Mass beyond the deliberate-assault ratio breaks even a manned line on a narrow sector and rolls it up from there; a belt slows that, a city absorbs it block by block.
+  // Mass beyond the deliberate-assault ratio breaks even a manned line on a narrow sector and rolls it up from there. A belt slows
+  // that, a city absorbs it block by block, and a dug-in line's kill zone lets only part of the mass through at once: in 2024-25 the
+  // drone-watched front held Russia's best-massed drives to 1-4 km a day (ISW), where air superiority let 1991's armour through.
   const breach = Math.min(1, Math.max(0, (battle.mass - DELIBERATE_ASSAULT_RATIO) / (MASSED_ASSAULT_RATIO - DELIBERATE_ASSAULT_RATIO)));
-  const penetration = breach * BREAKTHROUGH_KM_PER_DAY * (1 - BELT_DRAG * fort);
+  const open = (battle.committed - KILL_ZONE_COMMIT) / (1 - KILL_ZONE_COMMIT);
+  const penetration = breach * (COVERED_KM_PER_DAY + (BREAKTHROUGH_KM_PER_DAY - COVERED_KM_PER_DAY) * open) * (1 - BELT_DRAG * fort);
   const urban = ctx.map.terrain[node] === 'urban' ? URBAN_MANOEUVRE : 1;
   const rate = Math.max(attrition, (urban * Math.max(gaps * manoeuvre, penetration)) / moveCost);
   return pace * (rate * dtDays + (battle.yielded ? WITHDRAWAL_KM : 0));
@@ -513,7 +529,7 @@ function contestCell(world: World, ctx: SimContext, node: NodeId, invaders: Form
   if (!contest || !allied(world, lead, contest.by)) contest = slice.contest[node] = { by: lead, km: 0 };
 
   const defenders = hostilesAt(world, byNode, node, lead);
-  let battle: BattleResult = { exchange: 1, yielded: false, ratio: 1, mass: 1, manned: 1 };
+  let battle: BattleResult = { exchange: 1, yielded: false, ratio: 1, mass: 1, committed: 1, manned: 1 };
   const river = acrossRiver(world, ctx.map, node, lead);
   if (defenders.length) {
     for (const f of [...attackers, ...defenders]) {
@@ -577,7 +593,10 @@ export const landCombat: System = {
     const engaged = new Set<FormationId>();
     const firing = new Set<FormationId>();
 
-    for (const node of [...byNode.keys()]) {
+    // The main effort is fought first, so the guns next to it fire for it rather than for whichever fight comes up first.
+    const pressing = (node: number) => (byNode.get(node) ?? []).reduce((t, f) => t + (isPressing(f) && atWar(world, f.nation, world.control[node]) ? platformCount(f) : 0), 0);
+    const effort = [...byNode.keys()].map((node) => [node, pressing(node)]).sort((a, b) => b[1] - a[1] || a[0] - b[0]);
+    for (const [node] of effort) {
       const holder = world.control[node];
       const invaders = holder ? (byNode.get(node) ?? []).filter((f) => atWar(world, f.nation, holder)) : [];
       if (invaders.length) contestCell(world, ctx, node as NodeId, invaders, byNode, firing, engaged);

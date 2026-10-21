@@ -86,26 +86,41 @@ describe('fortified but empty ground', () => {
 });
 
 describe('concentration of force', () => {
-  // Belgorod cell 6502 into the fortified forest cell 6736 north of Kharkiv, held by two and a half Ukrainian brigades
-  // (734 platforms). The planning ratios: 3:1 for a deliberate assault (FM 3-90), and several times that on a
-  // breakthrough sector (Glantz and House, 1995). Ratios here are of platforms; the whole-force fire ratio is lower.
-  const ladder = (strongest: number) => {
+  // Belgorod cell 6502 into the forest cell 6736 north of Kharkiv. Fortified, it is held by two and a half Ukrainian
+  // brigades (734 platforms) behind the standing belt; as a hasty line, the belt is gone and more brigades stand in it
+  // so the line is manned across the cell. The planning ratios: 3:1 for a deliberate assault (FM 3-90), and several
+  // times that on a breakthrough sector (Glantz and House, 1995). Ratios here are of platforms.
+  const ladder = (ratio: number, hasty: boolean) => {
     const s = session('ukraine-2026', ['UKR', 'RUS']);
     const from = 6502 as NodeId, target = 6736 as NodeId;
-    const force = landForces(s, 'RUS').filter((f) => !f.territorial).sort((a, b) => platformCount(b) - platformCount(a)).slice(0, strongest);
+    const held = () => landForces(s, 'UKR').filter((f) => f.node === target);
+    if (hasty) {
+      delete s.world.slices.land.fortified[target];
+      for (const f of landForces(s, 'UKR').filter((g) => g.node !== target).sort((a, b) => platformCount(b) - platformCount(a))) {
+        if (held().reduce((a, g) => a + platformCount(g), 0) >= 1400) break;
+        f.node = target;
+      }
+    }
+    const def = held().reduce((a, f) => a + platformCount(f), 0);
+    const force: Formation[] = [];
+    for (const f of landForces(s, 'RUS').filter((g) => !g.territorial).sort((a, b) => platformCount(b) - platformCount(a)))
+      if (force.reduce((a, g) => a + platformCount(g), 0) < ratio * def) force.push(f);
     stage(force, from);
     s.attack(force, target);
     s.days(5);
-    return { km: s.world.control[target] === 'RUS' ? Infinity : s.contestKm(target), ratio: force.reduce((a, f) => a + platformCount(f), 0) / 734 };
+    return { km: s.world.control[target] === 'RUS' ? Infinity : s.contestKm(target), ratio: force.reduce((a, f) => a + platformCount(f), 0) / def };
   };
 
-  it('a 9:1 mass breaks into a fortified, manned cell several km a day where 3:1 only bleeds', () => {
-    const three = ladder(2), nine = ladder(6);
-    console.log(`ladder: ${three.ratio.toFixed(1)}:1 -> ${three.km.toFixed(1)} km, ${nine.ratio.toFixed(1)}:1 -> ${nine.km.toFixed(1)} km in 5 days`);
-    expect(three.ratio).toBeLessThan(4);
-    expect(nine.ratio).toBeGreaterThan(8);
-    expect(three.km).toBeLessThan(2);
-    expect(nine.km).toBeGreaterThanOrEqual(8);
+  // Drone-watched, fortified, no air superiority: the 2024-25 record (Avdiivka took four months at several to one).
+  // Against a hasty line the kill zone is not there and mass breaks through at the pace of 1973 or Kharkiv 2022.
+  it('9:1 gains clearly more than 3:1, a little against a fortified line and fast against a hasty one', () => {
+    const curve = [ladder(3, false), ladder(9, false), ladder(3, true), ladder(9, true)];
+    console.log(`ladder (5 days): ${curve.map((c, i) => `${i < 2 ? 'fortified' : 'hasty'} ${c.ratio.toFixed(1)}:1 -> ${c.km.toFixed(1)} km`).join(', ')}`);
+    const [fort3, fort9, hasty3, hasty9] = curve;
+    expect(fort3.km).toBeLessThan(0.5);
+    expect(fort9.km).toBeGreaterThanOrEqual(1);
+    expect(hasty9.km).toBeGreaterThanOrEqual(30);
+    expect(hasty9.km).toBeGreaterThan(1.5 * hasty3.km);
   }, SCENARIO_MS);
 });
 
@@ -130,7 +145,7 @@ describe('river lines', () => {
   it('crossing the Dnipro against a defended bank gains a fraction of the ground at a far higher price', () => {
     const river = assault(false), dry = assault(true);
     console.log(`Dnipro: across ${river.km.toFixed(1)} km for ${river.lost} platforms; dry ${dry.km.toFixed(1)} km for ${dry.lost}`);
-    expect(dry.km).toBeGreaterThan(8);
+    expect(dry.km).toBeGreaterThan(2);
     expect(river.km).toBeLessThan(0.3 * dry.km);
     expect(river.lost / Math.max(0.5, river.km)).toBeGreaterThan(3 * (dry.lost / dry.km));
   }, SCENARIO_MS);
