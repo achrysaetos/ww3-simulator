@@ -1,11 +1,22 @@
 import { newId, type SimContext } from '../../core/engine';
 import type { Command, Formation, NodeId, PlatformId, World } from '../../core/types';
+import { engages } from '../air/tables';
 import { canBoard, liftShare, liftUsed } from './amphibious';
 import { tickEnv } from './env';
 import { navalDestination, seaPath } from './movement';
 import { isNavalFormation } from './state';
+import { INTERCEPTOR_KINDS } from './tables';
 
 type OrderCommand = Extract<Command, { type: 'order' }>;
+
+/**
+ * Readiness below which a group is in a shipyard availability and cannot sail: a carrier in
+ * refuelling overhaul (about four years) or a docking availability. Under the US Navy's Optimized
+ * Fleet Response Plan a ship in its maintenance phase is not surge-ready; one in the basic phase
+ * between deployments is (GAO-21-366, 2021). The threshold is judgment: it separates the yard
+ * availabilities in the orders of battle (0.05-0.2) from ships working up (0.4 and above).
+ */
+export const SEAWORTHY = 0.25;
 
 /**
  * Whether the coordinator should route this 'order' to the naval system: orders to surface
@@ -49,6 +60,7 @@ export function applyNavalOrder(world: World, cmd: OrderCommand, ctx: SimContext
   if (f.status === 'embarked') return refuse('embarked formations land by ordering their lift group to attack or move to a coast');
   if (!isNavalFormation(f)) return refuse('not a naval formation');
 
+  if (f.readiness < SEAWORTHY && order.posture !== 'reserve' && f.node === f.home) return refuse(`${f.name} is in a shipyard availability and cannot sail`);
   const goal = order.posture === 'reserve' ? f.home : goalNode(world, order.target, order.targetFormation);
   if (goal === undefined) {
     f.order = { ...order, path: [] };
@@ -74,7 +86,7 @@ export function boardable(room: number, share: number): boolean {
 }
 
 /** Split `share` of a formation off as a landing team; the parent keeps the rest at the port. */
-function detach(world: World, ctx: SimContext, f: Formation, share: number): Formation {
+export function detach(world: World, ctx: SimContext, f: Formation, share: number): Formation {
   const take = <K extends string>(r: Record<K, number>): Record<K, number> => {
     const out = {} as Record<K, number>;
     for (const [k, n] of Object.entries(r) as [K, number][]) {
@@ -141,8 +153,37 @@ function repath(world: World, ctx: SimContext, f: Formation, goal: NodeId): void
   f.progressKm = 0;
 }
 
-/** Attack submarines with no torpedoes or missiles left go home to rearm. */
+/**
+ * Share of full load below which a surface group's area air-defence rounds send it home to
+ * rearm, and the share it must hold before it sails again. A warship cannot reload its vertical
+ * launch cells at sea under fire, and with its interceptors spent it can only be sunk: CSIS 2023
+ * lost US ships because salvos emptied their magazines. The thresholds are judgment.
+ */
+const WINCHESTER = 0.25;
+export const REARMED = 0.75;
+
+/**
+ * Share of its full load of area air-defence rounds a surface group still holds: the rounds that
+ * can engage a ballistic missile (SM-2/3/6, HQ-9, S-300, Aster 30; air tables `engages`), which
+ * its whole task force leans on. 1 for a group whose ships carry none.
+ */
+export function areaDefenseShare(ctx: SimContext, f: Formation): number {
+  let full = 0, have = 0;
+  const counted = new Set<string>();
+  for (const [pid, n] of Object.entries(f.equipment) as [PlatformId, number][]) {
+    for (const l of ctx.catalog.platform(pid).loadout) {
+      const m = ctx.catalog.munition(l.munition);
+      if (!INTERCEPTOR_KINDS.has(m.kind) || !engages(m, 'ballistic')) continue;
+      full += l.count * n;
+      if (!counted.has(m.id)) { counted.add(m.id); have += f.magazine[m.id] ?? 0; }
+    }
+  }
+  return full > 0 ? Math.min(1, have / full) : 1;
+}
+
+/** Attack submarines with no torpedoes or missiles left, and surface groups with their area-defence rounds spent, go home to rearm. */
 function outOfWeapons(ctx: SimContext, f: Formation): boolean {
+  if (f.kind === 'surface_group') return areaDefenseShare(ctx, f) < WINCHESTER;
   if (f.kind !== 'submarine') return false;
   let classes = 0, armed = 0;
   for (const pid of Object.keys(f.equipment)) {

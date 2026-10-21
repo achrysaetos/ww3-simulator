@@ -53,6 +53,9 @@ export const japan = [
   u('air_defense', 'brigade', '5th Air Defense Missile Group', base('Chinen', 26.17, 127.81), { patriot_pac3: 20 }),
   u('air_defense', 'brigade', '6th Air Defense Missile Group', base('Misawa AB', 40.7, 141.37), { patriot_pac3: 20 }),
 
+  // PFI high-speed marine transport: the RO-PAX ships Hakuo and Natchan World on call to move GSDF units between the islands.
+  u('surface_group', 'task_group', 'PFI high-speed marine transport (Hakuo, Natchan World)', base('Tomakomai', 42.63, 141.62), { military_roro: 2 }, { readiness: 0.7, personnel: 2 * 20 }),
+
   // ---- JMSDF. Four escort flotillas, each with one helicopter destroyer and two Aegis ships.
   u('surface_group', 'flotilla', 'Escort Flotilla 1', base('Yokosuka', 35.29, 139.67), { izumo: 1, kongo: 1, maya: 1, akizuki: 1, takanami: 2, murasame: 2 }),
   u('surface_group', 'flotilla', 'Escort Flotilla 2', base('Sasebo', 33.16, 129.72), { hyuga: 1, kongo: 2, atago: 1, akizuki: 1, takanami: 1, murasame: 3 }),

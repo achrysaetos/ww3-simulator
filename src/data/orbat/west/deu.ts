@@ -56,6 +56,8 @@ export const deu = [
   // Marine
   u('Einsatzflottille 2 (frigates)', 'surface_group', 'flotilla', base('Marinestützpunkt Wilhelmshaven', 53.52, 8.13), { ffg_f123: 4, ffg_f124: 3, ffg_f125: 4, egv_berlin: 3 }, { readiness: 0.6, personnel: 3000 }),
   u('Einsatzflottille 1 (corvettes)', 'surface_group', 'flotilla', base('Marinestützpunkt Warnemünde', 54.17, 12.08), { corvette_k130: 10 }, { readiness: 0.65, personnel: 650 }),
+  // ARK: German-Danish assured-access charter of three RO-RO ships for strategic sealift (NATO SALIS partner).
+  u('ARK strategic sealift RO-RO charter', 'surface_group', 'task_group', base('Lübeck-Travemünde', 53.96, 10.87), { military_roro: 3 }, { readiness: 0.7, personnel: 3 * 20 }),
   u('1. Ubootgeschwader', 'submarine', 'flotilla', base('Marinestützpunkt Eckernförde', 54.47, 9.84), { ssk_type212a: 6 }, { readiness: 0.5, personnel: 6 * 28 }),
   u('Marinefliegergeschwader 3 "Graf Zeppelin"', 'air_wing', 'wing', base('Marinefliegerstützpunkt Nordholz', 53.77, 8.66), { p8a: 4, nh90: 18 }, ACTIVE),
 ];

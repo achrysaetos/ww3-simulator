@@ -4,6 +4,8 @@ import { east } from '../src/data/orbat/east';
 import { rest } from '../src/data/orbat/rest';
 import { west } from '../src/data/orbat/west';
 import { createSession } from '../src/scenarios';
+import { isSealift } from '../src/systems/naval';
+import { compose } from '../src/systems/naval/state';
 
 /** The merged world every scenario starts from, as the player sees it: all modules together. */
 const session = createSession('peace-2027', 1);
@@ -26,6 +28,13 @@ describe('merged order of battle against IISS headline figures', () => {
     expect(tur.tanks).toBeLessThan(2800);
     expect(tur.submarines).toBe(12);
     expect(arm.personnel).toBeLessThan(55_000);
+  });
+
+  it.each(['USA', 'GBR', 'FRA', 'DEU', 'RUS', 'JPN'])('gives %s vehicle-deck ships to carry its heavy units overseas', (nation) => {
+    const decks = Object.values(session.world.formations)
+      .filter((f) => f.nation === nation && f.kind === 'surface_group' && isSealift(compose(f, session.catalog)))
+      .reduce((n, f) => n + compose(f, session.catalog).vehicleLift, 0);
+    expect(decks).toBeGreaterThanOrEqual(400);
   });
 
   it('gives North Korea the ~14,100 guns and rocket launchers IISS counts besides its mortars', () => {

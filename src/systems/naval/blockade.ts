@@ -1,7 +1,9 @@
+import type { Catalog } from '../../core/catalog';
 import { atWar } from '../../core/engine';
-import type { NationId, NodeId, World } from '../../core/types';
+import type { NationId, NodeId, Platform, World } from '../../core/types';
 import type { TickEnv } from './env';
 import { chokepointShare, geography } from './geography';
+import { ANTISHIP_KINDS } from './tables';
 
 /** Postures that project presence into neighbouring sea zones. */
 const PROJECTING = new Set(['patrol', 'blockade', 'attack', 'escort']);
@@ -10,6 +12,12 @@ const PROJECTION = 0.3;
 const CONTROL_SCALE = 2;
 /** Interdiction strength per attack submarine on a sea lane (U-boat and USN Pacific campaigns; a single SSN suspends a lane about 45%, estimate). */
 const SUB_INTERDICTION = 0.6;
+/**
+ * Anti-ship weapons a boat needs aboard to interdict at full strength: a Kilo's 18 torpedoes, about
+ * a Type VIIC's 14 plus reloads. A boat carrying fewer sinks fewer ships a patrol, so it threatens
+ * a lane in proportion: a Ghadir midget with two torpedoes is a ninth of a Kilo (estimate).
+ */
+const PATROL_LOAD = 18;
 /** Interdiction strength of hostile mines per mine (100 mines ~ 2.0). */
 const MINE_INTERDICTION = 0.02;
 /**
@@ -76,7 +84,7 @@ export function computeTradeBlocked(env: TickEnv): void {
     if (!belligerent.has(f.nation) || f.order.path?.length) continue;
     let s = f.order.posture === 'blockade' ? c.seaControl : 0;
     if (c.submerged && ['patrol', 'blockade', 'attack'].includes(f.order.posture))
-      for (const h of c.hulls) if (h.platform.class !== 'ssbn') s += SUB_INTERDICTION * h.count;
+      for (const h of c.hulls) if (h.platform.class !== 'ssbn') s += SUB_INTERDICTION * h.count * patrolLoad(ctx.catalog, h.platform);
     if (s > 0) add(blockers, f.node, f.nation, s);
   }
   const warZone = new Set<number>();
@@ -128,6 +136,13 @@ export function computeTradeBlocked(env: TickEnv): void {
     out[id] = 1 - open;
   }
   world.theater.tradeBlocked = out;
+}
+
+/** Share of a full interdiction patrol's anti-ship weapons a boat carries, 0..1. */
+function patrolLoad(catalog: Catalog, p: Platform): number {
+  let n = 0;
+  for (const l of p.loadout) if (ANTISHIP_KINDS.has(catalog.munition(l.munition).kind)) n += l.count;
+  return Math.min(1, n / PATROL_LOAD);
 }
 
 /** Whether naval forces of two nations at war share this sea zone. */

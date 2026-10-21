@@ -8,6 +8,13 @@ import { MINE_CLOSURE } from './tables';
 
 /** Fraction of transit fuel burn spent per hour holding station (loiter on one shaft, estimate). */
 const LOITER_BURN = 0.2;
+/**
+ * Share of its fuel and stores a ship alongside at its home base takes on per day. A naval base
+ * keeps its own fuel farm and victualling stores (Pearl Harbor's Red Hill held ~250 million gallons),
+ * so a fleet in Kaliningrad, Sevastopol or Sanya draws from the base, not from the land supply
+ * network that may not reach it. Rate as logistics' MAX_REFILL_FRACTION_PER_DAY.
+ */
+const BERTH_REFILL_PER_DAY = 0.5;
 
 /** Hostile mines at a node close it to this nation. */
 export function minedClosed(world: World, node: number, nation: NationId): boolean {
@@ -37,11 +44,14 @@ export function sailable(world: World, map: GameMap, f: Formation, target: NodeI
   return true;
 }
 
-/** A* over sea zones, canals, and the start/end port. Hostile minefields are impassable except as the destination. */
-export function seaPath(world: World, map: GameMap, nation: NationId, from: NodeId, to: NodeId): NodeId[] | null {
+/**
+ * A* over sea zones, canals, and the start/end port. Hostile minefields, and any zone `avoid`
+ * names, are impassable except as the destination.
+ */
+export function seaPath(world: World, map: GameMap, nation: NationId, from: NodeId, to: NodeId, avoid?: (zone: number) => boolean): NodeId[] | null {
   const geo = geography(map);
   return findPath(map, from, to, (_a, b, km) => {
-    if (map.isSea(b)) return b !== to && minedClosed(world, b, nation) ? Infinity : km;
+    if (map.isSea(b)) return b !== to && (minedClosed(world, b, nation) || avoid?.(b)) ? Infinity : km;
     if (geo.canalNodes.has(b)) return km;
     return b === to && geo.portZone.has(b) ? km : Infinity;
   }, 50_000);
@@ -51,8 +61,14 @@ export function seaPath(world: World, map: GameMap, nation: NationId, from: Node
 export function advance(world: World, map: GameMap, f: Formation, comp: Composition): void {
   const hours = world.dtHours;
   const burnPerKm = Number.isFinite(comp.rangeKm) && comp.rangeKm > 0 ? f.supplyCapacity.fuel / comp.rangeKm : 0;
-  f.supply.food = Math.max(0, f.supply.food - (f.supplyCapacity.food / comp.enduranceDays) * (hours / 24));
   const path = f.order.path;
+  if (!path?.length && f.node === f.home) {
+    const k = BERTH_REFILL_PER_DAY * (hours / 24);
+    f.supply.food = Math.min(f.supplyCapacity.food, f.supply.food + f.supplyCapacity.food * k);
+    f.supply.fuel = Math.min(f.supplyCapacity.fuel, f.supply.fuel + f.supplyCapacity.fuel * k);
+    return;
+  }
+  f.supply.food = Math.max(0, f.supply.food - (f.supplyCapacity.food / comp.enduranceDays) * (hours / 24));
   if (!path?.length) {
     f.supply.fuel = Math.max(0, f.supply.fuel - burnPerKm * comp.speedKph * hours * LOITER_BURN);
     return;

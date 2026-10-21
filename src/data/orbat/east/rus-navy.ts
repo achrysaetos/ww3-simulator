@@ -39,6 +39,8 @@ const northern: OrbatEntry[] = [
 const baltic: OrbatEntry[] = [
   surface('12th Surface Ship Division', BALTIYSK, { neustrashimy: 2, steregushchiy: 4 }),
   surface('36th Missile Boat Brigade', at('Baltiysk missile boats', 54.64, 19.9), { buyan_m: 2, karakurt: 4, molniya: 4 }),
+  // Ust-Luga to Baltiysk rail and vehicle ferries (Ambal, Baltiysk, Marshal Rokossovsky): Kaliningrad's sea bridge.
+  surface('Kaliningrad sea bridge RO-RO ferries', at('Baltiysk ferry terminal', 54.65, 19.92), { military_roro: 3 }, { readiness: 0.8, experience: 0.4 }),
   surface('71st Landing Ship Brigade', at('Baltiysk landing ships', 54.66, 19.95), { ropucha: 3 }),
   subs('Baltic Fleet Submarine Group', at('Baltiysk submarine pier', 54.64, 19.93), { kilo_636: 1, lada: 1 }),
   unit(RUS, '25th Coastal Missile Regiment', 'missile', 'brigade', at('Donskoye, Kaliningrad', 54.9, 20.1), { bastion_p_launcher: 4, bal_launcher: 4, truck: 30 }, READY),
@@ -47,6 +49,8 @@ const baltic: OrbatEntry[] = [
 const blackSea: OrbatEntry[] = [
   surface('Black Sea Fleet 30th Surface Ship Division', NOVOROSSIYSK, { admiral_grigorovich: 2, krivak: 2 }, { readiness: 0.5, experience: 0.6 }),
   surface('Black Sea Fleet 41st Missile Boat Brigade', at('Novorossiysk missile boats', 44.7, 37.8), { buyan_m: 4, karakurt: 2, bykov: 3 }, { readiness: 0.5, experience: 0.6 }),
+  // Oboronlogistika's Sparta-class RO-RO ships, the "Syrian Express" (Ursa Major sank in December 2024).
+  surface('Oboronlogistika RO-RO ships', at('Novorossiysk commercial port', 44.72, 37.8), { military_roro: 3 }, { readiness: 0.7, experience: 0.6 }),
   surface('Black Sea Fleet 197th Landing Ship Brigade', at('Novorossiysk landing ships', 44.73, 37.82), { ropucha: 4 }, { readiness: 0.4, experience: 0.6 }),
   subs('4th Submarine Brigade', at('Novorossiysk submarine base', 44.71, 37.77), { kilo_636: 4 }, { readiness: 0.6, experience: 0.6 }),
   unit(RUS, '15th Coastal Missile Brigade', 'missile', 'brigade', at('Sevastopol coastal', 45.1, 33.55), { bastion_p_launcher: 6, bal_launcher: 4, truck: 40 }, { readiness: 0.55, experience: 0.6 }),

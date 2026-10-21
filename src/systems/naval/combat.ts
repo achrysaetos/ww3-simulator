@@ -74,6 +74,10 @@ export function navalCombat(env: TickEnv, tracks: Tracks): void {
     const sprint = c.hulls.every((h) => NUCLEAR_ATTACK.has(h.platform.class));
     const target = pickTarget(env, tracks, f, (t) => (sprint || t.node === f.node) && !env.comp(t).submerged);
     if (!target) continue;
+    // Whether or not the boat is caught, its victims now know a submarine works this zone (intel 'naval' source),
+    // which tells their hunters where to search; it is not a firing track.
+    const known = (env.world.slices.naval.tracks[f.id] ??= []);
+    if (!known.includes(target.nation)) known.push(target.nation);
     for (let attacks = Math.max(1, Math.round(c.hullCount / SUB_REATTACK_TICKS)); attacks > 0; attacks--) {
       const torp = bestMunition(env, f, 'ship', 0, (m) => m.kind === 'torpedo');
       if (!torp) break;
@@ -371,9 +375,11 @@ export function applyHits(env: TickEnv, target: Formation, hits: number[], by: N
     for (const a of c.aircraft) target.equipment[a.pid] -= Math.round(a.count * share);
     for (const w of env.embarked.get(target.id) ?? []) if (w.kind === 'air_wing') shrink(env, w, share);
   }
-  // Troops and vehicles go down with the share of berths or deck lost, whichever is larger (cargo ships carry vehicles only).
+  // Troops and vehicles go down with the share of berths or deck lost, whichever is larger. Cargo ships
+  // carry vehicles only: a unit moving by sealift flies its people out and meets its equipment at the port
+  // (US strategic deployment: personnel by charter airlift, equipment on LMSRs), so they lose no one.
   const cargoLost = Math.max(c.troopLift ? liftLost / c.troopLift : 0, c.vehicleLift ? deckLost / c.vehicleLift : 0);
-  if (cargoLost) for (const e of env.embarked.get(target.id) ?? []) if (e.kind !== 'air_wing') shrink(env, e, cargoLost);
+  if (cargoLost) for (const e of env.embarked.get(target.id) ?? []) if (e.kind !== 'air_wing') shrink(env, e, cargoLost, c.troopLift > 0);
 
   const lb = ledger(world, target.nation);
   for (const n of Object.values(losses.sunk)) lb.hullsSunk += n;
@@ -385,7 +391,7 @@ export function applyHits(env: TickEnv, target: Formation, hits: number[], by: N
   ctx.emit({ type: 'battle', tick: world.tick, node: target.node, attacker: by, defender: target.nation, losses: { [target.nation]: { ...losses.sunk } }, casualties: { [target.nation]: Math.round(losses.casualties) }, domain: 'sea' });
   const after = env.comp(target);
   if (after.crippled && target.order.posture !== 'reserve') target.order = { posture: 'reserve', issuedTick: world.tick };
-  else if (!after.hullCount && !after.crippled) destroy(env, target);
+  else if (!after.hullCount && !after.crippled) destroy(env, target, c.troopLift === 0);
   return losses;
 }
 
@@ -399,16 +405,31 @@ function loseMagazineShare(env: TickEnv, f: Formation, pid: PlatformId, sunk: nu
 }
 
 /** Remove a share of a formation (embarked troops drowned with their ship, aircraft lost with their carrier). */
-function shrink(env: TickEnv, f: Formation, share: number): void {
-  if (share >= 0.999) return destroy(env, f);
+function shrink(env: TickEnv, f: Formation, share: number, aboard = true): void {
+  if (share >= 0.999 && aboard) return destroy(env, f);
   for (const [pid, n] of Object.entries(f.equipment) as [PlatformId, number][]) f.equipment[pid] = n - Math.round(n * share);
-  f.personnel = Math.round(f.personnel * (1 - share));
+  if (aboard) f.personnel = Math.round(f.personnel * (1 - share));
   env.invalidate(f);
 }
 
-export function destroy(env: TickEnv, f: Formation): void {
+/**
+ * A group lost with everything aboard. Troops aboard a group with no berths were never at sea: they
+ * fly to the port the ships were bound for and wait there without the equipment that went down.
+ */
+export function destroy(env: TickEnv, f: Formation, crewFlew = false): void {
   f.status = 'destroyed';
   delete env.world.slices.naval.tracks[f.id];
   env.ctx.emit({ type: 'formation_destroyed', tick: env.world.tick, formation: f.id, nation: f.nation });
-  for (const e of env.embarked.get(f.id) ?? []) if (e.status === 'embarked') destroy(env, e);
+  const port = env.world.slices.sealift?.voyages[f.id]?.to ?? f.home;
+  for (const e of env.embarked.get(f.id) ?? []) {
+    if (e.status !== 'embarked') continue;
+    if (!crewFlew || e.kind === 'air_wing') destroy(env, e);
+    else {
+      e.status = 'active';
+      delete e.embarkedOn;
+      e.node = port;
+      e.order = { posture: 'defend', target: port, issuedTick: env.world.tick };
+      env.invalidate(e);
+    }
+  }
 }

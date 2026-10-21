@@ -1,9 +1,14 @@
-import { atWar, relation } from '../../core/engine';
-import type { Formation, FormationId, NationId, NodeId } from '../../core/types';
-import { awaitingLift, debarkation, deckSlots, liftMode, overseas } from '../land/strategic';
+import { atWar, relation, type SimContext } from '../../core/engine';
+import type { GameMap } from '../../core/map';
+import { findPath } from '../../core/path';
+import type { Formation, FormationId, NationId, NodeId, World } from '../../core/types';
+import { applyLandOrder } from '../land/movement';
+import { allied } from '../land/state';
+import { awaitingLift, debarkation, deckSlots, landMass, liftMode, overseas } from '../land/strategic';
 import type { TickEnv } from './env';
 import { geography } from './geography';
 import { navalDestination, seaPath } from './movement';
+import { boardable, detach } from './orders';
 import type { Composition } from './state';
 
 /**
@@ -14,12 +19,18 @@ import type { Composition } from './state';
  *
  * A group activates some days after its nation goes to war, sails empty to the port where
  * troops wait, loads for LOAD_HOURS, sails when full (or when nobody else is waiting),
- * unloads at the destination port (naval/amphibious.ts landings) and returns home.
+ * unloads at the destination port (naval/amphibious.ts landings) and returns home. The
+ * formations it carried then march on to where they were sent.
+ *
+ * Convoys keep out of the enemy's shore-based anti-ship reach: they unload at the friendly
+ * port nearest the destination that a route clear of that reach joins, and march the rest
+ * (REFORGER's ports of debarkation were Bremerhaven, Rotterdam and Antwerp, not the Baltic).
+ * Only when no such port exists do they sail into the threat.
  */
 
 export interface SealiftState {
   /** Port each loaded or loading group is loading at and bound for, and the tick it began loading. */
-  voyages: Record<FormationId, { from: NodeId; to: NodeId; loadingSince: number }>;
+  voyages: Record<FormationId, { from: NodeId; to: NodeId; loadingSince: number; onward?: Record<FormationId, NodeId> }>;
 }
 
 declare module '../../core/types' {
@@ -40,6 +51,17 @@ const LOAD_HOURS = 48;
 const SAIL_LOAD = 0.9;
 /** Nor does a part-loaded group wait longer than this for formations still marching to the port (estimate). */
 const MAX_WAIT_HOURS = 5 * 24;
+
+/**
+ * Reach of shore-based anti-ship missiles a convoy routes around, km: Bastion-P's P-800 (~450 km)
+ * and the YJ-12 and Noor batteries are of this order (judgment).
+ */
+const SHORE_THREAT_KM = 450;
+/** Debarkation ports tried, nearest the destination first, before falling back to the nearest one regardless of threat. */
+const DEBARK_SHORTLIST = 8;
+/** A port is a gateway to the destination only if the road march from it is at most this much longer than the great circle, plus MARCH_SLACK_KM. */
+const MARCH_DETOUR = 1.5;
+const MARCH_SLACK_KM = 300;
 
 const sealiftSlice = (env: TickEnv) => (env.world.slices.sealift ??= { voyages: {} });
 
@@ -85,16 +107,19 @@ export function sealift(env: TickEnv): void {
   for (const list of waiting.values()) list.sort((a, b) => a.order.issuedTick - b.order.issuedTick || (a.id < b.id ? -1 : 1));
   const days = new Map<NationId, number>();
   const ports = new Map<string, NodeId | undefined>();
-  const debark = (nation: NationId, target: NodeId) => {
-    const k = `${nation}|${target}`;
-    if (!ports.has(k)) ports.set(k, debarkation(world, map, nation, target, 'sea'));
+  const threat = new Map<NationId, (zone: number) => boolean>();
+  const threatOf = (nation: NationId) => threat.get(nation) ?? threat.set(nation, shoreThreat(world, map, nation)).get(nation)!;
+  const debark = (nation: NationId, target: NodeId, from: NodeId) => {
+    const k = `${nation}|${target}|${from}`;
+    if (!ports.has(k)) ports.set(k, safeDebarkation(world, map, nation, target, from, threatOf(nation)) ?? debarkation(world, map, nation, target, 'sea'));
     return ports.get(k);
   };
   const atPort = (g: Formation, port: number) => g.node === port || g.node === geo.portZone.get(port);
   const sail = (g: Formation, posture: 'move' | 'patrol', to: NodeId) => {
     if (g.order.posture === posture && g.order.target === to) return;
     const dest = navalDestination(world, map, g.nation, to);
-    const path = dest === undefined ? null : seaPath(world, map, g.nation, g.node, dest);
+    const avoid = threatOf(g.nation);
+    const path = dest === undefined ? null : (seaPath(world, map, g.nation, g.node, dest, (z) => z !== g.node && avoid(z)) ?? seaPath(world, map, g.nation, g.node, dest));
     if (path) g.order = { posture, target: to, path, issuedTick: world.tick };
   };
 
@@ -103,7 +128,10 @@ export function sealift(env: TickEnv): void {
     if (days.get(g.nation)! < ACTIVATION_DAYS / Math.max(0.1, g.readiness)) continue;
     const comp = env.comp(g);
     const aboard = (env.embarked.get(g.id) ?? []).filter((e) => e.status === 'embarked');
-    if (!aboard.length) delete voyages[g.id];
+    if (!aboard.length && voyages[g.id]) {
+      marchOn(world, ctx, voyages[g.id]);
+      delete voyages[g.id];
+    }
     if (aboard.length && g.order.posture === 'move' && g.order.path?.length) continue;
 
     // Load where the group lies, or sail empty to the nearest port where troops wait.
@@ -130,22 +158,26 @@ export function sealift(env: TickEnv): void {
     const queue = waiting.get(key) ?? [];
     let full = false;
     for (const f of [...queue]) {
-      const to = debark(g.nation, f.order.target!);
+      const to = debark(g.nation, f.order.target!, port as NodeId);
       if (to === undefined || (voyages[g.id] && voyages[g.id].to !== to)) continue;
       const share = deckSlots(catalog, f) / comp.vehicleLift;
-      if (used > 0 && used + share > 1) {
+      // A formation too big for the decks left sails in echelons, as an armoured division does on a few RO-ROs;
+      // the rest waits at the port for the next sailing.
+      let boarding = f;
+      if (share > 1 - used + 1e-9) {
         full = true;
-        continue;
-      }
+        if (!boardable(1 - used, share)) continue;
+        boarding = detach(world, ctx, f, (1 - used) / share);
+      } else queue.splice(queue.indexOf(f), 1);
       voyages[g.id] ??= { from: port as NodeId, to, loadingSince: world.tick };
-      f.status = 'embarked';
-      f.embarkedOn = g.id;
-      f.node = g.node;
-      f.order = { posture: 'embark', targetFormation: g.id, issuedTick: world.tick };
-      (env.embarked.get(g.id) ?? env.embarked.set(g.id, []).get(g.id)!).push(f);
-      aboard.push(f);
-      queue.splice(queue.indexOf(f), 1);
-      used += share;
+      (voyages[g.id].onward ??= {})[boarding.id] = f.order.target!;
+      boarding.status = 'embarked';
+      boarding.embarkedOn = g.id;
+      boarding.node = g.node;
+      boarding.order = { posture: 'embark', targetFormation: g.id, issuedTick: world.tick };
+      (env.embarked.get(g.id) ?? env.embarked.set(g.id, []).get(g.id)!).push(boarding);
+      aboard.push(boarding);
+      used += deckSlots(catalog, boarding) / comp.vehicleLift;
     }
     const v = voyages[g.id];
     if (aboard.length && v) {
@@ -157,4 +189,61 @@ export function sealift(env: TickEnv): void {
     }
     if (!aboard.length && port === undefined && g.node !== g.home && g.order.posture !== 'reserve') g.order = { posture: 'reserve', issuedTick: world.tick };
   }
+}
+
+/** Formations a convoy has put ashore march on from the port to where they were sent. */
+function marchOn(world: World, ctx: SimContext, v: SealiftState['voyages'][FormationId]): void {
+  for (const [id, target] of Object.entries(v.onward ?? {}) as [FormationId, NodeId][]) {
+    const f = world.formations[id];
+    if (!f || f.status !== 'active' || f.node !== v.to || f.node === target) continue;
+    applyLandOrder(world, { type: 'order', nation: f.nation, formation: f.id, order: { posture: 'move', target } }, ctx);
+  }
+}
+
+/** Sea zones within SHORE_THREAT_KM of a coast held by an enemy of `nation`. */
+function shoreThreat(world: World, map: GameMap, nation: NationId): (zone: number) => boolean {
+  const coast: NodeId[] = [];
+  for (let n = 0; n < map.landCount; n++) {
+    const c = world.control[n];
+    if (!c || !atWar(world, nation, c)) continue;
+    for (const m of map.neighbors(n as NodeId)) if (map.isSea(m)) { coast.push(n as NodeId); break; }
+  }
+  const memo = new Map<number, boolean>();
+  return (zone) => {
+    let hit = memo.get(zone);
+    if (hit === undefined) memo.set(zone, (hit = coast.some((n) => map.distanceKm(n, zone as NodeId) <= SHORE_THREAT_KM)));
+    return hit;
+  };
+}
+
+/**
+ * The friendly port on the destination's land mass nearest the destination that a sea route
+ * from `from` clear of the enemy's shore threat reaches, its own approaches clear too.
+ */
+function safeDebarkation(world: World, map: GameMap, nation: NationId, target: NodeId, from: NodeId, threat: (zone: number) => boolean): NodeId | undefined {
+  const mass = landMass(map);
+  const geo = geography(map);
+  const fromZone = geo.portZone.get(from) ?? from;
+  const candidates = geo.ports
+    .filter((p) => mass[p.node] === mass[target] && world.control[p.node] && allied(world, nation, world.control[p.node]) && !threat(p.zone))
+    .sort((a, b) => map.distanceKm(a.node, target) - map.distanceKm(b.node, target) || a.node - b.node)
+    .slice(0, DEBARK_SHORTLIST);
+  for (const p of candidates) {
+    if (!seaPath(world, map, nation, fromZone, p.zone, (z) => z !== fromZone && threat(z))) continue;
+    if (marchKm(world, map, nation, p.node, target) <= MARCH_DETOUR * map.distanceKm(p.node, target) + MARCH_SLACK_KM) return p.node;
+  }
+  return undefined;
+}
+
+/** Road-march km from a port to the destination over land not held by the enemy; Infinity without such a road. */
+function marchKm(world: World, map: GameMap, nation: NationId, from: NodeId, to: NodeId): number {
+  const path = findPath(map, from, to, (_a, b, km) => {
+    if (b >= map.landCount) return Infinity;
+    const c = world.control[b];
+    return b !== to && c && atWar(world, nation, c) ? Infinity : km;
+  }, 20_000);
+  if (!path) return Infinity;
+  let km = 0;
+  for (let i = 0, at = from; i < path.length; at = path[i++]) km += map.distanceKm(at, path[i]);
+  return km;
 }

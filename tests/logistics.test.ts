@@ -194,6 +194,23 @@ describe('logistics', () => {
     expect(supplyFactor(t.world, t.map, beach, chn)).toBe(0);
   });
 
+  it('keeps feeding a lodgement over the beach once it holds its beach cell, even with stronger defenders still fighting in it', () => {
+    const t = setup();
+    const chn = id.nation('CHN');
+    t.war('CHN', 'TWN');
+    const beach = t.nodeAt(23.5, 120.5);
+    const zone = [...t.map.neighbors(beach)].find((n) => t.map.isSea(n))!;
+    const landing = t.brigade('CHN', beach);
+    for (let i = 0; i < 2; i++) t.brigade('TWN', beach);
+    t.add({ nation: chn, name: 'landing ships', kind: 'surface_group', echelon: 'squadron', node: zone, equipment: { [id.platform('t_lst')]: 10 } });
+    t.world.control[beach] = chn;
+    t.drain(landing, 0.3);
+    t.engine.run(t.world, 2 * DAY);
+    expect(t.world.control[beach]).toBe(chn);
+    expect(supplyFactor(t.world, t.map, beach, chn)).toBeGreaterThan(0.05);
+    expect(t.fill(landing, 'ammo')).toBeGreaterThan(0.31);
+  });
+
   it('weighs sealift by cargo tons, so losing a landing ship costs a lodgement less than losing a ferry', () => {
     const t = setup();
     const chn = id.nation('CHN');
