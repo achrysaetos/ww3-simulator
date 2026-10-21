@@ -110,12 +110,12 @@ describe('logistics', () => {
     const t = setup();
     for (const n of ['USA', 'JPN']) t.world.nations[id.nation(n)].blocs = ['us_japan'];
     t.war('USA', 'CHN');
-    const okinawa = t.nodeAt(26.3, 127.8);
-    expect(t.map.ports[okinawa]).toBe(0);
-    const marines = t.brigade('USA', okinawa);
+    const amami = t.nodeAt(28.38, 129.49);
+    expect(t.map.ports[amami]).toBe(0);
+    const marines = t.brigade('USA', amami);
     t.drain(marines, 0.3);
     t.engine.run(t.world, 2 * DAY);
-    expect(supplyFactor(t.world, okinawa, id.nation('USA'))).toBeGreaterThan(0.05);
+    expect(supplyFactor(t.world, amami, id.nation('USA'))).toBeGreaterThan(0.05);
     expect(t.fill(marines, 'ammo')).toBeGreaterThan(0.31);
   });
 

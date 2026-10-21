@@ -74,13 +74,11 @@ function totals(nation: string): Record<Category, number> {
 }
 
 /**
- * Island bases the 1-degree land grid does not resolve: no land cell of the nation or a
- * host lies within LAND_SNAP_KM, so placement by `map.nodeAt` puts the unit in a sea zone
- * or, for the eastern Aegean islands, in a Turkish cell.
+ * Island bases the land grid does not resolve: no land cell of the nation or a host lies
+ * within LAND_SNAP_KM, so placement by `map.nodeAt` puts the unit in a sea zone. Diego
+ * Garcia left the list when the map gave it an island cell.
  */
-const UNRESOLVED_ISLAND_BASES = new Set([
-  'Diego Garcia, BIOT',
-]);
+const UNRESOLVED_ISLAND_BASES = new Set<string>([]);
 const LAND_SNAP_KM = 150;
 
 /** Allowed foreign host nations for forward-based and multinational units. */

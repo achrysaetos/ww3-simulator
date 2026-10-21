@@ -31,8 +31,7 @@ function cityIndex(map: GameMap) {
 }
 
 export function cellAreaKm2(map: GameMap, node: NodeId): number {
-  const res = map.isSea(node) ? map.data.sea.res : map.data.cells.res;
-  return (111.32 * res) ** 2 * Math.max(0.05, Math.cos((map.lat[node] * Math.PI) / 180));
+  return (111.32 * 2 * map.halfDeg[node]) ** 2 * Math.max(0.05, Math.cos((map.lat[node] * Math.PI) / 180));
 }
 
 /**

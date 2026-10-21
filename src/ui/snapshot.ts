@@ -40,6 +40,8 @@ export interface ScenarioCard {
   suggestedNation: NationId;
   /** Nations in the opening wars, aggressors first. */
   belligerents: NationId[];
+  /** The opening wars as [aggressor, target], in declaration order. */
+  wars: [NationId, NationId][];
 }
 
 export interface NationCard {

@@ -38,9 +38,9 @@ export function landSlice(world: World): LandState {
   return (world.slices.land ??= { baseline: {}, isolatedDays: {}, contest: {}, fortified: {}, origin: [], shellsFired: {} });
 }
 
-/** North-south and east-west extent of a 1-degree cell, as one depth of advance: ~111 km by 111*cos(lat) km. */
+/** North-south and east-west extent of a cell, as one depth of advance: ~111 km by 111*cos(lat) km for a 1-degree cell. */
 export function cellDepthKm(map: GameMap, node: NodeId): number {
-  return 111 * Math.sqrt(Math.max(0.2, Math.cos((map.lat[node] * Math.PI) / 180)));
+  return 222 * map.halfDeg[node] * Math.sqrt(Math.max(0.2, Math.cos((map.lat[node] * Math.PI) / 180)));
 }
 
 export function isLandFormation(f: Formation, map: GameMap): boolean {
