@@ -535,7 +535,7 @@ function replace(world: World, ctx: SimContext, upkeep: Upkeep, f: Formation, es
     if (!free) nation.stockpile[pid] = stock - k;
   }
   if (f.personnel >= est.personnel) return;
-  const troops = Math.min(est.personnel - f.personnel, nation.reserves, Math.round(est.personnel * rate));
+  const troops = Math.floor(Math.min(est.personnel - f.personnel, nation.reserves, Math.round(est.personnel * rate)));
   if (troops > 0) {
     f.personnel += troops;
     nation.reserves -= troops;

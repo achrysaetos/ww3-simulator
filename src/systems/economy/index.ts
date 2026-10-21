@@ -108,6 +108,17 @@ const INTAKE_PER_DEFENSE_SHARE = 0.003;
  */
 const DRAFT_SHARE_PER_MONTH = 0.019;
 const CONSCRIPTION_EXPONENT = 2.5;
+/**
+ * Output lost per share of the labour force taken under arms beyond the opening level: labour's
+ * share of national income, about 0.55-0.6 across economies (Penn World Table 10, labsh), with no
+ * slack assumed to take up the loss, as in today's tight labour markets (Russia's 2022 call-up of
+ * ~300k drove unemployment to a record low 2.4% and cut output; Bank of Russia 2023).
+ */
+// param: tag=estimated range=[0.4,0.65] source=Penn World Table 10 labour share; Bank of Russia 2023
+const LABOUR_GDP_ELASTICITY = 0.55;
+/** Share of the working-age population in the labour force (ILO modelled estimates, ~70% of ages 15-64 worldwide). */
+// param: tag=calibrated range=[0.6,0.8] source=ILO ILOSTAT 2024
+const LABOUR_PARTICIPATION = 0.7;
 /** Mean months from call-up to a usable reservist: Russia 2022 weeks, Ukraine 1-2 months, NATO basic plus branch 3-6 months. */
 const TRAINING_MONTHS = 2.5;
 /** Full mobilization quadruples the fuel a military's budget buys (est.). */
@@ -427,6 +438,12 @@ function stepNation(world: World, ctx: SimContext, s: Scan, n: Nation, e: Nation
   e.supply.energy *= 1 - ELECTRICITY_SHARE * (1 - (s.grid.get(n.id) ?? 1));
   announceShortages(world, ctx, n.id, e);
 
+  const personnel = s.personnel.get(n.id) ?? 0;
+  const underArms = n.reserves + e.inTraining + personnel;
+  const opening = (e.opening ??= { mobilization: n.mobilization, reservists: n.reservists, underArms });
+  const labourForce = n.population * ((n.stats.workingAgePct ?? 65) / 100) * LABOUR_PARTICIPATION;
+  const labourOutput = 1 - LABOUR_GDP_ELASTICITY * clamp01((underArms - opening.underArms) / Math.max(1, labourForce));
+
   const energyImported = 1 - selfShare(n, 'energy');
   e.gdpIndex =
     e.integrity *
@@ -434,7 +451,8 @@ function stepNation(world: World, ctx: SimContext, s: Scan, n: Nation, e: Nation
     (1 - ENERGY_BILL_SHARE * energyImported * (world.slices.economy.energyPrice - 1) * ENERGY_PRICE_PASSTHROUGH) *
     (1 - FOOD_GDP_ELASTICITY * (1 - e.supply.food)) *
     (1 - SEMI_GDP_ELASTICITY * (1 - e.supply.semiconductors)) *
-    tradeOutput;
+    tradeOutput *
+    labourOutput;
 
   const gdpB = ((n.stats.gdp ?? 0) / 1e9) * e.gdpIndex;
   const share = defenseShare(n);
@@ -462,8 +480,6 @@ function stepNation(world: World, ctx: SimContext, s: Scan, n: Nation, e: Nation
   n.bulk.fuel = Math.min(Math.max(n.bulk.fuel, DEPOT_MONTHS * peaceFuelPerMonth), n.bulk.fuel + fuelPerMonth * dtMonths * served);
   e.fuelDelivered += n.bulk.fuel - fuelBefore;
 
-  const personnel = s.personnel.get(n.id) ?? 0;
-  const underArms = n.reserves + e.inTraining + personnel;
   const foodPerMonth = underArms * RATION_TONS_PER_DAY * 30.4;
   n.bulk.food = Math.min(Math.max(n.bulk.food, foodPerMonth * 6), n.bulk.food + foodPerMonth * dtMonths * Math.min(1, 1.5 * e.supply.food));
 
@@ -483,7 +499,8 @@ function stepNation(world: World, ctx: SimContext, s: Scan, n: Nation, e: Nation
   const graduates = e.inTraining * lag(dtMonths, TRAINING_MONTHS);
   e.inTraining -= graduates;
   n.reserves += graduates;
-  n.reserves += recallReservists(n, dtMonths);
+  const called = opening.mobilization < 1 ? clamp01((n.mobilization - opening.mobilization) / (1 - opening.mobilization)) : 0;
+  n.reserves += recallReservists(n, dtMonths, opening.reservists, called);
 }
 
 export const aidKey = (f: AidFlow) => `${f.donor}>${f.recipient}:${f.item}${f.source === 'market' ? ':market' : ''}`;

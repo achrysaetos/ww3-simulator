@@ -55,6 +55,12 @@ export interface NationEconomy {
   fuelDelivered: number;
   /** Treasury paid for ordered output beyond what the defence budget buys, USD B since the run began. */
   orderSpendUsdB: number;
+  /**
+   * What the nation stood at on the first tick, which the baseline stats already carry: its
+   * mobilization (scenarios set a war footing after setup), the reservists it had left, and the
+   * men under arms. Absent until the economy first steps.
+   */
+  opening?: { mobilization: number; reservists: number; underArms: number };
 }
 
 export interface AidState {
