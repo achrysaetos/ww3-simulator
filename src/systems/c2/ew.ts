@@ -3,7 +3,7 @@ import type { Catalog } from '../../core/catalog';
 import type { GameMap } from '../../core/map';
 import type { Formation, NationId, NodeId, PlatformId, World } from '../../core/types';
 import type { CommandNode, Jam } from './state';
-import { BAND_MAX, EMITTERS, ORGANIC_EW, ORGANIC_KINDS, type EmitterSpec } from './tables';
+import { BAND_MAX, DRONE_BAND_MAX, EMITTERS, ORGANIC_EW, ORGANIC_KINDS, SITE_EW, type EmitterSpec } from './tables';
 
 const KM_PER_DEG = 111.2;
 const EMIT_POSTURES: ReadonlySet<string> = new Set(['strike', 'air_superiority', 'patrol', 'escort']);
@@ -11,12 +11,19 @@ const EMIT_POSTURES: ReadonlySet<string> = new Set(['strike', 'air_superiority',
 /** Cells an emitter at `center` reaches, each with the share of its area covered. */
 const footprints = new WeakMap<GameMap, Map<number, { node: number; cover: number }[]>>();
 
-function footprint(map: GameMap, center: NodeId, radiusKm: number): { node: number; cover: number }[] {
+function footprint(map: GameMap, center: NodeId, radiusKm: number, point = false): { node: number; cover: number }[] {
   let byKey = footprints.get(map);
   if (!byKey) footprints.set(map, (byKey = new Map()));
-  const key = center * 4096 + radiusKm;
+  const key = (center * 4096 + radiusKm) * 2 + (point ? 1 : 0);
   let out = byKey.get(key);
   if (out) return out;
+  if (point) {
+    // The positions it protects, and the cells drones are flown at them from.
+    out = [{ node: center, cover: 1 }];
+    for (let k = map.adjStart[center]; k < map.adjStart[center + 1]; k++) out.push({ node: map.adj[k], cover: 1 });
+    byKey.set(key, out);
+    return out;
+  }
   const side = 2 * map.halfDeg[center] * KM_PER_DEG;
   const area = side * side * Math.cos((map.lat[center] * Math.PI) / 180);
   const own = Math.min(1, (Math.PI * radiusKm * radiusKm) / Math.max(1, area));
@@ -30,18 +37,26 @@ function footprint(map: GameMap, center: NodeId, radiusKm: number): { node: numb
 }
 
 /** Per emitting nation and cell, the log of the share of each band left unjammed; summed over emitters, then turned into jam. */
-type Field = Map<NationId, Map<number, [number, number, number]>>;
+type Field = Map<NationId, Map<number, [number, number, number, number]>>;
 
 function emit(field: Field, map: GameMap, nation: NationId, node: NodeId, spec: EmitterSpec, count: number): void {
   let cells = field.get(nation);
   if (!cells) field.set(nation, (cells = new Map()));
-  for (const { node: n, cover } of footprint(map, node, spec.radiusKm)) {
+  for (const { node: n, cover } of footprint(map, node, spec.radiusKm, spec.point)) {
     let acc = cells.get(n);
-    if (!acc) cells.set(n, (acc = [0, 0, 0]));
+    if (!acc) cells.set(n, (acc = [0, 0, 0, 0]));
     acc[0] += count * Math.log(1 - spec.gnss * cover);
     acc[1] += count * Math.log(1 - spec.comms * cover);
     acc[2] += count * Math.log(1 - spec.radar * cover);
+    acc[3] += count * Math.log(1 - spec.drone * cover);
   }
+}
+
+const siteNodes = new WeakMap<GameMap, { nation: NationId; node: NodeId; kit: Record<string, number> }[]>();
+function sites(map: GameMap): { nation: NationId; node: NodeId; kit: Record<string, number> }[] {
+  let out = siteNodes.get(map);
+  if (!out) siteNodes.set(map, (out = SITE_EW.map((s) => ({ nation: s.nation as NationId, node: map.nodeAt(s.lat, s.lon), kit: s.kit }))));
+  return out;
 }
 
 /**
@@ -55,9 +70,11 @@ function emitterNode(map: GameMap, f: Formation): NodeId | undefined {
 
 /**
  * The jamming field the given formations and HQs of nations at war put out: EW platforms in its formations, the organic EW
- * its manoeuvre formations carry by doctrine (ORGANIC_EW), and the EW brigades with its HQs.
+ * its manoeuvre formations carry by doctrine (ORGANIC_EW) in proportion to the strength they have left, the EW brigades
+ * with its army HQs, and the fixed sites around its cities (SITE_EW), on ground it still holds. Formations under
+ * emission control (`silent`) put out nothing.
  */
-export function buildJam(map: GameMap, catalog: Catalog, formations: Iterable<Formation>, belligerent: (n: NationId) => boolean, hqs: Iterable<CommandNode>): Record<NationId, Record<number, Jam>> {
+export function buildJam(world: World, map: GameMap, catalog: Catalog, formations: Iterable<Formation>, belligerent: (n: NationId) => boolean, hqs: Iterable<CommandNode>, strength: (f: Formation) => number, silent: (f: Formation) => boolean): Record<NationId, Record<number, Jam>> {
   // Emitters of one type in one cell jam as one source of their summed count, so each footprint is walked once.
   const sources = new Map<string, { nation: NationId; node: NodeId; pid: string; count: number }>();
   const add = (nation: NationId, node: NodeId, pid: string, count: number) => {
@@ -67,9 +84,12 @@ export function buildJam(map: GameMap, catalog: Catalog, formations: Iterable<Fo
     else sources.set(key, { nation, node, pid, count });
   };
   for (const f of formations) {
-    if (f.status !== 'active' || f.embarkedOn || !belligerent(f.nation)) continue;
+    if (f.status !== 'active' || f.embarkedOn || !belligerent(f.nation) || silent(f)) continue;
     const organic = ORGANIC_KINDS.has(f.kind) && !map.isSea(f.node) ? ORGANIC_EW[f.nation]?.[f.echelon] : undefined;
-    if (organic) for (const pid in organic) add(f.nation, f.node, pid, organic[pid]);
+    if (organic) {
+      const left = strength(f);
+      for (const pid in organic) add(f.nation, f.node, pid, organic[pid] * left);
+    }
     const at = emitterNode(map, f);
     if (at === undefined) continue;
     for (const pid in f.equipment) if (EMITTERS[pid] && f.equipment[pid as PlatformId] > 0 && catalog.platforms.has(pid as PlatformId)) add(f.nation, at, pid, f.equipment[pid as PlatformId]);
@@ -78,23 +98,24 @@ export function buildJam(map: GameMap, catalog: Catalog, formations: Iterable<Fo
     const kit = hq.level === 'army' && hq.integrity > 0 && belligerent(hq.nation) ? ORGANIC_EW[hq.nation]?.hq : undefined;
     if (kit) for (const pid in kit) add(hq.nation, hq.node, pid, kit[pid] * hq.integrity);
   }
+  for (const site of sites(map)) if (belligerent(site.nation) && world.control[site.node] === site.nation) for (const pid in site.kit) add(site.nation, site.node, pid, site.kit[pid]);
   const field: Field = new Map();
   for (const src of sources.values()) emit(field, map, src.nation, src.node, EMITTERS[src.pid], src.count);
   const out: Record<NationId, Record<number, Jam>> = {};
   for (const [nation, cells] of field) {
     const row: Record<number, Jam> = (out[nation] = {});
-    for (const [n, [g, c, r]] of cells) row[n] = { gnss: BAND_MAX.gnss * (1 - Math.exp(g)), comms: BAND_MAX.comms * (1 - Math.exp(c)), radar: BAND_MAX.radar * (1 - Math.exp(r)) };
+    for (const [n, [g, c, r, d]] of cells) row[n] = { gnss: BAND_MAX.gnss * (1 - Math.exp(g)), comms: BAND_MAX.comms * (1 - Math.exp(c)), radar: BAND_MAX.radar * (1 - Math.exp(r)), drone: DRONE_BAND_MAX() * (1 - Math.exp(d)) };
   }
   return out;
 }
 
-const CLEAR: Jam = Object.freeze({ gnss: 0, comms: 0, radar: 0 });
+const CLEAR: Jam = Object.freeze({ gnss: 0, comms: 0, radar: 0, drone: 0 });
 
 /** Jamming that `nation`'s enemies put on `node`, combining every enemy's emitters. */
 export function jamAgainst(world: World, node: NodeId, nation: NationId): Jam {
   const field = world.slices.c2?.jam;
   if (!field) return CLEAR;
-  let g = 1, c = 1, r = 1, any = false;
+  let g = 1, c = 1, r = 1, d = 1, any = false;
   for (const e in field) {
     const j = field[e as NationId][node];
     if (!j || !atWar(world, e as NationId, nation)) continue;
@@ -102,6 +123,7 @@ export function jamAgainst(world: World, node: NodeId, nation: NationId): Jam {
     g *= 1 - j.gnss;
     c *= 1 - j.comms;
     r *= 1 - j.radar;
+    d *= 1 - (j.drone ?? 0);
   }
-  return any ? { gnss: 1 - g, comms: 1 - c, radar: 1 - r } : CLEAR;
+  return any ? { gnss: 1 - g, comms: 1 - c, radar: 1 - r, drone: 1 - d } : CLEAR;
 }

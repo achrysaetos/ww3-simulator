@@ -38,8 +38,27 @@ export const TARGET_CLASS: Partial<Record<PlatformClass, TargetClass>> = {
 };
 export const targetClassOf = (c: PlatformClass): TargetClass => TARGET_CLASS[c] ?? 'soft';
 
-/** Area-fire weapons: Lanchester linear law (kills scale with target density), the rest aimed fire (square law). */
+/**
+ * Area-fire weapons: Lanchester linear law (kills scale with target density), the rest aimed fire (square law).
+ * Drone teams are aimed fire: only so many crews can fly over one stretch of front, so they share its frontage.
+ */
 export const INDIRECT_FIRE: ReadonlySet<PlatformClass> = new Set(['sp_artillery', 'towed_artillery', 'mlrs']);
+
+/**
+ * Multiplier on the land fire of drone teams (FPV and Lancet-class loitering munitions). Ukrainian
+ * commanders and RUSI put drones behind 60-80% of Russian casualties and destroyed vehicles in 2024-25
+ * (Watling and Reynolds, "Tactical Developments During the Third Year of the Russo-Ukrainian War", RUSI,
+ * Feb 2025; Ukrainian General Staff statements). These are combatant claims, likely high. At 1, drone teams
+ * hold some 45% of a Ukrainian front brigade's anti-personnel fire and 15% of a Russian one's, and Russian
+ * counter-drone EW halves Ukraine's (ukraine-2026). Casualty totals keep to their realism bands from 0.3 to 2.
+ * The seam for the drone-versus-counter-drone cycle over a war (issue #2, section 3), with c2.FPV_LINK_VULN.
+ */
+export const DRONE_FIRE = defineParam({
+  id: 'land.DRONE_FIRE', value: 1, range: [0.3, 2], tag: 'contested',
+  source: 'RUSI (Watling and Reynolds, Feb 2025); Ukrainian General Staff: drones cause 60-80% of casualties (combatant claims)',
+  affects: 'land fire of FPV and loitering-munition teams',
+});
+export const fireScaleOf = (c: PlatformClass): number => (c === 'loitering_munition_launcher' ? DRONE_FIRE() : 1);
 
 /** Platforms that are not vehicles; in a formation that has vehicles they ride (mechanized/motorized). */
 export const DISMOUNTS: ReadonlySet<PlatformClass> = new Set(['infantry', 'atgm']);
@@ -240,7 +259,7 @@ export const COVERED_KM_PER_DAY = defineParam({ id: 'land.COVERED_KM_PER_DAY', v
 export const EXPOSURE: Partial<Record<PlatformClass, number>> = {
   mbt: 0.35, ifv: 0.5, apc: 0.5,
   truck: 0.05, fuel_truck: 0.05, engineer: 0.5, recon: 0.8,
-  sp_artillery: 0.3, towed_artillery: 0.3, mlrs: 0.25,
+  sp_artillery: 0.3, towed_artillery: 0.3, mlrs: 0.25, loitering_munition_launcher: 0.3,
   sam_long: 0.05, sam_medium: 0.15, shorad: 0.4, abm: 0.05, ew: 0.2, radar: 0.1,
   tel_srbm: 0.05, tel_mrbm: 0.05, tel_irbm: 0.05, cruise_launcher: 0.05, coastal_asm: 0.05, icbm_mobile: 0.02,
 };

@@ -12,7 +12,7 @@ import { groundFactorAt } from '../weather/effects';
 import {
   AIR_SUPPRESSION, AMMO_DAYS_INTENSE, ATTRITION_KM_PER_DAY, ATTRITION_MAX_KM_PER_DAY, BREAKTHROUGH_KM_PER_DAY, COVERED_KM_PER_DAY, HOSTILE_GROUND_COST,
   ASSAULT_EXPOSURE, BELT_DRAG, DELIBERATE_ASSAULT_RATIO, FRONTAGE_PLATFORMS, WITHDRAWAL_KM, POSITIONAL_INTENSITY, AMMO_RATION_BELOW, AREA_FIRE_REF_DENSITY, CAS_BONUS, DIRECT_DENSITY_EXP, COMBAT_FUEL_DUTY, COMBINED_ARMS,
-  CELL_FRONT_KM, ENGAGED_HOURS_PER_DAY, HASTY_BARRIER, ENTRENCH_MAX_BONUS, KILL_ZONE_COMMIT, MASSED_ASSAULT_RATIO, NEXT_LINE_ENTRENCHMENT, NO_FUEL_SPEED, EXPERIENCE_PER_COMBAT_DAY, FATIGUE_COMBAT_PER_DAY, INDIRECT_FIRE, RETREAT_LOSS,
+  CELL_FRONT_KM, ENGAGED_HOURS_PER_DAY, HASTY_BARRIER, ENTRENCH_MAX_BONUS, KILL_ZONE_COMMIT, MASSED_ASSAULT_RATIO, NEXT_LINE_ENTRENCHMENT, NO_FUEL_SPEED, EXPERIENCE_PER_COMBAT_DAY, FATIGUE_COMBAT_PER_DAY, INDIRECT_FIRE, RETREAT_LOSS, fireScaleOf,
   RETREAT_MORALE, RIVER_DEFENSE, RIVER_TEMPO, ROUT_ABANDON, ROUT_MORALE, SHELL_TONS, SHELLS_PER_TUBE_DAY, TERRAIN, TUBE_ARTILLERY, URBAN_MANOEUVRE, exposureOf, targetClassOf,
 } from './tables';
 
@@ -76,8 +76,8 @@ export function combatPower(f: Formation, catalog: Catalog, vs: TargetMix): numb
   if (total <= 0) return 0;
   let fire = 0;
   for (const [pid, n] of Object.entries(f.equipment)) {
-    const fp = catalog.platform(pid as PlatformId).firepower;
-    for (const c of TARGET_CLASSES) fire += n * (fp[c] ?? 0) * ((vs[c] ?? 0) / total);
+    const p = catalog.platform(pid as PlatformId), k = fireScaleOf(p.class);
+    for (const c of TARGET_CLASSES) fire += n * k * (p.firepower[c] ?? 0) * ((vs[c] ?? 0) / total);
   }
   return fire * fireModifier(f);
 }
@@ -114,7 +114,8 @@ function summarize(world: World, catalog: Catalog, side: Side, node: NodeId, clo
     for (const [pid, n] of Object.entries(f.equipment)) {
       const p = catalog.platform(pid as PlatformId);
       const into = INDIRECT_FIRE.has(p.class) ? indirect : direct;
-      for (const c of TARGET_CLASSES) into[c] += n * (p.firepower[c] ?? 0) * m;
+      const k = m * fireScaleOf(p.class);
+      for (const c of TARGET_CLASSES) into[c] += n * (p.firepower[c] ?? 0) * k;
     }
   }
   let total = 0;

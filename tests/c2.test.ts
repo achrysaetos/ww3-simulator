@@ -37,7 +37,7 @@ beforeAll(() => {
 describe('ukraine-2026: Russian EW', () => {
   it('jams satellite navigation along the front and not in the Ukrainian rear', () => {
     expect(jamAgainst(s.world, front, UKR).gnss).toBeGreaterThan(0.85);
-    expect(jamAgainst(s.world, rear, UKR)).toEqual({ gnss: 0, comms: 0, radar: 0 });
+    expect(jamAgainst(s.world, rear, UKR)).toEqual({ gnss: 0, comms: 0, radar: 0, drone: 0 });
   });
 
   it('cuts GNSS-guided munitions and radio-flown drones near the front, as in 2023-24, and leaves the rest', () => {

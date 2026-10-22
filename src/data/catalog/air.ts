@@ -171,13 +171,13 @@ const drones: PlatformSpec<MunitionKey>[] = [
   { id: 'shahed129', name: 'Shahed-129', cls: 'strike_drone', producers: ['IRN'], inService: 2013, unitCostUsdM: 1, speedKph: 150, rangeKm: 1000, fuelTph: 0.02, stealth: 0.3, detectionKm: 40, q: 0.5, load: { qaem5: 4 } },
   { id: 'mohajer6', name: 'Mohajer-6', cls: 'strike_drone', producers: ['IRN'], inService: 2018, unitCostUsdM: 1, speedKph: 150, rangeKm: 200, fuelTph: 0.01, stealth: 0.35, detectionKm: 30, q: 0.4, load: { qaem5: 2 } },
   { id: 'shahed_launcher', name: 'Shahed-136 / Geran-2 launch truck (5 rails)', cls: 'loitering_munition_launcher', producers: ['IRN', 'RUS'], inService: 2022, unitCostUsdM: 0.2, load: { shahed136: 5 } },
-  { id: 'lancet_team', name: 'Lancet launch team', cls: 'loitering_munition_launcher', producers: ['RUS'], inService: 2022, unitCostUsdM: 0.05, speedKph: 40, load: { lancet3: 4 } },
-  { id: 'switchblade_team', name: 'Switchblade 600 team', cls: 'loitering_munition_launcher', producers: ['USA'], inService: 2021, unitCostUsdM: 0.05, speedKph: 40, load: { switchblade600: 2, switchblade300: 2 } },
+  { id: 'lancet_team', name: 'Lancet launch team', cls: 'loitering_munition_launcher', producers: ['RUS'], inService: 2022, unitCostUsdM: 0.05, speedKph: 40, fp: { armor: 0.015, soft: 0.06, infantry: 0.01 }, load: { lancet3: 4 } },
+  { id: 'switchblade_team', name: 'Switchblade 600 team', cls: 'loitering_munition_launcher', producers: ['USA'], inService: 2021, unitCostUsdM: 0.05, speedKph: 40, fp: { armor: 0.02, soft: 0.03, infantry: 0.02 }, load: { switchblade600: 2, switchblade300: 2 } },
   { id: 'harop_launcher', name: 'Harop launcher (12 canisters)', cls: 'loitering_munition_launcher', producers: ['ISR', 'IND'], inService: 2009, unitCostUsdM: 5, load: { harop: 12 } },
-  { id: 'fpv_team', name: 'FPV drone team', cls: 'loitering_munition_launcher', producers: ['UKR', 'RUS', 'CHN', 'USA', 'POL', 'TUR', 'IRN'], inService: 2023, unitCostUsdM: 0.02, speedKph: 30, stealth: 0.6, detectionKm: 10, load: { fpv: 30, fpv_fiber: 5 } },
+  { id: 'fpv_team', name: 'FPV drone team', cls: 'loitering_munition_launcher', producers: ['UKR', 'RUS', 'CHN', 'USA', 'POL', 'TUR', 'IRN'], inService: 2023, unitCostUsdM: 0.02, speedKph: 30, stealth: 0.6, detectionKm: 10, fp: { infantry: 0.2, soft: 0.12, armor: 0.008 }, load: { fpv: 30, fpv_fiber: 5 } },
   { id: 'bober_launcher', name: 'Long-range strike drone launch site (UJ-26 Bober)', cls: 'loitering_munition_launcher', producers: ['UKR'], inService: 2023, unitCostUsdM: 0.1, load: { bober: 4 } },
   { id: 'lyutyi_launcher', name: 'Long-range strike drone launch site (FP-1 / Lyutyi)', cls: 'loitering_munition_launcher', producers: ['UKR'], inService: 2023, unitCostUsdM: 0.2, load: { lyutyi: 4 } },
-  { id: 'kargu_team', name: 'Kargu-2 team', cls: 'loitering_munition_launcher', producers: ['TUR'], inService: 2020, unitCostUsdM: 0.05, speedKph: 40, load: { kargu2: 4 } },
+  { id: 'kargu_team', name: 'Kargu-2 team', cls: 'loitering_munition_launcher', producers: ['TUR'], inService: 2020, unitCostUsdM: 0.05, speedKph: 40, fp: { infantry: 0.02, soft: 0.03, armor: 0.01 }, load: { kargu2: 4 } },
 ];
 
 const helicopters: PlatformSpec<MunitionKey>[] = [

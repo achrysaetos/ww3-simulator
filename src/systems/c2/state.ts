@@ -1,7 +1,7 @@
 import type { Command, FormationId, NationId, NodeId } from '../../core/types';
 
 export type HqLevel = 'national' | 'front' | 'army';
-export type Band = 'gnss' | 'comms' | 'radar';
+export type Band = 'gnss' | 'comms' | 'radar' | 'drone';
 export type OrderCommand = Extract<Command, { type: 'order' }>;
 
 /** A headquarters: where it sits, who it answers to, and how intact it is. */
@@ -62,6 +62,8 @@ export interface C2State {
   /** Space formations and formations carrying EW platforms, found when formations are attached. */
   space: FormationId[];
   emitters: FormationId[];
+  /** Platforms each commanded formation had when attached: its organic EW shrinks with it. */
+  size: Record<FormationId, number>;
 }
 
 declare module '../../core/types' {

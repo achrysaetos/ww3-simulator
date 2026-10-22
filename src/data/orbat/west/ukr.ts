@@ -40,12 +40,14 @@ type Sector = keyof typeof sector;
 const WAR = { readiness: 0.6, experience: 0.85 };
 
 /** Mechanized/motorized brigade at typical 2025 strength; `tanks` sets the tank battalion's fleet. */
-const mech = (tanks: Kit, ifv: Kit = { bmp2: 30, btr4: 10 }): Kit => add(tanks, ifv, { '2s1': 12, '2a65': 6, mt_lb: 20, maxxpro: 20, infantry_squad: 50, truck: 150 });
-const AIR_ASSAULT = (tanks: Kit = { t80bv: 8 }): Kit => add(tanks, { btr4: 20, maxxpro: 40, '2a65': 12, infantry_squad: 60, truck: 150 });
-const MARINE: Kit = { t72: 8, bmp1: 20, btr4: 20, '2s1': 12, infantry_squad: 50, truck: 120 };
-const NGU: Kit = { t64bv: 4, btr4: 20, maxxpro: 20, '2a65': 6, infantry_squad: 55, truck: 100 };
-const TDF: Kit = { infantry_squad: 45, maxxpro: 10, truck: 60 };
-const TANK = (tanks: Kit): Kit => add(tanks, { bmp2: 10, '2s3': 12, infantry_squad: 9, truck: 150 });
+// fpv_team: a brigade's drone battalion and its battalions' strike platoons, some 20 teams flying
+// radio and fibre-optic FPVs (Ukrainian MoD "Army of Drones"; RUSI, Feb 2025). Estimate.
+const mech = (tanks: Kit, ifv: Kit = { bmp2: 30, btr4: 10 }): Kit => add(tanks, ifv, { '2s1': 12, '2a65': 6, mt_lb: 20, maxxpro: 20, infantry_squad: 50, fpv_team: 20, truck: 150 });
+const AIR_ASSAULT = (tanks: Kit = { t80bv: 8 }): Kit => add(tanks, { btr4: 20, maxxpro: 40, '2a65': 12, infantry_squad: 60, fpv_team: 20, truck: 150 });
+const MARINE: Kit = { t72: 8, bmp1: 20, btr4: 20, '2s1': 12, infantry_squad: 50, fpv_team: 20, truck: 120 };
+const NGU: Kit = { t64bv: 4, btr4: 20, maxxpro: 20, '2a65': 6, infantry_squad: 55, fpv_team: 16, truck: 100 };
+const TDF: Kit = { infantry_squad: 45, maxxpro: 10, fpv_team: 8, truck: 60 };
+const TANK = (tanks: Kit): Kit => add(tanks, { bmp2: 10, '2s3': 12, infantry_squad: 9, fpv_team: 6, truck: 150 });
 
 type Row = readonly [name: string, at: Sector, kit: Kit];
 const rows: Row[] = [

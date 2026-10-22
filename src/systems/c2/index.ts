@@ -15,38 +15,35 @@
  */
 import type { Catalog } from '../../core/catalog';
 import { hostility, type System } from '../../core/engine';
+import { platformCount } from '../../core/forces';
 import type { Formation, FormationId, Munition, NationId, NodeId, PlatformId, World } from '../../core/types';
 import { assessHqs, attach, chainOf, draw, hqFunction, relocate, tallyOf } from './command';
 import { buildJam, jamAgainst } from './ew';
 import type { C2State, Jam, OrderCommand } from './state';
-import { BEARERS, COMMS_DELAY_H, COMMS_FLOOR, DEFAULT_BEARERS, DRONE_KINDS, HQ, ISR_LINK_DENIAL, RADAR_DENIAL, SAM_RADAR_DENIAL, SATCOM_PROVIDER, VULN, VULN_OVERRIDE } from './tables';
+import { BEARERS, COMMS_DELAY_H, COMMS_FLOOR, DEFAULT_BEARERS, DRONE_KINDS, FPV_LINK_VULN, HQ, ISR_LINK_DENIAL, RADAR_DENIAL, SAM_RADAR_DENIAL, SATCOM_PROVIDER, VULN, VULN_OVERRIDE } from './tables';
 
 export type { C2State, C2Tally, CommandNode, FormationC2, HqLevel, Jam } from './state';
 export { jamAgainst } from './ew';
 
 const IMMUNE = { gnss: 0, link: 0 };
 function vulnOf(m: Munition): { gnss: number; link: number } {
+  if (m.id === 'fpv') return { gnss: 0, link: FPV_LINK_VULN() };
   return VULN_OVERRIDE[m.id] ?? VULN[m.kind] ?? IMMUNE;
 }
 
-/** Per platform: total firepower, and the shares of its rounds lost to full GNSS and full datalink jamming. */
-const platformVuln = new WeakMap<Catalog, Map<PlatformId, { fire: number; gnss: number; link: number }>>();
+/** Per platform: total firepower, and each munition's share of its rounds. */
+const platformMix = new WeakMap<Catalog, Map<PlatformId, { fire: number; mix: [Munition, number][] }>>();
 
-function platformVulnOf(catalog: Catalog, pid: PlatformId): { fire: number; gnss: number; link: number } {
-  let byId = platformVuln.get(catalog);
-  if (!byId) platformVuln.set(catalog, (byId = new Map()));
+function platformMixOf(catalog: Catalog, pid: PlatformId): { fire: number; mix: [Munition, number][] } {
+  let byId = platformMix.get(catalog);
+  if (!byId) platformMix.set(catalog, (byId = new Map()));
   let v = byId.get(pid);
   if (v) return v;
   const p = catalog.platform(pid);
-  let fire = 0, rounds = 0, gnss = 0, link = 0;
+  let fire = 0, rounds = 0;
   for (const k in p.firepower) fire += p.firepower[k as keyof typeof p.firepower] ?? 0;
-  for (const l of p.loadout) {
-    const m = vulnOf(catalog.munition(l.munition));
-    rounds += l.count;
-    gnss += l.count * m.gnss;
-    link += l.count * m.link;
-  }
-  byId.set(pid, (v = rounds ? { fire, gnss: gnss / rounds, link: link / rounds } : { fire, gnss: 0, link: 0 }));
+  for (const l of p.loadout) rounds += l.count;
+  byId.set(pid, (v = { fire, mix: p.loadout.map((l) => [catalog.munition(l.munition), l.count / rounds]) }));
   return v;
 }
 
@@ -56,9 +53,16 @@ function jammedFire(catalog: Catalog, f: Formation, jam: Jam): number {
   for (const pid in f.equipment) {
     const n = f.equipment[pid as PlatformId];
     if (n <= 0) continue;
-    const v = platformVulnOf(catalog, pid as PlatformId);
+    const v = platformMixOf(catalog, pid as PlatformId);
+    if (!v.fire) continue;
+    let gnss = 0, link = 0;
+    for (const [m, share] of v.mix) {
+      const x = vulnOf(m);
+      gnss += share * x.gnss;
+      link += share * x.link;
+    }
     fire += n * v.fire;
-    lost += n * v.fire * (1 - (1 - v.gnss * jam.gnss) * (1 - v.link * jam.comms));
+    lost += n * v.fire * (1 - (1 - gnss * jam.gnss) * (1 - link * jam.drone));
   }
   return fire > 0 ? lost / fire : 0;
 }
@@ -83,7 +87,7 @@ function satcomUp(s: C2State, nation: NationId): number {
 }
 
 function initialState(): C2State {
-  return { hqs: {}, chain: {}, jam: {}, satcomBase: {}, satcom: {}, formations: {}, transit: {}, released: {}, tally: {}, attachedTo: -1, space: [], emitters: [] };
+  return { hqs: {}, chain: {}, jam: {}, satcomBase: {}, satcom: {}, formations: {}, transit: {}, released: {}, tally: {}, attachedTo: -1, space: [], emitters: [], size: {} };
 }
 
 export const c2: System = {
@@ -109,7 +113,11 @@ export const c2: System = {
     assessHqs(world, ctx, s);
     relocate(world, map, s, live);
     const ew = s.emitters.map((id) => world.formations[id]).filter((f) => f && !(f.id in s.chain));
-    s.jam = foes.size ? buildJam(map, catalog, [...live, ...ew], belligerent, Object.values(s.hqs)) : {};
+    const strength = (f: Formation) => {
+      const was = s.size[f.id];
+      return was ? Math.min(1, platformCount(f) / was) : 1;
+    };
+    s.jam = foes.size ? buildJam(world, map, catalog, [...live, ...ew], belligerent, Object.values(s.hqs), strength, () => false) : {};
 
     s.formations = {};
     for (const f of live) {
@@ -165,7 +173,7 @@ export function jammedHits(world: World, target: NodeId, attacker: NationId, m: 
   const { gnss: g, link: l } = vulnOf(m);
   if (!g && !l) return hits;
   const jam = jamAgainst(world, target, attacker);
-  const keep = (1 - g * jam.gnss) * (1 - l * jam.comms);
+  const keep = (1 - g * jam.gnss) * (1 - l * jam.drone);
   if (keep >= 1) return hits;
   const expected = hits * keep;
   const kept = Math.floor(expected) + (draw(`${attacker}|${target}|${m.id}`, world.tick, world.seed) < expected % 1 ? 1 : 0);

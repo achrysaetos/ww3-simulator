@@ -1,4 +1,5 @@
 import { atWar, type SimContext } from '../../core/engine';
+import { platformCount } from '../../core/forces';
 import type { GameMap } from '../../core/map';
 import type { Formation, FormationId, FormationKind, NationId, NodeId, World } from '../../core/types';
 import { isrOverwatch } from '../intel';
@@ -52,6 +53,7 @@ export function attach(world: World, map: GameMap, s: C2State): void {
     if (f.kind === 'space') s.space.push(f.id);
     for (const pid in f.equipment) if (pid in EMITTERS) { s.emitters.push(f.id); break; }
     if (f.id in s.chain || !COMMANDED.has(f.kind)) continue;
+    s.size[f.id] = platformCount(f);
     const national = `${f.nation}:national`;
     s.hqs[national] ??= { id: national, nation: f.nation, level: 'national', name: `${f.nation} national command`, node: world.nations[f.nation].capital, integrity: 1 };
     // Until relocate places it among its subordinates, a new HQ sits with this formation on home ground, else at the capital.
