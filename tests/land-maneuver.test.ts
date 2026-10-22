@@ -113,12 +113,14 @@ describe('concentration of force', () => {
 
   // Drone-watched, fortified, no air superiority: the 2024-25 record (Avdiivka took four months at several to one).
   // Against a hasty line the kill zone is not there and mass breaks through at the pace of 1973 or Kharkiv 2022.
+  // Contest km is the advance averaged over the cell's width: against the belt only the first echelon fills a
+  // sector, so 0.5 km is ~20 km2 of the cell in five days.
   it('9:1 gains clearly more than 3:1, a little against a fortified line and fast against a hasty one', () => {
     const curve = [ladder(3, false), ladder(9, false), ladder(3, true), ladder(9, true)];
     console.log(`ladder (5 days): ${curve.map((c, i) => `${i < 2 ? 'fortified' : 'hasty'} ${c.ratio.toFixed(1)}:1 -> ${c.km.toFixed(1)} km`).join(', ')}`);
     const [fort3, fort9, hasty3, hasty9] = curve;
-    expect(fort3.km).toBeLessThan(0.5);
-    expect(fort9.km).toBeGreaterThanOrEqual(1);
+    expect(fort3.km).toBeLessThan(0.2);
+    expect(fort9.km).toBeGreaterThanOrEqual(0.5);
     expect(hasty9.km).toBeGreaterThanOrEqual(30);
     expect(hasty9.km).toBeGreaterThan(1.5 * hasty3.km);
   }, SCENARIO_MS);
@@ -162,8 +164,8 @@ describe('river lines', () => {
   // Kherson across the Dnipro into the fortified left-bank cell 7483 (Nova Kakhovka-Oleshky), held by a Russian
   // division and a brigade. The same force attacking from a foothold already on the left bank (7698 handed to
   // Ukraine) needs no crossing. Krynky 2023-24 never grew past a few km; FM 3-90.12.
-  const assault = (dry: boolean) => {
-    const s = session('ukraine-2026', ['UKR', 'RUS']);
+  const assault = (dry: boolean, seed: number) => {
+    const s = session('ukraine-2026', ['UKR', 'RUS'], seed);
     const kherson = s.map.nodeAt(46.64, 32.6), target = s.map.nodeAt(46.75, 33.25), foothold = s.map.nodeAt(46.25, 32.75);
     expect(s.map.riverBetween(kherson, target)).toBe('Dnipro');
     expect(s.map.riverBetween(foothold, target)).toBeUndefined();
@@ -176,14 +178,28 @@ describe('river lines', () => {
     return { km: s.world.control[target] === 'UKR' ? Infinity : s.contestKm(target), lost: before - force.reduce((a, f) => a + platformCount(f), 0) };
   };
 
+  // Thresholds from seeds 1-8 at integration e934827 and after the sector front law. Across those 16 runs the river
+  // assault gains 0.12-0.20 of the dry one's ground and pays 6.3-16 times its losses per km, so the per-seed limits of
+  // 0.3 and 3 hold with margin. Dry ground on its own swings with the seed (0.49-1.48 km), so it is read as the median of
+  // seeds 1-4 (0.58 km). The old 1 km floor, set before contest km became an average over the cell's width, scales by
+  // the measured dry-km ratio of 0.46 (identical on all 8 seeds) to 0.46; 0.5 keeps it at least that strict. The old
+  // check floored river km at 0.5 before dividing, which made seed 1 fail at e934827 (554 against 562) although its
+  // true price ratio was 6.3.
   it('crossing the Dnipro against a defended bank gains a fraction of the ground at a far higher price', () => {
-    const river = assault(false), dry = assault(true);
-    console.log(`Dnipro: across ${river.km.toFixed(1)} km for ${river.lost} platforms; dry ${dry.km.toFixed(1)} km for ${dry.lost}`);
-    // The scenario opens in the southern spring thaw, so even the dry assault wades through mud.
-    expect(dry.km).toBeGreaterThan(1);
-    expect(river.km).toBeLessThan(0.3 * dry.km);
-    expect(river.lost / Math.max(0.5, river.km)).toBeGreaterThan(3 * (dry.lost / dry.km));
-  }, SCENARIO_MS);
+    const seeds = [1, 2, 3, 4];
+    const runs = seeds.map((seed) => ({ seed, river: assault(false, seed), dry: assault(true, seed) }));
+    for (const { seed, river, dry } of runs)
+      console.log(`Dnipro seed ${seed}: across ${river.km.toFixed(2)} km for ${river.lost} platforms; dry ${dry.km.toFixed(2)} km for ${dry.lost}`);
+    const dryKm = runs.map((r) => r.dry.km).sort((a, b) => a - b);
+    // The scenario opens in the southern spring thaw, so even the dry assault wades through mud, and against a dug-in
+    // division only its first echelon fills a sector of the cell's width.
+    expect((dryKm[1] + dryKm[2]) / 2).toBeGreaterThan(0.5);
+    for (const { river, dry } of runs) {
+      expect(river.km).toBeLessThan(0.3 * dry.km);
+      const pricePerKm = (r: { km: number; lost: number }) => (r.km > 0 ? r.lost / r.km : Infinity);
+      expect(pricePerKm(river)).toBeGreaterThan(3 * pricePerKm(dry));
+    }
+  }, 4 * SCENARIO_MS);
 });
 
 describe('supply and manoeuvre', () => {

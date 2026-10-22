@@ -292,6 +292,8 @@ interface BattleResult {
   committed: number;
   /** Share of the cell's front the defender has the platforms to hold, 0..1. */
   manned: number;
+  /** Share of the cell's front the attacker's committed force fills at full frontage density, 0..1: the width its push covers. */
+  sector: number;
 }
 
 function resolveBattle(world: World, ctx: SimContext, node: NodeId, att: Side, def: Side, byNode: Map<number, Formation[]>, engaged: Set<FormationId>, how: Engagement): BattleResult {
@@ -381,7 +383,13 @@ function resolveBattle(world: World, ctx: SimContext, node: NodeId, att: Side, d
     casualties: { [att.nation]: ledgers.att.casualties, [def.nation]: ledgers.def.casualties } as Record<NationId, number>,
     ...(winner ? { winner } : {}),
   });
-  return { exchange, yielded, ratio: fireRatio(a, d), mass: fireRatio(a, d, true), committed, manned: Math.min(1, d.total / (FRONTAGE_PLATFORMS() * (cellDepthKm(map, node) / CELL_FRONT_KM))) };
+  const front = frontPlatforms(map, node);
+  return { exchange, yielded, ratio: fireRatio(a, d), mass: fireRatio(a, d, true), committed, manned: Math.min(1, d.total / front), sector: Math.min(1, (a.total * committed) / front) };
+}
+
+/** Platforms that fill a cell's front, one line of direct-fire weapons along its width. */
+function frontPlatforms(map: GameMap, node: NodeId): number {
+  return FRONTAGE_PLATFORMS() * (cellDepthKm(map, node) / CELL_FRONT_KM);
 }
 
 /** Artillery formations in nodes adjacent to the battle, friendly to `nation`, not on the march, not yet firing elsewhere this tick. */
@@ -498,10 +506,13 @@ function advanceKm(world: World, ctx: SimContext, node: NodeId, attackers: Forma
     // A belt of obstacles no garrison covers only delays (FM 3-90: an obstacle not covered by fire is not an obstacle).
     const { closed } = TERRAIN[ctx.map.terrain[node]];
     const side = (fs: Formation[]) => summarize(world, ctx.catalog, { nation: fs[0].nation, fighters: fs, support: [] }, node, closed);
-    const ratio = fireRatio(side(movers), side(cover), true);
-    // Cover too weak to matter is no cover: from the deliberate-assault ratio to the massed one the pace climbs to the road march.
+    const mine = side(movers);
+    const ratio = fireRatio(mine, side(cover), true);
+    const sector = Math.min(1, mine.total / frontPlatforms(ctx.map, node));
+    // Infiltration moves only the sector the force fills. Cover too weak to matter is no cover: from the deliberate-assault ratio to
+    // the massed one the pace climbs to the road march across the whole cell.
     const exploit = Math.min(1, Math.max(0, (ratio - DELIBERATE_ASSAULT_RATIO()) / (MASSED_ASSAULT_RATIO() - DELIBERATE_ASSAULT_RATIO())));
-    const covered = (pace * manoeuvreKmPerDay(ratio)) / moveCost;
+    const covered = (sector * pace * manoeuvreKmPerDay(ratio)) / moveCost;
     return Math.max(covered, (1 - exploit) * covered + exploit * pace * unopposed) * (1 - BELT_DRAG() * fort) * dtDays;
   }
   if (defenders.every((f) => f.status === 'routed')) return ((pace * BREAKTHROUGH_KM_PER_DAY()) / moveCost) * dtDays;
@@ -518,7 +529,7 @@ function advanceKm(world: World, ctx: SimContext, node: NodeId, attackers: Forma
   const penetration = breach * (COVERED_KM_PER_DAY() + (BREAKTHROUGH_KM_PER_DAY() - COVERED_KM_PER_DAY()) * open) * (1 - BELT_DRAG() * fort);
   const urban = ctx.map.terrain[node] === 'urban' ? URBAN_MANOEUVRE() : 1;
   const rate = Math.max(attrition, (urban * Math.max(gaps * manoeuvre, penetration)) / moveCost);
-  return pace * (rate * dtDays + (battle.yielded ? WITHDRAWAL_KM() : 0));
+  return battle.sector * pace * (rate * dtDays + (battle.yielded ? WITHDRAWAL_KM() : 0));
 }
 
 /**
@@ -533,7 +544,7 @@ function contestCell(world: World, ctx: SimContext, node: NodeId, invaders: Form
   if (!contest || !allied(world, lead, contest.by)) contest = slice.contest[node] = { by: lead, km: 0 };
 
   const defenders = hostilesAt(world, byNode, node, lead);
-  let battle: BattleResult = { exchange: 1, yielded: false, ratio: 1, mass: 1, committed: 1, manned: 1 };
+  let battle: BattleResult = { exchange: 1, yielded: false, ratio: 1, mass: 1, committed: 1, manned: 1, sector: 1 };
   const river = acrossRiver(world, ctx.map, node, lead);
   if (defenders.length) {
     for (const f of [...attackers, ...defenders]) {

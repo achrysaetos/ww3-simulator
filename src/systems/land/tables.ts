@@ -188,8 +188,11 @@ export const POSITIONAL_INTENSITY = defineParam({ id: 'land.POSITIONAL_INTENSITY
   affects: 'positional attrition and shell use' });
 
 /**
- * The front law. Advance across a contested cell, averaged over the cell's width, is the fastest of three ways
- * through (combat.ts advanceKm):
+ * The front law. Each pace below is a pace on the sector an attacker assaults, cited from the axes it was observed
+ * on. The cell's advance, averaged over its width, is that pace times the share of the cell's front the attacker's
+ * platforms in contact fill at FRONTAGE_PLATFORMS density (combat.ts `sector`): a force spread over many cells opens
+ * many narrow axes, not many full-width ones. A broken (routed) or absent defender confines nothing, so exploitation
+ * runs the cell's full width. The fastest of three ways through a held line wins (combat.ts advanceKm):
  * - Attrition against a line that holds: ATTRITION_KM_PER_DAY per unit of ln(defender loss rate / attacker loss
  *   rate), at most ATTRITION_MAX_KM_PER_DAY. Russian assaults in 2024-25 took ~3,500-5,000 km2 a year along a
  *   ~1,000 km front (ISW, DeepState): 0.1-1 km/day on the active axes.
@@ -351,10 +354,11 @@ export const RIVER_ASSAULT_COST = defineParam({ id: 'land.RIVER_ASSAULT_COST', v
  * Exposed platforms that can bring direct fire to bear along one cell's
  * ~100 km front: a mechanised brigade (~300 platforms) holds or attacks on
  * roughly 10 km (FM 3-90; Ukrainian brigades held 10-20 km sectors in 2024).
+ * It sets both how much of a cell's front a defender mans and how wide a sector an assault fills.
  */
 export const FRONTAGE_PLATFORMS = defineParam({ id: 'land.FRONTAGE_PLATFORMS', value: 3000, range: [2000, 4500], tag: 'estimated',
   source: 'A mechanised brigade holds ~10 km (FM 3-90); Ukrainian brigades held 10-20 km in 2024',
-  affects: 'how thin a line is' });
+  affects: 'how thin a line is and how wide an assault is' });
 /** Front length FRONTAGE_PLATFORMS holds: a 1-degree cell's ~100 km. Smaller cells (islands, city-states) need proportionally fewer. */
 export const CELL_FRONT_KM = 100;
 /**
