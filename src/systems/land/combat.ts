@@ -13,7 +13,7 @@ import { groundFactorAt } from '../weather/effects';
 import {
   AIR_SUPPRESSION, AMMO_DAYS_INTENSE, ATTRITION_KM_PER_DAY, ATTRITION_MAX_KM_PER_DAY, BREAKTHROUGH_KM_PER_DAY, COVERED_KM_PER_DAY, HOSTILE_GROUND_COST,
   ASSAULT_EXPOSURE, BELT_DRAG, DELIBERATE_ASSAULT_RATIO, FRONTAGE_PLATFORMS, WITHDRAWAL_KM, POSITIONAL_INTENSITY, AMMO_RATION_BELOW, AREA_FIRE_REF_DENSITY, CAS_BONUS, DIRECT_DENSITY_EXP, COMBAT_FUEL_DUTY, COMBINED_ARMS,
-  CELL_FRONT_KM, ENGAGED_HOURS_PER_DAY, HASTY_BARRIER, ENTRENCH_MAX_BONUS, KILL_ZONE_COMMIT, MASSED_ASSAULT_RATIO, NEXT_LINE_ENTRENCHMENT, NO_FUEL_SPEED, EXPERIENCE_PER_COMBAT_DAY, FATIGUE_COMBAT_PER_DAY, INDIRECT_FIRE, RETREAT_LOSS, fireScaleOf,
+  CELL_FRONT_KM, ENGAGED_HOURS_PER_DAY, HASTY_BARRIER, ENTRENCH_MAX_BONUS, KILL_ZONE_COMMIT, KILL_ZONE_DENSITY, MASSED_ASSAULT_RATIO, NEXT_LINE_ENTRENCHMENT, NO_FUEL_SPEED, EXPERIENCE_PER_COMBAT_DAY, FATIGUE_COMBAT_PER_DAY, INDIRECT_FIRE, RETREAT_LOSS, fireScaleOf,
   RETREAT_MORALE, RIVER_DEFENSE, RIVER_TEMPO, ROUT_ABANDON, ROUT_MORALE, SHELL_TONS, SHELLS_PER_TUBE_DAY, TERRAIN, TUBE_ARTILLERY, URBAN_MANOEUVRE, exposureOf, infiltrating, targetClassOf,
 } from './tables';
 
@@ -309,12 +309,14 @@ function resolveBattle(world: World, ctx: SimContext, node: NodeId, att: Side, d
   // An attacker without a deliberate-assault superiority attacks on a few narrow axes, not along the whole cell.
   const intensity = how.kind === 'assault' ? Math.min(1, Math.max(POSITIONAL_INTENSITY(), fireRatio(a, d) / DELIBERATE_ASSAULT_RATIO())) : POSITIONAL_INTENSITY();
   // Against a prepared line only part of an assaulting force is in the kill zone at once; the rest waits outside it while the guns fire.
-  const committed = how.kind === 'assault' ? 1 - (1 - KILL_ZONE_COMMIT()) * entrenchmentOf(world, def.fighters, node) * (1 - airControlOf(world, att.nation, node)) : 1;
+  // The kill zone is only as wide as the front the defender can watch: a battalion in a 40 km cell covers a fifth of it.
+  const prepared = entrenchmentOf(world, def.fighters, node) * Math.min(1, d.total / (KILL_ZONE_DENSITY() * cellDepthKm(map, node)));
+  const committed = how.kind === 'assault' ? 1 - (1 - KILL_ZONE_COMMIT()) * prepared * (1 - airControlOf(world, att.nation, node)) : 1;
   const hours = (ENGAGED_HOURS_PER_DAY() * world.dtHours * intensity * committed) / 24;
   const routedVulnerability = (s: Side) => (s.fighters.some((f) => f.status === 'routed') ? 2 : 1);
   const noise = () => Math.exp(rng.normal(0, 0.2));
   const onDef = expectedKills(a, d, hours, attEdge * noise(), routedVulnerability(def) / defEdge);
-  const exposure = how.kind === 'assault' ? 1 + ASSAULT_EXPOSURE() * entrenchmentOf(world, def.fighters, node) : 1;
+  const exposure = how.kind === 'assault' ? 1 + ASSAULT_EXPOSURE() * prepared : 1;
   const onAtt = expectedKills(d, a, hours, defEdge * noise(), (exposure * routedVulnerability(att)) / attEdge);
   const sum = (v: ClassVector) => TARGET_CLASSES.reduce((acc, c) => acc + v[c], 0);
   const exchange = sum(onDef) / Math.max(1, d.total) / Math.max(1e-9, sum(onAtt) / Math.max(1, a.total));
@@ -430,10 +432,14 @@ export function seize(world: World, ctx: SimContext, nation: NationId, node: Nod
  * ROK's forward barrier belts, anti-tank walls and minefields south of it, and the North's
  * fortified zone north of it. So does the India-Pakistan border and Line of Control: India's
  * 2003-04 LoC fence and bunker lines, Pakistan's ditch-cum-bund belts and canal defences in Punjab.
+ * So does Ukraine's border with Belarus, the ground Russia attacked Kyiv from in 2022: Ukraine has mined it and
+ * built defensive lines along it in Volyn, Rivne, Zhytomyr and Kyiv oblasts since (Ukrainian State Border Guard
+ * Service; Operational Command North).
  */
 const STANDING_BORDERS: readonly (readonly [NationId, NationId])[] = [
   ['KOR' as NationId, 'PRK' as NationId],
   ['IND' as NationId, 'PAK' as NationId],
+  ['UKR' as NationId, 'BLR' as NationId],
 ];
 
 function fortifyStandingLines(world: World, map: GameMap): void {

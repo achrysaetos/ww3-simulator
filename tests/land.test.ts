@@ -319,6 +319,28 @@ describe('the front', () => {
     expect(manned.world.slices.land.contest[PLAIN_UKR]?.km ?? 0).toBeLessThan(10);
   });
 
+  /** Scales the defender to `k` brigades and the attacker to `ratio` times that. */
+  const against = (k: number, ratio: number, days: number, before?: (s: ReturnType<typeof setup>, att: Formation, def: Formation) => void) =>
+    assault({ ratio: ratio * k, defNode: PLAIN_UKR, attNode: PLAIN_RUS, entrench: 1, days, before: (s, att, def) => {
+      for (const pid of Object.keys(def.equipment) as PlatformId[]) def.equipment[pid] = Math.round(def.equipment[pid] * k);
+      before?.(s, att, def);
+    } });
+
+  it('a 3:1 assault on a dug-in line manned across the cell costs the attacker 2-3 times what it costs the defender', () => {
+    // ASSAULT_EXPOSURE's calibration: Avdiivka, Bakhmut and Pokrovsk, 2023-25 (UK MoD; RUSI "Meatgrinder", 2023). Counted in platforms.
+    const r = against(1, 3, 2, man);
+    const exchange = (3 * r.attLoss) / r.defLoss;
+    expect(exchange).toBeGreaterThanOrEqual(2);
+    expect(exchange).toBeLessThanOrEqual(3);
+  });
+
+  it('one dug-in battalion cannot hold a fortified cell against fifteen: its kill zone covers a fraction of the cell', () => {
+    // On integration 8dd0f1e the battalion made the whole 46 km cell a kill zone, so only 30% of the attackers fought at a time and it
+    // still held on day 4, 0.8 km in. One battalion watches about 5 km (KILL_ZONE_DENSITY; FM 100-2-1).
+    const r = against(0.25, 15, 3, (s) => fortify(s));
+    expect(r.world.control[PLAIN_UKR]).toBe(RUS);
+  });
+
   it('an empty cell covered by an equal line next door is infiltrated a few km a day; a thin line is broken through', () => {
     expect([...MAP.neighbors(PLAIN_UKR)]).toContain(EAST_UKR);
     const cross = (cover: number) => {

@@ -67,6 +67,8 @@ export interface Sector {
   threat: number;
   /** The most pressed front cell. */
   key: NodeId;
+  /** A border with a state outside the war that lets the enemy stage on its soil (fronts hostBorder), not a line of contact. */
+  hostBorder?: true;
 }
 
 /** Active, un-embarked formations of a believed world, indexed once per tick. */

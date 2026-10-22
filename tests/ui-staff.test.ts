@@ -200,8 +200,9 @@ describe('advisor cards: the recommended button issues the command, and the answ
 
 describe('"Your staff runs" (ukraine-2026 as Ukraine)', () => {
   /** Ticks at which each of Ukraine's land formations last got an order, so a new order shows. */
-  const landOrders = (g: Game) => Object.fromEntries(Object.values(g.world.formations).filter((f) => f.nation === 'UKR' && ['maneuver', 'artillery'].includes(f.kind)).map((f) => [f.id, f.order.issuedTick]));
-  const changed = (a: Record<string, number>, b: Record<string, number>) => Object.keys(a).filter((k) => a[k] !== b[k]).length;
+  // A routed unit's retreat is ordered by the land engine, not the staff, so it does not count.
+  const landOrders = (g: Game) => Object.fromEntries(Object.values(g.world.formations).filter((f) => f.nation === 'UKR' && ['maneuver', 'artillery'].includes(f.kind) && f.status !== 'routed').map((f) => [f.id, f.order.issuedTick]));
+  const changed = (a: Record<string, number>, b: Record<string, number>) => Object.keys(a).filter((k) => k in b && a[k] !== b[k]).length;
 
   it('taking land back stops the AI staff ordering any land formation; leaving it delegated does not', () => {
     const kept = start('ukraine-2026', 'UKR');
