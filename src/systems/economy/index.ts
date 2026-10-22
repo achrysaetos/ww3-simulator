@@ -9,8 +9,7 @@ import {
 import { defenseObligations } from '../../data/nations';
 import { recallReservists } from '../../data/nations/reserves';
 import { advanceCuts, coverage, hasLandBorder, neutralAsk, neutralSpare, rungShares, SEA, type CutKind, type FlowKind, type RungId } from './ladder';
-import type { EconomyState } from './state';
-import { newLine, newNationEconomy, oilStockMonths, stocksOf, type LineState, type NationEconomy } from './state';
+import { newLine, newNationEconomy, oilStockMonths, stocksOf, type EconomyState, type LineState, type NationEconomy } from './state';
 import { defineParam } from '../../core/params';
 import { digitalLost } from '../nonkinetic/reads';
 import { DIGITAL_GDP_ELASTICITY } from '../nonkinetic/tables';

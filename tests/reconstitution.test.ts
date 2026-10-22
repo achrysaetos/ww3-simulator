@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Engine } from '../src/core/engine';
-import type { FormationId, NationId, PlatformId } from '../src/core/types';
+import type { FormationId, ItemId, NationId, PlatformId } from '../src/core/types';
 import { createSession } from '../src/scenarios';
 import { economy } from '../src/systems/economy';
 import { logistics } from '../src/systems/logistics';
@@ -55,7 +55,7 @@ describe('ships and air wings come back only through production', () => {
   }, 120_000);
 
   it('with no line building its class, a sunk boat never returns', () => {
-    const r = destroyAndWait('f267', 'virginia', 400, (_, s) => delete s.world.slices.economy.nations[USA].lines.virginia);
+    const r = destroyAndWait('f267', 'virginia', 400, (_, s) => delete s.world.slices.economy.nations[USA].lines['virginia' as ItemId]);
     expect(r.delivered).toBeNull();
     expect(r.back).toBeNull();
   }, 120_000);
@@ -65,7 +65,7 @@ describe('ships and air wings come back only through production', () => {
     expect(r.delivered!).toBeLessThan(RECONSTITUTE_AIR_DAYS());
     expect(r.back).toBe(RECONSTITUTE_AIR_DAYS() + 1);
     // Half its 20 airframes at least, all of them new: no airframes were warehoused at the start.
-    expect(r.f.equipment.f35a).toBeGreaterThanOrEqual(10);
-    expect(r.f.equipment.f35a).toBeLessThanOrEqual(r.need);
+    expect(r.f.equipment['f35a' as PlatformId]).toBeGreaterThanOrEqual(10);
+    expect(r.f.equipment['f35a' as PlatformId]).toBeLessThanOrEqual(r.need);
   }, 120_000);
 });
