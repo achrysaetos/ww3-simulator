@@ -74,12 +74,15 @@ export function sampleOutputs(world: World, catalog: Catalog, nations: readonly 
     const can = launchable.get(f.nation) ?? launchable.set(f.nation, new Set()).get(f.nation)!;
     for (const [pid, n] of Object.entries(f.equipment)) if (n > 0) for (const l of catalog.platform(pid as PlatformId).loadout) can.add(l.munition);
   }
-  // A magazine whose launchers were all destroyed holds rounds as dead as a warehouse nobody can load from.
-  for (const f of living)
+  // A magazine whose own launchers were all destroyed holds dead rounds: no other unit reloads from it.
+  for (const f of living) {
+    const own = new Set<string>();
+    for (const [pid, n] of Object.entries(f.equipment)) if (n > 0) for (const l of catalog.platform(pid as PlatformId).loadout) own.add(l.munition);
     for (const [m, k] of Object.entries(f.magazine)) {
-      const g = launchable.get(f.nation)?.has(m) ? groupOf(catalog.munitions.get(m as Munition['id'])) : undefined;
+      const g = own.has(m) ? groupOf(catalog.munitions.get(m as Munition['id'])) : undefined;
       if (g) out[f.nation].stock[g] = (out[f.nation].stock[g] ?? 0) + k;
     }
+  }
   for (const id of nations) {
     const s = out[id];
     const can = launchable.get(id);
