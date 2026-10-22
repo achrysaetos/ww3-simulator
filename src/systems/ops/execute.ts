@@ -5,12 +5,16 @@ import { allied, cellDepthKm, landSlice } from '../land/state';
 import { endOperation, holds, platforms, type OpsState } from './state';
 
 /**
- * A staff reports an attack stalled after this long without ground gained, and keeps feeding it; past the failure
- * limit it calls it off. Judgment: Russia's 2023 Vuhledar and Ukraine's 2023 Robotyne assaults were re-planned within
- * days of stalling and abandoned after one to three weeks (ISW).
+ * A staff judges an assault by its pace over the last STALL_DAYS: under STALL_KM_PER_DAY it reports the attack stalled
+ * and keeps feeding it; FAIL_DAYS after the assault last made that pace it calls it off. A creep of a few hundred
+ * metres a day is not progress: ISW called Ukraine's 2023 Robotyne push stalled at that rate, and Russia's 2024
+ * Pokrovsk drive advancing at 1-4 km a day. Russia's 2023 Vuhledar and Ukraine's 2023 Robotyne assaults were re-planned
+ * within days of stalling and abandoned after one to three weeks (ISW).
  */
 const STALL_DAYS = defineParam({ id: 'ops.STALL_DAYS', value: 2, range: [1, 4], tag: 'judgment',
   source: 'Judgment: assaults re-planned within days of stalling (ISW on Vuhledar and Robotyne, 2023)', affects: 'when an operation reports stalled' });
+const STALL_KM_PER_DAY = defineParam({ id: 'ops.STALL_KM_PER_DAY', value: 1, range: [0.3, 2], tag: 'judgment',
+  source: 'Judgment: ISW assessed Robotyne 2023 (a few hundred m/day) as stalled, Pokrovsk 2024 (1-4 km/day) as advancing', affects: 'when an operation reports stalled' });
 const FAIL_DAYS = defineParam({ id: 'ops.FAIL_DAYS', value: 7, range: [4, 21], tag: 'judgment',
   source: 'Judgment: stalled offensives abandoned after one to three weeks (ISW 2023)', affects: 'when a stalled operation is called off' });
 /**
@@ -67,15 +71,20 @@ function jumpOff(world: World, ctx: SimContext, op: Operation, bound: number): N
   return best;
 }
 
-/** How far along its axis an operation is: cells up to the furthest held, plus the share pushed across the cell being fought for. */
-function measure(world: World, ctx: SimContext, op: Operation): { bound: number; advance: number } {
+/**
+ * How far along its axis an operation is: cells up to the furthest held, plus the share pushed across the cell being
+ * fought for; and the same in km past the line of departure (axis[0]).
+ */
+function measure(world: World, ctx: SimContext, op: Operation): { bound: number; advance: number; km: number } {
   // The bound is the cell past the furthest one held: ground the enemy retakes behind the spearhead is the line's to clear, not the spearhead's.
   let bound = op.axis.length;
   while (bound > 0 && !holds(world, op.nation, op.axis[bound - 1])) bound--;
-  if (bound >= op.axis.length) return { bound, advance: bound };
+  let km = 0;
+  for (let i = 1; i < bound; i++) km += cellDepthKm(ctx.map, op.axis[i]);
+  if (bound >= op.axis.length) return { bound, advance: bound, km };
   const c = landSlice(world).contest[op.axis[bound]];
-  const share = c && allied(world, op.nation, c.by) ? Math.min(1, c.km / cellDepthKm(ctx.map, op.axis[bound])) : 0;
-  return { bound, advance: bound + share };
+  const pushed = c && allied(world, op.nation, c.by) ? Math.min(c.km, cellDepthKm(ctx.map, op.axis[bound])) : 0;
+  return { bound, advance: bound + pushed / cellDepthKm(ctx.map, op.axis[bound]), km: km + pushed };
 }
 
 /**
@@ -102,8 +111,23 @@ export function executeOperation(world: World, ctx: SimContext, s: OpsState, op:
     return;
   }
 
-  const { bound, advance } = measure(world, ctx, op);
-  if (advance > pr.advance + 1e-6) pr.lastGainTick = world.tick;
+  const { bound, advance, km } = measure(world, ctx, op);
+  // Assembly runs no clock. From the assault order (s.pace set below) the force has FAIL_DAYS to get into the bound, and
+  // from then on is judged by its pace.
+  const target = op.axis[Math.min(bound, op.axis.length - 1)];
+  const trail = s.pace[op.id];
+  const inContact = alive.some((f) => MANOEUVRE.has(f.kind) && f.node === target);
+  const window = Math.round(STALL_DAYS() * perDay);
+  let gained: number | undefined;
+  if (!trail) pr.lastGainTick = world.tick;
+  else if (trail.length || inContact) {
+    if (!trail.length) pr.lastGainTick = world.tick;
+    trail.push(km);
+    if (trail.length > window + 1) trail.shift();
+    if (trail.length > window) gained = trail[trail.length - 1] - trail[0];
+    if (gained === undefined || gained >= STALL_KM_PER_DAY() * STALL_DAYS()) pr.lastGainTick = world.tick;
+  }
+  const closing = !!trail && !trail.length;
   pr.bound = bound;
   pr.advance = advance;
   if (pr.objectivesHeld === op.objectives.length && bound >= op.axis.length - 1 && holds(world, op.nation, op.axis[op.axis.length - 1])) {
@@ -113,10 +137,17 @@ export function executeOperation(world: World, ctx: SimContext, s: OpsState, op:
   if (!alive.length) return endOperation(world, s, op, 'failed', pr.relieved.length ? 'every formation spent and pulled out' : 'every formation lost');
   if (pr.platformsAtLaunch > 0 && pr.platforms < SPENT_STRENGTH() * pr.platformsAtLaunch) return endOperation(world, s, op, 'failed', 'the force is spent');
   const idle = world.tick - pr.lastGainTick;
-  if (idle >= FAIL_DAYS() * perDay) return endOperation(world, s, op, 'failed', `no ground gained in ${Math.round(idle / perDay)} days`);
-  if (idle >= STALL_DAYS() * perDay) {
+  const kmText = (x: number) => `${x < 10 ? x.toFixed(1) : Math.round(x)} km`;
+  if (idle >= FAIL_DAYS() * perDay)
+    return endOperation(world, s, op, 'failed', closing
+      ? `called off: the assault never got into cell ${target} in ${Math.round(idle / perDay)} days`
+      : `called off after ${Math.round(idle / perDay)} days under ${+STALL_KM_PER_DAY().toFixed(1)} km a day; ${kmText(km)} gained in all`);
+  if (closing && idle >= window) {
     op.phase = 'stalled';
-    pr.note = `stalled before cell ${op.axis[Math.min(bound, op.axis.length - 1)]}: no ground gained in ${Math.round(idle / perDay)} days`;
+    pr.note = `stalled short of cell ${target}: the assault has not got in after ${Math.round(idle / perDay)} days`;
+  } else if (gained !== undefined && idle > 0) {
+    op.phase = 'stalled';
+    pr.note = `stalled at cell ${target}: ${kmText(Math.max(0, gained))} gained in ${+STALL_DAYS().toFixed(1)} days`;
   } else {
     op.phase = 'launched';
     pr.note = `fighting for bound ${bound} of ${op.axis.length - 1}`;
@@ -134,7 +165,6 @@ export function executeOperation(world: World, ctx: SimContext, s: OpsState, op:
   if (!fighting.length) return;
 
   secureAxis(world, ctx, s, op, fighting, bound);
-  const target = op.axis[Math.min(bound, op.axis.length - 1)];
   const base = jumpOff(world, ctx, op, bound);
   const since = s.boundSince[op.id];
   if (!since || since.bound !== bound) s.boundSince[op.id] = { bound, tick: world.tick };
@@ -150,6 +180,7 @@ export function executeOperation(world: World, ctx: SimContext, s: OpsState, op:
   const closed = manoeuvre.filter(ready).reduce((t, f) => t + platforms(f), 0);
   const assaulting = manoeuvre.some(inBound) || manoeuvre.some((f) => f.order.posture === 'attack' && f.order.target === target);
   const go = assaulting || base === undefined || closed >= ASSEMBLE_SHARE() * total || world.tick - sinceTick >= ASSEMBLE_DAYS * perDay;
+  if (go) s.pace[op.id] ??= [];
   for (const f of manoeuvre) {
     if (assaultingNow(f)) continue;
     if (inBound(f) || (go && ready(f)) || base === undefined) send(world, s, f, { posture: 'attack', target });

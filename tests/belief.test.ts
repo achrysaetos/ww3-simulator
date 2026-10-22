@@ -7,6 +7,7 @@ import { checkCommand } from '../src/ui/commands';
 import { applySnapshot, emptyClientState, nationCards, SnapshotEncoder, type ClientState } from '../src/ui/snapshot';
 
 const UKR = 'UKR' as NationId, RUS = 'RUS' as NationId, ISR = 'ISR' as NationId, IRN = 'IRN' as NationId, KOR = 'KOR' as NationId, PRK = 'PRK' as NationId;
+const USA = 'USA' as NationId, MEX = 'MEX' as NationId;
 type Session = ReturnType<typeof createSession>;
 
 const live = (world: World, nation: NationId) => Object.values(world.formations).filter((f) => f.nation === nation && f.status === 'active' && !f.embarkedOn);
@@ -110,6 +111,31 @@ describe('CE-5: indications and warning', () => {
     expect(b.korOrders.some((c) => c.type === 'order' && c.order.posture === 'defend')).toBe(true);
     expect(b.defending.length).toBeGreaterThan(5);
   }, 120_000);
+
+  it('US forces that never left the Mexican border, lost from view and then seen again, do not read as massing (X1 M11)', () => {
+    // peace-2027: the US units next to Mexico shift one cell along the border, dispersed and silent, so Mexico's contacts
+    // go stale for a week; then they stand down in the open and are re-fixed. Base warned "about 1967 platforms against 756".
+    const s = createSession('peace-2027', 1);
+    const { world, map } = s;
+    const near = (n: NodeId) => world.control[n] === MEX || [...map.neighbors(n)].some((m) => m < map.landCount && world.control[m] === MEX);
+    const border = live(world, USA).filter((f) => (f.kind === 'maneuver' || f.kind === 'artillery') && f.node < map.landCount && near(f.node));
+    expect(border.length).toBeGreaterThan(4);
+    const warnings: string[] = [];
+    const days = (n: number) => {
+      for (let t = 0; t < (n * 24) / world.dtHours; t++) for (const e of s.engine.step(world)) if (e.type === 'message' && e.nation === MEX && e.text.startsWith('warning')) warnings.push(e.text);
+    };
+    days(2);
+    for (const f of border) {
+      const to = [...map.neighbors(f.node)].find((m) => m < map.landCount && world.control[m] === USA && near(m as NodeId));
+      if (to !== undefined) world.pending.push({ type: 'order', nation: USA, formation: f.id, order: { posture: 'move', target: to as NodeId, deception: { disperse: true, emcon: true } } });
+    }
+    days(6);
+    for (const f of border) world.pending.push({ type: 'order', nation: USA, formation: f.id, order: { posture: 'defend' } });
+    days(3);
+    expect(border.every((f) => near(world.formations[f.id].node)), 'every unit is still on the border').toBe(true);
+    expect(warnings).toEqual([]);
+    expect(warningOf(world, MEX)).toBeUndefined();
+  }, 240_000);
 
   it('with the KPA in its garrisons there is no warning and South Korea stays put', () => {
     const q = korea(false);

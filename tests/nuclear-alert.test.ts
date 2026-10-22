@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { NodeId, SimEvent } from '../src/core/types';
 import type { AlertSpec } from '../src/data/nations';
+import { createSession } from '../src/scenarios';
 import { createAi } from '../src/systems/ai';
 import { createDiplomacy } from '../src/systems/diplomacy';
 import { createStrategic } from '../src/systems/strategic';
@@ -101,4 +102,22 @@ describe('nuclear alerts', () => {
     expect(of(run(t, 1), 'nuclear_detonation').filter((e) => e.by === RUS)).toHaveLength(1);
     expect(t.world.nations[UKR].status).toBe('war');
   });
+
+  it('the United States can raise its readiness: the bombers\' weapons come out of base storage in days, the upload hedge over months', () => {
+    const { engine, world } = createSession('peace-2027', 1);
+    const USA = N('USA');
+    world.nations[USA].controlledBy = 'human';
+    const { warheads, deployed } = world.nations[USA].nuclear;
+    expect(warheads - deployed).toBeGreaterThan(1500);
+    world.pending.push({ type: 'nuclear_alert', nation: USA, reason: 'crisis' });
+    const ticks = (hours: number) => {
+      for (let i = 0; i < hours / world.dtHours; i++) engine.step(world);
+    };
+    ticks(72);
+    expect(of(world.history, 'nuclear_alert').filter((e) => e.nation === USA).map((e) => e.stage)).toEqual(['ordered']);
+    expect(world.nations[USA].nuclear.deployed).toBe(deployed);
+    ticks(world.dtHours);
+    expect(world.nations[USA].nuclear.deployed).toBe(deployed + Math.round((warheads - deployed) * 0.15));
+    expect(of(world.history, 'nuclear_alert').filter((e) => e.nation === USA).map((e) => e.stage)).toEqual(['ordered', 'ready']);
+  }, 240_000);
 });

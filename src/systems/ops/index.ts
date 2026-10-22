@@ -154,6 +154,7 @@ function launch(world: World, s: OpsState, op: Operation, hHour: number): void {
   op.hHour = hHour;
   op.launchedTick ??= world.tick;
   op.progress.lastGainTick = Math.max(world.tick, hHour);
+  delete s.pace[op.id];
   op.progress.note = hHour > world.tick ? 'launched; waiting for H-hour' : 'launched';
   for (const id of op.formations) s.base[id] ??= platforms(world.formations[id]);
   op.progress.platformsAtLaunch = op.formations.reduce((t, id) => t + (s.base[id] ?? 0), 0);
@@ -242,7 +243,10 @@ function apply(world: World, cmd: OperationCommand, ctx: SimContext): { outcome:
       op.axis = axis;
       op.formations = formations;
       op.hHour = hHour;
-      if (reroute) delete s.boundSince[op.id];
+      if (reroute) {
+        delete s.boundSince[op.id];
+        delete s.pace[op.id];
+      }
       if (op.phase !== 'draft') {
         for (const id of formations) s.base[id] ??= platforms(world.formations[id]);
         op.progress.platformsAtLaunch = formations.reduce((t, id) => t + (s.base[id] ?? 0), 0) + op.progress.relieved.reduce((t, id) => t + (s.base[id] ?? 0), 0);
@@ -269,8 +273,8 @@ export const operations: System = {
     ctx.emit(answerCommand(world, c, outcome, accepted, operation ? { operation } : {}));
   },
   step(world, ctx) {
-    const s = world.slices.ops;
-    if (!s) return;
+    if (!world.slices.ops) return;
+    const s = opsSlice(world);
     const keepTicks = (KEEP_ENDED_DAYS * 24) / world.dtHours;
     for (const id of Object.keys(s.byId) as OperationId[]) {
       const op = s.byId[id];

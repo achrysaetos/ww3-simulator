@@ -432,7 +432,7 @@ describe('anti-ship strikes from shore', () => {
         const fleet = t.add({ nation: RUS, name: 'Frigates', kind: 'surface_group', node: at, equipment: t.eq({ n_frigate: 3 }), magazine: {} });
         fleet.home = t.portOf('RUS', 44.6, 33.5);
         t.world.tick = 20;
-        t.world.slices.intel = { pictures: { [UKR]: fix ? { [fleet.id]: { node: at, tick: t.world.tick - fix.ageTicks, kind: 'surface_group', strength: 3, equipment: {}, source: fix.source } } : {} }, levels: {}, warnings: {} };
+        t.world.slices.intel = { pictures: { [UKR]: fix ? { [fleet.id]: { node: at, tick: t.world.tick - fix.ageTicks, kind: 'surface_group', strength: 3, equipment: {}, source: fix.source } } : {} }, levels: {}, border: {}, warnings: {} };
         hits += strikeNavalGroup(t.world, t.engine.context(t.world), UKR, mid('n_asbm'), 12, fleet.id)!.hits.length;
         fired += led(t, 'UKR')!.missilesFired;
       }
