@@ -36,6 +36,10 @@ describe('validation cases', () => {
       expect(held, name).toContain(f.node);
       expect(f.entrenchment).toBe(1);
     }
+    // A standing line of occupation starts fortified on both sides, as the scenarios' own lines do (combat.ts fortifyStandingLines):
+    // the 1994-2020 Line of Contact was dug in for 26 years. On a69a1de the case drew the line after the session had fortified its
+    // lines, so it opened unfortified and a corps that gave up its first line had no belt behind it.
+    for (const n of held) expect(world.slices.land.fortified[n], `cell ${n}`).toBe(1);
     expect(world.startDate).toBe('2020-09-27T00:00:00Z');
     expect(world.pending).toContainEqual(expect.objectContaining({ type: 'declare_war', nation: 'AZE', target: 'ARM' }));
   });
