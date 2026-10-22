@@ -297,6 +297,17 @@ export const EXPOSURE: Partial<Record<PlatformClass, number>> = {
 export const exposureOf = (c: PlatformClass): number => EXPOSURE[c] ?? 1;
 
 /**
+ * Exposed platforms (EXPOSURE-weighted, as every side total in the combat code) per km of front that a defender needs to
+ * watch and cover a cell's whole front with fire, its kill zone. A Soviet-pattern motor-rifle battalion defends up to 5 km
+ * (FM 100-2-1, "The Soviet Army: Operations and Tactics", 1984). A brigade here carries 112 exposed platforms at the median
+ * for Ukraine and 123 for Russia (ukraine-2026 order of battle at day 0), so a battalion is about 25-30, or ~5-6 per km.
+ * Ukrainian brigades holding 10-20 km in 2024-25 give 6-12 per km before the gaps drones watch. A thinner line kills only on
+ * the share of the front it covers: one battalion in a 40 km cell does not make the whole cell a kill zone.
+ */
+export const KILL_ZONE_DENSITY = defineParam({ id: 'land.KILL_ZONE_DENSITY', value: 5, range: [3, 8], tag: 'estimated',
+  source: 'FM 100-2-1 (1984): motor-rifle battalion defends up to 5 km; ~25-30 exposed platforms per battalion in this order of battle',
+  affects: 'how thin a dug-in line can be and still hold an assault in its kill zone' });
+/**
  * Extra fire an assaulting force draws, at full entrenchment, while it crosses
  * observed ground into prepared positions (minefields, pre-registered fires,
  * the drone-watched kill zone), on top of the defender's Dupuy terrain and

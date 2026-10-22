@@ -110,6 +110,17 @@ describe('ukraine-2026, 60 days, ensemble of 8', () => {
   it('nobody capitulates in any run', () => {
     expect(spread(runs, 'capitulations').values.every((v) => v === 0)).toBe(true);
   });
+
+  /**
+   * No run breaks the front. Russia's fastest month of 2024-25 took about 725 km2 (November 2024, DeepState), 8,700 km2 at a
+   * yearly rate; a run four times faster is a collapse the record never showed. The cell band misses one: in L2's trial of
+   * mounting Russia's main effort before its line, without a check for belts on the route, six runs of eight took 73,000-228,000
+   * km2 a year while the median netted under two cells.
+   */
+  it('the front never collapses: no run takes ground at four times the fastest month of 2024-25', () => {
+    const { values } = spread(runs, 'rus_km2_per_year');
+    expect(values.filter((v) => v > 35_000), `every run: ${values.map((v) => Math.round(v)).join(', ')}`).toEqual([]);
+  });
 });
 
 /**

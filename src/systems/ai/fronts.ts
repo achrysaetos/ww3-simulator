@@ -100,6 +100,36 @@ export function stagingSector(world: World, map: GameMap, nation: NationId, frie
   return { nodes: nodes as NodeId[], enemyNodes: sorted as NodeId[], battleArea: new Set(sorted as NodeId[]), threat, key: nodes[0] as NodeId };
 }
 
+/**
+ * The mirror of stagingSector: the coalition's cells on the border of a state outside the war that lets
+ * an enemy stage on its soil, and the host's cells across from them. Russia attacked Kyiv from Belarus
+ * in February 2022, and Ukraine has held that border with Operational Command North ever since, with
+ * troops on it whether or not Russian ones stood opposite. The host is not at war and is no target, so
+ * the sector names no enemy cell; its threat is the enemy power standing in `hostNodes`.
+ */
+export function hostBorder(world: World, map: GameMap, friends: Set<NationId>, enemies: Set<NationId>): { nodes: NodeId[]; hostNodes: NodeId[] } | undefined {
+  const hosts = new Set<NationId>();
+  for (const e of [...enemies].sort())
+    for (const h of STAGING_HOSTS[e] ?? []) {
+      const n = world.nations[h as NationId];
+      if (n && !friends.has(n.id) && !enemies.has(n.id) && n.status !== 'war') hosts.add(n.id);
+    }
+  if (!hosts.size) return undefined;
+  const nodes = new Set<number>();
+  const hostNodes: number[] = [];
+  for (let n = 0; n < map.landCount; n++) {
+    if (!hosts.has(world.control[n])) continue;
+    let touches = false;
+    for (let k = map.adjStart[n]; k < map.adjStart[n + 1]; k++) {
+      const m = map.adj[k];
+      if (m < map.landCount && friends.has(world.control[m])) { touches = true; nodes.add(m); }
+    }
+    if (touches) hostNodes.push(n);
+  }
+  if (!nodes.size) return undefined;
+  return { nodes: [...nodes].sort((a, b) => a - b) as NodeId[], hostNodes: hostNodes as NodeId[] };
+}
+
 /** Group a nation's front cells into connected sectors and weigh the threat facing each. */
 export function sectorsFor(world: World, map: GameMap, edges: Int32Array, friends: Set<NationId>, enemies: Set<NationId>, index: ForceIndex): Sector[] {
   const touching = new Map<number, number[]>();

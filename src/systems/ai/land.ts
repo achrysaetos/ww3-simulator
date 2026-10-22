@@ -4,7 +4,7 @@ import { landSlice, openTo } from '../land';
 import { ACTIVE, committedFormations, routeAxis } from '../ops';
 import { aggressor, commitment, releasable } from './deploy';
 import { isGround, issue, strength } from './forces';
-import { enemyPowerAt, landMass, stagingSector } from './fronts';
+import { enemyPowerAt, hostBorder, landMass, stagingSector } from './fronts';
 import type { Plan, Sector } from './types';
 import { defineParam } from '../../core/params';
 
@@ -294,7 +294,7 @@ function byHolder(p: Plan, s: Sector): Sector[] {
       let e = 2 * enemyPowerAt(n, p.index, p.enemies);
       for (let k = map.adjStart[n]; k < map.adjStart[n + 1]; k++) {
         const m = map.adj[k];
-        if (m < map.landCount && p.enemies.has(p.world.control[m])) e += enemyPowerAt(m, p.index, p.enemies);
+        if (m < map.landCount && !p.friends.has(p.world.control[m])) e += enemyPowerAt(m, p.index, p.enemies);
       }
       g.pressure += e;
     }
@@ -316,6 +316,7 @@ function byHolder(p: Plan, s: Sector): Sector[] {
     battleArea: s.battleArea,
     threat: s.threat * (total > 0 ? g.pressure / total : g.nodes.length / s.nodes.length),
     key: g.nodes[0],
+    ...(s.hostBorder ? { hostBorder: true as const } : {}),
   }));
 }
 
@@ -344,7 +345,15 @@ function landPicture(p: Plan): LandPicture | undefined {
   let staging = p.memo.get(stagingKey) as Sector | null | undefined;
   if (staging === undefined) p.memo.set(stagingKey, (staging = stagingSector(p.world, map, p.nation, p.friends, p.enemies, p.index) ?? null));
   if (staging) staging = { ...staging, threat: staging.enemyNodes.reduce((a, n) => a + enemyPowerAt(n, p.index, p.enemies), 0) };
-  const sectors = (staging ? [...p.sectors, staging] : p.sectors).flatMap((s) => byHolder(p, s));
+  const borderKey = `hostBorder|${p.nation}`;
+  let border = p.memo.get(borderKey) as ReturnType<typeof hostBorder> | null | undefined;
+  if (border === undefined) p.memo.set(borderKey, (border = hostBorder(p.world, map, p.friends, p.enemies) ?? null));
+  const lined = new Set(p.sectors.flatMap((s) => s.nodes));
+  const watched = border?.nodes.filter((n) => !lined.has(n)) ?? [];
+  const watch: Sector[] = watched.length
+    ? [{ nodes: watched, enemyNodes: [], battleArea: new Set(), key: watched[0], hostBorder: true, threat: [...border!.hostNodes, ...watched].reduce((t, n) => t + enemyPowerAt(n, p.index, p.enemies), 0) }]
+    : [];
+  const sectors = [...p.sectors, ...(staging ? [staging] : []), ...watch].flatMap((s) => byHolder(p, s));
   if (!sectors.length) return undefined;
   const mass = landMass(map);
   const front = new Set<number>();
@@ -523,13 +532,13 @@ function partnersOnLine(lp: LandPicture): Map<number, number> {
   return others;
 }
 
-/** Enemy pressure on a line cell: what stands in it, twice over, and what stands in the enemy cells next to it. */
+/** Enemy pressure on a line cell: what stands in it, twice over, and the enemy troops in the foreign cells next to it, a staging host's included. */
 function pressureOn(p: Plan, n: number): number {
   const { map } = p.ctx;
   let e = 2 * enemyPowerAt(n, p.index, p.enemies);
   for (let k = map.adjStart[n]; k < map.adjStart[n + 1]; k++) {
     const m = map.adj[k];
-    if (m < map.landCount && p.enemies.has(p.world.control[m])) e += enemyPowerAt(m, p.index, p.enemies);
+    if (m < map.landCount && !p.friends.has(p.world.control[m])) e += enemyPowerAt(m, p.index, p.enemies);
   }
   return e;
 }
@@ -556,7 +565,10 @@ function holdTheLine(a: Allocation, reserved: number): Map<number, number> {
   const lineBudget = a.total - reserved;
   const scale = needTotal > lineBudget ? lineBudget / needTotal : 1;
   const manned = new Map<number, number>();
-  const byDuty = sectors.map((_, i) => i).sort((x, y) => Number(a.own(sectors[y])) - Number(a.own(sectors[x])) || need[y] - need[x] || x - y);
+  // A quiet border with a staging host is watched with what is left once the lines in contact, a partner's among them, are
+  // manned: Poland keeps troops on the Belarus border, but not the brigades it owes the Baltic states.
+  const quiet = (s: Sector) => Number(!!s.hostBorder && s.threat === 0);
+  const byDuty = sectors.map((_, i) => i).sort((x, y) => quiet(sectors[x]) - quiet(sectors[y]) || Number(a.own(sectors[y])) - Number(a.own(sectors[x])) || need[y] - need[x] || x - y);
   for (const i of byDuty) {
     const s = sectors[i];
     const req = need[i] * scale;
@@ -614,7 +626,50 @@ function holdTheLine(a: Allocation, reserved: number): Map<number, number> {
       assign(f, target!);
     }
   }
+  feedShortCells(a, manned, sectorOf.keys());
   return manned;
+}
+
+/** Planning ratio a prepared defence needs, defender to attacker: 1:3 (FM 6-0, historical minimum planning ratios). */
+const PREPARED_DEFENCE = 1 / 3;
+
+/**
+ * Once every sector has its screen and its share, the formations still free go to the cells where the enemy
+ * stands at more than 3:1 against what holds them, the worst first, nearest unit first, until each holds the 1:3 a
+ * prepared defence needs. A sector total met by a thick stretch of line does not hold the one cell the enemy masses on,
+ * and the brigades behind it would otherwise sit in reserve while it falls; Ukraine fed brigades to the axes Russia
+ * massed on in 2024-25 (Pokrovsk, Kurakhove; ISW). A unit holding a cell was assigned there above and is no longer free,
+ * so this never strips one cell to feed another and the line does not shuttle units between cells.
+ */
+function feedShortCells(a: Allocation, manned: Map<number, number>, line: Iterable<number>): void {
+  const { lp, free } = a;
+  const { p, sectorOf } = lp;
+  const power = p.index.power;
+  const behind = [...free].filter((f) => f.kind === 'maneuver').sort((x, y) => (x.id < y.id ? -1 : 1));
+  const enemy = new Map<number, number>();
+  for (const n of line) enemy.set(n, enemyPowerAt(n, p.index, p.enemies));
+  const gap = (n: number) => PREPARED_DEFENCE * enemy.get(n)! - manned.get(n)!;
+  const open = new Set([...enemy.keys()].filter((n) => gap(n) > 0));
+  while (open.size) {
+    let n = -1;
+    for (const m of open) if (n < 0 || gap(m) > gap(n) || (gap(m) === gap(n) && m < n)) n = m;
+    const s = sectorOf.get(n)!;
+    let best: Formation | undefined, bestKm = Infinity;
+    for (const f of behind) {
+      if (!free.has(f) || !a.mayServe(f, s) || !a.inRange(f, n) || a.overBudget(f, s)) continue;
+      const d = a.km(f.node, n);
+      if (d < bestKm) { bestKm = d; best = f; }
+    }
+    if (!best) {
+      open.delete(n);
+      continue;
+    }
+    a.spend(best, s);
+    manned.set(n, manned.get(n)! + power(best));
+    issue(p, best, { posture: 'defend', target: n as NodeId });
+    free.delete(best);
+    if (gap(n) <= 0) open.delete(n);
+  }
 }
 
 /** A cell pressed this much harder than the line's average is where the enemy's main effort is falling (judgment). */
@@ -714,9 +769,9 @@ function mainEffort(a: Allocation): void {
   };
   let spare = [...free].reduce((t, f) => t + power(f), 0) - reserveShare(p.profile.aggression) * a.total;
   /** The force an axis needs: the attacker's ratio against every defended bound on it, and never less than a division's worth. */
-  const needFor = (axis: readonly NodeId[], from: number) => {
+  const needFor = (axis: readonly NodeId[], from: number, to = axis.length) => {
     let d = 0;
-    for (let i = Math.max(1, from); i < axis.length; i++) if (p.enemies.has(p.world.control[axis[i]])) d += defenceOf(p, axis[i]);
+    for (let i = Math.max(1, from); i < Math.min(to, axis.length); i++) if (p.enemies.has(p.world.control[axis[i]])) d += defenceOf(p, axis[i]);
     return Math.max(ATTACK_RATIO() * d, MIN_EFFORT_UNITS * unit);
   };
 
@@ -759,14 +814,26 @@ function mainEffort(a: Allocation): void {
     const score = (base * aim.value * axis.length) / route.length / (1 + defenceOf(p, axis[1]) / unit);
     if (score > (best.get(direction)?.score ?? -Infinity)) best.set(direction, { axis, score });
   }
+  /**
+   * Whether the operation would open into a belt. The operation runs from its lead formation, not from the axis's first cell
+   * (ops plannedAxis): a division standing on a fortified front routes straight through the belt in front of it.
+   */
+  const intoBelts = (group: Formation[], axis: NodeId[]) => {
+    let lead: Formation | undefined;
+    for (const f of group) if (f.kind === 'maneuver' && (!lead || a.km(f.node, axis[0]) < a.km(lead.node, axis[0]))) lead = f;
+    const runs = lead && routeAxis(p.world, map, p.nation, [lead.node, ...axis]);
+    return !runs || runs.slice(1, 3).some((n) => fortified[n]);
+  };
   let first = true;
   for (const { axis } of [...best.values()].sort((x, y) => y.score - x.score || x.axis[0] - y.axis[0])) {
     const need = needFor(axis, 1);
     if (spare < need) continue;
-    // The main effort gets the mass; the other directions get what their axis needs.
+    // The main effort gets the mass; the other directions get what their axis needs. The first echelon, drawn from what is
+    // near, needs its ratio only against the immediate objective, the first two bounds; the operation is fed the rest as it
+    // goes (Soviet echelonment: the second echelon develops what the first opens, Glantz 1991).
     const group = take(axis[0], first ? Math.max(need, MAIN_EFFORT_SHARE * spare) : need, sectorOf.get(axis[0]));
     const got = group.reduce((t, f) => t + power(f), 0);
-    if (got < need) {
+    if (got < needFor(axis, 1, 3) || intoBelts(group, axis)) {
       for (const f of group) free.add(f);
       continue;
     }
@@ -896,10 +963,12 @@ export function planLand(p: Plan): void {
   // A defender keeps its reserve out of the line to meet the enemy's main effort; an attacker's reserve is what its own
   // main effort and attacks are mounted from, below.
   const reserve = aggressor(p) ? new Set<Formation>() : keepReserve(a);
+  // A nation that started the war weights its main effort first and holds the rest of its line with what is left (FM 3-0:
+  // economy of force elsewhere), so the divisions nearest the axis lead it rather than garrison a quiet border.
+  mainEffort(a);
   const manned = holdTheLine(a, [...reserve].reduce((t, f) => t + p.index.power(f), 0));
   meetMainEffort(a, reserve, manned);
   for (const f of reserve) a.free.add(f);
-  mainEffort(a);
   launchAttacks(a);
   holdReserve(a);
 }

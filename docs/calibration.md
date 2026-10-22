@@ -143,6 +143,46 @@ After about 3 days of assembly, 148 km at 8-12 km a day puts Tallinn's neighbour
 
 **Forecast `ground_km2`** now nets ground pushed back, through the same `progress` function the validation measure uses (`tests/forecast-ground.test.ts`).
 
+## L3: the brigades behind the line fight, and the line holds for that reason
+
+Measured with `npx tsx src/cli/validate.ts --cases ukraine-2026-60d,baltic-2027-21d,kursk-2024,karabakh-2020 --workers 2 --json`: 8 runs, seeds 1-4, tagged params by Latin hypercube. The base is integration 87a6494, which already carries O1's stall rule for operations.
+
+| Question | Observed | 87a6494 p10 / p50 / p90 | L3 p10 / p50 / p90 |
+| --- | --- | --- | --- |
+| ukraine `rus_km2_per_year` | 3,500-5,000 | 4,348 / 14,573 / 22,920 | 1,844 / 2,926 / 9,590 |
+| ukraine `rus_casualties_per_day` | 500-2,000 | 1,215 / 1,577 / 2,009 | 1,590 / 1,846 / 2,281 |
+| ukraine `rus_tanks_per_day` | 2-8 | 3.4 / 4.8 / 8.0 | 4.0 / 7.5 / 9.4 |
+| ukraine `ukr_minus_rus_tanks` | below 0 | -2.6 / 0.08 / 1.2 | -4.5 / -3.1 / 0.9 |
+| baltic `baltic_cells` | 1-6 | 1.02 / 1.63 / 1.99 | 0.54 / 1.00 / 2.01 |
+| kursk `ukr_ground_km2` | 800-1,300 | 194 / 1,104 / 1,679 | 683 / 1,199 / 2,398 |
+| held-out questions that beat the baseline | | 3 of 8 | 1 of 8 |
+
+The slowest Ukraine run of the base took 1,340 km2 a year and the fastest 23,848. On L3 they are 898 and 17,057. No L3 run passes the 35,000 km2 collapse line.
+
+**Kept, each with a test that fails on 87a6494:**
+
+- **The feed** (L2's patch). After every sector has its screen and its share, free brigades go to line cells where the enemy stands at more than 3:1, until each holds the 1:3 a prepared defence needs (FM 6-0). `tests/ai-land-allocation.test.ts`: the reserve share with cells outnumbered 3:1 falls from 0.24 to under 0.05.
+- **The kill zone is as wide as the line that watches it.** `combat.ts` scales the defender's entrenchment by `min(1, exposed / (KILL_ZONE_DENSITY x cell depth))` before it sets the committed share and the assault exposure. `KILL_ZONE_DENSITY` is 5 exposed platforms per km, from FM 100-2-1's 5 km battalion sector and this order of battle's 112-123 exposed platforms per brigade. `tests/land.test.ts`: one dug-in battalion on a fortified cell no longer holds fifteen battalions for four days. A full line's 3:1 exchange stays at 2.7 for the attacker, inside `ASSAULT_EXPOSURE`'s 2-3 calibration, and a test now pins it.
+- **The aggressor mounts its main effort before it mans its line**, so the 69th Guards Motor Rifle Division and the 25th Guards Motor Rifle Brigade lead the drive on Tallinn. They are the formations nearest Narva. Two guards stop L2's 110,000 km2 collapse. An operation that would open into a belt is not mounted, because it runs from its lead formation's position, not from the axis's first cell. The first echelon needs its ratio only against the first two bounds (echelonment, Glantz 1991). `tests/realism-ground.realism.test.ts` gained the collapse check, which L2's trial fails in six runs of eight.
+- **A border with a staging host is a front.** Ukraine screens its Belarus border (Operational Command North), and the border is a fortified standing line. `tests/ai-land-allocation.test.ts` checks both. A quiet one is manned last, so Poland still sends brigades to the Baltic states (`tests/ai.test.ts` passes on the base too, and failed until the quiet border went last). One L3 ensemble run without the screen saw a Russian group from Belarus take Polesia cell 6359 in three days, 38,657 km2 a year.
+
+**Casualties and tanks.** The Russian casualty median rose from 1,577 to 1,846 a day, and tanks from 4.8 to 7.5. The brigades that used to wait now kill assault groups. Both medians stay inside their bands, and Ukraine now loses fewer tanks than Russia, which the base did not (`ukr_minus_rus_tanks` 0.08 there). But 1,846 is above the 1,000-1,700 that `KILL_ZONE_COMMIT`'s note says it was tuned to (UK MoD, Oryx). Its range was not narrowed, because no source found pins the drone-era kill-zone share more tightly.
+
+**Tried and not kept:**
+
+| Change | Result | Why not kept |
+| --- | --- | --- |
+| First echelon drawn only from within 400 km | BB-8 reached on 1 of seeds 1-6 by day 30, against 2 without the limit | slower, no source |
+| A counter-attack on a lost cell takes no unit off a pressed line elsewhere | kursk-2024 default seeds: 1,745 and 1,887 km2, against 838 and 913 | Kursk's band depends on Russia stripping quieter lines, as it did in August 2024 |
+| A screen is chosen by march time: an engaged unit breaks contact at `BREAK_CONTACT_PACE` | Ukraine p50 7,049 with one run at 30,364; O1's strong player thrust no longer takes its cell | the faster defender reaction moves the band and breaks another unit's test |
+| `FRONTAGE_PLATFORMS` in exposed platforms, 1,200 | Ukraine default seeds 18,551, 23,568 and 8,152 km2 a year | needs a refit of the front-law paces (below) |
+
+**The frontage unit mismatch (O1's finding) is real, and not fixed here.** Side totals are counted in exposed platforms. A brigade's 300-450 platforms count as 112 (Ukraine) or 123 (Russia) at the median. `FRONTAGE_PLATFORMS`, 3,000, was sized in raw platforms, so a six-brigade assault fills about 16% of a cell's front, and a line counts as a third as thick as it is. Fixing the unit triples the width of every assault. That moves Ukraine back to 8,000-24,000 km2 a year, because `ATTRITION_KM_PER_DAY` and the covered and penetration paces were fitted with the narrow width. 16% of a 40-50 km cell is 6-8 km, about the width of a 2024-25 assault axis. So the old error stood in for an assault frontage that the model lacks. The fix is to give assaults their own frontage (a brigade attacks on 2-5 km in the drone era) and refit the paces.
+
+**BB-8, Russia at or next to Tallinn by day 18: 0 of 6 on 87a6494 and on L3.** L2's figure of 148 km to Tallinn's neighbour was measured centre to centre. Across the full depth of the five cells it is about 199 km (5 x 39.8 km), close to the 210 km Narva-Tallinn road. Paces recorded through a defended line that did not collapse run 5-8 km a day (Kursk, August 2024, ISW) to about 15 km a day (Kherson axis, February-March 2022). With contact on about day 4, that puts Tallinn's neighbour between days 17 and 44, and about day 24 at 10 km a day. Day 18 is at the fast end of that range. The bound is a realism band, so it is unchanged here. Seed 1's drive takes cell 4415 by day 10, 4388 by day 17 and 4387 by day 27, about 6 km a day, and culminates by day 33 under NATO air.
+
+**Karabakh's ATGMs were skipped**, as instructed, for want of a sourced count.
+
 ## Long horizons are out of reach today
 
 The bands and cases run 4 to 90 days. Questions about production races need runs of three to five years, since warships and new production lines take years. Nothing in the repository runs or checks that long, and a year of ukraine-2026 is about 1,460 ticks, five to ten minutes a run on a four-core machine. Treat any output past 90 days as unvalidated.
