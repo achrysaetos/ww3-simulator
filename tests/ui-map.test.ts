@@ -12,7 +12,7 @@ function view(nation: string, node: number, echelon: Echelon, platforms = 100, s
   const id = `f${seq++}` as FormationId;
   return {
     entry: { id, name: id, nation: nation as NationId, kind: 'maneuver', echelon, platforms },
-    node: node as NodeId, strength: 1, posture: 'defend', status, target: null,
+    node: node as NodeId, strength: 1, posture: 'defend', status, target: null, contact: null,
   };
 }
 
