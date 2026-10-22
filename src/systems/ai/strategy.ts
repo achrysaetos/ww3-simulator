@@ -5,6 +5,7 @@ import { platformCount } from '../../core/forces';
 import type { Command, MunitionId, NationId, NodeId, PlatformId, World } from '../../core/types';
 import { NUCLEAR_ALERT, nuclearThreshold, type NuclearAnswer, type NuclearThreshold } from '../../data/nations';
 import { neighbours } from '../diplomacy/assess';
+import { mayEnter, ownWaters, punitiveOnly, warAgainst } from '../diplomacy/aims';
 import { CITY_POP_SHARE } from '../diplomacy/escalation';
 import type { Assessment, DiplomacyState, WarRecord } from '../diplomacy/types';
 import { rung } from '../diplomacy/wars';
@@ -51,14 +52,21 @@ const MAX_AIMS = 20;
 /**
  * What to take: enemy capitals first (decapitation ends wars, cf. capitulation
  * rules in diplomacy), then large cities, industrial cells and ports. Values
- * are relative weights for the operational planner.
+ * are relative weights for the operational planner. Only ground the war aims
+ * reach counts (diplomacy/aims.ts mayEnter): a limited war's objectives are its
+ * claim, a punitive war has none on the ground.
  */
 export function warAims(p: Plan): Objective[] {
   const { map } = p.ctx;
   const out = new Map<NodeId, number>();
-  const add = (n: NodeId, v: number) => out.set(n, Math.max(out.get(n) ?? 0, v));
+  const add = (n: NodeId, v: number) => {
+    if (mayEnter(p.world, map, p.nation, n)) out.set(n, Math.max(out.get(n) ?? 0, v));
+  };
+  const d = p.world.slices.diplomacy;
   for (const e of p.enemies) {
     const held = (n: NodeId) => p.world.control[n] === e;
+    const aim = d && warAgainst(d, p.nation, e)?.own.aim;
+    if (aim?.kind === 'limited') for (const n of aim.claim) if (held(n)) add(n, 5);
     const cap = p.world.nations[e].capital;
     if (held(cap)) add(cap, 10);
     const c = candidates(map, e);
@@ -498,6 +506,22 @@ export function sanctionDecisions(world: World): Command[] {
   return out;
 }
 
+// ---------------------------------------------------------------- war aims at sea
+
+/**
+ * In a punitive war the fleet keeps to its own waters (diplomacy/aims.ts aimRefusal): ships already out at sea when the
+ * war begins come home, where the naval planner cannot send them out again.
+ */
+function keepFleetHome(p: Plan, d: DiplomacyState): void {
+  if (!punitiveOnly(d, p.nation)) return;
+  const { map } = p.ctx;
+  for (const f of p.index.byNation.get(p.nation) ?? []) {
+    if ((f.kind !== 'surface_group' && f.kind !== 'submarine') || !map.isSea(f.node) || ownWaters(p.world, map, d, p.nation, f.node)) continue;
+    if (f.order.posture === 'defend' && f.order.target === f.home) continue;
+    p.out.push({ type: 'order', nation: p.nation, formation: f.id, order: { posture: 'defend', target: f.home } });
+  }
+}
+
 // ---------------------------------------------------------------- strategy pass
 
 const PEACE_OFFER_BELOW = 0.3;
@@ -519,6 +543,7 @@ export function planStrategy(p: Plan): void {
   if (mob > standing + 0.05) p.out.push({ type: 'set_mobilization', nation: p.nation, level: mob });
 
   nuclearDecision(p, d);
+  if (d) keepFleetHome(p, d);
 
   const lastOffer = p.ai.lastPeaceOffer[p.nation];
   const offerDue = lastOffer === undefined || ((p.world.tick - lastOffer) * p.world.dtHours) / 24 >= PEACE_OFFER_EVERY_DAYS;
