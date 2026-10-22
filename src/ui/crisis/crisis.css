@@ -59,7 +59,7 @@
 .cr-facts .blue dd { color: #8fc6ff; }
 .cr-facts .gold dd { color: #ffc56b; }
 
-.cr-verdict { position: absolute; left: 0; right: 0; bottom: 280px; margin: 0; text-align: center; font-family: var(--ww-title); font-weight: 600; font-size: 17px; letter-spacing: 0.22em; text-transform: uppercase; color: #e8d6d7; text-shadow: 0 2px 8px #000; }
+.cr-verdict { grid-column: 1 / -1; margin: 0 0 -8px; text-align: center; font-family: var(--ww-title); font-weight: 600; font-size: 17px; letter-spacing: 0.22em; text-transform: uppercase; color: #e8d6d7; text-shadow: 0 2px 8px #000; }
 .cr-root.blue .cr-verdict { color: #d6e0ec; }
 .cr-verdict b { color: #fff; }
 .cr-opts { position: absolute; left: 50%; bottom: 24px; transform: translateX(-50%); display: grid; gap: 22px; width: min(1250px, calc(100% - 56px)); }

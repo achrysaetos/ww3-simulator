@@ -115,7 +115,6 @@ export function CrisisScreen(p: Props) {
         </dl>
       </aside>
 
-      <p className="cr-verdict">{c.verdict} · The clock is stopped · <b>This decision is yours</b></p>
       {chosen ? (
         <div className="cr-result ww-glass" data-testid="crisis-result">
           <span className="ww-label">You chose</span>
@@ -125,6 +124,7 @@ export function CrisisScreen(p: Props) {
         </div>
       ) : (
         <div className={`cr-opts n${c.options.length}`}>
+          <p className="cr-verdict">{c.verdict} · The clock is stopped · <b>This decision is yours</b></p>
           {c.options.map((o, i) => <Option key={o.title} o={o} i={i} me={p.me} onChoose={p.onChoose} disabled={false} />)}
         </div>
       )}
