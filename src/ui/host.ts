@@ -42,7 +42,7 @@ export class SimHost {
   private focus: { nation?: NationId; formation?: FormationId } = {};
   private readonly pacer = new Pacer(() => {
     if (!this.session || !this.encoder) return;
-    this.encoder.collect(this.session.engine.step(this.session.world).filter((e) => this.forPlayer(e)));
+    this.encoder.collect(this.session.engine.step(this.session.world).filter((e) => this.forPlayer(e)), this.session.world, this.session.engine.map);
     this.send();
   });
 
@@ -177,7 +177,7 @@ export class SimHost {
     this.focus = { nation };
     this.pacer.sent();
     const card = SCENARIO_CARDS.find((c) => c.id === scenario.id)!;
-    const history = resumed ? this.encoder.resumed(world) : [];
+    const history = resumed ? this.encoder.resumed(world, engine.map) : [];
     const snapshot = this.encoder.encode(world, engine.map, this.focus);
     if (history.length) snapshot.history = history;
     this.post({ type: 'ready', meta: sessionMeta(card, world, engine.map, engine.catalog), playing: nation, snapshot });

@@ -4,6 +4,7 @@ import { createSession } from '../src/scenarios';
 import { estimate, warningOf } from '../src/systems/intel';
 import { CURRENT_CONFIDENCE } from '../src/systems/intel/view';
 import { checkCommand } from '../src/ui/commands';
+import { theatreWorld } from '../src/forecast/operation';
 import { applySnapshot, emptyClientState, nationCards, SnapshotEncoder, type ClientState } from '../src/ui/snapshot';
 
 const UKR = 'UKR' as NationId, RUS = 'RUS' as NationId, ISR = 'ISR' as NationId, IRN = 'IRN' as NationId, KOR = 'KOR' as NationId, PRK = 'PRK' as NationId;
@@ -142,5 +143,82 @@ describe('CE-5: indications and warning', () => {
     expect(q.warning).toBeUndefined();
     expect(q.warnings).toEqual([]);
     expect(q.korOrders).toEqual([]);
+  }, 120_000);
+});
+
+describe('fog follow-ups (RT residual leaks)', () => {
+  it("the enemy nation panel carries no count of the enemy's depots, bulk stocks or production lines; one's own does", () => {
+    const s = createSession('ukraine-2026', 1);
+    s.engine.run(s.world, 4);
+    const enc = new SnapshotEncoder(s.map.nationIds, s.catalog, s.map.size);
+    const enemy = enc.encode(s.world, s.map, { nation: RUS }, UKR).focusNation!;
+    expect(enemy.munitions.length).toBeGreaterThan(0);
+    expect(enemy.munitions.filter((m) => m.warehoused !== null || m.perMonth !== null)).toEqual([]);
+    expect(enemy.bulk).toBeNull();
+    expect(enemy.economy).toBeNull();
+    expect(enemy.nuclear.bmd).toEqual({});
+    const own = enc.encode(s.world, s.map, { nation: UKR }, UKR).focusNation!;
+    expect(own.munitions.some((m) => (m.warehoused ?? 0) > 0)).toBe(true);
+    expect(own.economy?.lines.length).toBeGreaterThan(0);
+  }, 120_000);
+
+  it('a player far from a war hears that it began, but not of its battles, strikes, losses, production or shortages', () => {
+    const s = createSession('peace-2027', 1);
+    const BRA = 'BRA' as NationId;
+    for (const n of Object.values(s.world.nations)) n.controlledBy = n.id === BRA ? 'human' : 'ai';
+    s.world.pending.push({ type: 'declare_war', nation: IRN, target: ISR, reason: 'test' });
+    const enc = new SnapshotEncoder(s.map.nationIds, s.catalog, s.map.size);
+    const fogged = ['battle', 'strike', 'formation_destroyed', 'production', 'shortage'];
+    let emitted = 0;
+    for (let t = 0; t < 12; t++) {
+      const events = s.engine.step(s.world);
+      emitted += events.filter((e) => fogged.includes(e.type)).length;
+      enc.collect(events, s.world, s.map);
+    }
+    const heard = enc.encode(s.world, s.map, {}).events;
+    expect(emitted).toBeGreaterThan(0);
+    expect(heard.some((e) => e.type === 'war_declared' && e.by === IRN)).toBe(true);
+    expect(heard.filter((e) => fogged.includes(e.type) && !('nation' in e && e.nation === BRA)).map((e) => e.type)).toEqual([]);
+  }, 120_000);
+
+  it("Israel's client hears of every strike Iran lands on it", () => {
+    const s = createSession('peace-2027', 1);
+    for (const n of Object.values(s.world.nations)) n.controlledBy = n.id === ISR ? 'human' : 'ai';
+    s.world.pending.push({ type: 'declare_war', nation: IRN, target: ISR, reason: 'test' });
+    const enc = new SnapshotEncoder(s.map.nationIds, s.catalog, s.map.size);
+    let fired = 0;
+    for (let t = 0; t < 12; t++) {
+      const events = s.engine.step(s.world);
+      for (const e of events) if (e.type === 'strike' && e.by === IRN && s.world.control[e.target] === ISR) fired++;
+      enc.collect(events, s.world, s.map);
+    }
+    expect(fired).toBeGreaterThan(0);
+    expect(enc.encode(s.world, s.map, {}).events.filter((e) => e.type === 'strike' && e.by === IRN && s.world.control[e.target] === ISR).length).toBe(fired);
+  }, 120_000);
+
+  it('the forecast input names no Russian formation Ukraine has not found, and carries no Russian depot', () => {
+    const s = createSession('ukraine-2026', 1);
+    s.engine.run(s.world, 12);
+    const mine = live(s.world, UKR).filter((f) => f.kind === 'maneuver').slice(0, 3);
+    const cut = theatreWorld(s.world, s.map, s.catalog, UKR, { nation: UKR, kind: 'offensive', objectives: [s.map.nodeAt(50.0, 36.6)], formations: mine.map((f) => f.id) });
+    const hidden = live(s.world, RUS).filter((f) => !estimate(s.world, UKR, f.id));
+    expect(hidden.length).toBeGreaterThan(0);
+    const json = JSON.stringify(cut);
+    expect(hidden.filter((f) => json.includes(`"${f.id}"`)).map((f) => f.name)).toEqual([]);
+    expect(cut.nations[RUS].stockpile).toEqual({});
+    expect(Object.keys(cut.nations[UKR].stockpile).length).toBeGreaterThan(0);
+  }, 120_000);
+
+  it('an air wing that rebases to another field is not fixed there by an enemy with no sensor on it', () => {
+    const s = createSession('korea-2027', 1);
+    const { world, map } = s;
+    s.engine.run(world, 4);
+    const wing = live(world, USA).find((f) => f.kind === 'air_wing' && f.node === f.home && map.lon[f.node] < -80 && estimate(world, PRK, f.id)?.source === 'base')!;
+    let field: NodeId | undefined;
+    for (let n = 0; n < map.landCount && field === undefined; n++)
+      if (map.airports[n] && world.control[n] === USA && map.distanceKm(n as NodeId, wing.node) > 1000) field = n as NodeId;
+    wing.node = field!;
+    s.engine.step(world);
+    expect(estimate(world, PRK, wing.id)?.node).toBe(wing.home);
   }, 120_000);
 });

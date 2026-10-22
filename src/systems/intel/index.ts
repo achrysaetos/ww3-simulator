@@ -140,6 +140,13 @@ const SAT_VISIBILITY: Partial<Record<FormationKind, number>> = {
  * first week of June 2025, largely around known bases (IDF statements; ISW). Judgment.
  */
 const SAT_VISIBILITY_MISSILE_BASE = 0.3;
+/**
+ * Satellite visibility of aircraft on an airfield and of ships and boats alongside a pier away from their home base:
+ * a fixed, surveyed site that every pass over it images, so the only question is whether the sky is clear (imagingAt).
+ * Commercial imagery alone tracked the aircraft at Saky, Engels and Olenya and the boats at Sevastopol through
+ * 2022-24 (Maxar, Planet). Judgment: high, short of certain, for aircraft in shelters and boats under cover.
+ */
+const SAT_VISIBILITY_FIXED_SITE = 0.8;
 
 /** Furthest reach of airborne ISR from its orbit: AEW and maritime patrol radar, and long-endurance drones' sensors. Judgment. */
 const AIRBORNE_ISR_KM = 300;
@@ -358,7 +365,7 @@ export const intel: System = {
         fix(o, f, source, at, apparent);
         for (const g of aboard.get(f.id) ?? []) fix(o, g, source, at, apparent);
       };
-      if (atBase(map, f)) {
+      if (atBase(f)) {
         for (const o of observers) fixWith(o, 'base');
         continue;
       }
@@ -382,7 +389,8 @@ export const intel: System = {
         const sea = f.kind === 'surface_group';
         for (const w of isr) if (!seen.has(w.nation) && sensors.has(w.nation) && (sea ? w.sea : w.ground) && map.distanceKm(w.node, overhead) <= w.reachKm && spotted('airborne') && !isrJammed(world, overhead, w.nation, f.id)) see(w.nation, 'airborne');
       }
-      const vis = (garrisoned ? SAT_VISIBILITY_MISSILE_BASE : (SAT_VISIBILITY[f.kind] ?? 0)) * exposed * (map.isSea(overhead) ? 1 : imagingAt(overhead));
+      const visibility = garrisoned ? SAT_VISIBILITY_MISSILE_BASE : atFixedSite(map, f) ? SAT_VISIBILITY_FIXED_SITE : (SAT_VISIBILITY[f.kind] ?? 0);
+      const vis = visibility * exposed * (map.isSea(overhead) ? 1 : imagingAt(overhead));
       if (vis > 0) for (const [n, p] of sats) if (sensors.has(n) && !seen.has(n) && draw(f.id, world.tick, n) < p * vis) see(n, 'satellite');
       for (const n of tracks[f.id] ?? []) see(n, 'naval');
       if (!seen.size) continue;
@@ -515,11 +523,19 @@ function isrOrbit(world: World, map: GameMap, ctx: SimContext, f: Formation): { 
   return { node, nation: f.nation, ground, sea, reachKm };
 }
 
-/** A formation sitting where peacetime intelligence placed it: its garrison, an air base, a port. Dispersed TELs are not. */
-export function atBase(map: GameMap, f: Formation): boolean {
-  if (f.kind === 'missile') return false;
-  if (f.node === f.home) return true;
-  return !map.isSea(f.node) && ((f.kind === 'air_wing' && map.airports[f.node] > 0) || ((f.kind === 'surface_group' || f.kind === 'submarine') && map.ports[f.node] > 0));
+/**
+ * A formation sitting where peacetime intelligence placed it: its home garrison, air base or port, which open sources
+ * publish (IISS Military Balance basing tables). Dispersed TELs are not. A wing or ship that moves to another field or
+ * port is found there only by a sensor (atFixedSite).
+ */
+export function atBase(f: Formation): boolean {
+  return f.kind !== 'missile' && f.node === f.home;
+}
+
+/** Aircraft on an airfield, or a ship or boat in port: a site overhead imagery covers (SAT_VISIBILITY_FIXED_SITE). */
+function atFixedSite(map: GameMap, f: Formation): boolean {
+  if (map.isSea(f.node)) return false;
+  return (f.kind === 'air_wing' && map.airports[f.node] > 0) || ((f.kind === 'surface_group' || f.kind === 'submarine') && map.ports[f.node] > 0);
 }
 
 /** A deterministic draw in [0, 1) per formation, tick and observer, so intelligence never moves the shared RNG stream. */
