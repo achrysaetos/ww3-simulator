@@ -169,7 +169,7 @@ export function refreshOrders(world: World, ctx: SimContext, f: Formation, track
   }
 }
 
-function mostlyDamaged(f: Formation): boolean {
+export function mostlyDamaged(f: Formation): boolean {
   let damaged = 0, fit = 0;
   for (const k in f.damaged) damaged += f.damaged[k as PlatformId];
   for (const k in f.equipment) fit += f.equipment[k as PlatformId];

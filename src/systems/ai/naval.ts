@@ -4,7 +4,7 @@ import type { Formation, FormationId, MunitionId, NationId, NodeId, PlatformClas
 import { liftShare } from '../naval/amphibious';
 import { geography, sameWaters, seaNeighbour } from '../naval/geography';
 import { minedClosed, navalDestination, sailable, seaPath, straitBarred } from '../naval/movement';
-import { areaDefenseShare, boardable, REARMED, SEAWORTHY } from '../naval/orders';
+import { areaDefenseShare, boardable, mostlyDamaged, REARMED, SEAWORTHY } from '../naval/orders';
 import { isSealift } from '../naval/sealift';
 import { compose, fleetLosses } from '../naval/state';
 import { ANTISHIP_KINDS } from '../naval/tables';
@@ -108,8 +108,6 @@ const ASSAULT_RANGE_KM = 600;
 const STAGE_WAVES = 2;
 /** A lift group sails once this share of its capacity is aboard, or when nobody else is waiting. */
 const SAIL_LOAD = 0.9;
-/** Farthest an ASW surface group goes to hunt a submarine working its nation's sea lanes: about four days' steaming (judgment). */
-const HUNT_KM = 3000;
 /** Submarines this close to the maritime focus go there instead of to distant chokepoints (a few days' transit). */
 const FOCUS_SUB_KM = 3000;
 
@@ -374,10 +372,11 @@ function runAssault(p: Plan, a: Assault, lifts: Formation[]): void {
 export function planNaval(p: Plan): void {
   const { map } = p.ctx;
   const km = (a: number, b: number) => map.distanceKm(a as NodeId, b as NodeId);
-  // A group sent home with its interceptors or stores spent (naval orders) stays there until it has rearmed and victualled.
+  // A group sent home with its interceptors or stores spent (naval orders) stays there until it has rearmed and victualled;
+  // one with most of its hulls damaged is sent home from any sea it leaves port for, so it is not tasked until repaired.
   const rearming = (f: Formation) =>
     f.order.posture === 'reserve' && ((f.kind === 'surface_group' && areaDefenseShare(p.ctx, f) < REARMED) || f.supply.food < REARMED * f.supplyCapacity.food);
-  const groups = (p.index.byNation.get(p.nation) ?? []).filter((f) => (f.kind === 'surface_group' || f.kind === 'submarine') && f.status === 'active' && f.readiness >= SEAWORTHY && !rearming(f));
+  const groups = (p.index.byNation.get(p.nation) ?? []).filter((f) => (f.kind === 'surface_group' || f.kind === 'submarine') && f.status === 'active' && f.readiness >= SEAWORTHY && !rearming(f) && !mostlyDamaged(f));
   if (!groups.length) return;
   const liftCapable = groups.filter((g) => g.kind === 'surface_group' && compose(g, p.ctx.catalog).troopLift > 0);
   const assault = planAssault(p, liftCapable);
@@ -539,6 +538,10 @@ export function planNaval(p: Plan): void {
         issue(p, g, { posture: 'defend', target: g.home });
         break;
       case 'escort': {
+        // An ASW group hunts a blockader of its own lanes first, as far as it can go, work the zone and come back on
+        // its own fuel: half its unrefuelled range, the radius of action, as for an aircraft's combat radius.
+        const own = compose(g, p.ctx.catalog);
+        if (own.aswSearch > 0 && hunt(g, blockaders.filter((z) => clearance(z) >= SURFACE_STANDOFF_KM), own.rangeKm / 2)) break;
         let ward: Formation | undefined, bestD = Infinity;
         for (const c of unescorted) {
           const d = km(g.node, c.node);
@@ -547,8 +550,7 @@ export function planNaval(p: Plan): void {
         if (ward) {
           unescorted.splice(unescorted.indexOf(ward), 1);
           issue(p, g, { posture: 'escort', targetFormation: ward.id });
-        } else if (!(compose(g, p.ctx.catalog).aswSearch > 0 && hunt(g, blockaders.filter((z) => clearance(z) >= SURFACE_STANDOFF_KM), HUNT_KM)) && !blockade(g))
-          patrol(g, assault ? focus : stations[0]);
+        } else if (!blockade(g)) patrol(g, assault ? focus : stations[0]);
         break;
       }
     }
