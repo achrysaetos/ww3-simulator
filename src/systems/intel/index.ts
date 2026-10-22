@@ -19,6 +19,7 @@ import type { GameMap } from '../../core/map';
 import type { Formation, FormationId, FormationKind, NationId, NodeId, PlatformClass, PlatformId, World } from '../../core/types';
 import { isrJammed } from '../c2';
 import { DECEPTION } from '../c2/tables';
+import { infiltrating } from '../land/tables';
 import { conditionsAt, sortieFactorAt } from '../weather/effects';
 import { COMMERCIAL_IMAGERY, LIAISON_SOURCES, SUPPORT_SHARE, supportSources } from './sharing';
 import { seaNeighbour } from '../naval/geography';
@@ -338,13 +339,14 @@ export const intel: System = {
       if (!observers.size) continue;
       const d = f.order.deception;
       // Share of a concealed formation that sensors outside its cell see, and the chance a tick that they see any of it.
-      const exposed = (d?.disperse ? DECEPTION.dispersedSeen() : 1) * (d?.emcon ? DECEPTION.emconSeen() : 1);
+      const sof = infiltrating(f);
+      const exposed = (d?.disperse || sof ? DECEPTION.dispersedSeen() : 1) * (d?.emcon || sof ? DECEPTION.emconSeen() : 1);
       const spotted = (src: IntelSource) => exposed >= 1 || draw(f.id, world.tick, `~${src}`) < exposed;
       // Overhead sensors find mock-ups where the formation laid them; troops across the line are not fooled.
       const overhead = d?.decoy !== undefined && d.decoy !== f.node ? d.decoy : f.node;
       const fixWith = (o: NationId, source: IntelSource) => {
         const at = source === 'satellite' || source === 'airborne' ? overhead : f.node;
-        const close = source === 'territory' || source === 'base' || present.get(f.node)?.has(o);
+        const close = source === 'base' || (!sof && (source === 'territory' || present.get(f.node)?.has(o)));
         const apparent = close ? 1 : exposed * (d?.feint ? DECEPTION.feintScale() : 1);
         fix(o, f, source, at, apparent);
         for (const g of aboard.get(f.id) ?? []) fix(o, g, source, at, apparent);
@@ -366,8 +368,8 @@ export const intel: System = {
       };
       if (!map.isSea(f.node)) {
         const holder = world.control[f.node];
-        if (holder) see(holder, 'territory');
-        for (const n of watchers.get(f.node) ?? []) if (present.get(f.node)?.has(n) || spotted('contact')) see(n, 'contact');
+        if (holder && (!sof || spotted('territory'))) see(holder, 'territory');
+        for (const n of watchers.get(f.node) ?? []) if ((!sof && present.get(f.node)?.has(n)) || spotted('contact')) see(n, 'contact');
       }
       if (f.kind !== 'submarine') {
         const sea = f.kind === 'surface_group';

@@ -1,4 +1,4 @@
-import type { FormationKind, PlatformClass, TargetClass, Terrain } from '../../core/types';
+import type { Formation, FormationKind, PlatformClass, PlatformId, TargetClass, Terrain } from '../../core/types';
 import { defineParam } from '../../core/params';
 
 export interface TerrainProfile {
@@ -59,6 +59,30 @@ export const DRONE_FIRE = defineParam({
   affects: 'land fire of FPV and loitering-munition teams',
 });
 export const fireScaleOf = (c: PlatformClass): number => (c === 'loitering_munition_launcher' ? DRONE_FIRE() : 1);
+
+/**
+ * Special-forces platforms. A formation most of whose dismounts are special forces infiltrates: on any
+ * order but an attack it slips through and stays behind enemy lines without fighting for ground, is
+ * hard to find there, inserts by air without air control, and raids the command posts it finds.
+ */
+export const SOF_PLATFORMS: ReadonlySet<string> = new Set(['sof_squad']);
+export function isSof(f: Formation): boolean {
+  let sof = 0, all = 0;
+  for (const pid in f.equipment) {
+    const n = f.equipment[pid as PlatformId];
+    if (SOF_PLATFORMS.has(pid)) sof += n;
+    else if (pid.includes('squad')) all += n;
+  }
+  return sof > 0 && sof >= all;
+}
+/** An infiltrating special-forces formation: behind the lines it avoids battle rather than seeking it. */
+export const infiltrating = (f: Formation): boolean => f.order.posture !== 'attack' && isSof(f);
+/**
+ * Km of march an infiltrator spends per km of enemy-held ground: on foot, by night, round the
+ * positions. North Korean infiltration doctrine has light infantry crossing the DMZ and covering
+ * 20-40 km a night through the hills (ROK Defense White Paper 2022). Judgment.
+ */
+export const INFILTRATION_COST = 2;
 
 /** Platforms that are not vehicles; in a formation that has vehicles they ride (mechanized/motorized). */
 export const DISMOUNTS: ReadonlySet<PlatformClass> = new Set(['infantry', 'atgm']);

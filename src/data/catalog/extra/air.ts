@@ -85,7 +85,7 @@ const drones: PlatformSpec<Key>[] = [
   // The ORBATs count Geran/Shahed airframes (300-800 per launch group), not launch trucks, so this row is
   // one drone on its rail; shahed_launcher stays the 5-rail truck. Cost is the rail share; the drone is the munition.
   { id: 'shahed_136', name: 'Shahed-136 / Geran-2 on launch rail', cls: 'loitering_munition_launcher', crew: 1, producers: ['IRN', 'RUS'], inService: 2022, unitCostUsdM: 0.02, speedKph: 40, load: { shahed136: 1 } },
-  { id: 'lancet', name: 'ZALA Lancet-3 with launcher share', cls: 'loitering_munition_launcher', crew: 1, producers: ['RUS'], inService: 2022, unitCostUsdM: 0.01, speedKph: 40, load: { lancet3: 1 } },
+  { id: 'lancet', name: 'ZALA Lancet-3 with launcher share', cls: 'loitering_munition_launcher', crew: 1, producers: ['RUS'], inService: 2022, unitCostUsdM: 0.01, speedKph: 40, fp: { armor: 0.004, soft: 0.015, infantry: 0.003 }, load: { lancet3: 1 } },
 ];
 
 const helicopters: PlatformSpec<Key>[] = [

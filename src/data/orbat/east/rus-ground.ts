@@ -157,7 +157,7 @@ const vdv: OrbatEntry[] = [
   unit(RUS, '11th Guards Air Assault Brigade', 'maneuver', 'brigade', KURSK(-0.15), scale(VDV_BDE_TOE, 0.6), { ...deployed, airborne: true }),
   unit(RUS, '83rd Guards Air Assault Brigade', 'maneuver', 'brigade', KURSK(-0.2), scale(VDV_BDE_TOE, 0.6), { ...deployed, airborne: true }),
   unit(RUS, '31st Guards Air Assault Brigade', 'maneuver', 'brigade', KOSTIANTYNIVKA(0.35), scale(VDV_BDE_TOE, 0.55), { ...deployed, airborne: true }),
-  unit(RUS, '45th Guards Spetsnaz Brigade (VDV)', 'maneuver', 'brigade', at('Kubinka', 55.6, 36.65), { gaz_tigr: 60, infantry_squad: 60, truck: 80 }, { readiness: 0.7, experience: 0.7 }),
+  unit(RUS, '45th Guards Spetsnaz Brigade (VDV)', 'maneuver', 'brigade', at('Kubinka', 55.6, 36.65), { gaz_tigr: 60, sof_squad: 60, truck: 80 }, { readiness: 0.7, experience: 0.7, airborne: true }),
 ];
 
 const navalInfantry: OrbatEntry[] = [

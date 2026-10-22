@@ -282,6 +282,14 @@ export const SURPRISE = {
   memoryDays: 14,
 };
 
+/**
+ * Chance a day that a special-forces formation behind the lines finds and raids a command post in
+ * its cell. Raiding headquarters is the stated wartime task of the KPA's light infantry and sniper
+ * brigades and of Russian GRU Spetsnaz (ROK Defense White Paper 2022; Grau and Bartles, "The Russian
+ * Way of War", 2016). Judgment.
+ */
+export const SOF_RAID_PER_DAY = defineParam({ id: 'c2.SOF_RAID_PER_DAY', value: 0.3, range: [0.05, 0.6], tag: 'judgment', source: 'judgment: ROK Defense White Paper 2022; Grau and Bartles 2016', affects: 'special-forces raids on command posts' });
+
 /** Side of the square, degrees, of the region one derived front HQ directs. */
 export const FRONT_CELL_DEG = 6;
 

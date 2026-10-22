@@ -11,7 +11,7 @@ import { exposureLosses, groundFactorAt } from '../weather/effects';
 import { DECEPTION } from '../c2/tables';
 import {
   AIR_INTERDICTION, BREAK_CONTACT_PACE, DISMOUNTS, ENTRENCH_PER_DAY, FATIGUE_MARCH_PER_DAY, FATIGUE_RECOVERY_PER_DAY, HOSTILE_GROUND_COST,
-  MARCH_HOURS_PER_DAY, MARCH_SPEED_FACTOR, MORALE_RECOVERY_PER_DAY, NO_FUEL_SPEED, RAIL_BOOST_MAX, RAIL_KM_FULL, RALLY_MORALE, RIVER_ASSAULT_COST, RIVER_BRIDGE_COST, TERRAIN,
+  INFILTRATION_COST, MARCH_HOURS_PER_DAY, MARCH_SPEED_FACTOR, infiltrating, MORALE_RECOVERY_PER_DAY, NO_FUEL_SPEED, RAIL_BOOST_MAX, RAIL_KM_FULL, RALLY_MORALE, RIVER_ASSAULT_COST, RIVER_BRIDGE_COST, TERRAIN,
 } from './tables';
 
 
@@ -55,9 +55,10 @@ function edgeKm(world: World, map: GameMap, f: Formation, from: NodeId, to: Node
   if (!canEnter(world, map, f.nation, to)) return Infinity;
   const holder = world.control[to];
   const hostile = !!holder && atWar(world, f.nation, holder);
-  if (hostile && !seize) return Infinity;
+  const infiltrate = hostile && !seize && infiltrating(f);
+  if (hostile && !seize && !infiltrate) return Infinity;
   // Into enemy ground the march only carries the column to the cell's edge, half the way between centres; landCombat's contest then measures the push across the cell.
-  const reach = hostile ? 0.5 * HOSTILE_GROUND_COST() : 1;
+  const reach = infiltrate ? INFILTRATION_COST : hostile ? 0.5 * HOSTILE_GROUND_COST() : 1;
   return (km * TERRAIN[map.terrain[to]].moveCost * reach * riverCost(world, map, from, to, hostile)) / railBoost(world, map, f.nation, to) / groundFactorAt(world, map, to);
 }
 
@@ -150,7 +151,7 @@ function march(world: World, ctx: SimContext, f: Formation, byNode: Map<number, 
   // Fighting across the cell it stands in: landCombat moves that line. A route back onto friendly
   // ground breaks contact instead, as Russia pulled brigades out of Donbas to clear Kursk in 2024.
   const here = world.control[f.node];
-  if (here && atWar(world, f.nation, here) && !friendlyGround(world, f.nation, path[0])) return;
+  if (here && atWar(world, f.nation, here) && !friendlyGround(world, f.nation, path[0]) && !infiltrating(f)) return;
 
   const hours = MARCH_HOURS_PER_DAY * dtDays;
   const pressed = hostilesAt(world, byNode, f.node, f.nation).some((g) => g.kind === 'maneuver' && g.status === 'active' && g.order.posture === 'attack');
@@ -175,7 +176,7 @@ function march(world: World, ctx: SimContext, f: Formation, byNode: Map<number, 
     f.progressKm -= cost;
     path.shift();
     const holder = world.control[next];
-    if (holder && atWar(world, f.nation, holder)) {
+    if (holder && atWar(world, f.nation, holder) && !infiltrating(f)) {
       f.progressKm = 0;
       return;
     }

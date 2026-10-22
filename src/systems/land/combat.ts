@@ -13,7 +13,7 @@ import {
   AIR_SUPPRESSION, AMMO_DAYS_INTENSE, ATTRITION_KM_PER_DAY, ATTRITION_MAX_KM_PER_DAY, BREAKTHROUGH_KM_PER_DAY, COVERED_KM_PER_DAY, HOSTILE_GROUND_COST,
   ASSAULT_EXPOSURE, BELT_DRAG, DELIBERATE_ASSAULT_RATIO, FRONTAGE_PLATFORMS, WITHDRAWAL_KM, POSITIONAL_INTENSITY, AMMO_RATION_BELOW, AREA_FIRE_REF_DENSITY, CAS_BONUS, DIRECT_DENSITY_EXP, COMBAT_FUEL_DUTY, COMBINED_ARMS,
   CELL_FRONT_KM, ENGAGED_HOURS_PER_DAY, HASTY_BARRIER, ENTRENCH_MAX_BONUS, KILL_ZONE_COMMIT, MASSED_ASSAULT_RATIO, NEXT_LINE_ENTRENCHMENT, NO_FUEL_SPEED, EXPERIENCE_PER_COMBAT_DAY, FATIGUE_COMBAT_PER_DAY, INDIRECT_FIRE, RETREAT_LOSS, fireScaleOf,
-  RETREAT_MORALE, RIVER_DEFENSE, RIVER_TEMPO, ROUT_ABANDON, ROUT_MORALE, SHELL_TONS, SHELLS_PER_TUBE_DAY, TERRAIN, TUBE_ARTILLERY, URBAN_MANOEUVRE, exposureOf, targetClassOf,
+  RETREAT_MORALE, RIVER_DEFENSE, RIVER_TEMPO, ROUT_ABANDON, ROUT_MORALE, SHELL_TONS, SHELLS_PER_TUBE_DAY, TERRAIN, TUBE_ARTILLERY, URBAN_MANOEUVRE, exposureOf, infiltrating, targetClassOf,
 } from './tables';
 
 /** Relative weight of each target class in an opposing force; need not be normalised. */
@@ -602,12 +602,12 @@ export const landCombat: System = {
     const effort = [...byNode.keys()].map((node) => [node, pressing(node)]).sort((a, b) => b[1] - a[1] || a[0] - b[0]);
     for (const [node] of effort) {
       const holder = world.control[node];
-      const invaders = holder ? (byNode.get(node) ?? []).filter((f) => atWar(world, f.nation, holder)) : [];
+      const invaders = holder ? (byNode.get(node) ?? []).filter((f) => atWar(world, f.nation, holder) && !infiltrating(f)) : [];
       if (invaders.length) contestCell(world, ctx, node as NodeId, invaders, byNode, firing, engaged);
     }
     for (const key of Object.keys(slice.contest)) {
       const node = Number(key), c = slice.contest[node];
-      if (!(byNode.get(node) ?? []).some((f) => allied(world, c.by, f.nation) && atWar(world, f.nation, world.control[node]))) delete slice.contest[node];
+      if (!(byNode.get(node) ?? []).some((f) => allied(world, c.by, f.nation) && atWar(world, f.nation, world.control[node]) && !infiltrating(f))) delete slice.contest[node];
     }
     lineOfContact(world, ctx, byNode, firing, engaged);
     for (const id of Object.keys(slice.baseline) as FormationId[]) if (!engaged.has(id)) delete slice.baseline[id];

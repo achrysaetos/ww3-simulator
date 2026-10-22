@@ -4,7 +4,8 @@ import type { GameMap } from '../../core/map';
 import type { Formation, FormationId, FormationKind, NationId, NodeId, World } from '../../core/types';
 import { isrOverwatch } from '../intel';
 import type { C2State, C2Tally, CommandNode } from './state';
-import { ALTERNATE_CP, CORPS_REACH_KM, CORPS_SPAN, DISPLACE_DAYS, EMITTERS, FRONT_CELL_DEG, HQ, HQ_AIMED_HIT_PER_WEAPON, HQ_HIT_DAMAGE, HQ_HIT_PER_WEAPON, HQ_SPACING_KM, PRECISION_CEP_M } from './tables';
+import { ALTERNATE_CP, CORPS_REACH_KM, CORPS_SPAN, DISPLACE_DAYS, EMITTERS, FRONT_CELL_DEG, HQ, HQ_AIMED_HIT_PER_WEAPON, HQ_HIT_DAMAGE, HQ_HIT_PER_WEAPON, HQ_SPACING_KM, PRECISION_CEP_M, SOF_RAID_PER_DAY } from './tables';
+import { infiltrating } from '../land/tables';
 
 /** Kinds of ground formation that answer to a field HQ. */
 const COMMANDED: ReadonlySet<FormationKind> = new Set(['maneuver', 'artillery', 'missile', 'air_defense', 'logistics']);
@@ -175,6 +176,11 @@ export function assessHqs(world: World, ctx: SimContext, s: C2State): void {
     }
   });
   const days = world.dtHours / 24;
+  for (const f of Object.values(world.formations)) {
+    if (f.status !== 'active' || !infiltrating(f)) continue;
+    for (const hq of at.get(f.node) ?? [])
+      if (hq.level !== 'national' && hq.integrity > 0 && atWar(world, f.nation, hq.nation) && draw(`${hq.id}|raid|${f.id}`, world.tick, world.seed) < SOF_RAID_PER_DAY() * days) hit(hq, HQ_HIT_DAMAGE, `raided by ${f.name}`);
+  }
   const hostile = (hq: CommandNode) => atWar(world, hq.nation, world.control[hq.node]);
   for (const hq of Object.values(s.hqs)) {
     if (!hostile(hq)) {

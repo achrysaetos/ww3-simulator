@@ -5,6 +5,7 @@ import type { Formation, FormationId, NationId, NodeId, PlatformId, RefusalCode,
 import { AIRFRAME } from '../air/tables';
 import { supplyFactor } from '../logistics';
 import { allied, canEnter, landSlice } from './state';
+import { isSof } from './tables';
 import { airTons, liftTons, transportRadiusKm } from './strategic';
 
 /**
@@ -134,7 +135,8 @@ export function cannotDrop(world: World, map: GameMap, catalog: Catalog, f: Form
   if (from === undefined) return { code: 'no_airfield', reason: 'no friendly airfield within a day’s move' };
   if (map.distanceKm(from, target) > transportRadiusKm(world, catalog, f.nation)) return { code: 'out_of_range', reason: 'beyond the transports’ radius' };
   if (liftTons(world, catalog, f.nation) * LIFTS < airTons(catalog, f)) return { code: 'no_lift', reason: 'not enough airlift to land it in a day' };
-  if (!friendlyAir(world, map, catalog, f.nation, target)) return { code: 'no_air_cover', reason: 'no friendly air control over the drop zone' };
+  // Special forces go in low and by night in small packets, under the radar rather than under air cover.
+  if (!isSof(f) && !friendlyAir(world, map, catalog, f.nation, target)) return { code: 'no_air_cover', reason: 'no friendly air control over the drop zone' };
   return undefined;
 }
 
@@ -149,7 +151,7 @@ export function insert(world: World, ctx: SimContext, f: Formation, target: Node
   f.progressKm = 0;
   for (const k of ['fuel', 'ammo', 'food'] as const) f.supply[k] = Math.min(f.supply[k], f.supplyCapacity[k] * CARRIED_SHARE);
   const holder = world.control[target];
-  f.order = holder && atWar(world, f.nation, holder) ? { posture: 'attack', target, issuedTick: world.tick } : { posture: 'defend', issuedTick: world.tick };
+  f.order = holder && atWar(world, f.nation, holder) && !isSof(f) ? { posture: 'attack', target, issuedTick: world.tick } : { posture: 'defend', issuedTick: world.tick };
   landSlice(world).airheads[f.id] = world.tick;
   ctx.emit({ type: 'message', tick: world.tick, nation: f.nation, text: `${f.name} inserted by air, ${Math.round(loss * 100)}% lost on the way in` });
 }

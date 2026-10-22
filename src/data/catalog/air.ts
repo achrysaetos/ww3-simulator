@@ -128,6 +128,8 @@ const support: PlatformSpec<MunitionKey>[] = [
   { id: 'y9', name: 'Y-9', cls: 'transport_aircraft', producers: ['CHN'], inService: 2012, unitCostUsdM: 40, speedKph: 550, rangeKm: 1800, fuelTph: 2.5, capacity: { cargoTons: 20, troops: 106 } },
   { id: 'kc390', name: 'Embraer C-390 Millennium', cls: 'transport_aircraft', crew: 3, producers: ['BRA'], inService: 2019, unitCostUsdM: 130, speedKph: 850, rangeKm: 1800, fuelTph: 3.5, capacity: { cargoTons: 26, troops: 80 } },
   { id: 'an124', name: 'An-124 Ruslan', cls: 'transport_aircraft', crew: 6, producers: [], inService: 1986, unitCostUsdM: 150, speedKph: 800, rangeKm: 2500, fuelTph: 12, capacity: { cargoTons: 150, troops: 88, vehicles: 2 } },
+  // Fabric-skinned biplane flying low and slow: hard for radar to pick out of the ground clutter, the KPA's special-forces lift.
+  { id: 'an2', name: 'An-2 / Y-5 Colt', cls: 'transport_aircraft', producers: [], inService: 1957, unitCostUsdM: 0.3, speedKph: 185, rangeKm: 845, fuelTph: 0.15, stealth: 0.4, capacity: { cargoTons: 1.5, troops: 12 } },
   { id: 'an26', name: 'An-26 / Y-7', cls: 'transport_aircraft', producers: [], inService: 1969, unitCostUsdM: 5, speedKph: 440, rangeKm: 500, fuelTph: 0.8, capacity: { cargoTons: 5.5, troops: 40 } },
   { id: 'c2_kawasaki', name: 'Kawasaki C-2', cls: 'transport_aircraft', producers: ['JPN'], inService: 2017, unitCostUsdM: 170, speedKph: 850, rangeKm: 2000, fuelTph: 6, capacity: { cargoTons: 37, troops: 110 } },
   { id: 'c295', name: 'C-295', cls: 'transport_aircraft', crew: 3, producers: ['ESP', 'IND'], inService: 2001, unitCostUsdM: 30, speedKph: 480, rangeKm: 800, fuelTph: 0.8, capacity: { cargoTons: 9.25, troops: 71 } },
