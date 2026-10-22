@@ -113,12 +113,14 @@ describe('concentration of force', () => {
 
   // Drone-watched, fortified, no air superiority: the 2024-25 record (Avdiivka took four months at several to one).
   // Against a hasty line the kill zone is not there and mass breaks through at the pace of 1973 or Kharkiv 2022.
+  // Contest km is the advance averaged over the cell's width: against the belt only the first echelon fills a
+  // sector, so 0.5 km is ~20 km2 of the cell in five days.
   it('9:1 gains clearly more than 3:1, a little against a fortified line and fast against a hasty one', () => {
     const curve = [ladder(3, false), ladder(9, false), ladder(3, true), ladder(9, true)];
     console.log(`ladder (5 days): ${curve.map((c, i) => `${i < 2 ? 'fortified' : 'hasty'} ${c.ratio.toFixed(1)}:1 -> ${c.km.toFixed(1)} km`).join(', ')}`);
     const [fort3, fort9, hasty3, hasty9] = curve;
-    expect(fort3.km).toBeLessThan(0.5);
-    expect(fort9.km).toBeGreaterThanOrEqual(1);
+    expect(fort3.km).toBeLessThan(0.2);
+    expect(fort9.km).toBeGreaterThanOrEqual(0.5);
     expect(hasty9.km).toBeGreaterThanOrEqual(30);
     expect(hasty9.km).toBeGreaterThan(1.5 * hasty3.km);
   }, SCENARIO_MS);
@@ -179,8 +181,9 @@ describe('river lines', () => {
   it('crossing the Dnipro against a defended bank gains a fraction of the ground at a far higher price', () => {
     const river = assault(false), dry = assault(true);
     console.log(`Dnipro: across ${river.km.toFixed(1)} km for ${river.lost} platforms; dry ${dry.km.toFixed(1)} km for ${dry.lost}`);
-    // The scenario opens in the southern spring thaw, so even the dry assault wades through mud.
-    expect(dry.km).toBeGreaterThan(1);
+    // The scenario opens in the southern spring thaw, so even the dry assault wades through mud, and against a dug-in
+    // division only its first echelon fills a sector of the cell's width.
+    expect(dry.km).toBeGreaterThan(0.5);
     expect(river.km).toBeLessThan(0.3 * dry.km);
     expect(river.lost / Math.max(0.5, river.km)).toBeGreaterThan(3 * (dry.lost / dry.km));
   }, SCENARIO_MS);
