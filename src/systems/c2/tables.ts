@@ -1,3 +1,4 @@
+import { defineParam } from '../../core/params';
 import type { Echelon, MunitionKind, NationId } from '../../core/types';
 import type { Band, HqLevel } from './state';
 
@@ -148,9 +149,39 @@ export const COMMS_DELAY_H = 12;
  */
 export const HQ: Readonly<Record<HqLevel, { fire: number; delayH: number; recoverDays: number; hardness: number }>> = {
   army: { fire: 0.3, delayH: 48, recoverDays: 5, hardness: 0 },
-  front: { fire: 0.25, delayH: 36, recoverDays: 7, hardness: 0.3 },
+  // A front (Russian grouping of forces, Ukrainian operational-strategic group) directs its armies and corps, which fight on without it for a while.
+  front: { fire: 0.1, delayH: 12, recoverDays: 7, hardness: 0.3 },
   national: { fire: 0.1, delayH: 24, recoverDays: 10, hardness: 0.9 },
 };
+
+/**
+ * Share of a field HQ's lost function its alternate command post takes back. Doctrine keeps a
+ * main, an alternate and a tactical CP so that losing one does not stop the battle (US FM 6-0,
+ * ch. 1; Russian practice since 2022 of dispersed and duplicated CPs, RUSI "Preliminary Lessons",
+ * Nov 2022). Judgment.
+ */
+export const ALTERNATE_CP = defineParam({
+  id: 'c2.ALTERNATE_CP', value: 0.5, range: [0, 0.8], tag: 'judgment',
+  source: 'US FM 6-0 main/alternate/tactical CPs; RUSI Preliminary Lessons (Nov 2022)',
+  affects: 'how much of an HQ hit its subordinates feel',
+});
+
+/**
+ * Most formations one army or corps HQ commands before a new one stands up. Ukraine's 2025 corps
+ * reform puts five to eight brigades under each army corps (Ukrainian MoD, Feb-Jun 2025); NATO
+ * and Russian corps and combined-arms armies command two to four divisions plus a few brigades.
+ */
+export const CORPS_SPAN = 8;
+/** Furthest a formation stands from a corps HQ it joins, km: a corps sector is some 100-200 km of front. Judgment. */
+export const CORPS_REACH_KM = 200;
+/**
+ * Km of extra distance to its troops an HQ accepts rather than share a cell with another of its
+ * nation's HQs. After Ukraine's HIMARS raids of summer 2022 Russia dispersed its command posts
+ * and pulled them back beyond 80 km (RUSI, Nov 2022). Judgment.
+ */
+export const HQ_SPACING_KM = 100;
+/** Days a struck HQ stays out of the cell it was hit in: it displaces and does not come back while the enemy watches it. Judgment. */
+export const DISPLACE_DAYS = 3;
 
 /**
  * Chance one precision weapon that reaches an HQ's cell hits the HQ (an imprecise one, a third of that):
@@ -165,7 +196,7 @@ export const HQ_HIT_DAMAGE = 0.6;
 /** CEP, m, at or under which a weapon counts as precision against a command post. */
 export const PRECISION_CEP_M = 30;
 
-/** Side of the square, degrees, that groups formations with no named higher HQ under one derived front HQ. */
+/** Side of the square, degrees, of the region one derived front HQ directs. */
 export const FRONT_CELL_DEG = 6;
 
 export const BANDS: readonly Band[] = ['gnss', 'comms', 'radar'];

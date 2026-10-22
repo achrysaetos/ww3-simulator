@@ -75,7 +75,7 @@ export function buildJam(map: GameMap, catalog: Catalog, formations: Iterable<Fo
     for (const pid in f.equipment) if (EMITTERS[pid] && f.equipment[pid as PlatformId] > 0 && catalog.platforms.has(pid as PlatformId)) add(f.nation, at, pid, f.equipment[pid as PlatformId]);
   }
   for (const hq of hqs) {
-    const kit = hq.level !== 'national' && hq.integrity > 0 && belligerent(hq.nation) ? ORGANIC_EW[hq.nation]?.hq : undefined;
+    const kit = hq.level === 'army' && hq.integrity > 0 && belligerent(hq.nation) ? ORGANIC_EW[hq.nation]?.hq : undefined;
     if (kit) for (const pid in kit) add(hq.nation, hq.node, pid, kit[pid] * hq.integrity);
   }
   const field: Field = new Map();

@@ -138,12 +138,15 @@ describe('ukraine-2026: command posts', () => {
     throw new Error('no Russian army HQ within Tochka range of Ukrainian ground');
   }
 
-  it('a missile strike on a Russian army HQ slows that army\'s orders for days', () => {
+  it('a missile strike on a Russian army HQ slows that army\'s orders', () => {
     const { hq, sub, site } = target(s.world);
     const struck = fork(s.world), quiet = fork(s.world);
     const node = struck.world.slices.c2.hqs[hq].node;
     const battery = addFormation(struck.world, s.catalog, { nation: UKR, name: 'test Tochka battalion', kind: 'missile', echelon: 'battalion', node: site, equipment: { ['tochka_tel' as PlatformId]: 240 } });
     battery.order = { posture: 'strike', target: node, targetClass: 'hardened', issuedTick: struck.world.tick };
+    // Ukrainian troops close up to the command post's cell, so it is found.
+    const spotters = addFormation(struck.world, s.catalog, { nation: UKR, name: 'test recon company', kind: 'maneuver', echelon: 'battalion', node: [...s.map.neighbors(node)].find((n) => !s.map.isSea(n))!, equipment: { ['infantry_squad' as PlatformId]: 10 } });
+    spotters.order = { posture: 'defend', issuedTick: struck.world.tick };
     const delayBefore = orderDelayHours(s.world, sub);
     struck.engine.step(struck.world);
     quiet.engine.step(quiet.world);
@@ -164,8 +167,10 @@ describe('ukraine-2026: command posts', () => {
     };
     const slow = actedAt(struck), fast = actedAt(quiet);
     expect(fast).toBeLessThanOrEqual(1);
-    expect(slow).toBeGreaterThanOrEqual(fast + 3);
-    // ...and the HQ recovers as a replacement stands up.
+    // The alternate command post (c2.ALTERNATE_CP) takes back half the loss, so the lag is half a day or more, not days.
+    expect(slow).toBeGreaterThanOrEqual(fast + 2);
+    // ...and the HQ recovers as a replacement stands up, a fifth of the way a day for an army HQ.
+    struck.engine.run(struck.world, 8 - (slow + 1));
     expect(struck.world.slices.c2.hqs[hq].integrity).toBeGreaterThan(hit + 0.3);
   });
 });

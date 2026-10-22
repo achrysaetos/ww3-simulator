@@ -380,6 +380,7 @@ export const intel: System = {
       }
     }
     if (world.tick % ticksPerDay(world) === 0) indications(world, map, ctx);
+    orbits.set(world, { tick: world.tick, isr });
     stamps.set(world, pictureStamp(world) + 1);
   },
 };
@@ -390,6 +391,22 @@ export const intel: System = {
  */
 const stamps = new WeakMap<World, number>();
 export const pictureStamp = (world: World): number => stamps.get(world) ?? 0;
+
+/** The airborne ISR flying in the tick intel last stepped. Runtime only: it is rebuilt by the next step. */
+const orbits = new WeakMap<World, { tick: number; isr: { node: NodeId; nation: NationId; ground: boolean; reachKm: number }[] }>();
+
+/**
+ * Whether `observer`'s ground-watching ISR (drones over the battle area) covered `node` this tick and
+ * kept its link through the jamming there: what finds a command post or a launcher, rather than
+ * a formation somewhere in a cell. Without the intel system, everything is watched.
+ */
+export function isrOverwatch(world: World, map: GameMap, observer: NationId, node: NodeId, key: string): boolean {
+  if (!world.slices.intel) return true;
+  const o = orbits.get(world);
+  if (!o || o.tick !== world.tick) return false;
+  for (const w of o.isr) if (w.nation === observer && w.ground && map.distanceKm(w.node, node) <= w.reachKm) return !isrJammed(world, node, observer, key as FormationId);
+  return false;
+}
 
 const ticksPerDay = (world: World) => Math.max(1, Math.round(24 / world.dtHours));
 

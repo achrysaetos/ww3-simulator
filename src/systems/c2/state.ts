@@ -15,6 +15,8 @@ export interface CommandNode {
   parent?: string;
   /** 1 intact .. 0 destroyed; a replacement stands up over HQ[level].recoverDays. */
   integrity: number;
+  /** Cell it was last struck in, and the tick until which it keeps out of it (DISPLACE_DAYS). */
+  displaced?: { from: NodeId; until: number };
 }
 
 /** Jamming a nation's emitters put on one cell, per band, 0..1. */

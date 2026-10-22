@@ -1,6 +1,7 @@
 /**
  * Command and control, and electronic warfare. Builds each belligerent's chain of command (national
- * command authority, army and corps HQs from the order of battle, front HQs derived for the rest),
+ * command authority, front HQs by region, army and corps HQs from the order of battle and corps
+ * derived for the rest, each with an alternate command post),
  * tracks HQ damage from strikes and overrun, works out each formation's communications over
  * satellite, radio and fibre bearers, and lays the jamming field every nation's EW puts out.
  *
@@ -15,7 +16,7 @@
 import type { Catalog } from '../../core/catalog';
 import { hostility, type System } from '../../core/engine';
 import type { Formation, FormationId, Munition, NationId, NodeId, PlatformId, World } from '../../core/types';
-import { assessHqs, attach, chainOf, draw, relocate, tallyOf } from './command';
+import { assessHqs, attach, chainOf, draw, hqFunction, relocate, tallyOf } from './command';
 import { buildJam, jamAgainst } from './ew';
 import type { C2State, Jam, OrderCommand } from './state';
 import { BEARERS, COMMS_DELAY_H, COMMS_FLOOR, DEFAULT_BEARERS, DRONE_KINDS, HQ, ISR_LINK_DENIAL, RADAR_DENIAL, SAM_RADAR_DENIAL, SATCOM_PROVIDER, VULN, VULN_OVERRIDE } from './tables';
@@ -114,8 +115,9 @@ export const c2: System = {
     for (const f of live) {
       let coordination = 1, delayH = 0;
       for (const hq of chainOf(s, f.id)) {
-        coordination *= 1 - HQ[hq.level].fire * (1 - hq.integrity);
-        delayH += HQ[hq.level].delayH * (1 - hq.integrity);
+        const lost = 1 - hqFunction(hq);
+        coordination *= 1 - HQ[hq.level].fire * lost;
+        delayH += HQ[hq.level].delayH * lost;
       }
       const jam = jamAgainst(world, f.node, f.nation);
       const b = BEARERS[f.nation] ?? DEFAULT_BEARERS;
