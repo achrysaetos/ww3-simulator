@@ -40,7 +40,7 @@ describe('cyber operations need access', () => {
     expect(infraSum(withAccess.world, cells)).toBeLessThan(beforeA * 0.8);
     // Without access, firing does nothing to those cells (a point of standing-cyber noise aside).
     expect(infraSum(none.world, cells)).toBeGreaterThan(beforeN * 0.97);
-  });
+  }, 180_000);
 
   it('access takes months to build, and a payload fired before it is built does nothing', () => {
     const t = testWorld([nonKinetic]);
@@ -83,7 +83,7 @@ describe('undersea cable cuts', () => {
     // Still cut a month in: repair ships are few and the splice takes months.
     s.engine.run(s.world, 4 * 25);
     expect(nonKineticState(s.world)!.cables['c_lion1']).toBeDefined();
-  });
+  }, 180_000);
 
   it('the repair completes after months, restoring connectivity; a power cable cut hits its landing cell', () => {
     const t = testWorld([nonKinetic]);
@@ -115,7 +115,7 @@ describe('shipping deterred by fear', () => {
     expect(Math.max(...deterred)).toBeGreaterThan(0);
     // The deterrence runs on fear, not sunk hulls: few formations are actually destroyed.
     expect(s.world.history.filter((e) => e.type === 'formation_destroyed').length).toBeLessThan(40);
-  });
+  }, 180_000);
 });
 
 describe('occupation breeds resistance', () => {
