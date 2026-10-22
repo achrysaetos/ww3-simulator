@@ -31,6 +31,9 @@ const fighters: PlatformSpec<MunitionKey>[] = [
   { id: 'f15i', name: "F-15I Ra'am", cls: 'multirole', crew: 2, producers: [], inService: 1998, unitCostUsdM: 45, speedKph: 950, rangeKm: 1270, fuelTph: 5, stealth: 0.08, detectionKm: 170, q: 1.15, load: { aim120c: 2, aim9x: 2, gbu31: 4, rocks: 2, air_lora: 1 } },
   { id: 'f16i', name: 'F-16I Sufa', cls: 'multirole', crew: 2, producers: [], inService: 2004, unitCostUsdM: 45, rangeKm: 650, detectionKm: 120, q: 1.05, load: { aim120c: 2, aim9x: 2, gbu12: 2, rampage: 2 } },
   { id: 'f16c', name: 'F-16C Block 50/52', cls: 'multirole', producers: ['USA'], inService: 1994, unitCostUsdM: 35, rangeKm: 550, detectionKm: 110, q: 1.0, load: { aim120c: 2, aim9x: 2, gbu12: 2 } },
+  // The USAF's SEAD squadrons (20th FW Shaw, 35th FW Misawa, 52nd FW Spangdahlem) fly Block 50 F-16CMs with the HARM
+  // targeting system and two AGM-88s; on Desert Storm night one F-4G and F-16 Wild Weasels fired ~200 HARMs (GWAPS).
+  { id: 'f16cm_sead', name: 'F-16CM Block 50 (SEAD)', cls: 'multirole', producers: [], inService: 1994, unitCostUsdM: 35, rangeKm: 550, detectionKm: 110, q: 1.05, load: { aim120c: 2, aim9x: 2, agm88e: 2, mald: 2 } },
   { id: 'f16am', name: 'F-16AM/BM MLU', cls: 'multirole', producers: [], inService: 1980, unitCostUsdM: 20, rangeKm: 550, detectionKm: 100, q: 0.85, load: { aim120c: 2, aim9x: 2, gbu12: 2 } },
   { id: 'f18e', name: 'F/A-18E/F Super Hornet Block III', cls: 'multirole', producers: ['USA'], inService: 2001, unitCostUsdM: 67, rangeKm: 720, fuelTph: 4, stealth: 0.15, detectionKm: 150, q: 1.15, load: { aim120d: 4, aim9x: 2, gbu31: 2 } },
   { id: 'f18c', name: 'F/A-18C/D Hornet', cls: 'multirole', producers: [], inService: 1987, unitCostUsdM: 30, rangeKm: 600, fuelTph: 3.5, detectionKm: 110, q: 0.95, load: { aim120c: 2, aim9x: 2, gbu12: 2 } },
@@ -47,6 +50,8 @@ const fighters: PlatformSpec<MunitionKey>[] = [
   { id: 'mig31bm', name: 'MiG-31BM Foxhound', cls: 'fighter', crew: 2, producers: ['RUS'], inService: 2015, unitCostUsdM: 40, speedKph: 1700, rangeKm: 720, fuelTph: 9, stealth: 0.02, detectionKm: 320, q: 1.2, load: { r37m: 4, r77_1: 2 } },
   { id: 'mig31k', name: 'MiG-31K/I (Kinzhal carrier)', cls: 'multirole', crew: 2, producers: ['RUS'], inService: 2018, unitCostUsdM: 40, speedKph: 1700, rangeKm: 720, fuelTph: 9, stealth: 0.02, detectionKm: 200, q: 0.3, load: { kinzhal: 1 } },
   { id: 'mig29', name: 'MiG-29 (9.12/9.13)', cls: 'fighter', producers: [], inService: 1983, unitCostUsdM: 20, rangeKm: 700, fuelTph: 4, stealth: 0.08, detectionKm: 70, q: 0.85, load: { r27er: 2, r73: 4 } },
+  // Ukraine has fired AGM-88 HARMs from MiG-29s (and Su-27s) since August 2022 through an adapter pylon (US DoD, Aug 2022).
+  { id: 'mig29_harm', name: 'MiG-29 with AGM-88 HARM (Ukraine)', cls: 'multirole', producers: [], inService: 2022, unitCostUsdM: 20, rangeKm: 700, fuelTph: 4, stealth: 0.08, detectionKm: 70, q: 0.85, load: { r27er: 2, r73: 2, agm88e: 2 } },
   { id: 'mig29k', name: 'MiG-29K/KUB', cls: 'multirole', producers: ['RUS'], inService: 2010, unitCostUsdM: 40, rangeKm: 850, fuelTph: 4.5, stealth: 0.08, detectionKm: 120, q: 1.0, load: { r77_1: 4, r73: 2, kh35: 2 } },
   { id: 'mig21', name: 'MiG-21bis / J-7 / F-7', cls: 'fighter', producers: [], inService: 1966, unitCostUsdM: 4, rangeKm: 350, fuelTph: 2.5, stealth: 0.2, detectionKm: 30, q: 0.45, load: { ir_aam_old: 2 } },
   { id: 'j20a', name: 'J-20A Mighty Dragon', cls: 'multirole', producers: ['CHN'], inService: 2017, unitCostUsdM: 110, speedKph: 1000, rangeKm: 1100, fuelTph: 5, armor: 0.15, stealth: 0.8, detectionKm: 220, q: 1.35, fp: { armor: 0.08, soft: 0.1 }, load: { pl15: 4, pl10: 2 } },
@@ -81,7 +86,7 @@ const fighters: PlatformSpec<MunitionKey>[] = [
 
 const bombers: PlatformSpec<MunitionKey>[] = [
   // B-52H: 8 TF33s burn ~3,300 gal/h; AGM-86B load up to 20 (12 external + 8 internal).
-  { id: 'b52h', name: 'B-52H Stratofortress', cls: 'bomber', crew: 5, producers: [], inService: 1961, unitCostUsdM: 84, speedKph: 840, rangeKm: 7200, fuelTph: 10, stealth: 0.03, detectionKm: 250, nuclear: true, load: { agm86b: 12, jassm_er: 8 } },
+  { id: 'b52h', name: 'B-52H Stratofortress', cls: 'bomber', crew: 5, producers: [], inService: 1961, unitCostUsdM: 84, speedKph: 840, rangeKm: 7200, fuelTph: 10, stealth: 0.03, detectionKm: 250, nuclear: true, load: { agm86b: 12, jassm_er: 8, mald: 8 } },
   { id: 'b1b', name: 'B-1B Lancer', cls: 'bomber', producers: [], inService: 1986, unitCostUsdM: 283, speedKph: 900, rangeKm: 5500, fuelTph: 9, stealth: 0.3, detectionKm: 200, q: 1.2, load: { jassm_er: 16, lrasm: 8 } },
   // B-2: program unit cost ~$2.1B; flyaway ~$1B (1997 $). 20 built, 19 in service.
   { id: 'b2a', name: 'B-2A Spirit', cls: 'stealth_bomber', producers: [], inService: 1997, unitCostUsdM: 1000, speedKph: 900, rangeKm: 5500, fuelTph: 7, stealth: 0.95, detectionKm: 150, q: 1.3, nuclear: true, load: { b61_12: 8, gbu31: 8, gbu57: 2 } },

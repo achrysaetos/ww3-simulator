@@ -4,6 +4,7 @@ import { loadMap } from '../src/data/load';
 import { orderDelayHours } from '../src/systems/c2';
 import { authority } from '../src/systems/orders';
 import { SimHost } from '../src/ui/host';
+import { degradeChain } from './c2.fixture';
 import type { FromWorker, ToWorker } from '../src/ui/snapshot';
 
 const N = (s: string) => s as NationId;
@@ -101,13 +102,10 @@ describe('every order answers back (BB-4, BA-5)', () => {
 describe('orders in transit down a degraded chain of command', () => {
   it('answers relayed with an arrival time, keeps the delegate off the unit meanwhile, and hands it back when the order is refused', () => {
     const g = play('ukraine-2026', 'UKR');
-    let slow: Formation | undefined;
-    for (let i = 0; i < 40 && !slow; i++) {
-      g.step();
-      slow = Object.values(g.world.formations).find((f) => f.nation === 'UKR' && f.kind === 'maneuver' && f.status === 'active' && orderDelayHours(g.world, f.id) >= 2 * g.world.dtHours);
-    }
-    expect(slow).toBeDefined();
-    const f = slow!;
+    g.step();
+    const f = degradeChain(g.world, N('UKR'));
+    g.step();
+    expect(orderDelayHours(g.world, f.id)).toBeGreaterThanOrEqual(2 * g.world.dtHours);
     g.send({ type: 'order', nation: 'UKR', formation: f.id, order: { posture: 'attack', target: map.nodeAt(51.5, -0.1) } });
     g.step();
     expect(g.results().filter((r) => r.formation === f.id)).toEqual([expect.objectContaining({ ok: true, code: 'relayed', etaHours: expect.any(Number) })]);

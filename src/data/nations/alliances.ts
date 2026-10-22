@@ -51,19 +51,19 @@ export const alliances: Alliance[] = [
   {
     id: 'RUS-BLR', name: 'Union State security guarantees', members: ids('RUS BLR'), obligation: 'collective_defense',
     triggers: ['attack_on_territory', 'threat_to_security'], commitment: 0.9, nuclearGuarantors: ids('RUS'),
-    source: 'Treaty on Security Guarantees within the Union State, Dec 2024; Russian nuclear doctrine Nov 2024 covers Belarus',
+    inForce: '2024-12-06', source: 'Treaty on Security Guarantees within the Union State, Dec 2024; Russian nuclear doctrine Nov 2024 covers Belarus',
   },
   {
     id: 'RUS-PRK', name: 'Treaty on Comprehensive Strategic Partnership', members: ids('RUS PRK'),
     obligation: 'bilateral_defense', triggers: ['attack_on_territory'], commitment: 0.7,
     // Art. 4: immediate military assistance "with all means at its disposal". DPRK troops fought in Kursk, late 2024.
-    source: 'Russia-DPRK treaty, Pyongyang, 19 Jun 2024, Art. 4',
+    inForce: '2024-06-19', source: 'Russia-DPRK treaty, Pyongyang, 19 Jun 2024, Art. 4',
   },
   {
     id: 'RUS-IRN', name: 'Russia-Iran Comprehensive Strategic Partnership', members: ids('RUS IRN'),
     // No mutual defense clause: each only pledges not to aid an aggressor against the other.
     obligation: 'consultation', triggers: ['threat_to_security'], commitment: 0.15,
-    source: 'Treaty signed Moscow, 17 Jan 2025, Art. 3; Russia stayed out of the June 2025 Israel-Iran war',
+    inForce: '2025-01-17', source: 'Treaty signed Moscow, 17 Jan 2025, Art. 3; Russia stayed out of the June 2025 Israel-Iran war',
   },
   {
     id: 'CHN-PRK', name: 'Sino-North Korean Mutual Aid and Cooperation Friendship Treaty', members: ids('CHN PRK'),
@@ -157,11 +157,11 @@ export const alliances: Alliance[] = [
     id: 'SAU-PAK', name: 'Strategic Mutual Defence Agreement', members: ids('SAU PAK'), obligation: 'bilateral_defense',
     triggers: ['attack_on_territory'], commitment: 0.5,
     // Whether Pakistan's nuclear umbrella extends to Saudi Arabia is unstated; not modeled as a guarantee.
-    source: 'Saudi-Pakistan SMDA, Riyadh, 17 Sep 2025',
+    inForce: '2025-09-17', source: 'Saudi-Pakistan SMDA, Riyadh, 17 Sep 2025',
   },
   {
     id: 'TUR-AZE', name: 'Shusha Declaration', members: ids('TUR AZE'), obligation: 'bilateral_defense',
-    triggers: ['attack_on_territory'], commitment: 0.6, source: 'Shusha Declaration on Allied Relations, Jun 2021',
+    triggers: ['attack_on_territory'], commitment: 0.6, inForce: '2021-06-15', source: 'Shusha Declaration on Allied Relations, Jun 2021',
   },
   {
     id: 'FRA-ARE', name: 'France-UAE defence agreement', members: ids('FRA ARE'), obligation: 'bilateral_defense',
@@ -170,7 +170,7 @@ export const alliances: Alliance[] = [
   {
     id: 'FRA-GRC', name: 'France-Greece strategic partnership', members: ids('FRA GRC'), obligation: 'bilateral_defense',
     // Mutual assistance clause matters mainly against Turkey, a NATO ally Art. 5 does not cover.
-    triggers: ['attack_on_territory'], commitment: 0.5, source: 'Franco-Greek agreement Sep 2021, Art. 2',
+    triggers: ['attack_on_territory'], commitment: 0.5, inForce: '2021-09-28', source: 'Franco-Greek agreement Sep 2021, Art. 2',
   },
   {
     id: 'Arab League', name: 'League of Arab States', members: ARAB_LEAGUE, obligation: 'collective_defense',
@@ -210,10 +210,10 @@ const pair = (s: string) => ids(s) as [NationId, NationId];
 export const peaceTreaties: PeaceTreaty[] = [
   { between: pair('EGY ISR'), source: 'Egypt-Israel Peace Treaty, 26 Mar 1979; Egypt stayed out of the 1982, 2006 and 2023-25 wars' },
   { between: pair('JOR ISR'), source: 'Israel-Jordan Treaty of Peace (Wadi Araba), 26 Oct 1994' },
-  { between: pair('ARE ISR'), source: 'Abraham Accords, 15 Sep 2020' },
-  { between: pair('BHR ISR'), source: 'Abraham Accords, 15 Sep 2020' },
-  { between: pair('MAR ISR'), source: 'Israel-Morocco normalisation, 22 Dec 2020' },
-  { between: pair('SDN ISR'), source: 'Sudan signed the Abraham Accords declaration, 6 Jan 2021' },
+  { between: pair('ARE ISR'), inForce: '2020-09-15', source: 'Abraham Accords, 15 Sep 2020' },
+  { between: pair('BHR ISR'), inForce: '2020-09-15', source: 'Abraham Accords, 15 Sep 2020' },
+  { between: pair('MAR ISR'), inForce: '2020-12-22', source: 'Israel-Morocco normalisation, 22 Dec 2020' },
+  { between: pair('SDN ISR'), inForce: '2021-01-06', source: 'Sudan signed the Abraham Accords declaration, 6 Jan 2021' },
 ];
 
 /**

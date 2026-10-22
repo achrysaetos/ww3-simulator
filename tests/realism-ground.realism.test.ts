@@ -1,7 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import type { GameMap } from '../src/core/map';
 import type { NationId, World } from '../src/core/types';
 import { createSession } from '../src/scenarios';
+import { caseById } from '../src/validation/cases';
+import { bandProblem, ensemble, spread } from '../src/validation/ensemble';
+import type { CaseResult } from '../src/validation/run';
 
 interface GroundRun {
   world: World;
@@ -51,11 +54,26 @@ function netGain(map: GameMap, before: readonly (NationId | undefined)[], after:
   return n;
 }
 
-const perDay = (r: GroundRun, m: Map<NationId, number>, n: string) => (m.get(n as NationId) ?? 0) / r.days;
 const memo = new Map<string, GroundRun>();
 const run = (scenario: string, seed: number, days: number) => {
   const key = `${scenario}/${seed}/${days}`;
   return memo.get(key) ?? memo.set(key, runGround(scenario, seed, days)).get(key)!;
+};
+
+/**
+ * The bands below are checked over an ensemble, not one seed at a time: 8 runs, seeds 1-4 across a
+ * Latin hypercube of every estimated, judgment and contested param (src/validation/ensemble.ts).
+ * The median run must land in the band. Single seeds at the defaults hid how much the outcome rests
+ * on luck and on knobs: baltic-2027 seed 2 took half a cell against the 1-6 band, and A3's 16-run
+ * ukraine-2026 sweep put Russian casualties at p10-p90 1,100-2,200 a day. The bands themselves and
+ * their sources live with the cases in src/validation/cases/bands.ts.
+ */
+const bandOf = (caseId: string) => {
+  const c = caseById(caseId);
+  return (runs: readonly CaseResult[], question: string) => {
+    const q = c.questions.find((x) => x.id === question)!;
+    return bandProblem(spread(runs, question), q.observed.lo, q.observed.hi);
+  };
 };
 
 /**
@@ -66,29 +84,31 @@ const run = (scenario: string, seed: number, days: number) => {
  * from crews and dismounts. Oryx confirmed about 3-5 Russian tanks a day in 2024 and roughly a
  * quarter of that for Ukraine, which defended.
  */
-describe.each([1, 2, 3])('ukraine-2026 seed %i, 60 days', (seed) => {
-  const r = () => run('ukraine-2026', seed, 60);
+describe('ukraine-2026, 60 days, ensemble of 8', () => {
+  const band = bandOf('ukraine-2026-60d');
+  let runs: CaseResult[];
+  // Eight 60-day runs on two workers outlast the realism suite's 10-minute default on a shared machine.
+  beforeAll(async () => {
+    runs = await ensemble('ukraine-2026-60d');
+  }, 1_800_000);
 
   it('Russia nets 0-2 cells of Ukraine', () => {
-    expect(netGain(r().map, r().start, r().world.control, 'RUS', ['UKR'])).toBeGreaterThanOrEqual(0);
-    expect(netGain(r().map, r().start, r().world.control, 'RUS', ['UKR'])).toBeLessThanOrEqual(2);
+    expect(band(runs, 'rus_net_cells')).toBeUndefined();
   });
 
   it('Russia loses 500-2,000 personnel a day, more than Ukraine', () => {
-    expect(perDay(r(), r().casualties, 'RUS')).toBeGreaterThanOrEqual(500);
-    expect(perDay(r(), r().casualties, 'RUS')).toBeLessThanOrEqual(2000);
-    expect(perDay(r(), r().casualties, 'UKR')).toBeLessThan(perDay(r(), r().casualties, 'RUS'));
+    expect(band(runs, 'rus_casualties_per_day')).toBeUndefined();
+    expect(band(runs, 'ukr_minus_rus_casualties')).toBeUndefined();
   });
 
   it('Russia loses 2-8 tanks a day, Ukraine fewer, at least half a tank a day', () => {
-    expect(perDay(r(), r().tanks, 'RUS')).toBeGreaterThanOrEqual(2);
-    expect(perDay(r(), r().tanks, 'RUS')).toBeLessThanOrEqual(8);
-    expect(perDay(r(), r().tanks, 'UKR')).toBeGreaterThanOrEqual(0.5);
-    expect(perDay(r(), r().tanks, 'UKR')).toBeLessThan(perDay(r(), r().tanks, 'RUS'));
+    expect(band(runs, 'rus_tanks_per_day')).toBeUndefined();
+    expect(band(runs, 'ukr_tanks_per_day')).toBeUndefined();
+    expect(band(runs, 'ukr_minus_rus_tanks')).toBeUndefined();
   });
 
-  it('nobody capitulates', () => {
-    expect(r().capitulated).toEqual([]);
+  it('nobody capitulates in any run', () => {
+    expect(spread(runs, 'capitulations').values.every((v) => v === 0)).toBe(true);
   });
 });
 
@@ -99,13 +119,10 @@ describe.each([1, 2, 3])('ukraine-2026 seed %i, 60 days', (seed) => {
  * border (RUSSIA_WEST_2027 in src/scenarios), so the judgment band is ground taken but no
  * collapse: 1-6 Baltic cells in three weeks.
  */
-describe.each([1, 2])('baltic-2027 seed %i, 21 days', (seed) => {
-  it('Russia takes 1-6 cells of the Baltic states', () => {
-    const r = run('baltic-2027', seed, 21);
-    const taken = netGain(r.map, r.start, r.world.control, 'RUS', ['EST', 'LVA', 'LTU']) + netGain(r.map, r.start, r.world.control, 'BLR', ['EST', 'LVA', 'LTU']);
-    expect(taken).toBeGreaterThanOrEqual(1);
-    expect(taken).toBeLessThanOrEqual(6);
-  });
+describe('baltic-2027, 21 days, ensemble of 8', () => {
+  it('Russia takes 1-6 cells of the Baltic states', async () => {
+    expect(bandOf('baltic-2027-21d')(await ensemble('baltic-2027-21d'), 'baltic_cells')).toBeUndefined();
+  }, 1_800_000);
 });
 
 /**

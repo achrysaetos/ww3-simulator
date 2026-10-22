@@ -172,6 +172,7 @@ export const WEST_PLATFORMS = {
   f15e: 'multirole',
   f15c: 'fighter',
   f16c: 'multirole',
+  f16cm_sead: 'multirole',
   f16_blk70: 'multirole',
   f16am: 'multirole',
   a10c: 'attack_aircraft',
@@ -193,6 +194,7 @@ export const WEST_PLATFORMS = {
   gripen_e: 'multirole',
   fa50: 'multirole',
   mig29: 'fighter',
+  mig29_harm: 'multirole',
   su27: 'fighter',
   su24m_scalp: 'attack_aircraft',
   su25: 'attack_aircraft',
@@ -362,6 +364,8 @@ export type WestPlatform = keyof typeof WEST_PLATFORMS;
 /** Munition ids used in `extraMagazine` (reloads beyond the platforms' standard loadouts). */
 export const WEST_MUNITIONS = [
   'trident2_d5',
+  'trident2_d5_w88',
+  'm51',
   'asmp_a',
   'b61_12',
   'agm86b_alcm',

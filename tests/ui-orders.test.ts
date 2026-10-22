@@ -131,7 +131,7 @@ describe('player decisions in the snapshot', () => {
     w.world.slices.diplomacy = {
       wars: [{
         id: 'w1', name: 'CHN-TWN war', since: 0, theatre: w.world.nations[TWN].capital,
-        sides: [{ leader: CHN, members: { [CHN]: { joined: 0, via: 'declared' } } }, { leader: TWN, members: { [TWN]: { joined: 0, via: 'attacked' } } }],
+        sides: [{ leader: CHN, members: { [CHN]: { joined: 0, via: 'declared' } }, aim: { kind: 'total' }, gained: 0 }, { leader: TWN, members: { [TWN]: { joined: 0, via: 'attacked' } }, aim: { kind: 'total' }, gained: 0 }],
       }],
       joins: [{ nation: USA, war: 'w1', side: 1, dueTick: 24, treaty: 'US-TWN-TRA', kind: 'ambiguous', victim: TWN, aggressor: CHN }],
       records: {}, assessment: {}, pressure: {}, offers: { 'CHN|USA': CHN }, access: {}, aid: {}, rev: 0, ssbnFormations: [], invoked: [], umbrella: [],

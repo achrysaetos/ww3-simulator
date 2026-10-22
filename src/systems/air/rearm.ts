@@ -5,10 +5,11 @@
  * loadouts; rounds carried beyond that (an ORBAT's extra magazine) are spent first and
  * never topped up.
  */
+import type { Catalog } from '../../core/catalog';
 import type { SimContext } from '../../core/engine';
 import type { Formation, FormationKind, ItemId, MunitionId, Nation, PlatformId, World } from '../../core/types';
 import { supplyFactor } from '../logistics';
-import { BULK_AMMO_KINDS, isRoundOnRail, REARM_SHARE_PER_DAY } from './tables';
+import { BULK_AMMO_KINDS, isRoundOnRail, NON_STRIKE_KINDS, REARM_SHARE_PER_DAY, WAR_RESERVE_LOADS } from './tables';
 
 const REARMED: ReadonlySet<FormationKind> = new Set(['air_wing', 'missile', 'air_defense']);
 
@@ -66,4 +67,30 @@ function draw(nation: Nation, ctx: SimContext, mid: MunitionId, item: ItemId, wa
     got += Math.max(0, take);
   }
   return got;
+}
+
+/**
+ * War reserves of the strike weapons the industry tables do not list for a nation: WAR_RESERVE_LOADS of its forces'
+ * full load of each, so no air force or missile brigade flies one magazine per war. Interceptors and air-to-air
+ * missiles keep only their published stocks: their shortages (Ukraine's Patriots, Israel's Arrows) are the point.
+ */
+export function stockWarReserves(world: World, catalog: Catalog): void {
+  const loads = new Map<Nation, Map<MunitionId, number>>();
+  for (const f of Object.values(world.formations)) {
+    const nation = world.nations[f.nation];
+    if (!nation || f.status === 'destroyed' || !REARMED.has(f.kind)) continue;
+    const mine = loads.get(nation) ?? loads.set(nation, new Map()).get(nation)!;
+    for (const [pid, n] of Object.entries(f.equipment) as [PlatformId, number][]) {
+      const p = catalog.platform(pid);
+      if (n <= 0 || isRoundOnRail(p)) continue;
+      for (const l of p.loadout) mine.set(l.munition, (mine.get(l.munition) ?? 0) + l.count * n);
+    }
+  }
+  const reserve = WAR_RESERVE_LOADS();
+  for (const [nation, mine] of loads)
+    for (const [mid, full] of mine) {
+      const m = catalog.munition(mid);
+      if (m.yieldKt || NON_STRIKE_KINDS.has(m.kind) || BULK_AMMO_KINDS.has(m.kind) || nation.stockpile[mid] !== undefined) continue;
+      nation.stockpile[mid] = Math.round(full * reserve);
+    }
 }

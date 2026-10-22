@@ -10,15 +10,15 @@ import type { OrderCommand, OrderOutcome } from '../orders';
 import { navalPosition } from '../naval';
 import { combatRadiusKm } from './combat';
 import { buildPicture } from './picture';
-import { rearm } from './rearm';
-import { isStrikeMunition, resolveStrikes, type AirSlice } from './strike';
+import { rearm, stockWarReserves } from './rearm';
+import { isStrikeMunition, reloadSalvos, resolveStrikes, type AirSlice } from './strike';
 import { resolveAirSuperiority } from './superiority';
 import { AIRFRAME, LAUNCHER, OFFENSIVE_POSTURES, STRIKE_ROLES, TUNING } from './tables';
 
 export { combatRadiusKm, resolveAirBattle, visibility } from './combat';
 export { engagementCycles, interceptSalvo, type SalvoDefense, type SalvoResult, type SalvoThreat, type ShotDoctrine } from './intercept';
 export { aimKey, dailyRounds, effectPk, futileAim, type AirSlice, type Assessment } from './strike';
-export { ATTRITABLE_COST_USD_M } from './tables';
+export { ATTRITABLE_COST_USD_M, PENETRATOR_VISIBILITY } from './tables';
 
 declare module '../../core/types' {
   interface Slices {
@@ -48,8 +48,9 @@ export function ferryKm(world: World, catalog: Catalog, f: Formation): number {
 
 export const airWar: System = {
   id: 'air',
-  init(world) {
+  init(world, ctx) {
     world.slices.air = { runway: {} };
+    stockWarReserves(world, ctx.catalog);
   },
   step(world, ctx) {
     const slice = (world.slices.air ??= { runway: {} });
@@ -58,6 +59,7 @@ export const airWar: System = {
     resolveAirSuperiority(world, ctx, pic);
     resolveStrikes(world, ctx, pic, slice);
     recover(world, slice);
+    reloadSalvos(world, slice, ctx.catalog);
     rearm(world, ctx);
   },
 };

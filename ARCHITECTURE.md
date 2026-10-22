@@ -68,3 +68,19 @@ data) over invented ones, and cite the source in a comment next to any number a
 reader would question. Where the model abstracts (for example, `firepower` as kills
 per hour of engaged combat), state the calibration it was tuned against, such as
 historical loss rates from 2022 to 2024 in Ukraine, 1991 Iraq, or wargame results.
+
+## Calibration params, ensembles and validation
+
+- Every knob that decides outcomes is a param declared with `defineParam` or `tableParam`
+  (`src/core/params.ts`): default, range, source, and a tag (`observed`, `estimated`,
+  `judgment`, `contested` or `scenario`). Read it through the getter, never copy its value into
+  a module constant, or a sweep cannot move it. A run's overrides live in `World.params`.
+- `src/forecast/` runs ensembles: `runOne` steps one draw, `sampleRuns` draws seeds across a Latin
+  hypercube (forecast mode) or one param at a time (stress-test mode), `summarize` reports
+  spreads and tipping points, and `src/forecast/pool.ts` spreads runs over worker threads.
+- `src/validation/` scores the model on historical cases. A case (`ValidationCase`) builds a probe
+  world from an existing scenario, says which engine constants cite the event, and lists
+  questions with cited observed ranges, each source tagged independent, official or combatant.
+  `npm run validate` prints the scores and never fails on them. Tuned-on realism bands are
+  defined the same way (`src/validation/cases/bands.ts`) so the realism suite can check them as
+  ensembles. See [docs/validation.md](docs/validation.md) and [docs/calibration.md](docs/calibration.md).

@@ -6,6 +6,7 @@
 import type { SimContext, System } from '../../core/engine';
 import type { Formation, NationId, PlatformId, World } from '../../core/types';
 import { NUCLEAR_ALERT, type AlertSpec } from '../../data/nations';
+import { launchOnWarning } from '../ai/strategy';
 import { orderAlert, stepAlerts } from './alert';
 import { stepClimate } from './climate';
 import { stepCyber } from './cyber';
@@ -97,4 +98,5 @@ function partition(world: World, ctx: SimContext) {
   return { space, asat, byNation };
 }
 
-export const strategic: System = createStrategic();
+// The AI's launch-on-warning decision; a closure, so the import is read when a warning comes, not at module load.
+export const strategic: System = createStrategic({ onWarning: (world, warning, ctx) => launchOnWarning(world, warning, ctx) });

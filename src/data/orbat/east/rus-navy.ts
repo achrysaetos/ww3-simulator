@@ -21,7 +21,26 @@ const VILYUCHINSK = at('Vilyuchinsk', 52.93, 158.41);
 
 const surface = (name: string, base: Base, equipment: Kit, extra = READY): OrbatEntry => unit(RUS, name, 'surface_group', 'flotilla', base, equipment, extra);
 const subs = (name: string, base: Base, equipment: Kit, extra = READY): OrbatEntry => unit(RUS, name, 'submarine', 'flotilla', base, equipment, extra);
-const ssbn = (name: string, base: Base, equipment: Kit): OrbatEntry => unit(RUS, name, 'strategic', 'flotilla', base, equipment, { readiness: 0.7, experience: 0.6 });
+/**
+ * SSBN magazines count reentry vehicles: the boat's load is one per tube, the rest of each MIRVed missile goes in
+ * extraMagazine. FAS (2025) puts about 640 warheads on Russian SLBMs: Bulava carries up to 6 and is assessed at 4;
+ * Sineva up to 4, with Delta IV boats rotating through overhaul, so about 2 per tube across the class.
+ */
+const SLBM_EXTRA: Record<string, [munition: string, perBoat: number]> = { borei: ['bulava', 48], borei_a: ['bulava', 48], delta_iv: ['sineva', 16] };
+const ssbn = (name: string, base: Base, equipment: Kit): OrbatEntry => {
+  const extraMagazine: Kit = {};
+  for (const [boat, n] of Object.entries(equipment)) {
+    const [munition, perBoat] = SLBM_EXTRA[boat];
+    extraMagazine[munition] = (extraMagazine[munition] ?? 0) + n * perBoat;
+  }
+  return unit(RUS, name, 'strategic', 'flotilla', base, equipment, { readiness: 0.7, experience: 0.6, extraMagazine });
+};
+/**
+ * Russia keeps one or two SSBNs on patrol in peacetime, inside the Barents and Okhotsk bastions (FAS Nuclear Notebook
+ * 2025; Kofman, CNA 2020 on the bastion concept). Patrol rates are not published; one boat per fleet is an estimate.
+ */
+const BARENTS_BASTION = at('Barents Sea bastion', 73, 40);
+const OKHOTSK_BASTION = at('Sea of Okhotsk bastion', 55, 150);
 
 const northern: OrbatEntry[] = [
   surface('Admiral Kuznetsov (long refit)', at('35th Shipyard, Murmansk', 69.1, 33.1), { kuznetsov: 1 }, { readiness: 0.05, experience: 0.3 }),
@@ -29,7 +48,8 @@ const northern: OrbatEntry[] = [
   surface('Northern Fleet Frigate Group', at('Severomorsk frigate pier', 69.05, 33.4), { admiral_gorshkov: 3 }, { readiness: 0.7, experience: 0.5 }),
   surface('Admiral Nakhimov (post-modernisation trials)', at('Sevmash, Severodvinsk', 64.58, 39.8), { kirov: 1 }, { readiness: 0.3, experience: 0.2 }),
   surface('Kola Flotilla of Diverse Forces', at('Polyarny', 69.2, 33.47), { grisha: 6, ropucha: 2, ivan_gren: 2 }),
-  ssbn('31st Submarine Division', GADZHIYEVO, { borei: 1, borei_a: 2, delta_iv: 5 }),
+  ssbn('31st Submarine Division, SSBN on patrol', BARENTS_BASTION, { borei_a: 1 }),
+  ssbn('31st Submarine Division', GADZHIYEVO, { borei: 1, borei_a: 1, delta_iv: 5 }),
   subs('11th Submarine Division', at('Zaozyorsk', 69.4, 32.45), { yasen: 1, yasen_m: 2, oscar_ii: 2 }),
   subs('24th Submarine Division', at('Gadzhiyevo SSN pier', 69.26, 33.3), { akula: 2, sierra: 2 }),
   subs('161st Submarine Brigade', at('Polyarny submarine base', 69.19, 33.45), { kilo_877: 4 }),
@@ -61,7 +81,8 @@ const pacific: OrbatEntry[] = [
   surface('36th Surface Ship Division', VLADIVOSTOK, { slava: 1, udaloy: 4, sovremenny: 1 }),
   surface('Pacific Fleet Corvette Brigade', at('Vladivostok Ulysses Bay', 43.08, 131.95), { steregushchiy: 6 }),
   surface('Pacific Fleet Landing Ship Brigade', at('Fokino', 42.97, 132.4), { ropucha: 4 }),
-  ssbn('25th Submarine Division', VILYUCHINSK, { borei: 2, borei_a: 3 }),
+  ssbn('25th Submarine Division, SSBN on patrol', OKHOTSK_BASTION, { borei_a: 1 }),
+  ssbn('25th Submarine Division', VILYUCHINSK, { borei: 2, borei_a: 2 }),
   subs('10th Submarine Division', at('Vilyuchinsk SSGN pier', 52.92, 158.43), { yasen_m: 2, oscar_ii: 2, akula: 2 }),
   subs('19th Submarine Brigade', at('Vladivostok submarine base', 43.1, 131.87), { kilo_636: 6, kilo_877: 3 }),
   unit(RUS, '72nd Coastal Missile Regiment', 'missile', 'brigade', at('Smolyaninovo', 43.18, 132.43), { bastion_p_launcher: 4, bal_launcher: 4, truck: 30 }, READY),

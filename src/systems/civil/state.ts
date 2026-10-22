@@ -23,6 +23,8 @@ export interface CivilNation {
   /** Civilians killed and injured since the scenario opened. */
   killed: number;
   injured: number;
+  /** Its servicemen killed and wounded in battle since the scenario opened, as the battle events count them. Absent in older saves. */
+  military?: number;
   /** Its people living in cells an enemy holds, this tick. */
   underOccupation: number;
   /** Partisan sabotage acts against it as an occupier since the scenario opened. */

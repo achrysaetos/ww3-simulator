@@ -38,6 +38,20 @@ export const LINES: Record<string, LineSpec[]> = {
     // JASSM ~550/yr with a stated goal of ~1,100/yr combined JASSM/LRASM.
     L('jassm', 550, 1_000),
     L('lrasm', 50, 120),
+    // Boeing raised JDAM output to ~45,000 kits a year in 2017 to restock after the campaign on ISIS (Boeing);
+    // the 2024-25 rate is lower (est.), so baseline about half that, surge back to the 2017 peak.
+    L('gbu31', 12_000, 27_000),
+    L('gbu38', 8_000, 18_000),
+    L('gbu12', 6_000, 15_000),
+    // Lockheed: PrSM Increment 1 at ~110 a year in 2025 with capacity for ~400 (Army FY2026 budget; Lockheed).
+    L('prsm', 110, 400),
+    // ATACMS line reopened in 2023 for Ukraine and partners at ~500 a year (Lockheed; est.).
+    L('atacms', 300, 500),
+    L('harm', 150, 400),
+    L('mald', 300, 600),
+    // MDA FY2025: ~12 SM-3 IIA and ~25-50 IB a year; surge est.
+    L('sm3_ib', 36, 80),
+    L('sm3_iia', 12, 36),
     // AMRAAM ~1,100-1,200/yr after the 2023 multiyear; surge est.
     L('aim120', 1_150, 2_000),
     // Javelin JV: 2,400/yr (2023) toward 3,960/yr by 2026.
@@ -66,6 +80,10 @@ export const LINES: Record<string, LineSpec[]> = {
     // Ukrainian GUR 2024: Iskander-M ~40-50/month.
     L('iskander_m', 550, 900),
     L('kalibr', 300, 450),
+    // Ukrainian GUR 2024-25: Kh-59/69 ~40 a month and Iskander-K (9M728/9M729) ~15 a month.
+    L('kh59', 480, 700),
+    L('iskander_k', 180, 300),
+    L('kh31p', 200, 400),
     // Alabuga: ~2,700 Geran-2/month by mid-2025 plus decoys (ISIS, Ukrainian intelligence).
     L('shahed_136', 32_000, 72_000),
     // UMPK glide kits est. ~70,000 in 2025 (Ukrainian intelligence statements).
@@ -104,22 +122,28 @@ export const LINES: Record<string, LineSpec[]> = {
     L('ammo_generic', 44_000, 90_000),
   ],
   // EU target ~2M rounds/yr by end-2025 (European Commission); split by producer, est.
-  DEU: [L('shell_155', 450_000, 900_000), L('leopard2a8', 50, 120)],
+  // MBDA Germany: Taurus Neo production planned at ~50-100 a year from 2026 (est.).
+  DEU: [L('shell_155', 450_000, 900_000), L('leopard2a8', 50, 120), L('taurus', 50, 100)],
   FRA: [L('shell_155', 100_000, 200_000), L('rafale', 25, 36), L('aster30', 200, 400), L('storm_shadow', 50, 150)],
-  GBR: [L('shell_155', 80_000, 200_000), L('storm_shadow', 30, 100)],
+  GBR: [L('shell_155', 80_000, 200_000), L('storm_shadow', 30, 100), L('paveway4', 1_000, 3_000)],
   POL: [L('shell_155', 150_000, 300_000)],
   ESP: [L('shell_155', 250_000, 400_000)],
   ITA: [L('shell_155', 60_000, 150_000), L('aster30', 80, 160)],
   CZE: [L('shell_155', 100_000, 200_000)],
   // Poongsan/Hanwha supplied ~500k+ rounds to the US 2023; est.
-  KOR: [L('shell_155', 600_000, 1_200_000), L('k2', 100, 250), L('k9', 100, 250)],
+  // Hyunmoo-2/3 lines run at est. ~100 a year each; Korea also builds JDAM-class kits under licence (KGGB; est.).
+  KOR: [L('shell_155', 600_000, 1_200_000), L('k2', 100, 250), L('k9', 100, 250), L('hyunmoo2c', 100, 250), L('hyunmoo3c', 100, 250), L('gbu31', 1_000, 3_000)],
   JPN: [L('shell_155', 50_000, 150_000), L('pac3_mse', 30, 60), L('mogami', 2, 3)],
   TWN: [L('shell_155', 30_000, 100_000)],
   // South Korean NIS: North Korea shipped ~6M+ rounds to Russia 2023-24; capacity est.
-  PRK: [L('shell_152', 1_500_000, 3_000_000), L('kn23', 50, 100)],
-  IRN: [L('shahed_136', 12_000, 24_000), L('fateh_110', 300, 600)],
+  PRK: [L('shell_152', 1_500_000, 3_000_000), L('kn23', 50, 100), L('kn25', 100, 200)],
+  // US and Israeli estimates in 2025: ~50 MRBMs a month before the June war, with plans to reach far more.
+  IRN: [L('shahed_136', 12_000, 24_000), L('fateh_110', 300, 600), L('kheibar_shekan', 200, 600), L('emad', 200, 400), L('fattah1', 100, 300), L('zolfaghar', 200, 400)],
   IND: [L('shell_155', 100_000, 300_000), L('tejas', 16, 24), L('brahmos', 100, 200)],
-  ISR: [L('shell_155', 50_000, 150_000), L('tamir', 1_000, 2_500)],
+  // Arrow 3: IAI and Boeing built ~2 a week in 2024-25 after a ramp from ~1 (IAI; est.). Arrow 2 and Stunner est.
+  // Rafael's air-to-surface missiles (Rampage, ROCKS) and IAI's LORA est. from export and IAF use.
+  ISR: [L('shell_155', 50_000, 150_000), L('tamir', 1_000, 2_500), L('arrow3', 100, 200), L('arrow2', 60, 120), L('stunner', 120, 300),
+    L('rampage', 300, 800), L('rocks', 100, 300), L('air_lora', 50, 150), L('lora', 50, 150)],
   TUR: [L('shell_155', 100_000, 250_000)],
 };
 

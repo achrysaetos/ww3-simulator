@@ -1,5 +1,6 @@
 import type { FormationKind, MunitionKind, NationId, NodeId, PlatformClass } from '../../core/types';
 import type { GameMap } from '../../core/map';
+import { defineParam } from '../../core/params';
 import type { NuclearPosture, SatClass } from './state';
 
 const N = (s: string) => s as NationId;
@@ -18,26 +19,49 @@ export interface BmdSystem {
   shotsPerTarget: number;
   /** Nations whose territory it covers. */
   defends: readonly NationId[];
-  /** Point defense: covers only nodes within radiusKm of this point. */
+  /** Where its fire units stand: it covers only targets within radiusKm of this point. Without one it covers the defended nations whole. */
   site?: { lat: number; lon: number; radiusKm: number };
+  /** RVs its radars and fire units on station can take on in one tick; the rest of a salvo goes through unengaged. */
+  perTick: number;
 }
 
+/**
+ * Interceptors are counted where they stand, not as a national inventory: a ship in a home port or a battery in
+ * Texas defends nothing in Korea. Fire units on station cap how many RVs each layer engages in one tick, so a large
+ * salvo saturates it. Engagement capacities are estimates: about two simultaneous engagements per Aegis ship and a
+ * dozen per THAAD battery.
+ */
 export const BMD_SYSTEMS: readonly BmdSystem[] = [
   // 44 GBIs at Fort Greely and Vandenberg (CRS IF10541). Intercept tests since 1999 hit about 55% (Arms Control Association
   // tally, 11 of 20); MDA doctrine fires several GBIs per RV, here 4.
-  { id: 'gmd', owner: N('USA'), engages: ['icbm', 'slbm'], interceptors: 44, pk: 0.5, shotsPerTarget: 4, defends: [N('USA')] },
+  { id: 'gmd', owner: N('USA'), engages: ['icbm', 'slbm'], interceptors: 44, pk: 0.5, shotsPerTarget: 4, defends: [N('USA')], perTick: 11 },
   // Moscow A-135/A-235: 68 53T6 short-range interceptors (IISS Military Balance 2024). No public test record; pk is an estimate.
-  { id: 'a135', owner: N('RUS'), engages: ['icbm', 'slbm', 'irbm', 'mrbm'], interceptors: 68, pk: 0.5, shotsPerTarget: 2, defends: [N('RUS')], site: { lat: 55.75, lon: 37.62, radiusKm: 150 } },
-  // Aegis BMD SM-3: roughly 400 delivered (CRS RL33745, estimate), MDA flight-test record about 80%. Ships deploy to
-  // cover the US, Japan, Korea and NATO Europe (Aegis Ashore Romania and Poland).
-  { id: 'sm3', owner: N('USA'), engages: ['irbm', 'mrbm'], interceptors: 400, pk: 0.8, shotsPerTarget: 2, defends: [N('USA'), N('JPN'), N('KOR'), N('POL'), N('ROU'), N('DEU'), N('GBR'), N('FRA'), N('ITA')] },
+  { id: 'a135', owner: N('RUS'), engages: ['icbm', 'slbm', 'irbm', 'mrbm'], interceptors: 68, pk: 0.5, shotsPerTarget: 2, defends: [N('RUS')], site: { lat: 55.75, lon: 37.62, radiusKm: 150 }, perTick: 34 },
+  // Aegis BMD in the western Pacific: about 9 BMD-capable destroyers forward-based in Japan with perhaps 8-16 SM-3 each
+  // (CRS RL33745, 2025), four of them on BMD station at a time. MDA flight-test record about 80%.
+  { id: 'sm3_pacific', owner: N('USA'), engages: ['irbm', 'mrbm'], interceptors: 90, pk: 0.8, shotsPerTarget: 2, defends: [N('JPN'), N('KOR')], site: { lat: 37, lon: 133, radiusKm: 1500 }, perTick: 8 },
+  // Aegis BMD in Europe: Aegis Ashore at Deveselu (Romania) and Redzikowo (Poland), 24 SM-3 each, and the four destroyers
+  // at Rota (EPAA; CRS RL33745). Ship loads are an estimate.
+  { id: 'sm3_europe', owner: N('USA'), engages: ['irbm', 'mrbm'], interceptors: 90, pk: 0.8, shotsPerTarget: 2, defends: [N('POL'), N('ROU'), N('DEU'), N('GBR'), N('FRA'), N('ITA')], site: { lat: 48, lon: 15, radiusKm: 2000 }, perTick: 10 },
   // JMSDF Aegis destroyers, about 8 ships with SM-3 Block IB/IIA; inventory estimated at 50.
-  { id: 'sm3_jpn', owner: N('JPN'), engages: ['irbm', 'mrbm'], interceptors: 50, pk: 0.8, shotsPerTarget: 2, defends: [N('JPN')] },
-  // THAAD: 7 US batteries of 48 interceptors plus one in Korea; test record 16 of 16 (MDA). pk discounted to 0.85 for combat.
-  { id: 'thaad', owner: N('USA'), engages: ['irbm', 'mrbm', 'srbm'], interceptors: 330, pk: 0.85, shotsPerTarget: 2, defends: [N('USA'), N('KOR')] },
+  { id: 'sm3_jpn', owner: N('JPN'), engages: ['irbm', 'mrbm'], interceptors: 50, pk: 0.8, shotsPerTarget: 2, defends: [N('JPN')], site: { lat: 36, lon: 137, radiusKm: 1200 }, perTick: 8 },
+  // THAAD: one battery of 48 interceptors at Seongju (USFK) and one on Guam; test record 16 of 16 (MDA), pk discounted to
+  // 0.85 for combat. A battery defends a few hundred kilometres around it. The other US batteries are not on station.
+  { id: 'thaad_kor', owner: N('USA'), engages: ['irbm', 'mrbm', 'srbm'], interceptors: 48, pk: 0.85, shotsPerTarget: 2, defends: [N('KOR')], site: { lat: 35.9, lon: 128.1, radiusKm: 200 }, perTick: 12 },
+  { id: 'thaad_guam', owner: N('USA'), engages: ['irbm', 'mrbm', 'srbm'], interceptors: 48, pk: 0.85, shotsPerTarget: 2, defends: [N('USA')], site: { lat: 13.5, lon: 144.8, radiusKm: 200 }, perTick: 12 },
   // Arrow 3 exo-atmospheric interceptor; inventory is not public, about 100 is an estimate.
-  { id: 'arrow3', owner: N('ISR'), engages: ['irbm', 'mrbm'], interceptors: 100, pk: 0.85, shotsPerTarget: 2, defends: [N('ISR')] },
+  { id: 'arrow3', owner: N('ISR'), engages: ['irbm', 'mrbm'], interceptors: 100, pk: 0.85, shotsPerTarget: 2, defends: [N('ISR')], perTick: 12 },
 ];
+
+/**
+ * Share of RVs a defence layer never gets a shot at: decoys and debris it cannot discriminate, tracks lost or handed
+ * over late, depressed trajectories. Flight tests run against cooperative targets; planners assume salvo leakage
+ * (CRS IF10541; Wilkening, Science & Global Security 2000, on layered-defence leakage). Judgment.
+ */
+export const BMD_LEAKAGE = defineParam({
+  id: 'strategic.BMD_LEAKAGE', value: 0.15, range: [0.05, 0.3], tag: 'judgment',
+  source: 'judgment: salvo leakage from discrimination and timing, CRS IF10541', affects: 'share of ballistic RVs that get through missile defence',
+});
 
 export function bmdCovers(sys: BmdSystem, map: GameMap, victim: NationId, node: NodeId): boolean {
   if (!sys.defends.includes(victim)) return false;
@@ -86,6 +110,15 @@ export const DISPERSION_KM2: Record<FormationKind, number> = {
   maneuver: 300, artillery: 100, air_defense: 50, missile: 200, air_wing: 10, surface_group: 100,
   submarine: 1000, strategic: 400, logistics: 100, space: Infinity,
 };
+
+/**
+ * Ships and submarines tied up at a naval base. A boat alongside is a surfaced hull, as soft as a surface ship
+ * (Glasstone & Dolan 1977 table 6.96: severe damage to surfaced submarines and ships at about 10-20 psi), and the
+ * piers, dry docks and explosives-handling wharves of a base such as Bangor, Kings Bay, Gadzhiyevo or Vilyuchinsk lie
+ * within a few square kilometres. OTA, "The Effects of Nuclear War" (1979), treats SSBNs in port as destroyed by a
+ * warhead or two on the base. Area estimate.
+ */
+export const IN_PORT = { psi: 15, areaKm2: 10 } as const;
 
 /** Silos are point targets: each warhead is aimed at one launcher, so they are resolved silo by silo, not by area. */
 export const POINT_TARGET: ReadonlySet<PlatformClass> = new Set(['icbm_silo']);

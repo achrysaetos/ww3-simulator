@@ -73,7 +73,7 @@ for (const play of plays.length ? plays : ['ukraine-2026:UKR', 'ww3-2027:USA', '
   await page.locator('[data-testid="oob-item"]').first().click();
   check(await has('[data-testid="formation-name"]') && await has('[data-testid^="posture-"]'), `${tag}: picking a unit shows its orders`);
   await page.keyboard.press('n');
-  check(await has('[data-testid="nation-panel"]') && await has('[data-testid="delegate-land"]'), `${tag}: N opens the nation drawer with command authority`);
+  check(await has('[data-testid="nation-panel"]') && !(await has('[data-testid^="delegate-"]')) && await has('[data-testid="staff-land"]'), `${tag}: N opens the nation drawer; delegation lives only on the staff panel`);
   await page.keyboard.press('l');
   check(await has('[data-testid="event-log"]'), `${tag}: L opens the event log`);
   await page.keyboard.press('Escape');
