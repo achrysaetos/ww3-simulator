@@ -220,20 +220,32 @@ function chooseMunition(f: Formation, carriers: Carrier[], tc: TargetClass, dist
 const REAR_TOLERANCE_KM = 15;
 /** The line between two 1-degree cells in contact runs about half a cell (~55 km) from each side's cell centres. */
 const LINE_OFFSET_KM = 55;
-const frontMemo = new WeakMap<World, { tick: number; border?: NodeId[]; cells: Map<string, NodeId[]>; behind: Map<string, number> }>();
+/** A degree of latitude spans at least this many km, so a cell this far apart in latitude is at least as far away. */
+const KM_PER_DEG_LAT = 110.5;
+const frontMemo = new WeakMap<World, { tick: number; cells: Map<string, NodeId[]>; behind: Map<string, number> }>();
 
-/** Land cells with a land neighbour held by someone else: every front is drawn from these. */
+/** Land cells with a land neighbour held by someone else, kept until a land cell changes hands: every front is drawn from these. */
+const borderMemo = new WeakMap<World, { control: NationId[]; cells: NodeId[] }>();
+
 function borderCells(world: World, map: GameMap): NodeId[] {
-  const out: NodeId[] = [];
+  const memo = borderMemo.get(world);
+  if (memo && sameControl(memo.control, world.control, map.landCount)) return memo.cells;
+  const cells: NodeId[] = [];
   for (let n = 0; n < map.landCount; n++) {
     const c = world.control[n];
     if (!c) continue;
     for (let i = map.adjStart[n]; i < map.adjStart[n + 1]; i++) {
       const o = map.adj[i] < map.landCount ? world.control[map.adj[i]] : undefined;
-      if (o && o !== c) { out.push(n as NodeId); break; }
+      if (o && o !== c) { cells.push(n as NodeId); break; }
     }
   }
-  return out;
+  borderMemo.set(world, { control: world.control.slice(0, map.landCount), cells });
+  return cells;
+}
+
+function sameControl(a: NationId[], b: NationId[], n: number): boolean {
+  for (let i = 0; i < n; i++) if (a[i] !== b[i]) return false;
+  return true;
 }
 
 /**
@@ -253,7 +265,7 @@ function behindLineKm(world: World, ctx: SimContext, pic: AirPicture, target: No
   let front = memo.cells.get(key);
   if (!front) {
     front = [];
-    for (const n of (memo.border ??= borderCells(world, map))) {
+    for (const n of borderCells(world, map)) {
       const c = world.control[n];
       if (pic.atWar(c, nation) || !pic.atWar(c, holder)) continue;
       for (let i = map.adjStart[n]; i < map.adjStart[n + 1]; i++)
@@ -262,7 +274,8 @@ function behindLineKm(world: World, ctx: SimContext, pic: AirPicture, target: No
     memo.cells.set(key, front);
   }
   let km = Infinity;
-  for (const n of front) km = Math.min(km, nodeDistance(ctx, n, target));
+  const lat = map.lat[target];
+  for (const n of front) if (Math.abs(map.lat[n] - lat) * KM_PER_DEG_LAT < km) km = Math.min(km, nodeDistance(ctx, n, target));
   const behind = front.length ? Math.max(0, km - LINE_OFFSET_KM) : 0;
   memo.behind.set(aim, behind);
   return behind;
@@ -423,7 +436,9 @@ function resolveRaid(world: World, ctx: SimContext, pic: AirPicture, slice: AirS
     spendSalvo(slice, p.f, p.weapons, ctx.catalog);
   }
   strikeShips(world, ctx, pic, slice, target, attacker, all.filter((p) => p.targetClass === 'ship'));
-  const streams: RaidStream[] = live.map((p) => ({ munition: p.munition, count: p.weapons, overflightKm: overflightKm(world, ctx, pic, p.f.node, target, attacker) }));
+  const overflown = new Map<NodeId, number>();
+  const overflight = (from: NodeId) => overflown.get(from) ?? overflown.set(from, overflightKm(world, ctx, pic, from, target, attacker)).get(from)!;
+  const streams: RaidStream[] = live.map((p) => ({ munition: p.munition, count: p.weapons, overflightKm: overflight(p.f.node) }));
   const leaked = defendRaid(world, ctx, pic, target, attacker, streams);
   live.forEach((p, i) => {
     const flightMin = nodeDistance(ctx, p.f.node, target) / (Math.max(0.05, p.munition.speedMach) * MACH_KM_PER_MIN);
