@@ -6,7 +6,7 @@ import type { Formation, NationId, NodeId, Order, PlatformId, World } from '../.
 import type { OrderCommand, OrderOutcome } from '../orders';
 import { allied, canEnter, hostilesAt, indexByNode, isLandFormation, landSlice } from './state';
 import { cannotDrop, insert, supplyAirheads } from './airborne';
-import { airlift, embarkation, liftMode, overseas } from './strategic';
+import { airlift, embarkation, lifted, liftMode, overseas } from './strategic';
 import { exposureLosses, groundFactorAt } from '../weather/effects';
 import {
   AIR_INTERDICTION, BREAK_CONTACT_PACE, DISMOUNTS, ENTRENCH_PER_DAY, FATIGUE_MARCH_PER_DAY, FATIGUE_RECOVERY_PER_DAY, HOSTILE_GROUND_COST,
@@ -50,9 +50,10 @@ function riverCost(world: World, map: GameMap, from: NodeId, to: NodeId, hostile
 }
 
 /** Effective km of entering `to` from `from`: terrain friction, hostile ground, rivers, minus rail boost, and today's mud or snow there. Infinity when closed to this nation. */
-function edgeKm(world: World, map: GameMap, f: Formation, from: NodeId, to: NodeId, km: number, seize = canSeize(f)): number {
-  if (!canEnter(world, map, f.nation, to)) return Infinity;
+function edgeKm(world: World, map: GameMap, f: Formation, from: NodeId, to: NodeId, km: number, seize = canSeize(f), toGateway = f.order.lift !== undefined): number {
   const holder = world.control[to];
+  // A force on its way to a port or airfield of embarkation crosses allied ground under host-nation support (the 173rd to Aviano).
+  if (!canEnter(world, map, f.nation, to) && !(toGateway && holder && !map.isSea(to) && allied(world, f.nation, holder))) return Infinity;
   const hostile = !!holder && atWar(world, f.nation, holder);
   if (hostile && !seize) return Infinity;
   // Into enemy ground the march only carries the column to the cell's edge, half the way between centres; landCombat's contest then measures the push across the cell.
@@ -79,22 +80,33 @@ export function applyLandOrder(world: World, cmd: OrderCommand, ctx: SimContext)
   }
   const order: Order = { ...cmd.order, issuedTick: world.tick };
   if (!MARCHING.has(posture) || target === undefined || target === f.node) return commit(f, order);
-  // Across water the march ends at the gateway where the formation waits for lift (see strategic.ts).
-  let goal = target;
-  if (overseas(ctx.map, f.node, target)) {
+  const seize = posture === 'attack' && f.kind === 'maneuver';
+  // Across water, or where no land route leads (the 173rd from Vicenza to Korea), the march ends at the gateway
+  // where the formation waits for lift (see strategic.ts).
+  let path = overseas(ctx.map, f.node, target) ? null : route(world, ctx.map, f, target, seize);
+  if (path) delete order.lift;
+  else if (overseas(ctx.map, f.node, target) || betweenTheatres(world, ctx.map, f, target)) {
     const mode = posture === 'move' ? liftMode(world, ctx.catalog, f, cmd.order.lift) : undefined;
     if (!mode) return { ok: false, code: 'no_route', reason: `no land route to node ${target}; order a move to deploy overseas` };
     const gate = embarkation(world, ctx.map, f, target, mode);
     if (gate === undefined) return { ok: false, code: 'no_lift', reason: `no friendly ${mode === 'air' ? 'airfield' : 'port'} to embark at` };
+    order.lift = mode;
     if (gate === f.node) return commit(f, { ...order, path: [] });
-    goal = gate;
-  }
-  const seize = posture === 'attack' && f.kind === 'maneuver';
-  const path = route(world, ctx.map, f, goal, seize);
-  if (!path) return { ok: false, code: 'no_route', reason: `no land route to node ${target}` };
-  const km = path.reduce((sum, n, i) => sum + edgeKm(world, ctx.map, f, i ? path[i - 1] : f.node, n, ctx.map.distanceKm(i ? path[i - 1] : f.node, n), seize), 0);
+    path = route(world, ctx.map, f, gate, seize, true);
+    if (!path) return { ok: false, code: 'no_route', reason: `no land route to the gateway at node ${gate}` };
+  } else return { ok: false, code: 'no_route', reason: `no land route to node ${target}` };
+  const km = path.reduce((sum, n, i) => sum + edgeKm(world, ctx.map, f, i ? path[i - 1] : f.node, n, ctx.map.distanceKm(i ? path[i - 1] : f.node, n), seize, order.lift !== undefined), 0);
   const kmPerDay = marchKmPerDay(world, ctx.catalog, f);
   return commit(f, { ...order, path }, kmPerDay > 0 ? (km / kmPerDay) * 24 : undefined);
+}
+
+/** Shortest move that counts as a deployment between theatres rather than a march blocked at the front (judgement call: Vicenza to Korea, not Kharkiv to Izium). */
+const THEATRE_KM = 1500; // param:
+
+/** A move with no land route that lift can make instead: far off, into ground the formation may enter and its side holds. */
+function betweenTheatres(world: World, map: GameMap, f: Formation, target: NodeId): boolean {
+  const holder = world.control[target];
+  return map.distanceKm(f.node, target) >= THEATRE_KM && canEnter(world, map, f.nation, target) && !!holder && allied(world, f.nation, holder);
 }
 
 function commit(f: Formation, order: Order, etaHours?: number): OrderOutcome {
@@ -104,9 +116,9 @@ function commit(f: Formation, order: Order, etaHours?: number): OrderOutcome {
 }
 
 /** Cheapest land route for this formation. The heuristic is straight-line km, so edge costs are scaled until the cheapest (full rail) edge never undercuts it. */
-function route(world: World, map: GameMap, f: Formation, to: NodeId, seize: boolean): NodeId[] | null {
+function route(world: World, map: GameMap, f: Formation, to: NodeId, seize: boolean, toGateway = false): NodeId[] | null {
   const scale = 1 + RAIL_BOOST_MAX;
-  return findPath(map, f.node, to, (a, b, km) => edgeKm(world, map, f, a, b, km, seize) * scale);
+  return findPath(map, f.node, to, (a, b, km) => edgeKm(world, map, f, a, b, km, seize, toGateway) * scale);
 }
 
 function rest(f: Formation, dtDays: number, isolated: boolean, engaged: boolean): void {
@@ -177,8 +189,8 @@ function march(world: World, ctx: SimContext, f: Formation, byNode: Map<number, 
     }
   }
   f.progressKm = 0;
-  // At the gateway of an overseas move: wait there for lift.
-  if (f.order.posture === 'move' && f.order.target !== undefined && overseas(map, f.node, f.order.target)) return;
+  // At the gateway of a lifted move: wait there for lift.
+  if (lifted(map, f.node, f.order)) return;
   const holder = world.control[f.node];
   const contesting = f.order.posture === 'attack' && holder && atWar(world, f.nation, holder);
   if (!contesting && f.order.posture !== 'reserve') f.order = { posture: 'defend', issuedTick: world.tick };

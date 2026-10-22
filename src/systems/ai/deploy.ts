@@ -1,7 +1,7 @@
 import { relation } from '../../core/engine';
 import type { Formation, FormationId, NationId, NodeId, World } from '../../core/types';
 import { alliances } from '../../data/nations';
-import { debarkation, landMass, overseas } from '../land/strategic';
+import { debarkation, landMass, lifted } from '../land/strategic';
 import { isGround, issue } from './forces';
 import type { Plan } from './types';
 
@@ -72,7 +72,7 @@ const THEATRE_KM = 400;
  */
 const PRIORITY: Readonly<Partial<Record<string, Readonly<Partial<Record<string, number>>>>>> = { USA: { PRK: 0.5, IRN: 0.5 } };
 
-const deploying = (p: Plan, f: Formation) => f.status === 'embarked' || (f.order.posture === 'move' && f.order.target !== undefined && overseas(p.ctx.map, f.node, f.order.target));
+const deploying = (p: Plan, f: Formation) => f.status === 'embarked' || lifted(p.ctx.map, f.node, f.order);
 
 /** A front strategic deployment can send forces to: the ground power on both sides around it and the port it lands at. */
 interface Theatre {

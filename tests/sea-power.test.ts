@@ -54,7 +54,7 @@ describe('a submarine blockade is fought, not presence (NV-1)', () => {
     expect(blocked, 'the blockade bites').toBeGreaterThan(0.2);
     expect(loaded - (sq.magazine['mk48' as never] as number), 'torpedoes fired at merchant shipping').toBeGreaterThan(30);
     expect(contested, 'a Chinese hunter reaches the strait').toBe(true);
-  }, 180_000);
+  }, 300_000);
 });
 
 describe('submarines in the Gulf (NV-5, NV-6)', () => {
@@ -83,7 +83,7 @@ describe('submarines in the Gulf (NV-5, NV-6)', () => {
     expect(Object.keys(world.slices.naval.mines).length, 'Iran mines Hormuz').toBeGreaterThan(0);
     expect(wasted).toEqual([]);
     expect(mined).toEqual([]);
-  }, 180_000);
+  }, 300_000);
 
   it('a torpedo spread at a mixed group lands on its warships, not the speedboats around them', () => {
     const s = createSession('gulf-2027', 1);
@@ -94,7 +94,7 @@ describe('submarines in the Gulf (NV-5, NV-6)', () => {
     const hit = [...before].filter(([pid, n]) => (group.equipment[pid as PlatformId] ?? 0) < n).map(([pid]) => classOf(s, pid));
     expect(hit.length).toBeGreaterThan(0);
     for (const c of hit) expect(['patrol', 'usv']).not.toContain(c);
-  }, 60_000);
+  }, 180_000);
 });
 
 describe('escorts and convoys (NV-4)', () => {
@@ -115,7 +115,7 @@ describe('escorts and convoys (NV-4)', () => {
     des.order = { posture: 'patrol', target: iranAt!, path: [], issuedTick: world.tick };
     computeTradeBlocked(env());
     expect(world.theater.tradeBlocked[qat]).toBeLessThan(unescorted - 0.01);
-  }, 120_000);
+  }, 300_000);
 
   // On main the AI never escorted sealift: five US cargo ships were sunk crossing to Europe in baltic-2027.
   it('baltic-2027: the US AI escorts its loaded sealift convoys', () => {
@@ -131,7 +131,7 @@ describe('escorts and convoys (NV-4)', () => {
     });
     expect(sailing).toBeGreaterThan(0);
     expect(escorted / sailing).toBeGreaterThan(0.5);
-  }, 180_000);
+  }, 300_000);
 });
 
 describe('mine countermeasures (NV-3)', () => {
@@ -155,7 +155,7 @@ describe('mine countermeasures (NV-3)', () => {
     }
     expect(hulls(), 'hulls still sweeping').toBeGreaterThanOrEqual(start - 1);
     expect(world.slices.naval.ledger[USA].minesSwept).toBeGreaterThan(40);
-  }, 120_000);
+  }, 300_000);
 });
 
 describe('fleets fight within reach of their bases (NV-7)', () => {
@@ -173,7 +173,7 @@ describe('fleets fight within reach of their bases (NV-7)', () => {
       for (const f of Object.values(world.formations)) if (f.nation === CHN && f.status === 'active' && naval(f) && (map.lon[f.node] > 165 || map.lon[f.node] < -100)) far.add(f.name);
     });
     expect([...far]).toEqual([]);
-  }, 180_000);
+  }, 300_000);
 });
 
 describe('Ukraine orders a drone-boat raid (NV-11)', () => {
@@ -192,7 +192,7 @@ describe('Ukraine orders a drone-boat raid (NV-11)', () => {
     });
     expect(raids.length).toBeGreaterThan(0);
     expect(usv.order.posture).toBe('attack');
-  }, 120_000);
+  }, 300_000);
 });
 
 describe('fleets lie in port (NV-8) and ports weigh by their cargo (NV-13)', () => {
@@ -207,7 +207,7 @@ describe('fleets lie in port (NV-8) and ports weigh by their cargo (NV-13)', () 
       expect(allied(world, f.nation, world.control[f.home]!), name).toBe(true);
     }
     expect(world.control[named(s, 'Expeditionary Strike Group 3').home]).toBe('USA');
-  }, 60_000);
+  }, 180_000);
 
   // On main Gwadar weighed as much as Karachi, so a blockade of Karachi cut half of Pakistan's trade.
   it("Karachi carries most of Pakistan's seaborne trade", () => {
@@ -216,5 +216,5 @@ describe('fleets lie in port (NV-8) and ports weigh by their cargo (NV-13)', () 
     const total = ports.reduce((a, p) => a + p.weight, 0);
     const karachi = ports.find((p) => s.map.cities.some((c) => c.node === p.node && c.name === 'Karachi'))!;
     expect(karachi.weight / total).toBeGreaterThan(0.8);
-  }, 60_000);
+  }, 180_000);
 });

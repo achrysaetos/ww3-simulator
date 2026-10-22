@@ -6,6 +6,7 @@ import { createAi, type Plan } from '../src/systems/ai';
 import { issue } from '../src/systems/ai/forces';
 import { applyLandOrder, landMovement } from '../src/systems/land';
 import { landMass } from '../src/systems/land/strategic';
+import { allied } from '../src/systems/land/state';
 import { navalWar } from '../src/systems/naval';
 import { applyHits } from '../src/systems/naval/combat';
 import { tickEnv } from '../src/systems/naval/env';
@@ -145,8 +146,8 @@ describe('strategic deployment', () => {
   it('refuses an overseas move with nowhere to embark rather than dropping it silently', () => {
     const t = setup();
     const brigade = heavyBrigade(t, 'USA', t.nodeAt(...FORT_HOOD));
-    // Every US port in enemy hands.
-    for (let n = 0; n < t.map.landCount; n++) if (t.world.control[n] === N('USA') && t.map.ports[n]) t.world.control[n] = N('RUS');
+    // Every US and host-ally port in enemy hands.
+    for (let n = 0; n < t.map.landCount; n++) if (t.world.control[n] && allied(t.world, N('USA'), t.world.control[n]) && t.map.ports[n]) t.world.control[n] = N('RUS');
     const result = applyLandOrder(t.world, { type: 'order', nation: N('USA'), formation: brigade.id, order: { posture: 'move', target: t.nodeAt(...BREMERHAVEN) } }, t.engine.context(t.world));
     expect(brigade.order.posture).toBe('defend');
     expect(result).toMatchObject({ ok: false, code: 'no_lift', reason: expect.stringContaining('port') });
