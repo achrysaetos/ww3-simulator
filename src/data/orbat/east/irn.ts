@@ -60,12 +60,17 @@ const missileBase = (name: string, base: Base, tels: Kit, reloads: Kit): OrbatEn
   unit(IRN, name, 'missile', 'brigade', base, { ...tels, truck: 60 }, { ...IRGC_ASF, extraMagazine: reloads });
 const missiles: OrbatEntry[] = [
   missileBase('Imam Ali Missile Base', at('Khorramabad missile base', 33.4, 48.3), { shahab_3_tel: 12, kheibar_shekan_tel: 10 }, { ghadr_110: 100, kheibar_shekan: 90 }),
+  // The land-attack cruise TELs are their own unit in the west. Hoveyzeh (1,350 km) and Paveh (1,650 km) reach Israel only
+  // from western Iran, as the ~30 cruise missiles of 13-14 Apr 2024 did (IDF); from Haji Abad the nearest Israeli cell is
+  // ~1,940 km and the US bases in reach stand on neutral soil. A brigade fires one munition a tick, so cruise TELs that
+  // share a base with ballistic ones never fire.
+  missileBase('Cruise Missile Group (Hoveyzeh, Paveh)', at('Khorramabad', 33.5, 48.35), { hoveyzeh_tel: 6 }, { hoveyzeh: 40 }),
   missileBase('Kermanshah Missile Base', at('Panj Pelleh, Kermanshah', 34.4, 47.0), { emad_tel: 12, fateh_110_tel: 12 }, { emad: 100, fateh_110: 120 }),
   missileBase('Tabriz Missile Base', at('Tabriz missile base', 38.0, 46.4), { zolfaghar_tel: 14, kheibar_shekan_tel: 10 }, { zolfaghar: 120, kheibar_shekan: 80 }),
   missileBase('Shiraz Missile Base', at('Shiraz missile base', 29.65, 52.4), { kheibar_shekan_tel: 8, fattah_tel: 10, fateh_110_tel: 10 }, { kheibar_shekan: 70, fattah_1: 60, fateh_110: 100 }),
   missileBase('Isfahan Missile Base', at('Isfahan missile base', 32.75, 51.85), { shahab_3_tel: 10, emad_tel: 8, fateh_110_tel: 8 }, { ghadr_110: 90, emad: 60, fateh_110: 100 }),
   missileBase('Yazd Missile Base', at('Yazd missile base', 31.9, 54.3), { shahab_3_tel: 8, emad_tel: 5, kheibar_shekan_tel: 7, fattah_tel: 8, zolfaghar_tel: 10 }, { ghadr_110: 50, emad: 40, kheibar_shekan: 50, fattah_1: 50, zolfaghar: 120 }),
-  missileBase('Haji Abad Missile Base', at('Haji Abad', 28.3, 55.9), { sejjil_tel: 6, khorramshahr_tel: 5, hoveyzeh_tel: 6 }, { sejjil: 50, khorramshahr: 40, hoveyzeh: 40 }),
+  missileBase('Haji Abad Missile Base', at('Haji Abad', 28.3, 55.9), { sejjil_tel: 6, khorramshahr_tel: 5 }, { sejjil: 50, khorramshahr: 40 }),
   missileBase('Semnan Missile Base', at('Semnan', 35.24, 53.92), { sejjil_tel: 6, khorramshahr_tel: 5 }, { sejjil: 40, khorramshahr: 30 }),
   missileBase('Hormozgan Coastal Missile Brigade', at('Bandar Abbas coastal', 27.2, 56.1), { khalij_fars_tel: 12, fateh_110_tel: 6, noor_asm_launcher: 30 }, { khalij_fars: 100, fateh_110: 60 }),
 ];

@@ -10,10 +10,15 @@ describe('the top bar front figure, ww3-2027 as Russia', () => {
     s.world.nations[RUS].controlledBy = 'human';
     const held = () => s.world.control.filter((c) => c === RUS).length;
     const lost = () => Object.values(s.world.formations).filter((f) => f.nation === RUS && f.status === 'destroyed').length;
-    s.engine.run(s.world, 40);
-    const [held0, lost0] = [held(), lost()];
-    s.engine.run(s.world, 28);
-    const cells = held() - held0, gone = lost() - lost0;
+    // The first week of the war's first two months in which Russia gains ground and loses divisions: which week that is
+    // moves with any change upstream, the front figure's reading of it must not.
+    let cells = 0, gone = 0;
+    s.engine.run(s.world, 12);
+    for (let week = 0; week < 8 && !(cells > 0 && gone > 2); week++) {
+      const [held0, lost0] = [held(), lost()];
+      s.engine.run(s.world, 28);
+      [cells, gone] = [held() - held0, lost() - lost0];
+    }
     expect(cells).toBeGreaterThan(0);
     expect(gone).toBeGreaterThan(2);
     const stat = frontStat(cells, gone);

@@ -197,7 +197,9 @@ export const ukr = [
   u('GUR / SBU long-range drone units (Lyutyi, UJ-26 Bober)', 'missile', 'battalion', base('Dispersed launch sites, Sumy', 50.91, 34.8), { lyutyi_launcher: 1, bober_launcher: 2, truck: 10 }, { ...WAR, extraMagazine: { lyutyi: 80, bober: 120 } }),
 
   // Air defence (Air Force anti-aircraft missile brigades)
-  u('96th Anti-Aircraft Missile Brigade', 'air_defense', 'brigade', sector.kyiv, { patriot_pac3: 16, nasams: 12, iris_t_slm: 9, s300ps: 12 }, { ...WAR, extraMagazine: { pac3_mse: 48, pac2_gem_t: 24 } }),
+  // Ukraine fires both PAC-3 MSE and PAC-2 GEM-T (The War Zone, 2023). An M903 launcher holds 12 MSE or 4 GEM-T (The War
+  // Zone; Defence24, MSPO 2020), so 4 of the 16 launchers are loaded for GEM-T; the 240 MSE and 24 GEM-T rounds are unchanged.
+  u('96th Anti-Aircraft Missile Brigade', 'air_defense', 'brigade', sector.kyiv, { patriot_pac3: 12, patriot_pac2: 4, nasams: 12, iris_t_slm: 9, s300ps: 12 }, { ...WAR, extraMagazine: { pac3_mse: 96, pac2_gem_t: 8 } }),
   u('138th Anti-Aircraft Missile Brigade', 'air_defense', 'brigade', sector.dnipro, { patriot_pac3: 8, s300ps: 12, iris_t_slm: 6 }, WAR),
   u('160th Anti-Aircraft Missile Brigade', 'air_defense', 'brigade', sector.odesa, { patriot_pac3: 8, s300ps: 12, nasams: 8 }, WAR),
   u('201st Anti-Aircraft Missile Brigade', 'air_defense', 'brigade', sector.zaporizhzhia, { s300ps: 12, iris_t_slm: 6, samp_t: 5 }, WAR),

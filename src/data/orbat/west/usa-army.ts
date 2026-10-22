@@ -146,7 +146,8 @@ export const usaArmy = [
   u('Task Force Pabradė (ABCT battalion task force)', 'maneuver', 'battalion', pabrade, scale(US_ABCT, 0.3), { readiness: 0.9, personnel: 1100 }),
   u('41st Field Artillery Brigade', 'artillery', 'brigade', grafenwoehr, add(US_MLRS_BN, US_MLRS_BN), { readiness: 0.9, personnel: 1500, extraMagazine: { gmlrs: 864, atacms: 72, prsm_inc1: 24 } }),
   u('56th Multi-Domain Command, Long-Range Fires Battalion (2nd MDTF)', 'missile', 'battalion', mainzKastel, { typhon_launcher: 4, truck: 40 }, { readiness: 0.6, personnel: 500, extraMagazine: { tomahawk_blk5: 32, sm6: 16 } }),
-  u('5th Battalion, 7th Air Defense Artillery Regiment', 'air_defense', 'battalion', baumholder, US_PATRIOT_BN, { readiness: 0.9, personnel: 600, extraMagazine: { pac3_mse: 96, pac2_gem_t: 48 } }),
+  // A battalion mixes PAC-3 MSE and GEM-T launchers (an M903 holds 12 MSE or 4 GEM-T): 6 of 24 carry GEM-T, rounds unchanged.
+  u('5th Battalion, 7th Air Defense Artillery Regiment', 'air_defense', 'battalion', baumholder, { ...US_PATRIOT_BN, patriot_pac3: 18, patriot_pac2: 6 }, { readiness: 0.9, personnel: 600, extraMagazine: { pac3_mse: 168, pac2_gem_t: 24 } }),
   u('5th Battalion, 4th Air Defense Artillery Regiment (M-SHORAD)', 'air_defense', 'battalion', ansbach, { stryker_shorad: 36, avenger: 12, truck: 60 }, { readiness: 0.9, personnel: 600 }),
   u('10th Army Air and Missile Defense Command, Patriot Task Force (Poland)', 'air_defense', 'battalion', rzeszow, scale(US_PATRIOT_BN, 0.5), { readiness: 0.9, personnel: 300 }),
   u('Aegis Ashore Missile Defense System Romania', 'air_defense', 'battalion', deveselu, { aegis_ashore: 1 }, { readiness: 0.9, personnel: 200 }),

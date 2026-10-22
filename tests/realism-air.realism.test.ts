@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { measureRun, type RunMetrics, type StrikeWeaponClass } from '../src/metrics';
-import type { MunitionId, NationId, World } from '../src/core/types';
+import type { Catalog } from '../src/core/catalog';
+import type { Formation, FormationId, MunitionId, NationId, PlatformId, World } from '../src/core/types';
 import { createSession } from '../src/scenarios';
 
 const CREWED = new Set(['fighter', 'multirole', 'attack_aircraft', 'bomber', 'stealth_bomber', 'awacs', 'tanker', 'ew_aircraft', 'maritime_patrol', 'transport_aircraft', 'attack_helo', 'transport_helo', 'asw_helo']);
@@ -16,20 +17,48 @@ function upperTierStock(world: World, nation: string): number {
   return n;
 }
 
+/** Crewed aircraft aboard each ship group with a flight deck or hangar (its own and its embarked wings), and that deck space. */
+function decks(world: World, catalog: Catalog): Map<FormationId, { nation: string; deck: number; aircraft: number }> {
+  const out = new Map<FormationId, { nation: string; deck: number; aircraft: number }>();
+  const crewed = (eq: Formation['equipment']) => Object.entries(eq).reduce((a, [p, n]) => a + (CREWED.has(catalog.platform(p as PlatformId).class) ? n : 0), 0);
+  for (const f of Object.values(world.formations)) {
+    if (f.status === 'destroyed' || f.kind === 'air_wing') continue;
+    const deck = Object.entries(f.equipment).reduce((a, [p, n]) => a + (catalog.platform(p as PlatformId).capacity?.aircraft ?? 0) * n, 0);
+    if (deck > 0) out.set(f.id, { nation: f.nation, deck, aircraft: crewed(f.equipment) });
+  }
+  for (const f of Object.values(world.formations)) {
+    const host = f.status !== 'destroyed' && f.kind === 'air_wing' && f.embarkedOn ? out.get(f.embarkedOn) : undefined;
+    if (host) host.aircraft += crewed(f.equipment);
+  }
+  return out;
+}
+
+/** Crewed aircraft each nation lost with the ships that carried them. */
+const lostOnDeck = new WeakMap<RunMetrics, Record<string, number>>();
+
 /** Runs each seed; `joins` answer their treaty calls yes at the deadline, where the AI would draw its answer. */
 function run(scenario: string, days: number, seeds: number[], joins: string[] = []): RunMetrics[] {
   return seeds.map((seed) => {
     const s = createSession(scenario, seed);
     const start = upperTierStock(s.world, 'ISR');
+    const onDeck: Record<string, number> = {};
     const engine = Object.assign(Object.create(s.engine), {
       step: (w: World) => {
         for (const j of w.slices.diplomacy.joins)
           if (joins.includes(j.nation) && w.tick + 1 >= j.dueTick) w.pending.push({ type: 'answer_treaty', nation: j.nation, war: j.war, treaty: j.treaty, join: true });
-        return s.engine.step(w);
+        const before = decks(w, s.catalog);
+        const events = s.engine.step(w);
+        const after = decks(w, s.catalog);
+        for (const [id, b] of before) {
+          const a = after.get(id);
+          if (!a || a.deck < b.deck) onDeck[b.nation] = (onDeck[b.nation] ?? 0) + Math.max(0, b.aircraft - (a?.aircraft ?? 0));
+        }
+        return events;
       },
     });
     const r = measureRun(engine, s.world, s.map, days);
     upperTier.set(r, { start, end: upperTierStock(s.world, 'ISR') });
+    lostOnDeck.set(r, onDeck);
     return r;
   });
 }
@@ -162,13 +191,14 @@ describe('taiwan-2027, first week', () => {
     }
   });
 
-  // CSIS 2023: ~90 % of US aircraft losses were on the ground.
-  it('most US aircraft losses are on the ground', () => {
+  // CSIS 2023: "about 90 percent" of US losses were "on the ground"; its 168-372 US aircraft lost include "the 96 Navy
+  // fighter/attack aircraft lost on U.S. aircraft carriers", so aircraft that go down with their ship count with them.
+  it('most US aircraft losses are on the ground or aboard ships, not in the air', () => {
     for (const r of runs) {
       expect(r.nations.USA).toBeDefined();
       const usa = r.nations.USA!;
       expect(usa.aircraftLostOnGround).toBeGreaterThan(0);
-      expect(usa.aircraftLostOnGround).toBeGreaterThanOrEqual(0.5 * crewedLost(r, 'USA'));
+      expect(usa.aircraftLostOnGround + (lostOnDeck.get(r)!.USA ?? 0)).toBeGreaterThanOrEqual(0.5 * crewedLost(r, 'USA'));
     }
   });
 });
