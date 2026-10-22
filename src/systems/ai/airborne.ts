@@ -1,5 +1,5 @@
 import type { Formation, NodeId } from '../../core/types';
-import { cannotDrop, departure, dropLoss } from '../land/airborne';
+import { cannotDrop, departure, dropLoss, dropShare } from '../land/airborne';
 import { enemyPowerAt } from './fronts';
 import { isGround, issue } from './forces';
 import type { Plan } from './types';
@@ -55,10 +55,12 @@ export function planAirborne(p: Plan): void {
     for (const m of map.neighbors(zone)) if (m < map.landCount) defenders += enemyPowerAt(m, p.index, p.enemies);
     const value = map.airports[zone] ? 2 : 1;
     for (const f of troops) {
-      if (defenders > MAX_DEFENDERS * p.index.power(f) || cannotDrop(world, map, catalog, f, zone)) continue;
+      // What lands is the assault echelon the lift left today can carry, not the whole formation.
+      const landed = p.index.power(f) * dropShare(world, catalog, f);
+      if (defenders > MAX_DEFENDERS * landed || cannotDrop(world, map, catalog, f, zone)) continue;
       const loss = dropLoss(world, map, catalog, p.nation, zone);
       if (loss > MAX_LOSS) continue;
-      const score = value * (1 - loss) - defenders / Math.max(1e-9, p.index.power(f));
+      const score = value * (1 - loss) - defenders / Math.max(1e-9, landed);
       if (!best || score > best.score) best = { f, zone, score };
     }
   }
