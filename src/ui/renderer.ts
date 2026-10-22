@@ -18,7 +18,7 @@ import { cityName } from './placeNames';
 import type { Manifest } from './map/tiles';
 import { weatherLayer } from '../systems/weather/effects';
 import type { ClientState, FormationView } from './snapshot';
-import { clusterStacks, gridSize, indexByNode, type Stack } from './stacks';
+import { clusterStacks, fanRows, gridSize, indexByNode, type Stack } from './stacks';
 import { CounterSprites, ECHELON_W, LOOK, type CounterBox, type Side } from './symbols';
 import {
   BAND_PRESET, bandOf, clampCamera, flight, kmPerPx, project, pxPerDeg, unproject, worldZoom, zoomAt, zoomForPxPerDeg,
@@ -69,6 +69,13 @@ const CELL_PX: Record<ZoomBand, number> = { world: 72, theatre: 92, front: 34 };
 const FAN_PX = 70;
 const FAN_SLOT_PX = 50;
 const COUNTER_SCALE: Record<ZoomBand, number> = { world: 0.72, theatre: 0.9, front: 1.05 };
+
+/** A fan's grid at a node `nodePx` across: columns, slots used (the last one an overflow stack when it cannot show all), and the slot pitch. */
+function fanShape(stack: Stack, nodePx: number, scale: number): { cols: number; slots: number; step: number } {
+  const cols = Math.max(2, Math.min(4, Math.floor(nodePx / FAN_SLOT_PX)));
+  const slots = Math.min(stack.members.length, cols * cols);
+  return { cols, slots, step: Math.min(FAN_SLOT_PX * scale, nodePx / cols) };
+}
 
 export interface HitBox extends CounterBox {
   /** Strongest first. */
@@ -855,8 +862,11 @@ export class MapRenderer {
     }
     const scale = COUNTER_SCALE[band];
     const atNode = new Map<NodeId, number>();
-    /** Bottom row of the last fan drawn at a node, so a second side's fan goes underneath instead of on top. */
-    const fanBottom = new Map<NodeId, number>();
+    const fans = (s: Stack) => s.nodes === 1 && 2 * this.map.halfDeg[s.node] * ppd >= FAN_PX;
+    const fanTop = fanRows(this.stacks.filter(fans), this.map, input.state.control, nationIds, (st) => {
+      const { cols, slots } = fanShape(st, 2 * this.map.halfDeg[st.node] * ppd, 1);
+      return Math.ceil(slots / cols);
+    });
     const own = (s: Stack) => this.sideOf(s.members[0], s.nation, nationIds) === 'friend';
     // Enemies under friends, so the player's own counters are never hidden.
     const order = [...this.stacks].sort((a, b) => Number(own(a)) - Number(own(b)));
@@ -881,15 +891,11 @@ export class MapRenderer {
         if (picked) focusRing = { c: picked.contact!, x: cx, y: cy };
         else if (lead.contact) this.drawUncertainty(lead.contact, cx, cy, false);
       }
-      if (nodePx >= FAN_PX && stack.nodes === 1 && stack.members.length > 1) {
-        const cols = Math.max(2, Math.min(4, Math.floor(nodePx / FAN_SLOT_PX)));
-        const cap = cols * cols;
-        const shown = stack.members.length > cap ? stack.members.slice(0, cap - 1) : stack.members;
-        const slots = shown.length + (stack.members.length > shown.length ? 1 : 0);
-        const rows = Math.ceil(slots / cols), step = Math.min(FAN_SLOT_PX * scale, nodePx / cols);
-        const prev = fanBottom.get(stack.node);
-        const y0 = prev === undefined ? cy - ((rows - 1) / 2) * step : prev + step;
-        fanBottom.set(stack.node, y0 + (rows - 1) * step);
+      const top = fanTop.get(stack);
+      if (top !== undefined) {
+        const { cols, slots, step } = fanShape(stack, nodePx, scale);
+        const shown = slots < stack.members.length ? stack.members.slice(0, slots - 1) : stack.members;
+        const y0 = cy + top * step;
         const at = (i: number): [number, number] => [cx + ((i % cols) - (Math.min(cols, slots) - 1) / 2) * step, y0 + Math.floor(i / cols) * step];
         shown.forEach((f, i) => {
           const [x, y] = at(i);
