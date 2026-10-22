@@ -447,7 +447,8 @@ export function planNaval(p: Plan): void {
     let reach = 0;
     for (const [id, n] of Object.entries(f.magazine)) {
       const m = p.ctx.catalog.munition(id as MunitionId);
-      if (n >= 1 && ANTISHIP_KINDS.has(m.kind)) reach = Math.max(reach, m.rangeKm);
+      // A believed magazine is an estimate scaled by the fix's confidence: any rounds believed there are a threat.
+      if (n > 0 && ANTISHIP_KINDS.has(m.kind)) reach = Math.max(reach, m.rangeKm);
     }
     if (reach > 0) shoreReach.set(f, reach);
   }
@@ -498,7 +499,10 @@ export function planNaval(p: Plan): void {
     // Before entering a war only submarines deploy: quiet, they take station unseen, while surface
     // groups sent forward would sit in the enemy's opening salvo (judgment).
     if (!atWar && roles.get(g) !== 'submarine') continue;
-    if (inPort.has(g.home) && roles.get(g) !== 'raider' && roles.get(g) !== 'ssbn') {
+    // Sweepers keep clearing: a hull struck working a field is the price of the lane, not a loss that buys nothing (in
+    // February 1991 USS Tripoli and USS Princeton struck mines off Kuwait and the sweeping went on), and fieldGuarded
+    // already keeps them off a field the enemy can still fight over.
+    if (inPort.has(g.home) && roles.get(g) !== 'raider' && roles.get(g) !== 'ssbn' && roles.get(g) !== 'mcm') {
       issue(p, g, { posture: 'patrol', target: g.home });
       continue;
     }

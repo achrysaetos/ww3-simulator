@@ -9,7 +9,7 @@ import { applyHits, fire, navalCombat, targetValue } from './combat';
 import { detect } from './detection';
 import { geography, harbour, seaNeighbour } from './geography';
 import { reindex, tickEnv } from './env';
-import { mineWarfare } from './mines';
+import { chartWatchedLaying, mineWarfare } from './mines';
 import { advance } from './movement';
 import { refreshOrders } from './orders';
 import { sealift } from './sealift';
@@ -61,8 +61,9 @@ export const navalWar: System = {
       if (f.node !== from) reindex(env, f, from);
       for (const e of env.embarked.get(f.id) ?? []) e.node = f.node;
     }
-    mineWarfare(env);
+    const layers = mineWarfare(env);
     const tracks = detect(env);
+    chartWatchedLaying(world, layers, tracks);
     world.slices.naval.tracks = Object.fromEntries([...tracks].map(([id, s]) => [id, [...s]]));
     navalCombat(env, tracks);
     landings(env);
