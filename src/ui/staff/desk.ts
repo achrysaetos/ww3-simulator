@@ -186,6 +186,12 @@ export class StaffDesk {
     return fresh.length > 0;
   }
 
+  /** One decision was put to the player on its own (a crisis), so the brief does not open for it again. */
+  markBriefed(key: string): void {
+    this.briefed.add(key);
+    this.version++;
+  }
+
   /** The brief is open: what it shows now counts as briefed. */
   briefOpened(): void {
     for (const c of this.decisions) this.briefed.add(c.key);

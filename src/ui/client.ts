@@ -2,6 +2,7 @@ import { loadMap } from '../data/load';
 import { COMMAND_DOMAINS, type Command, type FormationId, type NationId, type SimEvent } from '../core/types';
 import { describeResult, PlaceNamer, type Namer } from './events';
 import { EventFeed } from './feed';
+import { nationName } from './placeNames';
 import { readSlot, writeSlot, type SlotInfo } from './slot';
 import type { Action, Card } from './staff/advice';
 import { StaffDesk } from './staff/desk';
@@ -113,7 +114,7 @@ export class SimClient {
   }
 
   readonly namer: Namer = {
-    nation: (id) => this.nationCards.get(id)?.name ?? id,
+    nation: (id) => nationName(id, this.nationCards.get(id)?.name),
     formation: (id) => this.formationNames.get(id),
     item: (id) => this.namer.known(id) ?? id.replace(/_/g, ' '),
     known: (id) => this.meta?.platforms[id]?.name ?? this.meta?.munitions[id]?.name,

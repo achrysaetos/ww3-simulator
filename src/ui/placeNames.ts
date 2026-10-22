@@ -22,3 +22,10 @@ const SPELLING: Readonly<Record<string, string>> = {
 };
 
 export const cityName = (raw: string): string => SPELLING[raw] ?? raw;
+
+/** Everyday names for nations whose ISO name reads like a form field: "South Korea", not "Korea, Republic of". */
+const NATION: Readonly<Record<string, string>> = {
+  KOR: 'South Korea', PRK: 'North Korea', MDA: 'Moldova', SYR: 'Syria', LAO: 'Laos', FSM: 'Micronesia', VAT: 'Vatican', BRN: 'Brunei',
+};
+
+export const nationName = (id: string, iso: string | undefined): string => NATION[id] ?? iso ?? id;

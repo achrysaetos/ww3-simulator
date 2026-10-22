@@ -5,6 +5,7 @@
  */
 import type { GameMap } from '../../core/map';
 import type { NationId, NodeId } from '../../core/types';
+import { nationName } from '../placeNames';
 import type { NationCard, ScenarioCard } from '../snapshot';
 
 export const THREAT_LABELS = ['Tension', 'Elevated', 'High', 'Severe', 'Critical'] as const;
@@ -21,9 +22,7 @@ export interface ScenarioInfo {
   theatre: { node: NodeId; name: string } | null;
 }
 
-const SHORT: Record<string, string> = { KOR: 'South Korea', PRK: 'North Korea', MDA: 'Moldova', SYR: 'Syria', LAO: 'Laos', FSM: 'Micronesia', VAT: 'Vatican', BRN: 'Brunei' };
-/** A nation's everyday name, for tight labels: "South Korea", not "Korea, Republic of". */
-export const shortName = (id: NationId, cards: ReadonlyMap<NationId, NationCard>) => SHORT[id] ?? cards.get(id)?.name ?? id;
+export const shortName = (id: NationId, cards: ReadonlyMap<NationId, NationCard>) => nationName(id, cards.get(id)?.name);
 
 const capital = (map: GameMap, id: NationId): NodeId | null => {
   const i = map.nationIds.indexOf(id);

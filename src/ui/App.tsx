@@ -4,10 +4,13 @@ import { DEFAULT_DELEGATION, DOMAIN_OF_KIND } from '../systems/orders';
 import type { SimClient } from './client';
 import { Palette } from './colors';
 import { briefingFor, objectives as objectivesOf, outcome as outcomeOf } from './briefing';
-import { BriefingDialog, ConfirmDialog, EndDialog, GameMenu, type Confirmation } from './GameFlow';
+import { CrisisScreen } from './crisis/CrisisScreen';
+import { nextCrisis, type Crisis, type CrisisContext } from './crisis/crisis';
+import { ConfirmDialog, EndDialog, GameMenu, type Confirmation } from './GameFlow';
+import { crisesOn } from './prefs';
 import { EventLog } from './EventLog';
 import { FormationList, FormationPanel, GROUND_KINDS, postureLabel, type Command as CommandHolder } from './FormationPanel';
-import { MapView } from './MapView';
+import { MapView, openingFocus } from './MapView';
 import { TopBar, type TopBarStat } from './map/TopBar';
 import { ContactPanel } from './map/ContactPanel';
 import { DOMAIN_LABEL, NationPanel } from './NationPanel';
@@ -15,7 +18,10 @@ import { NuclearDialog } from './NuclearDialog';
 import { OutputsPanel } from './outputs/OutputsPanel';
 import { Routes } from './routes';
 import type { LoggedEvent } from './feed';
+import { domainNames, OpeningTitle, SituationCard } from './start/Opening';
+import { openingFacts } from './start/opening';
 import { StartScreen } from './start/StartScreen';
+import { shortName } from './start/scenarioInfo';
 import type { Overlays } from './renderer';
 import type { Action, Card, Drawer } from './staff/advice';
 import { DailyBrief } from './staff/DailyBrief';
@@ -73,7 +79,13 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
   const [selected, setSelected] = useState<FormationId | null>(null);
   const [pending, setPending] = useState<{ posture: Posture; targetClass?: TargetClass; lift?: 'air' | 'sea' } | null>(null);
   const [confirm, setConfirm] = useState<Confirmation | null>(null);
-  const [briefingOpen, setBriefingOpen] = useState(true);
+  // A new game opens on the cinematic title, then the situation report; a loaded one on the report.
+  const [opening, setOpening] = useState<'title' | 'card' | null>(() => (client.state.tick === 0 ? 'title' : 'card'));
+  const briefingOpen = opening !== null;
+  // The first turn runs under the title, so the opening wars are declared and the staff has read them when the report opens.
+  useEffect(() => {
+    if (opening === 'title' && client.state.tick === 0) client.step();
+  }, []);
   const [endSeen, setEndSeen] = useState<string | null>(null);
   const [nuclearPick, setNuclearPick] = useState(false);
   const [nuclearTarget, setNuclearTarget] = useState<NodeId | null>(null);
@@ -84,6 +96,8 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
   const [overlays, setOverlays] = useState<Overlays>(DEFAULT_OVERLAYS);
   const [delegating, setDelegating] = useState<Partial<Record<CommandDomain, boolean>>>(() => client.openingDelegation);
   const [toast, setToast] = useState<Toast | null>(null);
+  const [crisis, setCrisis] = useState<{ c: Crisis; resume: number; chosen: number | null } | null>(null);
+  const shownCrises = useRef(new Set<string>());
   const watch = useRef<Watch | null>(null);
   const lastSeq = () => client.feed.newest(new Set(), null, 1)[0]?.seq ?? -1;
   const speed = client.ticksPerSec;
@@ -156,17 +170,58 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
     });
   }, [client]);
 
-  // The brief opens itself when a decision needs the player (or each morning, by the player's setting).
+  const crisisContext = (): CrisisContext | null => d ? {
+    me: playAs, tick: client.state.tick, dtHours: client.meta?.dtHours ?? 6, d, nations: client.state.nations,
+    name: (id) => shortName(id, client.nationCards),
+    capital: (id) => {
+      const i = client.map.nationIds.indexOf(id);
+      const cell = i < 0 ? undefined : client.map.data.nations[i].capital?.cell;
+      return cell === undefined ? undefined : (cell as NodeId);
+    },
+  } : null;
+
+  // A crisis stops the clock and takes the screen; otherwise the brief opens itself when a decision
+  // needs the player (or each morning, by the player's setting).
   useEffect(() => {
-    if (brief || briefingOpen || (endKey && endKey !== endSeen) || !client.state.date) return;
+    if (brief || crisis || briefingOpen || (endKey && endKey !== endSeen) || !client.state.date) return;
+    const ctx = crisesOn() ? crisisContext() : null;
+    const next = ctx && nextCrisis(desk.cards, shownCrises.current, ctx);
+    if (next) {
+      shownCrises.current.add(next.key);
+      desk.markBriefed(next.key);
+      setCrisis({ c: next, resume: client.ticksPerSec, chosen: null });
+      client.setSpeed(0);
+      if (next.node !== undefined) focusHandle.current?.(next.node, 'wide');
+      return;
+    }
     if (desk.briefDue(new Date(client.state.date), cadence)) openBrief();
-  }, [client.state.tick, desk.version, brief, briefingOpen, cadence]);
+  }, [client.state.tick, desk.version, brief, crisis, briefingOpen, cadence]);
+
+  const chooseCrisis = (i: number) => {
+    if (!crisis) return;
+    const o = crisis.c.options[i];
+    if (o.defer) return closeCrisis();
+    if (o.action.kind === 'show') {
+      setCrisis(null);
+      focusNode(o.action.node);
+      return;
+    }
+    client.act(crisis.c.card, o.action);
+    if (o.action.kind !== 'command') return closeCrisis();
+    setCrisis({ ...crisis, chosen: i });
+    // The engine answers on the next turn: run it now, so the answer shows while the crisis is still open.
+    if (!client.ticksPerSec) client.step();
+  };
+  const closeCrisis = () => {
+    if (crisis?.resume) client.setSpeed(crisis.resume);
+    setCrisis(null);
+  };
 
   const toggleDrawer = useCallback((id: Drawer) => setDrawer((cur) => (cur === id ? null : id)), []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (brief || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (brief || opening || crisis || e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key === 'Escape') {
         if (pending || nuclearPick) { setPending(null); setNuclearPick(false); setNuclearTarget(null); }
         else setDrawer(null);
@@ -185,7 +240,7 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [client, brief, pending, nuclearPick, openBrief, toggleDrawer]);
+  }, [client, brief, opening, crisis, pending, nuclearPick, openBrief, toggleDrawer]);
 
   const quit = () => setConfirm({
     title: 'Quit to the start screen?',
@@ -273,8 +328,9 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
   const day = date && client.meta ? Math.max(0, Math.floor((date.getTime() - new Date(client.meta.scenario.startDate).getTime()) / 864e5)) : 0;
   const selectedView = selected ? client.state.formations.find((f) => f.entry.id === selected) : undefined;
   const targeting = nuclearPick ? 'nuclear' : pending ? 'order' : null;
-  const delegatedNames = COMMAND_DOMAINS.filter((k) => ai[k]).map((k) => DOMAIN_LABEL[k].name);
-  const keptNames = COMMAND_DOMAINS.filter((k) => !ai[k]).map((k) => DOMAIN_LABEL[k].name);
+  const want = { ...ai, ...delegating };
+  const focusAt = useMemo(() => (client.meta ? openingFocus(client.map, client.meta.scenario, playAs) : null), [client, playAs]);
+  const theatreName = focusAt === null ? '' : `${shortName(client.map.owner[focusAt] as NationId, client.nationCards)} · ${places.name(focusAt).replace(/^near /, '')}`;
   const n = client.state.nations.get(playAs);
   const mineIdx = nationIds.indexOf(playAs);
   const enemiesKey = d?.enemies.join(',') ?? '';
@@ -288,7 +344,7 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
   const front = desk.frontChange(7);
   const atWar = (d?.enemies.length ?? 0) > 0;
   const defcon = desk.nuclearStep === 2 ? 1 : desk.nuclearStep === 1 ? 2 : atWar ? 3 : 5;
-  const role = roleOf(ai);
+  const role = roleOf(want);
   const stats: TopBarStat[] = n ? [
     ...(atWar ? [{ label: 'Front · 7d', value: !front ? 'Holding' : `${front > 0 ? '+' : ''}${front} cells`, tone: !front ? undefined : front > 0 ? 'good' as const : 'bad' as const }] : []),
     { label: 'War support', value: `${Math.round(n.warSupport * 100)}%`, tone: n.warSupport < 0.4 ? 'bad' : undefined },
@@ -341,12 +397,12 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
           </div>
         )}
       </div>
-      <GameMenu client={client} onBriefing={() => setBriefingOpen(true)} onQuit={quit} />
+      <GameMenu client={client} onBriefing={() => setOpening('card')} onQuit={quit} />
     </div>
   );
 
   return (
-    <div className={`ww-shell ${drawer ? 'drawer-open' : ''} ${targeting ? 'targeting' : ''}`} data-testid="shell">
+    <div className={`ww-shell ${drawer ? 'drawer-open' : ''} ${targeting ? 'targeting' : ''} ${crisis || opening === 'title' ? 'hud-off' : ''}`} data-testid="shell">
       <MapView
         client={client}
         palette={palette}
@@ -360,7 +416,7 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
         focusHandle={focusHandle}
       />
       <TopBar
-        nation={{ id: playAs, name: n?.name ?? client.namer.nation(playAs) }}
+        nation={{ id: playAs, name: client.namer.nation(playAs) }}
         subtitle={`${role?.name ?? 'Supreme Commander'} · ${client.meta?.scenario.name ?? ''}`}
         date={date}
         day={day}
@@ -482,11 +538,44 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
           onRelease={releaseNuclear}
         />
       )}
-      {briefingOpen && (
-        <BriefingDialog client={client} nation={playAs} briefing={briefing} objectives={objectives} delegated={delegatedNames} kept={keptNames} onClose={() => setBriefingOpen(false)} />
+      {opening === 'title' && date && (
+        <OpeningTitle scenario={client.meta?.scenario.name ?? ''} theatre={theatreName} date={date} onDone={() => setOpening('card')} />
       )}
-      {ending && endKey !== endSeen && !briefingOpen && !brief && (
+      {opening === 'card' && date && (
+        <SituationCard
+          me={playAs}
+          nation={client.namer.nation(playAs)}
+          scenario={client.meta!.scenario}
+          date={date}
+          day={day}
+          briefing={briefing}
+          objectives={objectives}
+          facts={openingFacts(client.state, playAs, d)}
+          name={(id) => shortName(id, client.nationCards)}
+          role={roleOf(want)}
+          youRun={domainNames(COMMAND_DOMAINS.filter((k) => !want[k]))}
+          staffRuns={domainNames(COMMAND_DOMAINS.filter((k) => want[k]))}
+          cards={desk.cards}
+          onClose={() => setOpening(null)}
+        />
+      )}
+      {ending && endKey !== endSeen && !briefingOpen && !brief && !crisis && (
         <EndDialog outcome={ending} objectives={objectives} onContinue={() => setEndSeen(endKey)} onQuit={() => client.quit()} />
+      )}
+      {crisis && date && (
+        <CrisisScreen
+          crisis={crisis.c}
+          me={playAs}
+          nation={client.namer.nation(playAs)}
+          scenario={client.meta?.scenario.name ?? ''}
+          date={date}
+          defcon={defcon}
+          chosen={crisis.chosen}
+          sent={desk.answered.find((x) => x.card.key === crisis.c.key)}
+          paused={!speed}
+          onChoose={chooseCrisis}
+          onClose={closeCrisis}
+        />
       )}
       {confirm && <ConfirmDialog c={confirm} onClose={() => setConfirm(null)} />}
     </div>

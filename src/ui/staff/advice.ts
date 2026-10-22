@@ -461,6 +461,45 @@ function cities(s: Situation): Card[] {
   return out;
 }
 
+/** How close enemy manoeuvre units must stand to the capital, by the player's own contacts, before it counts as threatened. */
+export const CAPITAL_THREAT_KM = 120;
+
+/**
+ * Enemy formations the player's intelligence holds within striking distance of its capital: a
+ * decision-grade moment, at most once a week. Reads only the player's contacts.
+ */
+function capitalThreat(s: Situation): Card[] {
+  if (!s.d.enemies.length) return [];
+  const i = s.nationIds.indexOf(s.me);
+  const cell = i < 0 ? undefined : s.map.data.nations[i].capital?.cell;
+  if (cell === undefined) return [];
+  const cap = cell as NodeId;
+  const enemies = new Set(s.d.enemies);
+  const near = s.formations
+    .filter((f) => enemies.has(f.entry.nation) && f.entry.kind === MANEUVER && f.status === 'active' && !s.map.isSea(f.node))
+    .map((f) => ({ f, km: s.map.distanceKm(f.node, cap) }))
+    .filter((x) => x.km <= CAPITAL_THREAT_KM);
+  if (!near.length) return [];
+  const city = bare(s.namer.place.name(cap));
+  const closest = Math.round(Math.min(...near.map((x) => x.km)));
+  const reserve = nearestFree(s, cap, (f) => f.posture === 'reserve' && s.map.distanceKm(f.node, cap) > 0);
+  const send: Action | undefined = reserve
+    ? { kind: 'command', label: `Send ${reserve.f.entry.name}`, command: { type: 'order', nation: s.me, formation: reserve.f.entry.id, order: { posture: 'move', target: cap } } }
+    : undefined;
+  const week = Math.floor((s.tick * s.dtHours) / 24 / 7);
+  return [{
+    key: `capital|${week}`, topic: 'threat', role: 'intel', tone: 'advice', tick: s.tick, node: cap, urgent: true,
+    title: `${city} is threatened`,
+    text: `${plural(near.length, 'enemy formation')} within ${CAPITAL_THREAT_KM} km of ${city}, the nearest ${closest} km out.`,
+    ask: reserve ? `Move ${reserve.f.entry.name} into ${city}.` : `Hold ${city} with what is there.`,
+    cost: reserve ? { label: 'Cost', text: `${reserve.f.entry.name} leaves the reserve, ${Math.round(reserve.km)} km away` } : undefined,
+    figure: { value: String(closest), unit: 'km', caption: 'nearest enemy to the capital' },
+    chip: 'Capital',
+    primary: send ?? { kind: 'show', label: 'Show me', node: cap },
+    secondary: send ? { kind: 'show', label: 'Show me', node: cap } : { kind: 'later', label: 'Noted' },
+  }];
+}
+
 /** Trained reserves too thin to refill the front, while the public would bear more call-ups. */
 function reserves(s: Situation): Card[] {
   const n = s.nations.get(s.me);
@@ -509,7 +548,7 @@ function wire(s: Situation): Card[] {
   return out;
 }
 
-const SOURCES: readonly ((s: Situation) => Card[])[] = [raids, nuclear, cities, treatyCalls, peaceOffers, massing, shells, reserves, orderAnswers, shortages, wire];
+const SOURCES: readonly ((s: Situation) => Card[])[] = [raids, nuclear, cities, treatyCalls, peaceOffers, capitalThreat, massing, shells, reserves, orderAnswers, shortages, wire];
 
 export interface Answer {
   ok: boolean;

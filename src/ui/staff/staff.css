@@ -261,3 +261,7 @@
   .ww-brief-thumb { display: none; }
   .ww-brief-foot { flex-wrap: wrap; }
 }
+
+/* A crisis or the opening report has the screen: the HUD steps back so only the map shows behind it. */
+.ww-shell.hud-off .ww-hud-left, .ww-shell.hud-off .ww-warroom, .ww-shell.hud-off .ww-topbar, .ww-shell.hud-off .ww-dock,
+.ww-shell.hud-off .ww-ticker, .ww-shell.hud-off .map-zoom, .ww-shell.hud-off .ww-toast { opacity: 0; pointer-events: none; transition: opacity 0.3s; }

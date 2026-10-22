@@ -1,0 +1,235 @@
+/**
+ * Crises: the few staff cards big enough to stop the clock and take the screen (a treaty call,
+ * an enemy nuclear alert, an armistice offer, a threat to the capital), recast as one decision
+ * with two or three options, each argued by an adviser. Every option is an action the card
+ * already offers or a decision to wait, so choosing one issues the same command the War Room
+ * and the Daily Brief would. Pure: reads the card and the player's own view.
+ */
+import type { NationId, NodeId } from '../../core/types';
+import { treatyName } from '../events';
+import type { NationDetail, NationSummary } from '../snapshot';
+import type { Action, Card } from '../staff/advice';
+import type { Role } from '../staff/advisors';
+
+export type CrisisKind = 'treaty' | 'nuclear' | 'peace' | 'capital';
+export type Tone = 'red' | 'gold' | 'blue';
+
+export interface CrisisOption {
+  title: string;
+  /** What happens, in one or two short sentences. */
+  text: string;
+  button: string;
+  tone: Tone;
+  advisor: Role;
+  quote: string;
+  action: Action;
+  irreversible?: boolean;
+  /** Close the crisis and leave the card on the table, to be answered later from the War Room or the brief. */
+  defer?: true;
+  recommended: boolean;
+}
+
+export interface CrisisFact { label: string; value: string; tone?: Tone }
+
+export interface Crisis {
+  key: string;
+  kind: CrisisKind;
+  card: Card;
+  /** The wire the alert comes over, e.g. "Foreign ministry · Treaty desk". */
+  source: string;
+  headline: string;
+  sub: string;
+  /** Hours left to answer; null when the decision has no deadline. */
+  hoursLeft: number | null;
+  /** The whole answer window, for the deadline bar. */
+  windowHours: number | null;
+  node?: NodeId;
+  facts: CrisisFact[];
+  options: CrisisOption[];
+  /** One line on how the staff stands: agreed, or split. */
+  verdict: string;
+}
+
+export interface CrisisContext {
+  me: NationId;
+  tick: number;
+  dtHours: number;
+  d: NationDetail;
+  nations: ReadonlyMap<NationId, NationSummary>;
+  name(id: NationId): string;
+  capital(id: NationId): NodeId | undefined;
+}
+
+export const CRISIS_KINDS: Record<string, CrisisKind> = { treaty: 'treaty', nalert: 'nuclear', peace: 'peace', capital: 'capital' };
+export const crisisKind = (card: Card): CrisisKind | undefined => (card.urgent || card.key.startsWith('peace|') ? CRISIS_KINDS[card.key.split('|')[0]] : undefined);
+
+const n = (x: number) => x.toLocaleString('en-US');
+const pct = (x: number) => `${Math.round(x * 100)}%`;
+const later = (label: string): Action => ({ kind: 'later', label });
+const same = (a: Action | undefined, b: Action) => !!a && a.kind === b.kind && JSON.stringify(a) === JSON.stringify(b);
+
+function treaty(card: Card, c: CrisisContext): Crisis | null {
+  const [, war, tr] = card.key.split('|');
+  const call = c.d.treatyCalls.find((x) => x.war === war && x.treaty === tr);
+  if (!call) return null;
+  const aggressor = c.name(call.aggressor), victim = c.name(call.victim), name = treatyName(call.treaty);
+  const theirWarheads = c.nations.get(call.aggressor)?.warheads ?? 0;
+  const ours = c.nations.get(c.me)?.warheads ?? 0;
+  const join: Action = { kind: 'command', label: 'Honour the treaty', command: { type: 'answer_treaty', nation: c.me, war: call.war, treaty: call.treaty, join: true } };
+  const stay: Action = { kind: 'command', label: 'Stand aside', command: { type: 'answer_treaty', nation: c.me, war: call.war, treaty: call.treaty, join: false } };
+  const hoursLeft = Math.max(0, (call.dueTick - c.tick) * c.dtHours);
+  const joinFirst = card.primary?.kind === 'command' && card.primary.command.type === 'answer_treaty' && card.primary.command.join;
+  const options: CrisisOption[] = [
+    {
+      title: 'Go to war', text: `We declare war on ${aggressor} and fight beside ${victim}.`, button: 'Honour the treaty', tone: 'red', advisor: 'chief', irreversible: true,
+      quote: theirWarheads ? `Our word is the deterrent. If it bends now, it breaks everywhere.` : `${aggressor} cannot match us. Every day we wait, ${victim} loses ground.`,
+      action: join, recommended: joinFirst,
+    },
+    {
+      title: 'Wait and consult', text: `No answer yet. The call stays open ${hoursLeft >= 48 ? `${Math.floor(hoursLeft / 24)} more days` : `${Math.round(hoursLeft)} more hours`}.`, button: 'Decide later', tone: 'gold', advisor: 'foreign',
+      quote: 'Let me sound out the other members first. We have time, not much.', action: later('Decide later'), defer: true, recommended: false,
+    },
+    {
+      title: 'Stand aside', text: `We stay out of the war. Allies may doubt the ${name}.`, button: 'Stand aside', tone: 'blue', advisor: 'security',
+      quote: theirWarheads && !ours ? `${aggressor} holds ${n(theirWarheads)} warheads. This is not a war we can finish.` : 'This is not our war. Our forces stay ours.',
+      action: stay, recommended: !joinFirst,
+    },
+  ];
+  return {
+    key: card.key, kind: 'treaty', card, node: c.capital(call.victim),
+    source: 'Foreign ministry · Treaty desk',
+    headline: 'Treaty invoked',
+    sub: `${victim} calls on the ${name}${call.reconsidered ? ' again' : ''} · ${aggressor} has attacked`,
+    hoursLeft, windowHours: Math.max(hoursLeft, 7 * 24),
+    facts: [
+      { label: 'Aggressor', value: aggressor, tone: 'red' },
+      { label: 'Under attack', value: victim, tone: 'blue' },
+      { label: `${aggressor} warheads`, value: theirWarheads ? n(theirWarheads) : 'None', tone: theirWarheads ? 'red' : undefined },
+      { label: 'Our warheads', value: ours ? n(ours) : 'None' },
+      { label: 'Our wars now', value: c.d.enemies.length ? `${c.d.enemies.length} at war` : 'At peace' },
+    ],
+    options,
+    verdict: joinFirst ? 'Your advisers lean to war, 2 to 1' : 'Your advisers lean to staying out, 2 to 1',
+  };
+}
+
+function nuclear(card: Card, c: CrisisContext): Crisis | null {
+  const by = card.key.split('|')[1] as NationId;
+  const them = c.name(by);
+  const alert = c.d.nuclear.alert;
+  const theirs = c.nations.get(by)?.warheads ?? 0;
+  const raise = card.primary?.kind === 'command' ? card.primary : undefined;
+  const at = c.capital(by);
+  const options: CrisisOption[] = [];
+  if (raise) {
+    options.push({
+      title: 'Raise our alert', text: `Mate our ${n(alert.stored)} stored warheads to launchers, so a strike on us can be answered.`, button: 'Raise the alert', tone: 'red', advisor: 'security',
+      quote: 'If they can strike and we cannot answer, deterrence is gone.', action: raise, recommended: true,
+    });
+  }
+  options.push({
+    title: 'Hold readiness', text: raise ? `We match nothing. ${them} sees no escalation from us.` : 'We have no nuclear answer of our own. We hold and watch.',
+    button: 'Hold', tone: 'gold', advisor: 'foreign', quote: raise ? 'Matching them tells them we expect a strike. Give the hotline a day.' : 'Our allies hold the deterrent. Let them speak first.',
+    action: later('Hold'), recommended: !raise,
+  });
+  if (at !== undefined) {
+    options.push({
+      title: 'Look first', text: 'Return to the map with the clock stopped, and decide from the Daily Brief.', button: 'Show the map', tone: 'blue', advisor: 'intel',
+      quote: 'One report is not a satellite fix. Look before you answer.', action: { kind: 'show', label: 'Show me', node: at }, recommended: false,
+    });
+  }
+  return {
+    key: card.key, kind: 'nuclear', card, node: at,
+    source: 'Strategic command · Early warning',
+    headline: 'Nuclear alert',
+    sub: `${them} is mating warheads to its launchers`,
+    hoursLeft: null, windowHours: null,
+    facts: [
+      { label: `${them} warheads`, value: theirs ? n(theirs) : 'Unknown', tone: 'red' },
+      { label: 'Ours ready now', value: n(alert.mated), tone: alert.mated ? 'blue' : undefined },
+      { label: 'Ours in storage', value: n(alert.stored) },
+      { label: 'Our posture', value: alert.ordered ? 'Alert ordered' : 'Peacetime' },
+    ],
+    options,
+    verdict: raise ? 'Your advisers disagree, 2 to 1' : 'Your advisers agree: hold',
+  };
+}
+
+function peace(card: Card, c: CrisisContext): Crisis | null {
+  const from = card.key.split('|')[1] as NationId;
+  const them = c.name(from);
+  const accept: Action = { kind: 'command', label: 'Accept peace', command: { type: 'offer_peace', nation: c.me, target: from } };
+  const take = same(card.primary, accept);
+  const held = c.d.nodesHome ? c.d.nodesHeld / c.d.nodesHome : 1;
+  const me = c.nations.get(c.me);
+  return {
+    key: card.key, kind: 'peace', card, node: c.capital(from),
+    source: 'Foreign ministry · Back channel',
+    headline: 'Armistice offered',
+    sub: `${them} proposes a ceasefire on today's lines`,
+    hoursLeft: null, windowHours: null,
+    facts: [
+      { label: 'Our land held', value: pct(held), tone: held < 0.97 ? 'red' : 'blue' },
+      { label: 'War support', value: pct(me?.warSupport ?? 0), tone: (me?.warSupport ?? 1) < 0.4 ? 'red' : undefined },
+      { label: 'Mobilised', value: pct(me?.mobilization ?? 0) },
+      { label: 'Other wars', value: String(Math.max(0, c.d.enemies.length - 1)) },
+    ],
+    options: [
+      {
+        title: 'Sign the armistice', text: `The guns stop on today's lines. Ground ${them} holds stays in its hands.`, button: 'Accept peace', tone: 'blue', advisor: 'foreign',
+        quote: take ? 'We will not get better terms by bleeding for them.' : 'A ceasefire now freezes the line where it stands.', action: accept, irreversible: true, recommended: take,
+      },
+      {
+        title: 'Fight on', text: `The offer stays open. The war goes on.`, button: 'Fight on', tone: 'red', advisor: 'chief',
+        quote: take ? 'One more push and the line is ours again.' : `We are holding. ${them} is asking because it is losing.`, action: later('Fight on'), recommended: !take,
+      },
+    ],
+    verdict: take ? 'Your advisers lean to peace' : 'Your advisers lean to fighting on',
+  };
+}
+
+function capital(card: Card, c: CrisisContext): Crisis | null {
+  const city = card.title.replace(/ is threatened$/, '');
+  const send = card.primary?.kind === 'command' ? card.primary : undefined;
+  const show: Action = card.node !== undefined ? { kind: 'show', label: 'Show me', node: card.node } : later('Not now');
+  const options: CrisisOption[] = [];
+  if (send) {
+    options.push({
+      title: 'Reinforce the capital', text: card.ask ?? `Move the reserve into ${city}.`, button: send.label, tone: 'gold', advisor: 'chief',
+      quote: card.cost?.text ? `${card.cost.text}. It is worth it.` : 'The reserve exists for this.', action: send, recommended: true,
+    });
+  }
+  options.push({ title: 'Look first', text: 'Return to the map with the clock stopped.', button: 'Show me', tone: 'blue', advisor: 'intel', quote: 'Our fixes on them are hours old. See where they are.', action: show, recommended: !send });
+  options.push({ title: 'Hold the line', text: `${city} holds with what is there.`, button: 'Hold', tone: 'red', advisor: 'security', quote: 'Pull from the front and the front breaks.', action: later('Hold'), recommended: false });
+  return {
+    key: card.key, kind: 'capital', card, node: card.node,
+    source: 'Military intelligence · Flash',
+    headline: 'Capital threatened',
+    sub: card.text,
+    hoursLeft: null, windowHours: null,
+    facts: [
+      { label: 'Nearest enemy', value: card.figure ? `${card.figure.value} km` : '—', tone: 'red' },
+      { label: 'War support', value: pct(c.nations.get(c.me)?.warSupport ?? 0) },
+      { label: 'Wars', value: `${c.d.enemies.length} at war`, tone: 'red' },
+    ],
+    options,
+    verdict: send ? 'Your advisers want the reserve in the city' : 'Your staff has no reserve to send',
+  };
+}
+
+const BUILD: Record<CrisisKind, (card: Card, c: CrisisContext) => Crisis | null> = { treaty, nuclear, peace, capital };
+
+export function crisisOf(card: Card, c: CrisisContext): Crisis | null {
+  const kind = crisisKind(card);
+  return kind ? BUILD[kind](card, c) : null;
+}
+
+/** The first card on the table that should stop the clock, if any, skipping those already shown. */
+export function nextCrisis(cards: readonly Card[], shown: ReadonlySet<string>, c: CrisisContext): Crisis | null {
+  for (const card of cards) {
+    if (shown.has(card.key)) continue;
+    const crisis = crisisOf(card, c);
+    if (crisis) return crisis;
+  }
+  return null;
+}

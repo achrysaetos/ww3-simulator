@@ -1,6 +1,5 @@
 import { useRef, useState, type ReactNode } from 'react';
-import type { NationId } from '../core/types';
-import type { Briefing, Objective, Outcome } from './briefing';
+import type { Objective, Outcome } from './briefing';
 import type { SimClient } from './client';
 
 /** Save, load, briefing and quit, behind one button in the top bar. */
@@ -69,44 +68,6 @@ export function ObjectiveList({ items }: { items: Objective[] }) {
     <ul className="objectives" data-testid="objectives">
       {items.map((o) => <li key={o.label} className={o.met ? 'met' : 'open'}><span className="obj-mark">{o.met ? '✓' : '○'}</span>{o.label}</li>)}
     </ul>
-  );
-}
-
-interface BriefingProps {
-  client: SimClient;
-  nation: NationId;
-  briefing: Briefing;
-  objectives: Objective[];
-  delegated: string[];
-  kept: string[];
-  onClose(): void;
-}
-
-export function BriefingDialog({ client, nation, briefing, objectives, delegated, kept, onClose }: BriefingProps) {
-  const name = client.namer.nation(nation);
-  const sc = client.meta?.scenario;
-  return (
-    <div className="modal-back" role="dialog" aria-modal="true">
-      <div className="modal briefing" data-testid="briefing">
-        <h2>{sc?.name ?? 'Briefing'} · {name}</h2>
-        <p className="muted small">{sc?.summary}</p>
-        <p>{briefing.text}</p>
-        <h3 className="modal-h">Objectives</h3>
-        <ObjectiveList items={objectives} />
-        <h3 className="modal-h">How you command</h3>
-        <ul className="brief-list">
-          <li>{delegated.length ? <>Your AI delegate runs <b>{delegated.join(', ')}</b>.</> : 'You run everything yourself.'} {kept.length ? <>You decide <b>{kept.join(', ')}</b>.</> : ''} Change this under Command authority on the Nation tab; any order you give a unit takes it off the delegate.</li>
-          <li>The clock is paused. Press space or a speed button to run it, or Step to advance six hours.</li>
-          <li>Click a counter on the map or a row under Forces to command a unit. Ground units cross the sea by strategic deployment (airlift or cargo ships) or by amphibious lift.</li>
-          <li>Treaty calls and peace offers pause the game and wait for your answer.</li>
-          <li>{briefing.reminder}</li>
-          <li>Save, load and quit are under the Game menu.</li>
-        </ul>
-        <div className="row gap end">
-          <button className="primary" onClick={onClose} data-testid="briefing-close" autoFocus>Take command</button>
-        </div>
-      </div>
-    </div>
   );
 }
 
