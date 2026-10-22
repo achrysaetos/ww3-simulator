@@ -141,7 +141,6 @@ export class PlaceNamer {
   heldName(node: NodeId, holds: (cell: NodeId) => boolean): string {
     return this.nearest(node, (c) => holds(c.node));
   }
-  /** A cell is named for a place inside it, else for its biggest city, else "near" the nearest place outside it, so two cells never share a bare name. */
   /**
    * A cell is named for a place inside it, else for its biggest city, else "near" the nearest place outside it, so
    * two cells never share a bare name. Far from any place it is a distance and bearing from the nearest: "300 km E of Naha".
@@ -225,12 +224,17 @@ function fight(e: Extract<SimEvent, { type: 'battle' }>, n: Namer): string {
 
 type Rule = [RegExp, (m: RegExpExecArray, n: Namer) => string];
 const node = (s: string, n: Namer) => n.place.name(+s as NodeId);
+/** A place after "to": "to Warsaw", "to the area near Warsaw", "to the waters off Busan", "to a point 300 km E of Naha". */
+const toNode = (s: string, n: Namer) => {
+  const name = node(s, n);
+  return /^near /.test(name) ? `the area ${name}` : /^off /.test(name) ? `the waters ${name}` : /^\d+ km /.test(name) ? `a point ${name}` : name;
+};
 const nation = (s: string, n: Namer) => n.nation(s as NationId);
 
 /** Plain-words versions of the engine's refusal reasons. */
 const REASONS: Rule[] = [
-  [/^no sea route to node (\d+)$/, (m, n) => `no sea route to ${node(m[1], n)}`],
-  [/^no land route to node (\d+)(;.*)?$/, (m, n) => `no land route to ${node(m[1], n)}. It lies across the sea or past territory closed to you. To cross the sea, embark on amphibious lift at a port from the unit panel, or Move to a friendly port or airfield on the far shore`],
+  [/^no sea route to node (\d+)$/, (m, n) => `no sea route to ${toNode(m[1], n)}`],
+  [/^no land route to node (\d+)(;.*)?$/, (m, n) => `no land route to ${toNode(m[1], n)}. It lies across the sea or past territory closed to you. To cross the sea, embark on amphibious lift at a port from the unit panel, or Move to a friendly port or airfield on the far shore`],
   [/^no friendly (port|airfield) to embark at$/, (m) => m[1] === 'port'
     ? 'no friendly port on the far shore to sail into, or no sea lane to one. To land on a hostile coast, march to a port and embark on amphibious lift from the unit panel'
     : 'no friendly airfield on the far shore to fly into'],
