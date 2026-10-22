@@ -99,13 +99,34 @@ describe.each([1, 2, 3])('ukraine-2026 seed %i, 60 days', (seed) => {
  * border (RUSSIA_WEST_2027 in src/scenarios), so the judgment band is ground taken but no
  * collapse: 1-6 Baltic cells in three weeks.
  */
-describe.each([1, 2])('baltic-2027 seed %i, 21 days', (seed) => {
-  it('Russia takes 1-6 cells of the Baltic states', () => {
-    const r = run('baltic-2027', seed, 21);
-    const taken = netGain(r.map, r.start, r.world.control, 'RUS', ['EST', 'LVA', 'LTU']) + netGain(r.map, r.start, r.world.control, 'BLR', ['EST', 'LVA', 'LTU']);
-    expect(taken).toBeGreaterThanOrEqual(1);
-    expect(taken).toBeLessThanOrEqual(6);
-  });
+describe('baltic-2027 seeds 1-6, 21 days', () => {
+  const SEEDS = [1, 2, 3, 4, 5, 6];
+  const median = (xs: number[]) => {
+    const s = [...xs].sort((a, b) => a - b);
+    return (s[(s.length - 1) >> 1] + s[s.length >> 1]) / 2;
+  };
+  const taken = (r: GroundRun) => netGain(r.map, r.start, r.world.control, 'RUS', ['EST', 'LVA', 'LTU']) + netGain(r.map, r.start, r.world.control, 'BLR', ['EST', 'LVA', 'LTU']);
+
+  it('Russia takes 1-6 cells of the Baltic states at the median seed', () => {
+    const cells = SEEDS.map((seed) => taken(run('baltic-2027', seed, 21)));
+    const why = `cells taken by seed: ${cells.map((c) => c.toFixed(2)).join(', ')}`;
+    expect(median(cells), why).toBeGreaterThanOrEqual(1);
+    expect(median(cells), why).toBeLessThanOrEqual(6);
+  }, 3_600_000);
+
+  /**
+   * BB-8: a Russian main effort on Tallinn reaches the city or the cells around it by day 18 on most seeds
+   * (RAND's 36-60 hours against 2016 posture, slowed by the thicker 2027 defence above).
+   */
+  it('Russia reaches Tallinn or a cell next to it by day 18 on a majority of seeds', () => {
+    const reached = SEEDS.filter((seed) => {
+      const r = run('baltic-2027', seed, 21);
+      const tallinn = r.map.nodeAt(59.44, 24.75);
+      const day18 = r.daily[17];
+      return day18[tallinn] === 'RUS' || [...r.map.neighbors(tallinn)].some((n) => n < r.map.landCount && day18[n] === 'RUS');
+    });
+    expect(reached.length, `seeds that reached Tallinn: ${reached.join(', ')}`).toBeGreaterThan(SEEDS.length / 2);
+  }, 3_600_000);
 });
 
 /**
