@@ -124,6 +124,7 @@ export class SimClient {
         applySnapshot(this.state, msg.snapshot, this.meta!.nationIds, this.nationCards);
         if (msg.type === 'ready') this.openingDelegation = this.pendingDelegation();
         this.send({ type: 'ack' });
+        if (msg.snapshot.history) this.record(msg.snapshot.history);
         this.record(msg.snapshot.events);
         this.answer(msg.snapshot.events);
         this.tracks.observe(msg.snapshot.events, this.state.tick, (r) => humanizeReason(r, this.namer));

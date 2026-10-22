@@ -31,6 +31,7 @@ import { conditionsAt, type Conditions, packWeather } from '../systems/weather/e
 import type { IntelSource } from '../systems/intel';
 import { believedWorld, viewOf, type View } from '../systems/intel/view';
 import { OutputsRecorder } from '../outputs';
+import { nationName } from './placeNames';
 import { outputsView, type OutputsView } from './outputs/view';
 import type { OperationForecastInput, OperationPlan } from '../forecast/operation';
 import type { OptionsResult } from './orders/options';
@@ -405,6 +406,8 @@ export interface Snapshot {
   nations?: Float32Array;
   diff?: Partial<Record<Packed, PackedDiff>>;
   events: SimEvent[];
+  /** A resumed game's notable events from before the save, newest last: for the log and ticker, not replayed as news. */
+  history?: SimEvent[];
   droppedEvents: number;
   wars: [NationId, NationId][];
   /** Flat (node, nationIndex, level) triples. */
@@ -446,10 +449,25 @@ export interface ContactDetail {
 
 // ---------------------------------------------------------------- encoder (worker side)
 
+/**
+ * Platforms a formation fields at full strength: its establishment as logistics recorded it, so a
+ * resumed game and a first sighting read the same strength as a session that watched all along.
+ * A world without logistics (a test) counts the damaged kit as the missing share.
+ */
+function establishedPlatforms(world: World, f: Formation): number {
+  const est = world.slices.logistics?.establishment[f.id]?.equipment;
+  let n = 0;
+  if (est) for (const v of Object.values(est)) n += v;
+  else {
+    n = platformCount(f);
+    for (const v of Object.values(f.damaged)) n += v;
+  }
+  return Math.max(1, n);
+}
+
 export class SnapshotEncoder {
   private lastControl: Uint16Array | null = null;
   private lastIds: FormationId[] = [];
-  private readonly initial = new Map<FormationId, number>();
   private readonly nationIndex: Map<NationId, number>;
   private events: SimEvent[] = [];
   private dropped = 0;
@@ -469,6 +487,19 @@ export class SnapshotEncoder {
 
   /** Buffer events from ticks that run between two snapshots. The AI's answers to its own commands never leave the worker. */
   collect(events: readonly SimEvent[]): void {
+    for (const e of this.admit(events)) {
+      if (this.events.length < EVENT_LIMIT) this.events.push(e);
+      else this.dropped++;
+    }
+  }
+
+  /** The newest of a resumed World's notable events, to send once with the first snapshot; it also restores how each war began. */
+  resumed(world: World): SimEvent[] {
+    return this.admit(world.history).slice(-EVENT_LIMIT);
+  }
+
+  private admit(events: readonly SimEvent[]): SimEvent[] {
+    const out: SimEvent[] = [];
     for (const e of events) {
       if (e.type === 'command_result' && !e.byPlayer) continue;
       if (e.type === 'war_declared') {
@@ -476,9 +507,9 @@ export class SnapshotEncoder {
         if (!this.entries.has(`${e.by}|${e.on}`)) this.entries.set(`${e.by}|${e.on}`, { nation: e.by, ...entry });
         if (!this.entries.has(`${e.on}|${e.by}`)) this.entries.set(`${e.on}|${e.by}`, { nation: e.on, ...entry, reason: `attacked by ${e.by}` });
       }
-      if (this.events.length < EVENT_LIMIT) this.events.push(e);
-      else this.dropped++;
+      out.push(e);
     }
+    return out;
   }
 
   /**
@@ -526,8 +557,8 @@ export class SnapshotEncoder {
       return !!c && !c.embarkedOn;
     };
     const fs = Object.values(world.formations).filter(shown);
-    for (const f of fs) if (!this.initial.has(f.id)) this.initial.set(f.id, Math.max(1, contactOf(f)?.strength ?? platformCount(f)));
-    const entry = (f: Formation): RosterEntry => ({ id: f.id, name: f.name, nation: f.nation, kind: f.kind, echelon: f.echelon, platforms: this.initial.get(f.id)! });
+    const full = new Map(fs.map((f) => [f.id, establishedPlatforms(world, f)]));
+    const entry = (f: Formation): RosterEntry => ({ id: f.id, name: f.name, nation: f.nation, kind: f.kind, echelon: f.echelon, platforms: full.get(f.id)! });
     const prevIds = this.lastIds;
     const kept = fs.length >= prevIds.length && prevIds.every((id, i) => fs[i].id === id);
     if (!kept) snap.roster = fs.map(entry);
@@ -545,7 +576,7 @@ export class SnapshotEncoder {
       const c = contactOf(f);
       if (c) {
         p.fNode[i] = c.node;
-        p.fStrength[i] = Math.round(Math.min(1, c.strength / this.initial.get(f.id)!) * 255);
+        p.fStrength[i] = Math.round(Math.min(1, c.strength / full.get(f.id)!) * 255);
         p.fPosture[i] = NO_POSTURE;
         p.fStatus[i] = STATUSES.indexOf('active');
         p.fTarget[i] = NO_NODE;
@@ -555,7 +586,7 @@ export class SnapshotEncoder {
         continue;
       }
       p.fNode[i] = f.node;
-      p.fStrength[i] = Math.round(Math.min(1, platformCount(f) / this.initial.get(f.id)!) * 255);
+      p.fStrength[i] = Math.round(Math.min(1, platformCount(f) / full.get(f.id)!) * 255);
       p.fPosture[i] = POSTURES.indexOf(f.order.posture);
       p.fStatus[i] = STATUSES.indexOf(f.status);
       p.fTarget[i] = f.order.target ?? NO_NODE;
@@ -966,7 +997,7 @@ export function nationCards(map: GameMap, profiles: Readonly<Record<string, { bl
   return map.data.nations.map((raw, i) => {
     const id = map.nationIds[i];
     const p = profiles[id] ?? {};
-    return { id, name: raw.name, blocs: p.blocs ?? [], doctrine: p.nuclear?.doctrine ?? 'none', gdpUsdB: ((raw.stats as { gdp?: number }).gdp ?? 0) / 1e9 };
+    return { id, name: nationName(id, raw.name), blocs: p.blocs ?? [], doctrine: p.nuclear?.doctrine ?? 'none', gdpUsdB: ((raw.stats as { gdp?: number }).gdp ?? 0) / 1e9 };
   });
 }
 

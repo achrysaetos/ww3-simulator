@@ -2,10 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Echelon, FormationId, NationId, NodeId } from '../src/core/types';
 import { Pacer } from '../src/ui/pacer';
 import type { FormationView } from '../src/ui/snapshot';
-import { clusterStacks, gridSize, indexByNode } from '../src/ui/stacks';
+import { clusterStacks, fanRows, gridSize, indexByNode } from '../src/ui/stacks';
+import { applySnapshot, emptyClientState, nationCards, SnapshotEncoder } from '../src/ui/snapshot';
 import { openingFocus } from '../src/ui/MapView';
 import { loadMap } from '../src/data/load';
-import { SCENARIOS } from '../src/scenarios';
+import { createSession, SCENARIOS } from '../src/scenarios';
 
 let seq = 0;
 function view(nation: string, node: number, echelon: Echelon, platforms = 100, status: FormationView['status'] = 'active'): FormationView {
@@ -52,6 +53,30 @@ describe('counter stacking', () => {
     expect(gridSize(34, 1)).toBeGreaterThanOrEqual(34);
     expect(gridSize(34, 1) / 2).toBeLessThan(34);
   });
+});
+
+describe('counters at the front zoom of ukraine-2026, D+10', () => {
+  it('fans the enemy attacking a held cell on the side its own ground lies, not behind the defenders', () => {
+    const s = createSession('ukraine-2026', 1);
+    const UKR = 'UKR' as NationId, RUS = 'RUS' as NationId;
+    s.world.nations[UKR].controlledBy = 'human';
+    s.engine.run(s.world, 40);
+    const client = emptyClientState(s.map.size);
+    applySnapshot(client, new SnapshotEncoder(s.map.nationIds, s.catalog, s.map.size).encode(s.world, s.map), s.map.nationIds, new Map(nationCards(s.map, {}).map((c) => [c.id, c])));
+    const stacks = clusterStacks(indexByNode(client.formations), (n) => [s.map.lon[n], -s.map.lat[n]], 1e-6);
+    const rows = fanRows(stacks, s.map, client.control, s.map.nationIds, () => 1);
+    const ruIdx = s.map.nationIds.indexOf(RUS);
+    let shared = 0;
+    for (const ua of stacks.filter((x) => x.nation === UKR)) {
+      const ru = stacks.find((x) => x.nation === RUS && x.node === ua.node);
+      if (!ru) continue;
+      const theirs = [...s.map.neighbors(ua.node)].filter((m) => m < s.map.landCount && client.control[m] === ruIdx);
+      if (!theirs.length || !theirs.every((m) => s.map.lat[m] < s.map.lat[ua.node])) continue;
+      shared++;
+      expect(rows.get(ru)!, `node ${ua.node}`).toBeGreaterThan(rows.get(ua)!);
+    }
+    expect(shared).toBeGreaterThan(0);
+  }, 300_000);
 });
 
 describe('engine pacing', () => {

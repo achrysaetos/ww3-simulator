@@ -59,7 +59,7 @@ export function FormationPanel({ client, palette, places, routes, playAs, comman
         <span className="swatch" style={{ background: palette.of(f.nation).css }} />
         <div style={{ flex: 1 }}>
           <div className="nation-name" data-testid="formation-name">{f.name}</div>
-          <div className="nation-sub">{nation?.name ?? f.nation} · {f.kind.replace(/_/g, ' ')} {f.echelon.replace(/_/g, ' ')} · <span className={`status ${f.status}`}>{f.status}</span></div>
+          <div className="nation-sub">{nation?.name ?? f.nation} · {f.kind.replace(/_/g, ' ')}{f.kind.endsWith(f.echelon) ? '' : ` ${f.echelon.replace(/_/g, ' ')}`} · <span className={`status ${f.status}`}>{f.status}</span></div>
         </div>
         <button className="ghost" onClick={onClose} title="Deselect">✕</button>
       </div>
@@ -103,7 +103,7 @@ export function FormationPanel({ client, palette, places, routes, playAs, comman
           {POSTURES_BY_KIND[f.kind].includes('strike') && (
             <label className="field inline">
               <span>Strike target class</span>
-              <select value={tc} onChange={(e) => { setTc(e.target.value as TargetClass); if (pending === 'strike') onPickPosture('strike', e.target.value as TargetClass); }}>
+              <select value={pending !== 'strike' && f.order.posture === 'strike' && f.order.targetClass ? f.order.targetClass : tc} onChange={(e) => { setTc(e.target.value as TargetClass); if (pending === 'strike') onPickPosture('strike', e.target.value as TargetClass); }}>
                 {TARGET_CLASSES.map((c) => <option key={c} value={c}>{STRIKE_CLASS_LABEL[c]}</option>)}
               </select>
             </label>
@@ -115,14 +115,14 @@ export function FormationPanel({ client, palette, places, routes, playAs, comman
       )}
 
       {own && detail.deploy && f.status === 'active' && (
-        <Deploy d={detail.deploy} name={f.name} place={(n) => places.name(n)} pendingLift={pending === 'move' ? pendingLift : null} onPick={(lift) => onPickPosture(pending === 'move' && pendingLift === lift ? null : 'move', undefined, lift)} />
+        <Deploy d={detail.deploy} name={f.name} amphibious={detail.lifts.length} place={(n) => places.name(n)} pendingLift={pending === 'move' ? pendingLift : null} onPick={(lift) => onPickPosture(pending === 'move' && pendingLift === lift ? null : 'move', undefined, lift)} />
       )}
 
       {own && detail.deploy && f.status === 'active' && (
         <Section title="Amphibious lift">
           <p className="muted small">To land under fire, or where no friendly port is open, board an amphibious group in a port, then order the group to Attack a coast or Move to a friendly port to unload.</p>
           {detail.portZone === null && (port !== null
-            ? <p className="small">Not in a port. Nearest port: <a onClick={() => onFocus(port)}>{places.name(port)}</a> <button data-testid="move-to-port" onClick={() => onOrder(f.id, { posture: 'move', target: port }, `${f.name} marching to ${places.name(port)} to embark`)}>March there</button></p>
+            ? <p className="small">Not in a port. Nearest port: <a onClick={() => onFocus(port)}>{places.name(port)}</a> <button data-testid="move-to-port" onClick={() => onOrder(f.id, { posture: 'move', target: port }, `${f.name} marching to ${places.to(port)} to embark`)}>March there</button></p>
             : <p className="small tt-warn">No friendly port on this land mass.</p>)}
           {detail.lifts.length ? (
             <ul className="lift-list" data-testid="lifts">
@@ -131,7 +131,7 @@ export function FormationPanel({ client, palette, places, routes, playAs, comman
                   <span><b>{l.name}</b> <span className="muted">{places.name(l.node)} · carries {l.share >= 1 ? 'all' : `${Math.round(l.share * 100)}%`} of this unit</span></span>
                   {l.boardNow
                     ? <button data-testid="embark-on" onClick={() => onOrder(f.id, { posture: 'embark', targetFormation: l.id }, `${f.name} embarking on ${l.name}`)}>Embark</button>
-                    : detail.portZone !== null && <button data-testid="call-lift" onClick={() => onOrder(l.id, { posture: 'move', target: detail.portZone! }, `${l.name} sailing to ${places.name(f.node)} to load ${f.name}`)}>Sail here</button>}
+                    : detail.portZone !== null && <button data-testid="call-lift" onClick={() => onOrder(l.id, { posture: 'move', target: detail.portZone! }, `${l.name} sailing to ${places.to(f.node)} to load ${f.name}`)}>Sail here</button>}
                 </li>
               ))}
             </ul>
@@ -237,7 +237,7 @@ function Escort({ client, f, place, onOrder }: { client: SimClient; f: Formation
 const days = (d: number) => (d < 1 ? `${Math.max(1, Math.round(d * 24))} hours` : `${d.toFixed(d < 10 ? 1 : 0)} days`);
 
 /** Strategic deployment overseas: by the nation's airlift or by its cargo ships, to a friendly port or airfield on the far shore. */
-function Deploy({ d, name, place, pendingLift, onPick }: { d: DeployView; name: string; place(n: NodeId): string; pendingLift: 'air' | 'sea' | null; onPick(lift: 'air' | 'sea'): void }) {
+export function Deploy({ d, name, amphibious, place, pendingLift, onPick }: { d: DeployView; name: string; amphibious: number; place(n: NodeId): string; pendingLift: 'air' | 'sea' | null; onPick(lift: 'air' | 'sea'): void }) {
   const canFly = d.airPortable && d.airliftTonsPerDay > 0;
   const flyDays = d.airliftTonsPerDay > 0 ? d.airTons / d.airliftTonsPerDay : Infinity;
   const job = d.deploying;
@@ -260,7 +260,7 @@ function Deploy({ d, name, place, pendingLift, onPick }: { d: DeployView; name: 
           </tr>
           <tr>
             <td><b>Sealift</b></td>
-            <td className="small">{d.sealiftGroups === 0 ? 'Your nation has no cargo-ship groups.' : `${fmtNum(d.deckSlots)} deck slots to load; ${d.sealiftGroups} cargo-ship group${d.sealiftGroups > 1 ? 's' : ''} with ${fmtNum(d.sealiftSlots)} slots.${d.atWar ? '' : ' Ships sail once your nation is at war.'}`}</td>
+            <td className="small">{d.sealiftGroups === 0 ? (amphibious ? 'No cargo ships for an unopposed crossing. It can still cross on the amphibious lift below.' : 'Your nation has no cargo-ship groups.') : `${fmtNum(d.deckSlots)} deck slots to load; ${d.sealiftGroups} cargo-ship group${d.sealiftGroups > 1 ? 's' : ''} with ${fmtNum(d.sealiftSlots)} slots.${d.atWar ? '' : ' Ships sail once your nation is at war.'}`}</td>
             <td><button disabled={d.sealiftGroups === 0} className={pendingLift === 'sea' ? 'active' : ''} onClick={() => onPick('sea')} data-testid="deploy-sea">By sea…</button></td>
           </tr>
         </tbody>
@@ -319,7 +319,7 @@ export function activity(d: FormationDetail, place: (n: NodeId) => string, natio
   const parts = [DOING[f.order.posture](place(f.order.target ?? f.node))];
   const escorted = f.order.posture === 'escort' && f.order.targetFormation ? formationName?.(f.order.targetFormation) : undefined;
   if (escorted) parts[0] = `Escorting ${escorted} near ${place(f.order.target ?? f.node)}`;
-  if (f.order.targetClass && f.order.posture === 'strike') parts[0] += ` (${f.order.targetClass} targets)`;
+  if (f.order.targetClass && f.order.posture === 'strike') parts[0] += `: ${STRIKE_CLASS_LABEL[f.order.targetClass].toLowerCase()}`;
   if (f.order.path?.length) parts.push(`${f.order.path.length} ${f.order.path.length === 1 ? 'cell' : 'cells'} to go`);
   if (f.status === 'routed') parts.push('routed and falling back');
   if (d.engaged) parts.push('in contact with the enemy');
