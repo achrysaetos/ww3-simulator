@@ -5,6 +5,7 @@ import { nuclearForces } from './nuclear';
 import { opinions } from './opinions';
 import { IISS_RESERVES } from './reserves';
 import { strategicProfiles } from './strategic';
+export { nuclearThreshold } from './strategic';
 
 export type * from './types';
 export { airDefencePledges, alliances, allianceById, defenseObligations, peaceTreaties } from './alliances';

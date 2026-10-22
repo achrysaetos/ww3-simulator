@@ -160,6 +160,9 @@ export const usaArmy = [
   u('6th Battalion, 52nd Air Defense Artillery Regiment', 'air_defense', 'battalion', suwon, US_PATRIOT_BN, { readiness: 0.9, personnel: 600, extraMagazine: { pac3_mse: 96 } }),
   u('Battery D, 2nd ADA Regiment (THAAD Korea)', 'air_defense', 'battalion', seongju, US_THAAD_BTY, { readiness: 0.9, personnel: 100, extraMagazine: { thaad_interceptor: 48 } }),
 
+  // Middle East: a THAAD battery has been in Israel since October 2024 and fired ~100-150 rounds in the June 2025 war (US DoD; CSIS 2025).
+  u('Battery B, 2nd ADA Regiment (THAAD Israel)', 'air_defense', 'battalion', base('Nevatim', 31.21, 35.01), US_THAAD_BTY, { readiness: 0.9, personnel: 100, extraMagazine: { thaad_interceptor: 48 } }),
+
   // Japan, Guam, Philippines
   u('1st Battalion, 1st Air Defense Artillery Regiment', 'air_defense', 'battalion', kadena, US_PATRIOT_BN, { readiness: 0.9, personnel: 600, extraMagazine: { pac3_mse: 96 } }),
   u('38th Air Defense Artillery Brigade', 'air_defense', 'brigade', zama, { truck: 50 }, { readiness: 0.9, personnel: 300 }),

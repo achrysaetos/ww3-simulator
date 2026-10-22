@@ -20,6 +20,8 @@ export interface NuclearLadder {
   warnedTick?: number;
   /** Nuclear strikes it has ordered in this war: the first is limited, later ones climb to the theatre and general rungs. */
   strikes?: number;
+  /** Warheads launched on warning since its last answer; the next answer counts them. */
+  launchedOnWarning?: number;
 }
 
 export interface AiState {

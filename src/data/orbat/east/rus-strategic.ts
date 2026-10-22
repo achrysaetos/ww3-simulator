@@ -7,11 +7,25 @@ import { at, unit, type Base, type Kit } from './build';
  * near 330. Sarmat is not modelled as deployed: FAS found no evidence of a Sarmat regiment
  * on combat duty, and the September 2024 Plesetsk test ended in a silo explosion.
  * The bombers and SSBNs live in rus-aerospace.ts and rus-navy.ts.
+ *
+ * Magazines count reentry vehicles, and a launcher's standard load is one, so MIRV loads beyond
+ * the first go in extraMagazine. FAS (2025) puts about 870 warheads on Russian ICBMs: the R-36M2
+ * carries 10, Yars up to 4 but is assessed downloaded to about 2 on average to meet New START,
+ * Topol-M and Avangard 1 each.
  */
 
 const RUS = 'RUS';
 const SRF = { readiness: 0.85, experience: 0.5 };
-const div = (name: string, base: Base, equipment: Kit): OrbatEntry => unit(RUS, name, 'strategic', 'division', base, equipment, SRF);
+/** Reentry vehicles beyond the first, per launcher: the munition and how many. */
+const MIRV: Record<string, [munition: string, extra: number]> = { yars_mobile: ['yars', 1], yars_silo: ['yars', 1], r36m2_silo: ['r36m2', 9] };
+const div = (name: string, base: Base, equipment: Kit): OrbatEntry => {
+  const extraMagazine: Kit = {};
+  for (const [launcher, n] of Object.entries(equipment)) {
+    const mirv = MIRV[launcher];
+    if (mirv) extraMagazine[mirv[0]] = (extraMagazine[mirv[0]] ?? 0) + n * mirv[1];
+  }
+  return unit(RUS, name, 'strategic', 'division', base, equipment, { ...SRF, extraMagazine });
+};
 
 const srf: OrbatEntry[] = [
   div('54th Guards Missile Division', at('Teykovo', 56.86, 40.53), { yars_mobile: 18, topol_m_mobile: 18 }),

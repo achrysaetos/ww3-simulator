@@ -1,0 +1,77 @@
+/* The War Cost drawer: the redesign's kit (theme/kit.css) on a wider drawer. */
+.ww-drawer:has(.ww-cost) { width: min(540px, 100vw); background: linear-gradient(180deg, rgba(12, 19, 31, 0.96), rgba(6, 10, 17, 0.95)); }
+.ww-shell.drawer-open:has(.ww-cost) .ww-dock { left: calc(270px + 50%); }
+.ww-cost { padding: 0 18px 18px 20px; font-size: 13px; color: var(--ww-text); }
+.ww-cost-empty { margin: 18px 0; color: var(--ww-muted); line-height: 1.5; }
+
+.ww-cost-tabs { position: sticky; top: 0; z-index: 1; display: flex; gap: 2px; margin: 0 -18px 0 -20px; padding: 10px 18px 0 20px; background: linear-gradient(180deg, rgba(12, 19, 31, 0.98), rgba(12, 19, 31, 0.92)); border-bottom: 1px solid var(--ww-line); }
+.ww-cost-tabs button {
+  flex: 1; height: 34px; border: 0; background: transparent; color: var(--ww-muted); cursor: pointer;
+  font-family: var(--ww-title); font-weight: 600; font-size: 14px; letter-spacing: 0.1em; text-transform: uppercase;
+  box-shadow: inset 0 -2px 0 transparent; transition: color 0.15s ease, box-shadow 0.15s ease;
+}
+.ww-cost-tabs button:hover { color: var(--ww-text); }
+.ww-cost-tabs button.on { color: #ffc56b; box-shadow: inset 0 -2px 0 var(--ww-gold); background: rgba(255, 181, 71, 0.06); }
+
+.ww-cost-sides { display: grid; grid-template-columns: 1fr 1fr auto; gap: 10px; align-items: start; padding: 12px 0 10px; border-bottom: 1px solid rgba(150, 195, 240, 0.08); }
+.ww-cost-sides > div { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.ww-cost-sides .ww-chip { align-self: flex-start; }
+.ww-cost-names { font-size: 12px; color: #c9d5e3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ww-cost-day { font-size: 12px; color: var(--ww-muted); padding-top: 3px; }
+
+.ww-cost-section { padding: 6px 0 12px; border-bottom: 1px solid rgba(150, 195, 240, 0.08); }
+.ww-cost-section:last-of-type { border-bottom: 0; }
+.ww-cost-section h4 { margin: 12px 0 8px; }
+
+.ww-cost-vs { padding: 9px 0 8px; border-bottom: 1px solid rgba(150, 195, 240, 0.06); }
+.ww-cost-vs:last-child { border-bottom: 0; }
+.ww-cost-vs-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 5px; }
+.ww-cost-vs-head .ww-label { color: #c2d1e2; font-size: 12.5px; }
+.ww-cost-note { font-size: 11px; color: var(--ww-faint); }
+.ww-cost-vs-nums { display: grid; grid-template-columns: 82px 1fr 82px; gap: 12px; align-items: center; }
+.ww-cost-vs-nums .ww-mono { font-size: 19px; font-weight: 600; letter-spacing: -0.01em; }
+.ww-cost-vs-nums .ww-mono.blue { color: #8fc6ff; text-shadow: 0 0 14px rgba(74, 163, 255, 0.45); }
+.ww-cost-vs-nums .ww-mono.red { color: #ff9d9e; text-align: right; text-shadow: 0 0 14px rgba(255, 77, 79, 0.45); }
+.ww-cost-split { display: flex; height: 6px; gap: 2px; border-radius: 3px; overflow: hidden; background: rgba(150, 195, 240, 0.08); }
+.ww-cost-split i { display: block; height: 6px; min-width: 2px; transition: width 0.4s ease; }
+.ww-cost-split i.blue { background: linear-gradient(90deg, rgba(74, 163, 255, 0.45), var(--ww-blue)); box-shadow: 0 0 8px rgba(74, 163, 255, 0.6); }
+.ww-cost-split i.red { background: linear-gradient(90deg, var(--ww-red), rgba(255, 77, 79, 0.45)); box-shadow: 0 0 8px rgba(255, 77, 79, 0.6); }
+
+.ww-cost-meter { display: grid; grid-template-columns: 112px 1fr 44px; gap: 12px; align-items: center; padding: 5px 0; }
+.ww-cost-meter .ww-mono { text-align: right; font-size: 13px; }
+.ww-cost-hosts { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 4px 18px; }
+.ww-cost-hosts li { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px dotted rgba(150, 195, 240, 0.14); color: #c9d5e3; }
+.ww-cost-source { margin: 12px 0 0; font-size: 11px; line-height: 1.5; color: var(--ww-faint); }
+
+.ww-cost-race { margin: 12px 0 4px; padding: 12px 14px 12px; background: rgba(10, 17, 28, 0.6); border: 1px solid rgba(150, 195, 240, 0.12); border-radius: 3px; }
+.ww-cost-race header { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 10px; }
+.ww-cost-race header .ww-title { font-size: 17px; letter-spacing: 0.06em; }
+.ww-cost-race header .ww-chip { white-space: nowrap; }
+.ww-cost-race-row { display: grid; grid-template-columns: 52px 1fr 96px; gap: 10px; align-items: center; }
+.ww-cost-race-row .ww-bar { height: 6px; }
+.ww-cost-race-row .ww-bar i { height: 6px; transition: width 0.4s ease; }
+.ww-cost-race-row .ww-mono { text-align: right; font-size: 14px; font-weight: 600; }
+.ww-cost-race-row small { font-size: 10.5px; color: var(--ww-muted); font-weight: 400; margin-left: 2px; }
+.ww-cost-race-sub { margin: 3px 0 9px 62px; font-size: 11.5px; color: var(--ww-muted); }
+.ww-cost-runway { display: grid; grid-template-columns: 52px 74px 1fr auto; gap: 10px; align-items: center; margin-top: 4px; padding-top: 9px; border-top: 1px dashed rgba(150, 195, 240, 0.14); }
+.ww-cost-runway .ww-mono { font-size: 13px; }
+.ww-cost-runway.out { display: flex; gap: 10px; font-size: 12px; }
+.ww-cost-left { font-family: var(--ww-title); font-weight: 600; font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; white-space: nowrap; }
+.ww-cost-left.green { color: #7fe8b0; }
+.ww-cost-left.gold { color: #ffc56b; }
+.ww-cost-left.red { color: #ff8f90; animation: ww-cost-pulse 1.6s ease-in-out infinite; }
+@keyframes ww-cost-pulse { 50% { opacity: 0.55; } }
+
+.ww-cost-life-nation h4 { display: flex; align-items: center; gap: 8px; margin: 14px 0 6px; font-family: var(--ww-title); font-weight: 700; font-size: 15px; letter-spacing: 0.1em; text-transform: uppercase; }
+.ww-cost-dot { width: 8px; height: 8px; border-radius: 50%; }
+.ww-cost-dot.blue { background: var(--ww-blue); box-shadow: 0 0 8px var(--ww-blue); }
+.ww-cost-dot.red { background: var(--ww-red); box-shadow: 0 0 8px var(--ww-red); }
+.ww-cost-life { padding: 9px 0 10px 16px; border-left: 1px solid rgba(150, 195, 240, 0.14); margin-left: 3px; }
+.ww-cost-life-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.ww-cost-life-head .ww-title { font-size: 14.5px; letter-spacing: 0.06em; }
+.ww-cost-life p { margin: 6px 0 0; font-size: 12px; line-height: 1.45; color: #b9c8da; }
+
+@media (max-width: 600px) {
+  .ww-cost-vs-nums { grid-template-columns: 64px 1fr 64px; }
+  .ww-cost-vs-nums .ww-mono { font-size: 16px; }
+}

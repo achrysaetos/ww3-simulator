@@ -59,6 +59,8 @@ export const fra = [
   // France moves heavy equipment overseas on chartered RO-RO ships under standing strategic-freight contracts.
   u('Affrètement stratégique (chartered RO-RO)', 'surface_group', 'task_group', toulon, { military_roro: 2 }, { readiness: 0.6, personnel: 2 * 20 }),
   u('Escadrille des sous-marins nucléaires d’attaque', 'submarine', 'flotilla', toulon, { ssn_suffren: 3, ssn_rubis: 2 }, { readiness: 0.7, personnel: 5 * 65 }),
-  u('Force océanique stratégique, SSBN on deterrent patrol', 'strategic', 'flotilla', base('North-east Atlantic patrol area', 47, -15), { ssbn_triomphant: 1 }, { readiness: 1, personnel: 111 }),
-  u('Force océanique stratégique, SSBNs at Île Longue', 'strategic', 'flotilla', ileLongue, { ssbn_triomphant: 3 }, { readiness: 0.4, personnel: 3 * 111 }),
+  // Magazines count reentry vehicles, one per tube in the boat's load. FAS (2025): 240 TN75/TNO warheads for three
+  // boatloads of 16 M51, about 5 per missile, and one boat always at sea; the fourth boat is in refit.
+  u('Force océanique stratégique, SSBN on deterrent patrol', 'strategic', 'flotilla', base('North-east Atlantic patrol area', 47, -15), { ssbn_triomphant: 1 }, { readiness: 1, personnel: 111, extraMagazine: { m51: 64 } }),
+  u('Force océanique stratégique, SSBNs at Île Longue', 'strategic', 'flotilla', ileLongue, { ssbn_triomphant: 3 }, { readiness: 0.4, personnel: 3 * 111, extraMagazine: { m51: 112 } }),
 ];

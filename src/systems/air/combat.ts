@@ -13,7 +13,7 @@ export function visibility(stealth: number): number {
 
 /**
  * Combat radius with tanker support. `tankers` is tanker aircraft available per
- * receiving aircraft. One tanker sortie tops up ~2 receivers once; one refuel adds
+ * receiving aircraft. One tanker sortie tops up TUNING.tankerReceiversPerTanker once; one refuel adds
  * ~half a radius, an outbound plus recovery refuel roughly doubles it, which is the cap.
  */
 export function combatRadiusKm(platform: Platform, tankers = 0): number {

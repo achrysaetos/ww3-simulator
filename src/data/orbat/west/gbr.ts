@@ -66,6 +66,8 @@ export const gbr = [
   u('Strategic Sealift Service (Point class)', 'surface_group', 'task_group', base('Marchwood Military Port', 50.89, -1.44), { military_roro: 4 }, { readiness: 0.6, personnel: 4 * 20 }),
   u('Royal Fleet Auxiliary tankers', 'logistics', 'task_group', base('Marchwood', 50.9, -1.44), { tide_tanker: 3 }, { readiness: 0.6, personnel: 400 }),
   u('Faslane Flotilla attack submarines', 'submarine', 'flotilla', faslane, { ssn_astute: 5, ssn_trafalgar: 1 }, { readiness: 0.6, personnel: 6 * 98 }),
-  u('Continuous At-Sea Deterrent patrol (Vanguard class)', 'strategic', 'flotilla', base('North Atlantic patrol area', 58, -20), { ssbn_vanguard: 1 }, { readiness: 1, personnel: 135 }),
-  u('Faslane Flotilla ballistic missile submarines in port', 'strategic', 'flotilla', faslane, { ssbn_vanguard: 3 }, { readiness: 0.4, personnel: 3 * 135 }),
+  // Magazines count reentry vehicles, one per tube in the boat's load. The patrol boat carries 40 warheads on 8 missiles
+  // (Integrated Review 2021); FAS (2025) counts 120 deployed, so two more loads sit at Faslane with the boat in refit.
+  u('Continuous At-Sea Deterrent patrol (Vanguard class)', 'strategic', 'flotilla', base('North Atlantic patrol area', 58, -20), { ssbn_vanguard: 1 }, { readiness: 1, personnel: 135, extraMagazine: { trident2_d5: 32 } }),
+  u('Faslane Flotilla ballistic missile submarines in port', 'strategic', 'flotilla', faslane, { ssbn_vanguard: 3 }, { readiness: 0.4, personnel: 3 * 135, extraMagazine: { trident2_d5: 56 } }),
 ];

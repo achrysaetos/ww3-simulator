@@ -19,26 +19,41 @@ export async function runEnsemble(input: EnsembleInput, opts: EnsembleOptions = 
   return summarize(input, results);
 }
 
-export async function runAll(input: EnsembleInput, opts: EnsembleOptions = {}): Promise<RunResult[]> {
-  const total = input.runs.length;
+export function runAll(input: EnsembleInput, opts: EnsembleOptions = {}): Promise<RunResult[]> {
+  return runPooled(input.runs, { worker: new URL('./worker-boot.mjs', import.meta.url), workerData: { input }, serial: (spec) => runOne(input, spec) }, opts);
+}
+
+/**
+ * How to run one kind of job. `worker` is a thread entry that answers `{ index, job }` with
+ * `{ index, result }` or `{ index, error }`; `serial` does the same job in this thread.
+ */
+export interface PoolTarget<J, R> {
+  worker: URL;
+  workerData?: unknown;
+  serial: (job: J) => R;
+}
+
+/** Runs jobs on worker threads, whole jobs per message. Results land by job index, so the output equals a serial run. */
+export async function runPooled<J, R>(jobs: readonly J[], target: PoolTarget<J, R>, opts: { workers?: number; onProgress?: (done: number, total: number, result: R) => void } = {}): Promise<R[]> {
+  const total = jobs.length;
   const workers = Math.min(opts.workers ?? availableParallelism(), total);
-  const results: RunResult[] = new Array(total);
+  const results: R[] = new Array(total);
   if (workers <= 0) {
-    input.runs.forEach((spec, i) => {
-      results[i] = runOne(input, spec);
+    jobs.forEach((job, i) => {
+      results[i] = target.serial(job);
       opts.onProgress?.(i + 1, total, results[i]);
     });
     return results;
   }
-  const pool = Array.from({ length: workers }, () => new Worker(new URL('./worker-boot.mjs', import.meta.url), { execArgv: [], workerData: { input } }));
+  const pool = Array.from({ length: workers }, () => new Worker(target.worker, { execArgv: [], workerData: target.workerData }));
   let next = 0, done = 0;
   try {
     await new Promise<void>((resolve, reject) => {
       const feed = (w: Worker) => {
-        if (next < total) w.postMessage({ index: next, spec: input.runs[next++] });
+        if (next < total) w.postMessage({ index: next, job: jobs[next++] });
       };
       for (const w of pool) {
-        w.on('message', (m: { index: number; result?: RunResult; error?: string }) => {
+        w.on('message', (m: { index: number; result?: R; error?: string }) => {
           if (m.error !== undefined) return reject(new Error(`run ${m.index} failed: ${m.error}`));
           results[m.index] = m.result!;
           done++;
@@ -48,7 +63,7 @@ export async function runAll(input: EnsembleInput, opts: EnsembleOptions = {}): 
         });
         w.on('error', reject);
         w.on('exit', (code) => {
-          if (done < total) reject(new Error(`ensemble worker exited with code ${code} after ${done} of ${total} runs`));
+          if (done < total) reject(new Error(`pool worker exited with code ${code} after ${done} of ${total} runs`));
         });
         feed(w);
       }

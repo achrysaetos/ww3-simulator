@@ -144,6 +144,8 @@
 .ww-drawer-body .eventlog { display: flex; flex-direction: column; }
 .ww-drawer-body .ev-list { flex: 1; min-height: 0; overflow-y: auto; }
 .ww-shell.drawer-open .ww-hud-left, .ww-shell.drawer-open .map-zoom { opacity: 0; pointer-events: none; }
+/* The dock is wider than the map left of a drawer can spare at its centre, so it centres on the map beside the drawer. */
+.ww-shell.drawer-open .ww-dock { left: calc(230px + 50%); width: max-content; }
 .in-transit { display: flex; align-items: center; margin: 0 0 10px; padding: 8px 10px; border-radius: 3px; background: rgba(255, 181, 71, 0.1); border: 1px solid rgba(255, 181, 71, 0.35); color: #ffd79a; font-size: 12.5px; line-height: 1.4; }
 
 /* ---------------------------------------------------------------- ticker, banners, toasts */

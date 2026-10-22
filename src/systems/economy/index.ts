@@ -10,6 +10,8 @@ import { defenseObligations } from '../../data/nations';
 import { recallReservists } from '../../data/nations/reserves';
 import { newLine, newNationEconomy, oilStockMonths, stocksOf, type LineState, type NationEconomy } from './state';
 import { defineParam } from '../../core/params';
+import { digitalLost, maritimeDeterred } from '../nonkinetic/reads';
+import { DIGITAL_GDP_ELASTICITY } from '../nonkinetic/tables';
 
 export type { EconomyState, LineState, NationEconomy } from './state';
 
@@ -283,7 +285,7 @@ function exportSites(map: GameMap): { nation: NationId; node: NodeId; share: num
 }
 
 /** Share of each listed exporter's energy export capacity its export sites still give, 0..1: a site lost or wrecked takes its share of what is left. */
-function exportCapacity(world: World, map: GameMap): Map<NationId, number> {
+export function exportCapacity(world: World, map: GameMap): Map<NationId, number> {
   const out = new Map<NationId, number>();
   for (const { nation, node, share } of exportSites(map)) {
     const up = world.control[node] === nation ? Math.max(0, world.theater.infrastructure[node] ?? 1) : 0;
@@ -542,12 +544,17 @@ function stepNation(world: World, ctx: SimContext, s: Scan, n: Nation, e: Nation
   const labourOutput = 1 - LABOUR_GDP_ELASTICITY * clamp01((underArms - opening.underArms) / Math.max(1, labourForce));
 
   const energyImported = 1 - selfShare(n, 'energy');
+  // Non-kinetic drag: data connectivity cut by severed cables and telecom cyber, and seaborne trade
+  // deterred by shipping fear. Grid cyber and cut power/gas cables already bite through infrastructure.
+  const nkTrade = 1 - ((n.stats.importsPctGdp ?? 30) / 100) * maritimeDeterred(world, ctx.map, n.id) * IMPORT_GDP_LOSS();
   e.gdpIndex =
     e.integrity *
     (1 - ENERGY_GDP_ELASTICITY() * (1 - e.supply.energy)) *
     (1 - ENERGY_BILL_SHARE() * energyImported * (world.slices.economy.energyPrice - 1) * ENERGY_PRICE_PASSTHROUGH()) *
     (1 - FOOD_GDP_ELASTICITY() * (1 - e.supply.food)) *
     (1 - SEMI_GDP_ELASTICITY() * (1 - e.supply.semiconductors)) *
+    (1 - DIGITAL_GDP_ELASTICITY() * digitalLost(world, n.id)) *
+    nkTrade *
     tradeOutput *
     labourOutput;
 

@@ -5,7 +5,7 @@ import { isOverseas } from '../../data/territories';
 import { HOSTILE_OPINION } from '../diplomacy/escalation';
 import { delegated } from '../orders';
 import { rung, sideOf } from '../diplomacy/wars';
-import { aimKey, ATTRITABLE_COST_USD_M, dailyRounds, effectPk, futileAim } from '../air';
+import { aimKey, ATTRITABLE_COST_USD_M, dailyRounds, effectPk, futileAim, PENETRATOR_VISIBILITY } from '../air';
 import { ANTISHIP_KINDS } from '../naval';
 import type { HqLevel } from '../c2/state';
 import { isGround, issue, sighted } from './forces';
@@ -57,6 +57,12 @@ const WORTH = { min: 0.5, max: 3 };
 const FRONT_FORCES = { value: 2, cls: 'armor' as TargetClass };
 const RAIL_HUB = { value: 1.5, cls: 'structure' as TargetClass, minRailKm: 50 };
 const CAPITAL = { value: 2.5, cls: 'structure' as TargetClass };
+/**
+ * A bridge, tunnel or isthmus carrying the enemy's supply to a front within `reachKm`: interdicting the few crossings
+ * behind a front starves it faster than any depot strike (the 1944 Seine and Loire bridges; Ukraine's strikes on the
+ * Kerch and Chonhar bridges in 2022-23). Worth what is still open, ranked with the air bases (judgment).
+ */
+const CHOKEPOINT = { value: 4, cls: 'structure' as TargetClass, reachKm: 400 };
 /**
  * Field headquarters, struck as hardened aimpoints: Ukraine's HIMARS and Storm Shadow strikes on Russian army and
  * corps command posts in 2022-23 killed several generals and slowed Russian command for days at a time (RUSI,
@@ -242,7 +248,29 @@ export function strikeTargets(p: Plan, battleArea: Set<number>): TargetGrid {
   };
   // Aims recent raids could not touch wait for reassessment (air BDA).
   const live = (t: StrikeTarget) => !futileAim(p.world, p.nation, aimKey(t.node, t.formation, t.cls));
-  return new TargetGrid(out.filter((t) => allowed(t) && live(t)).sort((a, b) => b.value - a.value || a.node - b.node), map);
+  const kept = out.filter((t) => allowed(t) && live(t));
+  for (const t of chokepointTargets(p, front)) if (live(t)) kept.push(t);
+  return new TargetGrid(kept.sort((a, b) => b.value - a.value || a.node - b.node), map);
+}
+
+/**
+ * Crossings wholly in enemy hands that feed a front: struck at their first cell, which a structure strike there closes
+ * (air cutChokepoints). Ground the enemy took from this nation is struck as theatre; the enemy's own needs leave to
+ * strike deep.
+ */
+function chokepointTargets(p: Plan, front: number[]): StrikeTarget[] {
+  const { map } = p.ctx;
+  const out: StrikeTarget[] = [];
+  for (const cp of map.chokepoints) {
+    const open = p.world.theater.chokepoints?.[cp.id] ?? 1;
+    const at = cp.edges[0][0];
+    const holder = p.world.control[at];
+    if (open <= 0 || !p.enemies.has(holder) || !cp.edges.every(([a, b]) => p.world.control[a] === holder && p.world.control[b] === holder)) continue;
+    if (!front.some((n) => map.distanceKm(n as NodeId, at) <= CHOKEPOINT.reachKm)) continue;
+    if (map.owner[at] !== p.nation && !deepStrikeAllowed(p, holder)) continue;
+    out.push({ node: at, cls: CHOKEPOINT.cls, value: CHOKEPOINT.value * open, assigned: 0 });
+  }
+  return out;
 }
 
 /** The cells holding the enemy's largest cities it still controls, largest first. */
@@ -313,7 +341,8 @@ export class FireBudget {
    * landing (CSIS 2023: Taiwan's shore-based Harpoons were among the main killers of PLA lift).
    */
   propose(f: Formation, options: Munition[], t: StrikeTarget, order: Omit<Order, 'issuedTick'>): void {
-    if (!options.length || options[0].unitCostUsdM < ATTRITABLE_COST_USD_M || this.landingOnFriends(t)) return issue(this.p, f, order);
+    // The planner names the weapon it cleared, so the package does not swap in a cheaper one it would have to fly into the defences to use.
+    if (!options.length || options[0].unitCostUsdM < ATTRITABLE_COST_USD_M || this.landingOnFriends(t)) return issue(this.p, f, options.length && !order.munition ? { ...order, munition: options[0].id } : order);
     this.proposals.push({ f, options, t, order });
   }
 
@@ -377,11 +406,6 @@ const INTERCEPTOR_KINDS: ReadonlySet<Munition['kind']> = new Set(['sam', 'abm', 
  */
 const TOLERATED_DEPTH_KM = 15;
 const ROUTE_SAMPLE_KM = 50;
-/**
- * Below this visibility (a stealth airframe) a package flies over the enemy's rear
- * without first winning the air there, as B-2s and F-35Is did over Iran in 2025.
- */
-const PENETRATOR_VISIBILITY = 0.1;
 /**
  * Air bases are the first thing a defender's short- and medium-range SAMs cover
  * (Ukraine's Starokostiantyniv and Myrhorod, Patriot at Kadena), whether or not the

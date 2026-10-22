@@ -1,7 +1,8 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { Command, CommandDomain, FormationId, NationId, SimEvent } from '../src/core/types';
+import { atWar } from '../src/core/engine';
+import type { Command, CommandDomain, FormationId, NationId, NodeId, SimEvent } from '../src/core/types';
 import { loadMap } from '../src/data/load';
 import { orderDelayHours } from '../src/systems/c2';
 import { authority } from '../src/systems/orders';
@@ -10,7 +11,9 @@ import { advise, answerOf, type Card, type CommandAction, type Situation } from 
 import { advisorOf, ROLES } from '../src/ui/staff/advisors';
 import type { Sent } from '../src/ui/staff/desk';
 import { COMMAND_ROLES, delegateCommands, roleOf } from '../src/ui/staff/StaffPanel';
+import { operations } from '../src/ui/staff/operations';
 import { StaffCard } from '../src/ui/staff/WarRoom';
+import { degradeChain } from './c2.fixture';
 import { playWithStaff } from './staff-mirror';
 
 const N = (s: string) => s as NationId;
@@ -109,6 +112,41 @@ describe('advisor cards: the recommended button issues the command, and the answ
     expect(shown(g, s)).toContain(s.answer!.text.replace(/&/g, '&amp;'));
   }, 300_000);
 
+  it('a warned build-up (peace-2027 as South Korea): Reinforce sends a brigade to the DMZ before any shot, and only when warned', () => {
+    const korea = (buildUp: boolean) => {
+      const g = start('peace-2027', 'KOR');
+      const { world } = g;
+      const [kor, prk] = [N('KOR'), N('PRK')];
+      const dmz = new Set<NodeId>();
+      for (let n = 0 as NodeId; n < map.landCount; n++)
+        if (world.control[n] === kor && [...map.neighbors(n)].some((m) => m < map.landCount && world.control[m] === prk)) dmz.add(n);
+      // The CE-5 build-up (tests/belief.test.ts): every KPA manoeuvre formation marched to the DMZ.
+      const kpa = Object.values(world.formations).filter((f) => f.nation === prk && f.kind === 'maneuver' && f.status === 'active');
+      const across = [...map.nodesOf(prk)].filter((n) => world.control[n] === prk && [...map.neighbors(n)].some((m) => dmz.has(m)));
+      if (buildUp) kpa.forEach((f, i) => world.pending.push({ type: 'order', nation: prk, formation: f.id, order: { posture: 'move', target: across[i % across.length] } }));
+      let card: Card | undefined;
+      for (let i = 0; i < 16 && !card; i++) {
+        g.step();
+        card = g.desk.cards.find((c) => c.key === 'warning|PRK');
+      }
+      return { g, card, dmz };
+    };
+    const quiet = korea(false);
+    expect(quiet.card, 'no warning, no card').toBeUndefined();
+    const { g, card, dmz } = korea(true);
+    expect(card).toBeDefined();
+    expect(atWar(g.world, N('KOR'), N('PRK'))).toBe(false);
+    expect(card!.text).toMatch(/North Korea|PRK/);
+    const a = approve(g, card!);
+    const cmd = a.command as Extract<Command, { type: 'order' }>;
+    expect(cmd).toMatchObject({ type: 'order', nation: 'KOR', order: { posture: 'move', target: card!.node } });
+    expect(dmz.has(card!.node!)).toBe(true);
+    expect(dmz.has(g.world.formations[cmd.formation].node)).toBe(false);
+    const s = settle(g, card!.key);
+    expect(s.answer!.ok).toBe(true);
+    expect(shown(g, s)).toContain(s.answer!.text.replace(/&/g, '&amp;'));
+  }, 300_000);
+
   it('thin reserves (ukraine-2026 as Ukraine): Mobilise raises the call-up target in the engine', () => {
     const g = start('ukraine-2026', 'UKR');
     g.step(8);
@@ -195,21 +233,22 @@ describe('"Your staff runs" (ukraine-2026 as Ukraine)', () => {
 describe('the staff reads only what the player is told', () => {
   it('never sees the enemy\'s command answers (BA-12), and says when an order is in transit (CE-9)', () => {
     const g = start('ukraine-2026', 'UKR');
-    let slow: FormationId | undefined;
     const seen: SimEvent[] = [];
-    for (let i = 0; i < 40 && !slow; i++) {
+    for (let i = 0; i < 8; i++) {
       g.step();
       seen.push(...g.desk.recent);
-      slow = Object.values(g.world.formations).find((f) => f.nation === 'UKR' && f.kind === 'maneuver' && f.status === 'active' && orderDelayHours(g.world, f.id) >= 2 * g.world.dtHours)?.id;
     }
-    expect(slow).toBeDefined();
-    g.send({ type: 'order', nation: N('UKR'), formation: slow!, order: { posture: 'defend' } });
+    const slow = degradeChain(g.world, N('UKR')).id;
+    g.step();
+    seen.push(...g.desk.recent);
+    expect(orderDelayHours(g.world, slow)).toBeGreaterThanOrEqual(2 * g.world.dtHours);
+    g.send({ type: 'order', nation: N('UKR'), formation: slow, order: { posture: 'defend' } });
     g.step();
     seen.push(...g.desk.recent);
     const results = seen.filter((e) => e.type === 'command_result');
     expect(results.length).toBeGreaterThan(0);
     expect(results.every((e) => e.type === 'command_result' && e.nation === 'UKR' && e.byPlayer)).toBe(true);
-    expect(g.desk.inTransit.get(slow!)).toBeGreaterThan(0);
+    expect(g.desk.inTransit.get(slow)).toBeGreaterThan(0);
     const card = g.desk.cards.find((c) => c.key.startsWith(`relayed|${slow}`));
     expect(card?.text).toMatch(/reaches .+ in about \d+ h/);
   }, 300_000);
@@ -231,5 +270,38 @@ describe('display errors (BA-14)', () => {
     const text = describeEvent({ type: 'strike', tick: 1, by: N('RUS'), munition: 'kh101' as never, fired: 2, intercepted: 1, target: map.nodeAt(50.45, 30.52), effects: [{ kind: 'infrastructure', before: 1, after: 0.996 }] }, g.namer);
     expect(text).toContain('infrastructure cut from 100.0% to 99.6%');
     expect(text).not.toContain('100% to 100%');
+  });
+
+  it('names each sector Ukraine holds after a town on its own side of the line, never a Russian city across it', () => {
+    const g = start('ukraine-2026', 'UKR');
+    g.step();
+    const { control } = g.state;
+    const mine = map.nationIds.indexOf(N('UKR'));
+    const enemyIdx = new Set(g.state.focusNation!.enemies.map((e) => map.nationIds.indexOf(e)));
+    const cityCells = new Map<string, NodeId[]>();
+    for (const c of map.cities) cityCells.set(c.name, [...(cityCells.get(c.name) ?? []), map.nodeAt(c.lat, c.lon)]);
+    const enemyCity = (name: string) => (cityCells.get(name.replace(/^near /, '')) ?? []).some((n) => enemyIdx.has(control[n]));
+    // A Ukrainian cell on the line whose nearest place is a city Russia holds, such as Bryansk across from Chernihiv and Sumy oblasts.
+    let cell: NodeId | undefined;
+    for (let n = 0 as NodeId; n < map.landCount && cell === undefined; n++)
+      if (control[n] === mine && [...map.neighbors(n)].some((m) => enemyIdx.has(control[m])) && enemyCity(g.namer.place.name(n))) cell = n;
+    expect(cell, 'a held cell the plain place name would name after an enemy city').toBeDefined();
+    // Enough brigades there that it is the biggest sector held, the one the panel always lists.
+    const moved = new Set(g.state.formations.filter((f) => f.entry.nation === 'UKR' && f.entry.kind === 'maneuver' && f.status === 'active').slice(0, 40));
+    const brigade = [...moved][0];
+    const formations = g.state.formations.map((f) => (moved.has(f) ? { ...f, node: cell!, posture: 'defend' as const, target: null } : f));
+    const ops = operations({
+      me: N('UKR'), map, nationIds: map.nationIds, control, contest: new Float32Array(0), formations,
+      enemies: g.state.focusNation!.enemies, places: g.namer.place, commandOf: () => 'delegate',
+    });
+    const there = ops.find((o) => o.formations.includes(brigade.entry.id));
+    expect(there, 'the brigade on that cell holds a sector').toBeDefined();
+    expect(enemyCity(there!.name.replace(/^Hold /, '')), there!.name).toBe(false);
+  });
+
+  it('words an escalation as what happens, not the rung id', () => {
+    const g = start('ukraine-2026', 'UKR');
+    const text = describeEvent({ type: 'escalation', tick: 1, a: N('RUS'), b: N('UKR'), level: 'strategic_conventional' }, g.namer);
+    expect(text).toBe("Russia and Ukraine begin striking deep into each other's homelands");
   });
 });

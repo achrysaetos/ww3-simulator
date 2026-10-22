@@ -1,4 +1,4 @@
-import type { SimContext } from '../../core/engine';
+import { atWar, type SimContext } from '../../core/engine';
 import { platformCount } from '../../core/forces';
 import type { Catalog } from '../../core/catalog';
 import type { GameMap } from '../../core/map';
@@ -67,7 +67,10 @@ export function weaponFor(launchers: readonly NuclearLauncher[], map: GameMap, t
 /**
  * Nodes worth a warhead in `defender`, best first, limited to what `attacker` can reach with the nuclear munitions
  * in its magazines. Counterforce: nuclear forces, the capital (national command), air bases, and ships in port.
- * Countervalue: cities by population.
+ * Countervalue: cities by population. Only parties to the war are struck: forces based on a third state's soil are
+ * aimpoints only when that host is at war with `attacker` too, and no aimpoint is taken where forces of a state not
+ * at war with `attacker` stand. A strike on Russian bases in Armenia, US bases in Italy or the DPRK contingent in
+ * Kursk would bring states into the exchange that are not party to it.
  */
 export function targetList(world: World, ctx: Pick<SimContext, 'map' | 'catalog'>, attacker: NationId, defender: NationId, mode: TargetMode): Target[] {
   const launchers = nuclearLaunchers(world, ctx.catalog, attacker);
@@ -82,9 +85,15 @@ export function targetList(world: World, ctx: Pick<SimContext, 'map' | 'catalog'
     }
   };
 
+  const bystanders = new Set<number>();
+  for (const f of Object.values(world.formations))
+    if (f.status !== 'destroyed' && f.nation !== defender && f.nation !== attacker && !atWar(world, attacker, f.nation)) bystanders.add(f.node);
+
   if (mode === 'counterforce') {
     for (const f of Object.values(world.formations)) {
       if (f.nation !== defender || f.status === 'destroyed' || ctx.map.isSea(f.node)) continue;
+      const host = world.control[f.node];
+      if (host !== defender && !atWar(world, attacker, host)) continue;
       const kind = counterforceKind(f, ctx);
       if (kind) add(f.node, kind, platformCount(f));
     }
@@ -93,5 +102,5 @@ export function targetList(world: World, ctx: Pick<SimContext, 'map' | 'catalog'
   } else {
     for (const c of ctx.map.cities) if (c.nation === defender && world.control[c.node] === defender) add(c.node, 'city', c.pop);
   }
-  return [...byNode.values()].filter((t) => reachable(t.node)).sort((a, b) => PRIORITY[a.kind] - PRIORITY[b.kind] || b.value - a.value || a.node - b.node);
+  return [...byNode.values()].filter((t) => !bystanders.has(t.node) && reachable(t.node)).sort((a, b) => PRIORITY[a.kind] - PRIORITY[b.kind] || b.value - a.value || a.node - b.node);
 }

@@ -4,15 +4,19 @@
  * lhs draws every swept param together over --runs runs (forecast mode: ranges and probabilities).
  * oat moves one param at a time across --runs levels with the rest at their defaults (stress-test
  * mode: tipping points). --sweep takes 'tagged' (every estimated, judgment or contested param) or
- * a comma list of param ids.
+ * a comma list of param ids. Every run also reads the war's Outputs (src/outputs), printed as
+ * p10/p50/p90 under "war cost and production race" for the nations in the opening wars.
  */
 import { paramRegistry } from '../core/params';
-import { defaultMetrics, metric, sampleRuns, sweptParams, type EnsembleInput, type EnsembleReport, type Flip } from '../forecast';
-import { runAll } from '../forecast/pool';
+import type { NationId } from '../core/types';
+import { belligerentPairs, defaultMetrics, metric, sampleRuns, sweptParams, type EnsembleInput, type EnsembleReport, type Flip } from '../forecast';
 import { summarize } from '../forecast/report';
+import { outputRanges, type OutputRange } from '../outputs';
 import { createSession } from '../scenarios';
 import { CliError } from './args';
 import { parseEnsembleArgs, type EnsembleArgs } from './ensemble-args';
+import { count } from './outputs-report';
+import { runAllWithOutputs } from './outputs-pool';
 
 function fail(message: string, code: number): never {
   console.error(`error: ${message}`);
@@ -20,11 +24,13 @@ function fail(message: string, code: number): never {
 }
 
 let args: EnsembleArgs;
-let input: EnsembleInput;
+let input: EnsembleInput & { world: string };
+let nations: NationId[];
 try {
   args = parseEnsembleArgs(process.argv.slice(2));
   const probe = createSession(args.scenario, args.seeds[0]);
   const metrics = args.metrics ?? defaultMetrics(probe.world);
+  nations = [...new Set(belligerentPairs(probe.world).flat())];
   metrics.forEach(metric);
   sweptParams(args.sweep);
   input = {
@@ -38,16 +44,21 @@ try {
 }
 
 const t0 = performance.now();
-const results = await runAll(input, {
+const runs = await runAllWithOutputs(input, nations, {
   workers: args.workers,
   onProgress: (done, total) => process.stderr.write(`\r${done}/${total} runs, ${((performance.now() - t0) / 1000).toFixed(0)} s`),
 });
 process.stderr.write('\n');
+const results = runs.map((r) => r.result);
 const report = summarize(input, results);
+const outputs = outputRanges(runs.map((r) => r.rows));
 const seconds = (performance.now() - t0) / 1000;
 
-if (args.json) console.log(JSON.stringify({ ...report, seconds, results }, null, 2));
-else print(report, seconds);
+if (args.json) console.log(JSON.stringify({ ...report, outputs, seconds, results }, null, 2));
+else {
+  print(report, seconds);
+  printOutputs(outputs);
+}
 
 function fmt(x: number): string {
   if (!Number.isFinite(x)) return String(x);
@@ -76,4 +87,11 @@ function print(r: EnsembleReport, seconds: number): void {
   r.top3.forEach((f, i) => console.log(`  ${i + 1}. ${flipLine(f)}`));
   console.log('\nstrongest effects');
   for (const f of r.flips.slice(0, 10)) console.log(`  ${flipLine(f)}`);
+}
+
+function printOutputs(rows: OutputRange[]): void {
+  const cell = (r: OutputRange, x: number) => (r.unit === 'share' ? `${Math.round(x * 100)}%` : r.unit === 'day' && !Number.isFinite(x) ? 'never' : count(x));
+  console.log('\nwar cost and production race                         p10        p50        p90');
+  for (const r of rows) console.log(`${r.label.padEnd(50)} ${[r.p10, r.p50, r.p90].map((x) => cell(r, x).padStart(10)).join(' ')}${r.runs < runs.length ? `   (${r.runs} of ${runs.length} runs)` : ''}`);
+  console.log('  run-out days are from the scenario start: the day a stock ran dry, else when it would at the last month\'s rates');
 }

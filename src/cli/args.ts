@@ -3,6 +3,8 @@ import { SCENARIOS } from '../scenarios';
 export interface CliArgs {
   list: boolean;
   quiet: boolean;
+  /** Print the after-action report (war cost, production race, workarounds) at the end. */
+  report: boolean;
   days: number;
   seed: number;
   scenario: string;
@@ -11,7 +13,7 @@ export interface CliArgs {
 }
 
 const VALUE_FLAGS = new Set(['days', 'seed', 'scenario', 'resume', 'save']);
-const BOOL_FLAGS = new Set(['list', 'quiet']);
+const BOOL_FLAGS = new Set(['list', 'quiet', 'report']);
 
 export class CliError extends Error {}
 
@@ -44,6 +46,7 @@ export function parseArgs(argv: string[]): CliArgs {
   return {
     list: raw.has('list'),
     quiet: raw.has('quiet'),
+    report: raw.has('report'),
     days: raw.has('days') ? integer('days', raw.get('days'), 0) : 30,
     seed: raw.has('seed') ? integer('seed', raw.get('seed'), 0) : 1,
     scenario,
