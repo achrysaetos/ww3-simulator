@@ -435,10 +435,25 @@ export interface ContactDetail {
 
 // ---------------------------------------------------------------- encoder (worker side)
 
+/**
+ * Platforms a formation fields at full strength: its establishment as logistics recorded it, so a
+ * resumed game and a first sighting read the same strength as a session that watched all along.
+ * A world without logistics (a test) counts the damaged kit as the missing share.
+ */
+function establishedPlatforms(world: World, f: Formation): number {
+  const est = world.slices.logistics?.establishment[f.id]?.equipment;
+  let n = 0;
+  if (est) for (const v of Object.values(est)) n += v;
+  else {
+    n = platformCount(f);
+    for (const v of Object.values(f.damaged)) n += v;
+  }
+  return Math.max(1, n);
+}
+
 export class SnapshotEncoder {
   private lastControl: Uint16Array | null = null;
   private lastIds: FormationId[] = [];
-  private readonly initial = new Map<FormationId, number>();
   private readonly nationIndex: Map<NationId, number>;
   private events: SimEvent[] = [];
   private dropped = 0;
@@ -515,8 +530,8 @@ export class SnapshotEncoder {
       return !!c && !c.embarkedOn;
     };
     const fs = Object.values(world.formations).filter(shown);
-    for (const f of fs) if (!this.initial.has(f.id)) this.initial.set(f.id, Math.max(1, contactOf(f)?.strength ?? platformCount(f)));
-    const entry = (f: Formation): RosterEntry => ({ id: f.id, name: f.name, nation: f.nation, kind: f.kind, echelon: f.echelon, platforms: this.initial.get(f.id)! });
+    const full = new Map(fs.map((f) => [f.id, establishedPlatforms(world, f)]));
+    const entry = (f: Formation): RosterEntry => ({ id: f.id, name: f.name, nation: f.nation, kind: f.kind, echelon: f.echelon, platforms: full.get(f.id)! });
     const prevIds = this.lastIds;
     const kept = fs.length >= prevIds.length && prevIds.every((id, i) => fs[i].id === id);
     if (!kept) snap.roster = fs.map(entry);
@@ -534,7 +549,7 @@ export class SnapshotEncoder {
       const c = contactOf(f);
       if (c) {
         p.fNode[i] = c.node;
-        p.fStrength[i] = Math.round(Math.min(1, c.strength / this.initial.get(f.id)!) * 255);
+        p.fStrength[i] = Math.round(Math.min(1, c.strength / full.get(f.id)!) * 255);
         p.fPosture[i] = NO_POSTURE;
         p.fStatus[i] = STATUSES.indexOf('active');
         p.fTarget[i] = NO_NODE;
@@ -544,7 +559,7 @@ export class SnapshotEncoder {
         continue;
       }
       p.fNode[i] = f.node;
-      p.fStrength[i] = Math.round(Math.min(1, platformCount(f) / this.initial.get(f.id)!) * 255);
+      p.fStrength[i] = Math.round(Math.min(1, platformCount(f) / full.get(f.id)!) * 255);
       p.fPosture[i] = POSTURES.indexOf(f.order.posture);
       p.fStatus[i] = STATUSES.indexOf(f.status);
       p.fTarget[i] = f.order.target ?? NO_NODE;
