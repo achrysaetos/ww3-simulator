@@ -7,6 +7,7 @@ import { armenia, azerbaijan, georgia, serbia } from './caucasus-balkans';
 import { india } from './india';
 import { israel } from './israel';
 import { japan } from './japan';
+import { lebanon } from './lebanon';
 import { southKorea } from './korea';
 import { egypt, iraq, jordan, qatar, saudiArabia, syria, uae } from './middle-east';
 import { pakistan } from './pakistan';
@@ -18,7 +19,7 @@ import { taiwan } from './taiwan';
 export const rest: OrbatEntry[] = placeOnOwnLand(loadMap(), [
   ...japan, ...southKorea, ...taiwan, ...australia, ...india, ...pakistan,
   ...philippines, ...vietnam, ...indonesia, ...singapore, ...thailand,
-  ...israel, ...saudiArabia, ...uae, ...egypt, ...syria, ...iraq, ...jordan, ...qatar,
+  ...israel, ...lebanon, ...saudiArabia, ...uae, ...egypt, ...syria, ...iraq, ...jordan, ...qatar,
   ...brazil, ...argentina, ...mexico,
   ...algeria, ...morocco, ...nigeria, ...southAfrica, ...ethiopia,
   ...azerbaijan, ...armenia, ...georgia, ...serbia,

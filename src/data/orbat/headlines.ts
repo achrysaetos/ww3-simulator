@@ -38,6 +38,7 @@ export const AUXILIARIES: Record<string, { personnel: number; what: string }> = 
   FIN: { personnel: 238_000, what: 'reservists filling the wartime brigades (IISS reserve)' },
   SWE: { personnel: 10_000, what: 'conscript reservists filling the wartime brigades (IISS reserve)' },
   AZE: { personnel: 15_000, what: 'State Border Service and internal troops (IISS paramilitary)' },
+  LBN: { personnel: 34_500, what: 'Hezbollah fighters and reservists (IISS, CSIS est.)' },
 };
 
 /**
@@ -111,6 +112,7 @@ export const IISS_HEADLINES: Record<string, Headline> = {
   SYR: h(150, 0, 0, 0, 169_000), // equipment est. for the post-Assad army; personnel is the IISS 2025 headline
   IRQ: h(390, 85, 0, 0, 193_000),
   JOR: h(180, 45, 0, 0, 100_500),
+  LBN: h(334, 6, 0, 0, 60_000),
   QAT: h(62, 96, 0, 0, 16_500),
   DZA: h(1500, 150, 5, 6, 139_000),
   MAR: h(650, 88, 6, 0, 195_800),
