@@ -66,6 +66,16 @@ export const DIGITAL_GDP_ELASTICITY = defineParam({ id: 'nonkinetic.DIGITAL_GDP_
  */
 export const ATTACK_HEAT = defineParam({ id: 'nonkinetic.ATTACK_HEAT', value: 0.5, range: [0.2, 1], tag: 'judgment',
   source: 'Judgment: each attack on shipping in a zone raises its remembered risk', affects: 'how much one attack scares shipping' });
+/**
+ * Heat an attack on warships leaves, as a share of an attack on merchant ships. Navies fighting
+ * each other deter merchants far less than a campaign against them: Ukraine sank or disabled about
+ * a third of the Black Sea Fleet in 2023-24, yet its grain corridor through the same sea was back to
+ * near pre-war monthly volumes in 2024; Gulf tanker traffic kept sailing through the 1987 Stark attack
+ * and the 1988 Praying Mantis battle, while the Red Sea 2024 campaign aimed at merchants cut transits by two thirds.
+ * At a tenth, a zone takes about ten warship attacks within a few weeks to scare shipping as much as two attacks on merchants.
+ */
+export const WARSHIP_ATTACK_SHARE = defineParam({ id: 'nonkinetic.WARSHIP_ATTACK_SHARE', value: 0.1, range: [0.02, 0.4], tag: 'judgment',
+  source: 'Ukraine grain corridor near pre-war volumes in 2024 despite the Black Sea Fleet campaign (Ukrainian Sea Ports Authority); Tanker War 1987-88 vs Red Sea 2024 (UNCTAD)', affects: 'how much fighting between navies scares merchant shipping' });
 export const HEAT_HALF_DAYS = defineParam({ id: 'nonkinetic.HEAT_HALF_DAYS', value: 20, range: [7, 60], tag: 'estimated',
   source: 'Red Sea traffic stayed depressed for months after attacks eased (UNCTAD 2024)', affects: 'how long shipping stays scared' });
 export const MINE_RISK = defineParam({ id: 'nonkinetic.MINE_RISK', value: 0.01, range: [0.002, 0.03], tag: 'judgment',

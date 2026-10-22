@@ -3,24 +3,30 @@ import type { GameMap } from '../../core/map';
 import type { NationId, NodeId, World } from '../../core/types';
 import { chokepointShare, geography } from '../naval/geography';
 import type { NonKineticState, ZoneRisk } from './state';
-import { ATTACK_HEAT, HEAT_HALF_DAYS, MAX_PREMIUM_PCT, MAX_REFUSING, MINE_RISK } from './tables';
+import { ATTACK_HEAT, HEAT_HALF_DAYS, MAX_PREMIUM_PCT, MAX_REFUSING, MINE_RISK, WARSHIP_ATTACK_SHARE } from './tables';
 
 /**
- * Shipping fear by sea zone, rebuilt each tick. Every strike on a ship or shore target in a sea
- * zone, and every sea battle there, leaves heat that decays over days; hostile mines add standing
+ * Shipping fear by sea zone, rebuilt each tick. Every attack on warships in a sea zone (a strike
+ * that gets through, a sea battle) leaves heat that decays over days; hostile mines add standing
  * risk. Risk sets a war-risk premium and the share of merchant ships that refuse to transit, the
  * Red Sea 2024 mechanism where few sinkings still cut transits by two thirds (UNCTAD, Lloyd's List).
+ * Warship fighting scares merchants far less than a campaign against them (WARSHIP_ATTACK_SHARE).
+ * Submarines sinking merchants emit no event; blockade.ts counts that interdiction physically.
  */
 export function stepMaritimeRisk(world: World, ctx: SimContext, s: NonKineticState): void {
   const dtDays = world.dtHours / 24;
   const decay = Math.exp(-(dtDays / HEAT_HALF_DAYS()) * Math.LN2);
   for (const node of Object.keys(s.maritime)) s.maritime[Number(node)].attackHeat *= decay;
 
+  // A salvo that hits emits a strike and a battle; one attacker's fire in one zone in one tick is one attack.
+  const attacks = new Set<string>();
   for (const e of world.events) {
-    let node: NodeId | undefined;
-    if (e.type === 'strike' && ctx.map.isSea(e.target) && e.fired > e.intercepted) node = e.target;
-    else if (e.type === 'battle' && e.domain === 'sea') node = e.node as NodeId;
-    if (node !== undefined) zoneOf(s, node).attackHeat += ATTACK_HEAT();
+    let node: NodeId | undefined, by: NationId | undefined;
+    if (e.type === 'strike' && ctx.map.isSea(e.target) && e.fired > e.intercepted) [node, by] = [e.target, e.by];
+    else if (e.type === 'battle' && e.domain === 'sea') [node, by] = [e.node as NodeId, e.attacker];
+    if (node === undefined || attacks.has(`${node}|${by}`)) continue;
+    attacks.add(`${node}|${by}`);
+    zoneOf(s, node).attackHeat += ATTACK_HEAT() * WARSHIP_ATTACK_SHARE();
   }
 
   const mineRisk = new Map<number, number>();

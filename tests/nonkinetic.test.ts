@@ -5,7 +5,9 @@ import type { NationId, NodeId } from '../src/core/types';
 import { createSession } from '../src/scenarios';
 import { nonKinetic } from '../src/systems/nonkinetic';
 import { dataConnectivityLost, maritimeDeterred, nonKineticState } from '../src/systems/nonkinetic/reads';
+import { stepMaritimeRisk } from '../src/systems/nonkinetic/maritime';
 import { accessKey } from '../src/systems/nonkinetic/state';
+import { geography } from '../src/systems/naval/geography';
 import { id, testWorld } from '../src/testkit';
 
 const UKR = id.nation('UKR'), RUS = id.nation('RUS');
@@ -116,6 +118,27 @@ describe('shipping deterred by fear', () => {
     // The deterrence runs on fear, not sunk hulls: few formations are actually destroyed.
     expect(s.world.history.filter((e) => e.type === 'formation_destroyed').length).toBeLessThan(40);
   }, 180_000);
+
+  // taiwan-2027: DF-26B salvoes sinking US amphibs in the Korea Strait saturated Busan's zone and cut neutral Korea's trade by half.
+  it('navies fighting off a neutral port leave its shipping far less scared than a campaign against merchants would', () => {
+    const s = createSession('taiwan-2027', 1);
+    const KOR = id.nation('KOR'), CHN = id.nation('CHN'), USA = id.nation('USA');
+    const busan = s.map.nodeAt(35.1, 129.04) as NodeId;
+    const zone = geography(s.map).ports.find((p) => p.node === busan)!.zone as NodeId;
+    const amphib = Object.values(s.world.formations).find((f) => f.nation === USA && f.kind === 'surface_group')!;
+    const nk = nonKineticState(s.world)!;
+    const ctx = s.engine.context(s.world);
+    for (let salvo = 0; salvo < 2; salvo++) {
+      s.world.events = [
+        { type: 'strike', tick: s.world.tick, by: CHN, munition: id.munition('df26b'), fired: 4, intercepted: 1, target: zone, effects: [{ kind: 'ship_hits', formation: amphib.id, hits: 3 }] },
+        { type: 'battle', tick: s.world.tick, node: zone, attacker: CHN, defender: USA, losses: {}, casualties: {}, domain: 'sea' },
+      ];
+      stepMaritimeRisk(s.world, ctx, nk);
+    }
+    expect(nk.maritime[zone].refusing).toBeGreaterThan(0);
+    expect(nk.maritime[zone].refusing).toBeLessThan(0.1);
+    expect(maritimeDeterred(s.world, s.map, KOR)).toBeLessThan(0.1);
+  });
 });
 
 describe('occupation breeds resistance', () => {
