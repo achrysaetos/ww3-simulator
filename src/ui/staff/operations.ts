@@ -58,6 +58,7 @@ export function operations(p: OperationsInput): Operation[] {
   const enemyIdx = new Set(p.enemies.map((e) => p.nationIds.indexOf(e)));
   const own = p.formations.filter((f) => f.entry.nation === p.me && f.status === 'active' && LINE.has(f.entry.kind) && !p.map.isSea(f.node));
   const at = new Map<NodeId, FormationView[]>();
+  const sector = (node: NodeId) => bare(p.places.heldName(node, (cell) => p.control[cell] === mine));
   for (const f of own) at.set(f.node, [...(at.get(f.node) ?? []), f]);
 
   const offensives = new Map<string, FormationView[]>();
@@ -82,7 +83,7 @@ export function operations(p: OperationsInput): Operation[] {
   for (let i = 0; i < c.length; i += 3) {
     const node = c[i] as NodeId;
     if (p.control[node] !== mine || !enemyIdx.has(c[i + 1])) continue;
-    const area = bare(p.places.name(node));
+    const area = sector(node);
     const s = pushed.get(area) ?? { share: 0, node, cells: [] };
     s.cells.push(node);
     if (c[i + 2] >= s.share) {
@@ -110,7 +111,7 @@ export function operations(p: OperationsInput): Operation[] {
     let touches = false;
     for (let i = p.map.adjStart[node]; i < p.map.adjStart[node + 1] && !touches; i++) touches = enemyIdx.has(p.control[p.map.adj[i]]);
     if (!touches) continue;
-    const area = bare(p.places.name(node));
+    const area = sector(node);
     if (pushed.has(area)) continue;
     front.set(area, [...(front.get(area) ?? []), ...fs.filter((f) => f.posture !== 'attack')]);
   }

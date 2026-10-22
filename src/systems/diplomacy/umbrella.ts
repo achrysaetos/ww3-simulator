@@ -3,7 +3,7 @@ import type { MunitionId, NationId, NodeId, World } from '../../core/types';
 import { believedWorld } from '../intel/view';
 import { delegated } from '../orders';
 import { nuclearLaunchers, weaponFor } from '../strategic/targeting';
-import { CITY_POP_SHARE, STRATEGIC_YIELD_KT, hitBy } from './escalation';
+import { CITY_POP_SHARE, nuclearAttacks } from './escalation';
 import type { AllianceTreaty, DiplomacyState, UmbrellaCase } from './types';
 import { declareWar, raiseEscalation } from './wars';
 
@@ -56,10 +56,9 @@ function umbrellasOver(alliances: readonly AllianceTreaty[], ally: NationId, att
  * guarantor enters the war at once if it was not in it, and the dyad climbs to the nuclear rung.
  */
 export function openUmbrellaCases(world: World, ctx: SimContext, s: DiplomacyState, alliances: readonly AllianceTreaty[]): void {
-  for (const e of world.events) {
-    if (e.type !== 'nuclear_detonation') continue;
-    const strategic = e.yieldKt >= STRATEGIC_YIELD_KT || (!ctx.map.isSea(e.node) && ctx.map.popShare[e.node] >= CITY_POP_SHARE);
-    for (const ally of hitBy(world, ctx.map, e.by, e.node))
+  for (const e of nuclearAttacks(world, ctx, s)) {
+    const strategic = e.strategic;
+    for (const ally of e.victims)
       for (const u of umbrellasOver(alliances, ally, e.by)) {
         const g = world.nations[u.guarantor];
         if (!g || g.status === 'capitulated' || g.nuclear.warheads <= 0) continue;

@@ -52,6 +52,13 @@ export const AIRFRAME: Partial<Record<PlatformClass, AirframeProfile>> = {
  * an aim battle damage assessment calls futile.
  */
 export const ATTRITABLE_COST_USD_M = 0.3;
+/**
+ * Below this visibility (combat.ts, 10^-stealth) an airframe is a penetrator: it flies over the enemy's rear without
+ * first winning the air there, as B-2s and Israel's F-35Is did over Iran in June 2025 (IDF; US DoD, 22 June 2025).
+ * It takes in every fifth-generation design (F-35, F-22, B-2, B-21, J-20, J-35) and leaves out the Su-57, whose
+ * frontal-only shaping keeps it behind the line in Ukraine (RUSI 2023, judgment).
+ */
+export const PENETRATOR_VISIBILITY = 0.2;
 
 export const STRIKE_ROLES: ReadonlySet<AirRole> = new Set(['counter_air', 'strike', 'bomber', 'helo']);
 /** Roles that take on tanker fuel. */
@@ -62,17 +69,22 @@ export const OFFENSIVE_POSTURES: ReadonlySet<Posture> = new Set(['strike', 'air_
 
 /**
  * Ground launchers that fire strike munitions from their magazine. Launches per
- * launcher per day: Russia 2022 fired roughly one Iskander per TEL per day across
+ * launcher per day, the sustained reload rate: Russia 2022 fired roughly one Iskander per TEL per day across
  * ~50 TELs; Kalibr ships/launchers 2-4; Shahed racks launch ~5 per night (Ukrainian
  * Air Force daily reports 2023-24). Estimates, not doctrine rates.
+ *
+ * `salvo` is the rounds one launcher puts up at once after holding fire: what it carries plus a reload from its
+ * transloader within the hours of a wave. An Iskander-M TEL carries two missiles; Iran's ~100-130 MRBM launchers
+ * put ~180-200 missiles into the 1 October 2024 wave (IDF, CSIS), so about two each; a ground cruise-missile
+ * launcher holds four canisters (Iskander-K, Typhon cell); a Bastion or Harpoon coastal launcher two to four.
  */
-export const LAUNCHER: Partial<Record<PlatformClass, { launchesPerDay: number }>> = {
-  tel_srbm: { launchesPerDay: 1.5 },
-  tel_mrbm: { launchesPerDay: 1 },
-  tel_irbm: { launchesPerDay: 0.5 },
-  cruise_launcher: { launchesPerDay: 3 },
-  coastal_asm: { launchesPerDay: 2 },
-  loitering_munition_launcher: { launchesPerDay: 5 },
+export const LAUNCHER: Partial<Record<PlatformClass, { launchesPerDay: number; salvo: number }>> = {
+  tel_srbm: { launchesPerDay: 1.5, salvo: 2 },
+  tel_mrbm: { launchesPerDay: 1, salvo: 2 },
+  tel_irbm: { launchesPerDay: 0.5, salvo: 1 },
+  cruise_launcher: { launchesPerDay: 3, salvo: 4 },
+  coastal_asm: { launchesPerDay: 2, salvo: 2 },
+  loitering_munition_launcher: { launchesPerDay: 5, salvo: 5 },
 };
 
 /**
@@ -104,6 +116,20 @@ export const DRONE_SITE_LAUNCHES_PER_DAY = defineParam({ id: 'air.DRONE_SITE_LAU
  * ~100+ glide bombs a day in 2024-25 per Ukrainian Air Force reports).
  */
 export const REARM_SHARE_PER_DAY = 0.5;
+/**
+ * Full loads of each strike weapon a nation holds in war reserve where no published stock is listed
+ * (data/industry/stockpiles.ts). NATO's war-reserve objectives are about 30 days of combat use; European air forces
+ * over Libya in 2011 ran short of precision bombs within weeks (RUSI 2012), so most hold a few loads (judgment).
+ */
+export const WAR_RESERVE_LOADS = defineParam({ id: 'air.WAR_RESERVE_LOADS', value: 2, range: [1, 4], tag: 'judgment',
+  source: 'NATO ~30-day war-reserve objectives; Libya 2011 PGM shortages (RUSI 2012)', affects: 'how long air forces and missile brigades keep firing' });
+/**
+ * Lethal radius of a 500 kg warhead against a parked aircraft, scaled by the cube root of warhead mass (Hopkinson-Cranz).
+ * Inaccurate missiles miss ramps: some 20-30 Iranian MRBMs landed on Nevatim on 1 October 2024 and wrecked no aircraft
+ * (IDF; Planet imagery via AP, 2024), while Iskanders with a ~10 m CEP destroyed Ukrainian jets on the ground (Oryx).
+ */
+export const RAMP_LETHAL_RADIUS_M = defineParam({ id: 'air.RAMP_LETHAL_RADIUS_M', value: 50, range: [30, 100], tag: 'judgment',
+  source: 'Nevatim, 1 Oct 2024: ~20-30 MRBM impacts, no aircraft lost (IDF; AP imagery); Iskander kills on Ukrainian ramps (Oryx)', affects: 'aircraft lost on the ground' });
 export const BULK_AMMO_KINDS: ReadonlySet<MunitionKind> = new Set(['unguided_bomb', 'glide_bomb', 'rocket']);
 
 /**
@@ -131,13 +157,16 @@ export function beltKillProbability(kind: MunitionKind, overflightKm: number, di
 /** How a threat behaves for air defense. */
 export type ThreatCategory = 'aircraft' | 'air_breathing' | 'ballistic';
 
-/** Category of each strike munition kind as an incoming threat; null = not intercepted by air defense. */
+/**
+ * Category of each strike munition kind as an incoming threat; null = not intercepted by air defense. Bombs, guided or
+ * not, fall for under a minute from release with a small cross-section, so air defence fights the aircraft that drop
+ * them: Ukraine's air force reports thousands of Russian glide bombs a month and few intercepts of the bombs themselves (2024-25).
+ */
 export const THREAT_OF_KIND: Record<MunitionKind, ThreatCategory | null> = {
   srbm: 'ballistic', mrbm: 'ballistic', irbm: 'ballistic', icbm: 'ballistic', slbm: 'ballistic', hgv: 'ballistic',
   antiship_ballistic: 'ballistic',
-  cruise: 'air_breathing', antiship_cruise: 'air_breathing', glide_bomb: 'air_breathing', guided_bomb: 'air_breathing',
-  loitering: 'air_breathing', drone_oneway: 'air_breathing', arm: 'air_breathing',
-  unguided_bomb: null, aam: null, sam: null, abm: null, shorad_missile: null, atgm: null, shell: null,
+  cruise: 'air_breathing', antiship_cruise: 'air_breathing', loitering: 'air_breathing', drone_oneway: 'air_breathing', arm: 'air_breathing',
+  glide_bomb: null, guided_bomb: null, unguided_bomb: null, aam: null, sam: null, abm: null, shorad_missile: null, atgm: null, shell: null,
   guided_shell: null, rocket: null, guided_rocket: null, torpedo: null, mine: null, small_arms: null,
 };
 
@@ -197,6 +226,17 @@ export const NON_STRIKE_KINDS: ReadonlySet<MunitionKind> = new Set(['aam', 'sam'
 /** Target classes that move: a strike must find them, not just reach their cell. */
 export const MOBILE_TARGETS: ReadonlySet<TargetClass> = new Set(['soft', 'armor', 'infantry']);
 
+/** Platforms that hide like an air-defence battery (TUNING.airDefenseLocated). */
+export const AIR_DEFENSE_CLASSES: ReadonlySet<PlatformClass> = new Set(['sam_long', 'sam_medium', 'shorad', 'abm', 'radar']);
+
+/**
+ * Weapons that home on what they find at the aimpoint: an imaging or radar seeker (JASSM, Storm Shadow, Kh-101,
+ * anti-ship missiles), radiation homing, or a loitering search. A battery that moved a few km while the weapon flew is
+ * still in the seeker's basket, so flight time does not lose it; GNSS-only bombs, ballistic missiles and rockets go
+ * where the target was.
+ */
+export const TERMINAL_SEEKER_KINDS: ReadonlySet<MunitionKind> = new Set(['cruise', 'antiship_cruise', 'antiship_ballistic', 'arm', 'loitering']);
+
 /** The target class a platform presents to a strike. */
 export const TARGET_OF_CLASS: Record<PlatformClass, TargetClass> = {
   infantry: 'infantry', mbt: 'armor', ifv: 'armor', apc: 'armor', recon: 'armor', sp_artillery: 'armor',
@@ -228,8 +268,12 @@ export const TUNING = paramTable('air', {
    * is an estimate between a coordinated time-on-target and a staggered wave.
    */
   raidWindowS: tableParam({ value: 600, range: [300, 1200], tag: 'estimated', source: 'Iran Oct 2024 and Russian combined strikes arrived in waves over tens of minutes', affects: 'air-defence saturation' }),
-  /** Each tanker sortie refuels ~2 receivers once (KC-135 ~90 t offload vs ~6-8 t per fighter top-up, minus tanker reserve). */
-  tankerReceiversPerTanker: 2,
+  /**
+   * Receivers one tanker sortie refuels once: a KC-135 offloads up to ~90 t and a KC-46 ~95 t (USAF fact sheets), a
+   * fighter top-up takes ~6-8 t, and the tanker keeps a reserve and flies one track at a time, so about six. Israel's
+   * dozen tankers took ~200 jets 1,500 km to Iran in June 2025 (IDF).
+   */
+  tankerReceiversPerTanker: tableParam({ value: 6, range: [3, 8], tag: 'estimated', source: 'KC-135/KC-46 offload ~90 t vs ~6-8 t per fighter top-up (USAF fact sheets)', affects: 'tanker-supported combat radius' }),
   /** Two refuels per sortie (outbound and recovery) at most roughly doubles combat radius. */
   maxTankerExtension: 1,
   /** Fighter AAM shots per aircraft per BVR volley (standard 2-shot shoot doctrine). */
@@ -269,6 +313,14 @@ export const TUNING = paramTable('air', {
    */
   mobileTargetLocated: tableParam({ value: 0.5, range: [0.3, 0.7], tag: 'judgment', source: 'Judgment fitted to Ukraine 2023-25: a few SAM launchers destroyed a month (Oryx)', affects: 'strikes on mobile units' }),
   mobileTargetDwellMin: tableParam({ value: 60, range: [30, 120], tag: 'judgment', source: 'Judgment fitted to Ukraine 2023-25 shoot-and-scoot', affects: 'strikes on mobile units' }),
+  /**
+   * How often an air-defence launcher or radar is where the attacker's picture puts it, relative to other mobile units.
+   * Batteries hide by emission control, decoys and moves after each engagement: in 2023-25 Russia's thousands of
+   * missile, drone and glide-bomb strikes destroyed a few Ukrainian SAM systems a month (Oryx lists ~150 SAM systems
+   * lost in three and a half years, a quarter of them in the first weeks of 2022), while the same strikes hit fixed
+   * targets daily (judgment fitted to those counts).
+   */
+  airDefenseLocated: tableParam({ value: 0.35, range: [0.2, 0.6], tag: 'judgment', source: 'Oryx: ~150 Ukrainian SAM systems lost Feb 2022-2025, a few a month after the first weeks', affects: 'strikes on air defences' }),
   /** Interceptor difficulty an aircraft presents (ECM, chaff, terrain masking, maneuver). */
   aircraftEvasion: tableParam({ value: 0.55, range: [0.4, 0.7], tag: 'judgment', source: 'Judgment: ECM, chaff, terrain masking and manoeuvre against interceptors', affects: 'aircraft losses to SAMs' }),
   aircraftEvasionWithEw: tableParam({ value: 0.7, range: [0.55, 0.85], tag: 'judgment', source: 'Judgment: the same with escort jamming', affects: 'aircraft losses to SAMs' }),

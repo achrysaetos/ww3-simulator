@@ -6,7 +6,8 @@ import type { Palette } from './colors';
 import type { PlaceNamer } from './events';
 import type { Manifest } from './map/tiles';
 import { ZoomControl } from './map/ZoomControl';
-import { contactOf, MapRenderer, type Overlays } from './renderer';
+import { fixAge } from './map/contacts';
+import { MapRenderer, type Overlays } from './renderer';
 import { NO_NATION, type ScenarioCard } from './snapshot';
 import { BAND_PRESET, pinTo, unproject, zoomForPxPerDeg, type ZoomBand } from './view';
 import './theme/kit.css';
@@ -262,8 +263,8 @@ export function MapView(props: MapViewProps) {
         {here.length > 0 && (
           <ul className="tt-list">
             {here.slice(0, 6).map((f) => {
-              const c = contactOf(f);
-              return <li key={f.entry.id}>{f.entry.nation} · {f.entry.name}{c && <span className="tt-age"> · seen {Math.round(c.ageHours)}h ago, ±{Math.round(c.errorKm)} km</span>}</li>;
+              const c = f.contact;
+              return <li key={f.entry.id}>{f.entry.nation} · {f.entry.name}{c && <span className="tt-age"> · seen {fixAge(c.ageHours)} ago, ±{Math.round(c.errorKm)} km</span>}</li>;
             })}
             {here.length > 6 && <li className="ww-muted">+{here.length - 6} more</li>}
           </ul>

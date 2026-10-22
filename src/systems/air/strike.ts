@@ -15,14 +15,17 @@ import { visibility } from './combat';
 import { emitBattle, hasSupport } from './superiority';
 import { spaceSupport } from '../strategic/space';
 import { jammedHits } from '../c2';
+import { strikeChokepoint } from '../logistics/chokepoints';
 import { conditionsAt, pgmFactor } from '../weather/effects';
-import { AIRFRAME, ATTRITABLE_COST_USD_M, DRONE_SITE_LAUNCHES_PER_DAY, isRoundOnRail, LAUNCHER, MOBILE_TARGETS, NON_STRIKE_KINDS, STRIKE_ROLES, TARGET_OF_CLASS, TUNING } from './tables';
+import { AIR_DEFENSE_CLASSES, AIRFRAME, ATTRITABLE_COST_USD_M, DRONE_SITE_LAUNCHES_PER_DAY, isRoundOnRail, LAUNCHER, MOBILE_TARGETS, NON_STRIKE_KINDS, PENETRATOR_VISIBILITY, RAMP_LETHAL_RADIUS_M, STRIKE_ROLES, TARGET_OF_CLASS, TERMINAL_SEEKER_KINDS, TUNING } from './tables';
 
 export interface AirSlice {
   /** Runway capacity per airbase node after cratering, 0..1; absent = intact. */
   runway: Record<number, number>;
   /** Each attacker's battle damage assessment of what it aimed at, by aimKey; absent in older saves. */
   bda?: Record<NationId, Record<string, Assessment>>;
+  /** Share of each missile formation's ready rounds (LAUNCHER salvo) still on its launchers, 0..1; absent = all loaded. */
+  salvo?: Record<FormationId, number>;
 }
 
 /** What a shooter's last raids on one aim achieved, as its sensors and reports show it. */
@@ -99,27 +102,73 @@ export function dailyRounds(f: Formation, m: MunitionId, catalog: Catalog): numb
     if (n <= 0 || load <= 0) continue;
     if (f.kind === 'air_wing') rounds += n * (AIRFRAME[p.class]?.surgePerDay ?? 0) * load;
     else if (isRoundOnRail(p)) rounds += DRONE_SITE_LAUNCHES_PER_DAY();
-    else rounds += n * (LAUNCHER[p.class]?.launchesPerDay ?? 0);
+    // A loaded launcher's first day on a strike order: its salvo, then reloads as they come up.
+    else rounds += n * ((LAUNCHER[p.class]?.salvo ?? 0) + (LAUNCHER[p.class]?.launchesPerDay ?? 0));
   }
   return rounds * f.readiness;
 }
 
-/** Air groups or ground launchers of a striking formation, with how far each can put a weapon. */
-function carriersOf(f: Formation, pic: AirPicture, ctx: SimContext, world: World): Carrier[] {
+/**
+ * Air groups or ground launchers of a striking formation, with how far each can put a weapon. A missile
+ * formation fires every round it has ready at once (LAUNCHER salvo), so a brigade that held fire masses
+ * its launchers on one aim; one-way drones go up at the launch site's rate.
+ */
+function carriersOf(f: Formation, pic: AirPicture, ctx: SimContext, world: World, slice: AirSlice): Carrier[] {
   if (f.kind === 'air_wing')
     return (pic.byFormation.get(f.id) ?? []).filter((g) => STRIKE_ROLES.has(g.profile.role) && g.sorties > 0).map((g) => ({ platform: g.platform, n: g.sorties, reachKm: g.radiusKm, group: g }));
   if (f.kind !== 'missile') return [];
   const out: Carrier[] = [];
+  const loaded = slice.salvo?.[f.id] ?? 1;
   for (const [pid, n] of Object.entries(f.equipment) as [PlatformId, number][]) {
     const platform = ctx.catalog.platform(pid);
     const rate = LAUNCHER[platform.class];
     if (!rate || n <= 0) continue;
-    const perDay = isRoundOnRail(platform) ? DRONE_SITE_LAUNCHES_PER_DAY() : n * rate.launchesPerDay;
-    const expected = perDay * f.readiness * (world.dtHours / 24);
+    const expected = isRoundOnRail(platform) ? DRONE_SITE_LAUNCHES_PER_DAY() * f.readiness * (world.dtHours / 24) : n * rate.salvo * f.readiness * loaded;
     const launches = Math.floor(expected) + (ctx.rng.chance(expected % 1) ? 1 : 0);
     if (launches > 0) out.push({ platform, n: launches, reachKm: 0 });
   }
   return out;
+}
+
+/** Ready rounds a missile formation's launchers hold when all are loaded, and how many they reload a day. */
+function salvoOf(f: Formation, catalog: Catalog): { rounds: number; perDay: number } {
+  let rounds = 0, perDay = 0;
+  for (const [pid, n] of Object.entries(f.equipment) as [PlatformId, number][]) {
+    const platform = catalog.platform(pid);
+    const rate = LAUNCHER[platform.class];
+    if (!rate || n <= 0 || isRoundOnRail(platform)) continue;
+    rounds += n * rate.salvo;
+    perDay += n * rate.launchesPerDay;
+  }
+  return { rounds, perDay };
+}
+
+/**
+ * Share of rounds aimed at a parked aircraft that land close enough to wreck it: the chance a round with this CEP
+ * falls within the warhead's lethal radius, scaled from RAMP_LETHAL_RADIUS_M by the cube root of its mass.
+ */
+function rampLethality(m: Munition): number {
+  if (!m.cepM) return 1;
+  const radius = RAMP_LETHAL_RADIUS_M() * Math.cbrt(m.warheadKg / 500);
+  return 1 - 0.5 ** ((radius / m.cepM) ** 2);
+}
+
+/** Takes `fired` rounds off a missile formation's ready salvo. */
+function spendSalvo(slice: AirSlice, f: Formation, fired: number, catalog: Catalog): void {
+  if (f.kind !== 'missile' || fired <= 0) return;
+  const { rounds } = salvoOf(f, catalog);
+  if (rounds > 0 && f.readiness > 0) (slice.salvo ??= {})[f.id] = Math.max(0, (slice.salvo[f.id] ?? 1) - fired / (rounds * f.readiness));
+}
+
+/** Launch crews reload from their transloaders at LAUNCHER launchesPerDay. */
+export function reloadSalvos(world: World, slice: AirSlice, catalog: Catalog): void {
+  for (const [id, frac] of Object.entries(slice.salvo ?? {}) as [FormationId, number][]) {
+    const f = world.formations[id];
+    const { rounds, perDay } = f && f.status !== 'destroyed' ? salvoOf(f, catalog) : { rounds: 0, perDay: 0 };
+    const next = rounds > 0 ? frac + (perDay / rounds) * (world.dtHours / 24) : 1;
+    if (next >= 1) delete slice.salvo![id];
+    else slice.salvo![id] = next;
+  }
 }
 
 /**
@@ -168,7 +217,6 @@ function chooseMunition(f: Formation, carriers: Carrier[], tc: TargetClass, dist
  * kill as surely. Russian glide bombs reach 40-70 km past the line, and Russian jets do not overfly Poltava (ISW, RUSI 2024).
  */
 const REAR_TOLERANCE_KM = 15;
-const PENETRATOR_VISIBILITY = 0.1;
 /** The line between two 1-degree cells in contact runs about half a cell (~55 km) from each side's cell centres. */
 const LINE_OFFSET_KM = 55;
 const frontMemo = new WeakMap<World, { tick: number; cells: Map<string, NodeId[]> }>();
@@ -216,33 +264,43 @@ function threatRingKm(world: World, ctx: SimContext, pic: AirPicture, from: Node
 const carriesArm = (g: AirGroup, ctx: SimContext) =>
   g.platform.loadout.some((l) => ctx.catalog.munition(l.munition).kind === 'arm' && (g.f.magazine[l.munition] ?? 0) >= 1);
 
-function planPackage(world: World, ctx: SimContext, pic: AirPicture, f: Formation): Package | undefined {
+/**
+ * The packages a striking formation flies this tick. A missile brigade told to fire, not what with, fires every launcher
+ * type in reach, each its own round: Iran's 1 October 2024 wave mixed Emads, Ghadrs and Fattahs from the same bases
+ * (IDF, CSIS).
+ */
+function planPackages(world: World, ctx: SimContext, pic: AirPicture, f: Formation, slice: AirSlice): Package[] {
   const target = f.order.target;
-  if (target === undefined) return undefined;
-  const carriers = carriersOf(f, pic, ctx, world);
-  if (!carriers.length) return undefined;
+  if (target === undefined) return [];
+  const carriers = carriersOf(f, pic, ctx, world, slice);
+  if (!carriers.length) return [];
   const tc = f.order.targetClass ?? 'structure';
   const ship = tc === 'ship' && f.order.targetFormation ? world.formations[f.order.targetFormation] : undefined;
   const dist = nodeDistance(ctx, f.node, ship?.node === target ? navalPosition(ctx.map, ship) : target);
   const ring = threatRingKm(world, ctx, pic, f.node, target, f.nation);
-  const m = chooseMunition(f, carriers, tc, dist, ring, behindLineKm(world, ctx, pic, target, f.nation), ctx);
-  let weapons = 0;
-  const penetrators: AirGroup[] = [];
-  for (const c of carriers) {
-    // A sortie delivers the full load; a ground launch is one round (the loadout is the launcher's reload capacity).
-    const per = !m ? 0 : c.group ? loadOf(c.platform, m.id) : Math.min(1, loadOf(c.platform, m.id));
-    const strikes = m !== undefined && per > 0 && c.reachKm + m.rangeKm >= dist;
-    if (strikes) weapons += c.n * per;
-    const g = c.group;
-    if (!g) continue;
-    const sead = ring > 0 && dist <= g.radiusKm && carriesArm(g, ctx);
-    if (sead || (strikes && m.rangeKm < ring)) penetrators.push(g);
-    else if (strikes) g.sorties = 0;
+  const rearKm = behindLineKm(world, ctx, pic, target, f.nation);
+  const out: Package[] = [];
+  for (const set of f.kind === 'missile' && !f.order.munition ? carriers.map((c) => [c]) : [carriers]) {
+    const m = chooseMunition(f, set, tc, dist, ring, rearKm, ctx);
+    let weapons = 0;
+    const penetrators: AirGroup[] = [];
+    for (const c of set) {
+      // A sortie delivers the full load; a ground launch is one round (the loadout is the launcher's reload capacity).
+      const per = !m ? 0 : c.group ? loadOf(c.platform, m.id) : Math.min(1, loadOf(c.platform, m.id));
+      const strikes = m !== undefined && per > 0 && c.reachKm + m.rangeKm >= dist;
+      if (strikes) weapons += c.n * per;
+      const g = c.group;
+      if (!g) continue;
+      const sead = ring > 0 && dist <= g.radiusKm && carriesArm(g, ctx);
+      if (sead || (strikes && m.rangeKm < ring)) penetrators.push(g);
+      else if (strikes) g.sorties = 0;
+    }
+    weapons = m ? Math.min(weapons, Math.floor(f.magazine[m.id] ?? 0)) : 0;
+    const strike = m && weapons > 0 ? { munition: m, targetClass: tc, weapons } : undefined;
+    const depthKm = ring - (m && m.rangeKm < ring ? m.rangeKm : 0);
+    if (strike || penetrators.length) out.push({ f, strike, penetrators, depthKm });
   }
-  weapons = m ? Math.min(weapons, Math.floor(f.magazine[m.id] ?? 0)) : 0;
-  const strike = m && weapons > 0 ? { munition: m, targetClass: tc, weapons } : undefined;
-  const depthKm = ring - (m && m.rangeKm < ring ? m.rangeKm : 0);
-  return strike || penetrators.length ? { f, strike, penetrators, depthKm } : undefined;
+  return out;
 }
 
 export function resolveStrikes(world: World, ctx: SimContext, pic: AirPicture, slice: AirSlice): void {
@@ -251,12 +309,12 @@ export function resolveStrikes(world: World, ctx: SimContext, pic: AirPicture, s
   for (const f of Object.values(world.formations)) {
     if (f.status !== 'active' || f.order.posture !== 'strike' || !hostileTarget(world, pic, f)) continue;
     if (futileAim(world, f.nation, aimKey(f.order.target!, f.order.targetFormation, f.order.targetClass), f.order.issuedTick)) continue;
-    const p = planPackage(world, ctx, pic, f);
-    if (!p) continue;
-    const key = `${f.order.target}|${f.nation}`;
-    const list = raids.get(key);
-    if (list) list.push(p);
-    else raids.set(key, [p]);
+    for (const p of planPackages(world, ctx, pic, f, slice)) {
+      const key = `${f.order.target}|${f.nation}`;
+      const list = raids.get(key);
+      if (list) list.push(p);
+      else raids.set(key, [p]);
+    }
   }
   for (const [key, pkgs] of raids) {
     const [t, attacker] = key.split('|');
@@ -341,7 +399,10 @@ function resolveRaid(world: World, ctx: SimContext, pic: AirPicture, slice: AirS
 
   const all = pkgs.flatMap((p) => (p.strike && p.strike.weapons > 0 ? [{ f: p.f, ...p.strike }] : []));
   const live = all.filter((p) => p.targetClass !== 'ship');
-  for (const p of live) p.f.magazine[p.munition.id] -= p.weapons;
+  for (const p of live) {
+    p.f.magazine[p.munition.id] -= p.weapons;
+    spendSalvo(slice, p.f, p.weapons, ctx.catalog);
+  }
   strikeShips(world, ctx, pic, slice, target, attacker, all.filter((p) => p.targetClass === 'ship'));
   const streams: RaidStream[] = live.map((p) => ({ munition: p.munition, count: p.weapons, overflightKm: overflightKm(world, ctx, pic, p.f.node, target, attacker) }));
   const leaked = defendRaid(world, ctx, pic, target, attacker, streams);
@@ -369,6 +430,7 @@ function strikeShips(world: World, ctx: SimContext, pic: AirPicture, slice: AirS
     if (!target) continue;
     if (!ANTISHIP_KINDS.has(p.munition.kind) && (target.node !== target.home || target.order.path?.length)) continue;
     p.f.magazine[p.munition.id] -= p.weapons;
+    spendSalvo(slice, p.f, p.weapons, ctx.catalog);
     const key = `${target.id}|${p.munition.id}`;
     const s = salvos.get(key);
     if (s) s.count += p.weapons;
@@ -436,7 +498,7 @@ const MACH_KM_PER_MIN = 20.4;
  */
 function stillThere(m: Munition, tc: TargetClass, flightMin: number): number {
   if (!MOBILE_TARGETS.has(tc) || m.kind === 'loitering') return 1;
-  return TUNING.mobileTargetLocated * Math.exp(-flightMin / TUNING.mobileTargetDwellMin);
+  return TUNING.mobileTargetLocated * (TERMINAL_SEEKER_KINDS.has(m.kind) ? 1 : Math.exp(-flightMin / TUNING.mobileTargetDwellMin));
 }
 
 interface Victim { f: Formation; pid: PlatformId; /** Detectability relative to a vehicle in the open, 0..1. */ seen: number }
@@ -464,13 +526,28 @@ function victims(ctx: SimContext, pic: AirPicture, target: NodeId, attacker: Nat
     if (tc === 'aircraft' && f.kind !== 'air_wing' && f.kind !== 'strategic') continue;
     for (const pid of Object.keys(f.equipment) as PlatformId[]) {
       const platform = ctx.catalog.platform(pid);
-      if (f.equipment[pid] > 0 && TARGET_OF_CLASS[platform.class] === tc) out.push({ f, pid, seen: mobile ? visibility(Math.max(0, platform.protection.stealth - OPEN_STEALTH)) : 1 });
+      if (f.equipment[pid] > 0 && TARGET_OF_CLASS[platform.class] === tc)
+        out.push({ f, pid, seen: mobile ? visibility(Math.max(0, platform.protection.stealth - OPEN_STEALTH)) * (AIR_DEFENSE_CLASSES.has(platform.class) ? TUNING.airDefenseLocated : 1) : 1 });
     }
   }
   return out;
 }
 
 /** Apply the weapons that got through. Returns what they did for the strike event, and whether anything was destroyed or damaged. */
+/**
+ * A structure strike on a cell that a bridge, tunnel or isthmus joins aims at the crossing: the warheads that land on it
+ * go to strikeChokepoint (logistics), which closes it in proportion. Returns whether it closed any further.
+ */
+function cutChokepoints(world: World, ctx: SimContext, target: NodeId, m: Munition, hits: number): boolean {
+  let cut = false;
+  for (const cp of ctx.map.chokepoints) {
+    if (!cp.edges.some(([a, b]) => a === target || b === target)) continue;
+    const r = strikeChokepoint(world, ctx.map, cp.id, m.warheadKg, ctx.rng.binomial(hits, effectPk(m, 'structure')));
+    cut ||= !!r && r.after < r.before;
+  }
+  return cut;
+}
+
 function applyEffect(world: World, ctx: SimContext, pic: AirPicture, slice: AirSlice, target: NodeId, attacker: NationId, m: Munition, tc: TargetClass, hits: number, tally: LossTally, flightMin: number, aimed: FormationId | undefined): { effects: StrikeEffect[]; effective: boolean } {
   if (hits <= 0) return { effects: [{ kind: 'no_effect', why: 'all_intercepted' }], effective: false };
   hits = jammedHits(world, target, attacker, m, hits);
@@ -481,7 +558,8 @@ function applyEffect(world: World, ctx: SimContext, pic: AirPicture, slice: AirS
     const before = infra[target];
     const perHit = TUNING.structurePerHit * effectPk(m, tc) * spaceSupport(world, attacker, m, false) * (m.warheadKg / 450) ** (2 / 3);
     infra[target] = before * (1 - Math.min(0.5, perHit)) ** hits;
-    return { effects: [{ kind: 'infrastructure', before, after: infra[target] }], effective: infra[target] < before };
+    const cut = tc === 'structure' ? cutChokepoints(world, ctx, target, m, hits) : false;
+    return { effects: [{ kind: 'infrastructure', before, after: infra[target] }], effective: infra[target] < before || cut };
   }
   if (tc === 'power') {
     const owner = world.control[target];
@@ -497,7 +575,7 @@ function applyEffect(world: World, ctx: SimContext, pic: AirPicture, slice: AirS
   let p = effectPk(m, tc) * stillThere(m, tc, flightMin) * spaceSupport(world, attacker, m, MOBILE_TARGETS.has(tc)) * (cloud ? pgmFactor(cloud) : 1);
   const effects: StrikeEffect[] = [];
   if (tc === 'aircraft') {
-    p = (1 - TUNING.shelteredShare) * p + TUNING.shelteredShare * (m.pk.hardened ?? 0);
+    p = ((1 - TUNING.shelteredShare) * p + TUNING.shelteredShare * (m.pk.hardened ?? 0)) * rampLethality(m);
     if (!ctx.map.isSea(target)) {
       const r = slice.runway[target] ?? 1;
       slice.runway[target] = Math.max(0, r * (1 - TUNING.runwayPerHit * (m.pk.structure ?? 0)) ** hits);

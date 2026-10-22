@@ -5,6 +5,7 @@
  * At 1 kt the 5 psi ground range is ~0.71 km for an optimum-height air burst and ~0.54 km for a surface burst
  * (G&D fig. 3.73-3.74). NUKEMAP reproduces these within ~10% (e.g. 300 kt air burst: 5 psi at ~4.7 km).
  */
+import { defineParam } from '../../core/params';
 import type { Burst } from './state';
 
 const R5_PER_KT13: Record<Exclude<Burst, 'high_altitude'>, number> = { air: 0.71, ground: 0.54 };
@@ -53,13 +54,25 @@ export function blastFatalities(yieldKt: number, burst: Burst, popWithin: (rKm: 
 }
 
 /**
+ * Central density (people per km^2) of a city of 340k, the size of Hiroshima in 1945. Calibrated so a 15 kt air burst
+ * over such a city kills about 69k, against RERF's 70-80k immediate deaths at Hiroshima; with the size scaling below,
+ * a 15 kt weapon on a South Asian megacity kills about 180k, near the 210k per weapon of Toon et al. 2007 (ACP 7:1973,
+ * 100 weapons, 21M dead). Nagasaki comes out high (72k against ~40k immediate), because the hills around the
+ * Urakami valley sheltered much of the city, which a radial density cannot show.
+ */
+const CORE_DENSITY = defineParam({
+  id: 'strategic.CITY_CORE_DENSITY', value: 15_000, range: [10_000, 20_000], tag: 'judgment',
+  source: 'judgment: fit to RERF Hiroshima immediate deaths and Toon et al. 2007', affects: 'deaths from a nuclear strike on a city',
+});
+
+/**
  * People within r of a city centre under Clark's exponential density law, D(r) = D0 e^(-r/b). The central density
- * D0 rises with city size (Bertaud & Malpezzi 2014 density gradients: ~3-4k/km^2 for small cities, 15-25k for
- * megacities); the fit below is an estimate.
+ * D0 rises gently with city size, from ~12k per km^2 for a town of 50k to the 25k cap for a megacity (Bertaud &
+ * Malpezzi 2014 put most large cities' cores at 15-30k).
  */
 export function cityPopWithin(cityPop: number, rKm: number): number {
   if (cityPop <= 0) return 0;
-  const d0 = Math.min(20_000, Math.max(2_000, 2_500 * (cityPop / 1e5) ** 0.35));
+  const d0 = Math.min(25_000, CORE_DENSITY() * (cityPop / 340_000) ** 0.12);
   const b = Math.sqrt(cityPop / (2 * Math.PI * d0));
   const x = rKm / b;
   return cityPop * (1 - (1 + x) * Math.exp(-x));

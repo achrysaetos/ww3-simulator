@@ -1,6 +1,7 @@
 import type { SimContext, System } from '../core/engine';
 import type { Command, CommandDomain, CommandResult, FormationId, FormationKind, NationId, OperationId, RefusalCode, World } from '../core/types';
 import { holdOrder, orderDelayHours } from './c2';
+import { aimRefusal, widen } from './diplomacy/aims';
 import { operationOf } from './ops/state';
 
 export type OrderCommand = Extract<Command, { type: 'order' }>;
@@ -150,12 +151,21 @@ export function createOrderRouter(handlers: readonly OrderHandler[]): System {
 /**
  * The player's order takes the formation from the delegate at once, so the delegate cannot
  * overrule it while it travels down the chain; if the order is then refused the delegate has it back.
+ * The war aims bind the AI (diplomacy/aims.ts aimRefusal, the rules of engagement): it is refused
+ * an order that would carry the war past them. A player is the government and sets its own aims,
+ * so its order goes ahead and the war grows with it.
  */
 function applyOrder(world: World, cmd: OrderCommand, ctx: SimContext, handlers: readonly OrderHandler[]): CommandResult {
   const f = world.formations[cmd.formation];
   if (!f) return answer(world, cmd, { ok: false, code: 'unknown_formation', reason: 'no such formation' });
   if (f.nation !== cmd.nation) return answer(world, cmd, { ok: false, code: 'not_yours', reason: `${f.name} belongs to ${f.nation}` });
   if (f.status === 'destroyed') return answer(world, cmd, { ok: false, code: 'destroyed', reason: `${f.name} has been destroyed` });
+  const beyond = aimRefusal(world, ctx.map, f, cmd.order);
+  if (beyond) {
+    const player = cmd.byPlayer || (world.nations[cmd.nation].controlledBy === 'human' && authority(world, cmd.nation).held[f.id]);
+    if (!player) return answer(world, cmd, { ok: false, code: 'beyond_war_aims', reason: beyond.why });
+    widen(world, ctx, beyond.war, `${cmd.nation} ordered ${f.name} past its war aims`);
+  }
   const auth = cmd.byPlayer ? authorityMut(world, cmd.nation) : undefined;
   if (auth && !auth.held[f.id]) {
     auth.held[f.id] = true;

@@ -1,5 +1,5 @@
 import type { GameMap } from '../core/map';
-import type { CommandResult, FormationId, NationId, NodeId, SimEvent, StrikeEffect } from '../core/types';
+import type { CommandResult, EscalationLevel, FormationId, NationId, NodeId, SimEvent, StrikeEffect } from '../core/types';
 import { allianceById } from '../data/nations/alliances';
 import { geography } from '../systems/naval/geography';
 
@@ -123,17 +123,34 @@ export class PlaceNamer {
         return s;
       }
     }
+    s = this.nearest(node, () => true);
+    this.cache.set(node, s);
+    return s;
+  }
+  /**
+   * The name of a land cell after the nearest place in a cell that `holds` accepts: a sector a nation
+   * holds is named for a town on its own side of the line, never for an enemy city across it.
+   */
+  heldName(node: NodeId, holds: (cell: NodeId) => boolean): string {
+    return this.nearest(node, (c) => holds(this.cellOf(c)));
+  }
+  private readonly cells = new Map<Place, NodeId>();
+  private cellOf(c: Place): NodeId {
+    let n = this.cells.get(c);
+    if (n === undefined) this.cells.set(c, (n = this.map.nodeAt(c.lat, c.lon)));
+    return n;
+  }
+  private nearest(node: NodeId, ok: (c: Place) => boolean): string {
+    const { map } = this;
     let best: Place | null = null, bestD = 250;
     for (const c of this.places) {
       const d = Math.hypot(c.lat - map.lat[node], (c.lon - map.lon[node]) * Math.cos((c.lat * Math.PI) / 180)) * 111;
-      if (d < bestD) { bestD = d; best = c; }
+      if (d < bestD && ok(c)) { bestD = d; best = c; }
     }
     const lat = map.lat[node], lon = map.lon[node];
     const coord = `${Math.abs(lat).toFixed(0)}°${lat >= 0 ? 'N' : 'S'} ${Math.abs(lon).toFixed(0)}°${lon >= 0 ? 'E' : 'W'}`;
     // A cell holding a city is named for it, even when the city sits off the cell's centre.
-    s = best && bestD < 60 ? best.name : this.cityAt.get(node) ?? (best ? `near ${best.name}` : map.isSea(node) ? `sea zone ${coord}` : coord);
-    this.cache.set(node, s);
-    return s;
+    return best && bestD < 60 ? best.name : this.cityAt.get(node) ?? (best ? `near ${best.name}` : map.isSea(node) ? `sea zone ${coord}` : coord);
   }
   /** "at Kiev", "near Kiev", "in sea zone 20°N 120°E". */
   at(node: NodeId): string {
@@ -260,6 +277,17 @@ export function describeResult(e: CommandResult, n: Namer): string {
   return `${who}: order accepted${when}${e.note ? `, but ${e.note}` : ''}`;
 }
 
+/** The ticker's words for a pair climbing to each rung of escalation (diplomacy/escalation.ts). */
+const ESCALATION_WORDS: Record<EscalationLevel, string> = {
+  peace: 'step back to peace',
+  tension: 'move into open tension',
+  crisis: 'move into crisis',
+  conventional: 'go to open conventional war',
+  strategic_conventional: 'begin striking deep into each other\'s homelands',
+  tactical_nuclear: 'cross the nuclear threshold with tactical weapons',
+  strategic_nuclear: 'enter a strategic nuclear exchange',
+};
+
 export function describeEvent(e: SimEvent, n: Namer): string {
   switch (e.type) {
     case 'war_declared': {
@@ -276,7 +304,7 @@ export function describeEvent(e: SimEvent, n: Namer): string {
     case 'nuclear_alert': return e.stage === 'ordered'
       ? `NUCLEAR ALERT: ${n.nation(e.nation)} orders warheads mated to launchers (${e.reason})`
       : `NUCLEAR ALERT: ${n.nation(e.nation)} has ${e.ready.toLocaleString()} of ${e.of.toLocaleString()} warheads ready to launch`;
-    case 'escalation': return `${n.nation(e.a)} and ${n.nation(e.b)} escalate to ${e.level.replace(/_/g, ' ')}`;
+    case 'escalation': return `${n.nation(e.a)} and ${n.nation(e.b)} ${ESCALATION_WORDS[e.level]}`;
     case 'production': return `${n.nation(e.nation)} produces ${e.count} × ${n.item(e.item)}`;
     case 'shortage': return `${n.nation(e.nation)} shortage: ${e.what}`;
     case 'capitulation': return `${n.nation(e.nation)} capitulates to ${e.to.map(n.nation).join(', ')}`;

@@ -1,7 +1,7 @@
 import type { Catalog } from '../core/catalog';
 import { Engine } from '../core/engine';
 import type { GameMap } from '../core/map';
-import type { Command, NationId, World } from '../core/types';
+import type { Command, DeclaredAim, NationId, World } from '../core/types';
 import { createWorld } from '../core/world';
 import { loadCatalog } from '../data/catalog';
 import { loadMap } from '../data/load';
@@ -33,7 +33,7 @@ export interface Scenario {
   opening: (Command | { type: 'mobilize'; nations: string[]; level: number })[];
 }
 
-const war = (nation: string, target: string, reason: string): Command => ({ type: 'declare_war', nation: nation as NationId, target: target as NationId, reason });
+const war = (nation: string, target: string, reason: string, aim?: DeclaredAim): Command => ({ type: 'declare_war', nation: nation as NationId, target: target as NationId, reason, ...(aim && { aim }) });
 const mobilize = (nations: string[], level: number) => ({ type: 'mobilize' as const, nations, level });
 /**
  * Russia at 0.33 (7.2% of GDP; SIPRI 2025: 7.1% in 2024) and Ukraine at 0.8 (34% of GDP in
@@ -128,10 +128,11 @@ export const SCENARIOS: Scenario[] = [
   {
     id: 'south-asia-2027',
     name: 'India-Pakistan crisis',
-    summary: 'A terror attack escalates into a full war between two nuclear powers.',
+    summary: 'A terror attack draws Indian punitive strikes on Pakistan. Two nuclear powers decide whether it stays a strike exchange or grows into a full war.',
     startDate: '2027-02-15T00:00:00Z',
     suggestedNation: 'IND',
-    opening: [mobilize(['IND', 'PAK'], 0.5), war('IND', 'PAK', 'cross-border terrorism')],
+    // India's stated aim after Pahalgam (2025) and Pulwama (2019): punish cross-border terrorism below Pakistan's nuclear threshold (src/data/nations/strategic.ts).
+    opening: [mobilize(['IND', 'PAK'], 0.5), war('IND', 'PAK', 'cross-border terrorism', { kind: 'punitive' })],
   },
   {
     id: 'ww3-2027',

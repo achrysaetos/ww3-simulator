@@ -26,6 +26,8 @@ Checks:
 npm test          # unit and integration suite
 npm run perf      # per-system time budgets, run serially
 npm run realism   # scenario outcomes against historical reference bands
+npm run validate  # held-out historical cases scored against a naive baseline
+npm run ensemble -- --scenario ukraine-2026 --days 30 --runs 16  # spread over seeds and tagged params
 npm run typecheck
 ```
 
@@ -107,6 +109,17 @@ npm run typecheck
   at local 3:1, task air, missile and naval forces, deploy coalition forces overseas
   through staging hosts, and use nuclear weapons only when their doctrine's threshold is
   crossed. Any domain of a human player's nation can be delegated to the AI.
+
+## What the numbers are worth
+
+Read [Validation status](docs/validation.md) before quoting any output. In short, the ground
+model is tuned on Ukraine 2022-25, so a passing realism band means "tuned", not "validated".
+Four modern cases the model was not fitted to (Nagorno-Karabakh 2020, Kursk 2024, Operation
+Sindoor 2025 and the Twelve-Day War 2025) are scored against a "nothing changes" baseline, and
+the model beats it on 5 of their 19 untuned questions today. Multi-theatre and world-war outcomes, nuclear
+escalation, diplomacy beyond who joins a war, and anything past 90 days have never been
+validated. [Calibration knobs and ensembles](docs/calibration.md) explains the tagged params and
+why one seed is an anecdote.
 
 ## How it is built
 

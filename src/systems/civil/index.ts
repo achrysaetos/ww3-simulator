@@ -118,6 +118,10 @@ function readEvents(world: World, map: GameMap, catalog: Catalog, s: CivilState)
   const t: TickInputs = { battles: new Map(), hits: new Map(), warheadKg: new Map(), captured: new Set() };
   for (const e of world.events) {
     if (e.type === 'battle') {
+      for (const [n, c] of Object.entries(e.casualties)) {
+        const cn = civilNation(s, n as NationId);
+        cn.military = (cn.military ?? 0) + c;
+      }
       if (e.node < map.landCount && e.domain !== 'air' && e.domain !== 'sea') t.battles.set(e.node, (t.battles.get(e.node) ?? 0) + 1);
     } else if (e.type === 'strike') {
       const m = catalog.munitions.get(e.munition);

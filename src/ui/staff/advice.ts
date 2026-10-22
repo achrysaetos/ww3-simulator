@@ -11,7 +11,7 @@ import { describeResult, treatyName, type Namer } from '../events';
 import type { FormationView, NationDetail, NationSummary } from '../snapshot';
 import type { Role } from './advisors';
 
-export type Drawer = 'forces' | 'nation' | 'log';
+export type Drawer = 'forces' | 'nation' | 'log' | 'cost';
 
 export type Action =
   | { kind: 'command'; label: string; command: Command }
@@ -302,11 +302,93 @@ function shortages(s: Situation): Card[] {
   return out;
 }
 
+/** The nearest own manoeuvre formation free to send to `node`: one in reserve, else (in peacetime) one off the threatened border. */
+function nearestFree(s: Situation, node: NodeId, free: (f: FormationView) => boolean): { f: FormationView; km: number } | undefined {
+  const { map } = s;
+  return s.formations
+    .filter((f) => f.entry.nation === s.me && f.entry.kind === MANEUVER && f.status === 'active' && !map.isSea(f.node) && free(f))
+    .map((f) => ({ f, km: map.distanceKm(f.node, node) }))
+    .sort((a, b) => a.km - b.km || a.f.entry.id.localeCompare(b.f.entry.id))[0];
+}
+
+interface BuildUp {
+  key: string;
+  place: string;
+  node: NodeId;
+  from: NationId;
+  text: string;
+  figure: NonNullable<Card['figure']>;
+  reserve: { f: FormationView; km: number } | undefined;
+}
+
+function buildUpCard(s: Situation, b: BuildUp): Card {
+  const { reserve } = b;
+  const send: Action | undefined = reserve
+    ? { kind: 'command', label: 'Reinforce', command: { type: 'order', nation: s.me, formation: reserve.f.entry.id, order: { posture: 'move', target: b.node } } }
+    : undefined;
+  return {
+    key: b.key, topic: 'threat', role: 'intel', tone: 'advice', tick: s.tick, node: b.node,
+    title: `Build-up near ${b.place}`,
+    text: b.text,
+    ask: reserve ? `Move ${reserve.f.entry.name} up to ${b.place}.` : undefined,
+    cost: reserve ? { label: 'Cost', text: `${reserve.f.entry.name} leaves the ${reserve.f.posture === 'reserve' ? 'reserve' : 'line it holds'}, ${Math.round(reserve.km)} km away` } : undefined,
+    figure: b.figure,
+    chip: 'Intelligence',
+    primary: send ?? { kind: 'show', label: 'Show me', node: b.node },
+    secondary: send ? { kind: 'show', label: 'Show me', node: b.node } : { kind: 'later', label: 'Noted' },
+  };
+}
+
+/** The wording of intel's indications-and-warning message (systems/intel WARN_RISE), the only way the player is told. */
+const WARNING = /^warning: (\w+) forces massing on the border of (\w+), about (\d+) platforms against (\d+)/;
+
 /**
- * Enemy formations the player can see massed against one stretch of its front, against what it
- * holds there. Reads only the formations in the player's own snapshot.
+ * In peacetime: the build-up the player's intelligence has warned of, placed at the stretch of its
+ * border facing the most contacts of the nation massing. Reads the warning message the player was
+ * sent and its own contacts, nothing else.
  */
-function massing(s: Situation): Card[] {
+function warned(s: Situation): BuildUp[] {
+  const { map } = s;
+  let w: RegExpExecArray | null = null;
+  for (const e of s.recent) if (e.type === 'message' && e.nation === s.me) w = WARNING.exec(e.text) ?? w;
+  if (!w || w[2] !== s.me || s.d.enemies.includes(w[1] as NationId)) return [];
+  const from = w[1] as NationId;
+  const [mine, theirs] = [s.nationIds.indexOf(s.me), s.nationIds.indexOf(from)];
+  const contacts = new Map<NodeId, number>();
+  for (const f of s.formations) if (f.entry.nation === from && f.entry.kind === MANEUVER && !map.isSea(f.node)) contacts.set(f.node, (contacts.get(f.node) ?? 0) + 1);
+  const facing = new Set<NodeId>();
+  let node: NodeId | null = null, most = -1;
+  for (let n = 0 as NodeId; n < map.landCount; n++) {
+    if (s.control[n] !== mine) continue;
+    let near = 0, border = false;
+    for (let i = map.adjStart[n]; i < map.adjStart[n + 1]; i++) {
+      const m = map.adj[i] as NodeId;
+      if (s.control[m] !== theirs) continue;
+      border = true;
+      near += contacts.get(m) ?? 0;
+    }
+    if (!border) continue;
+    facing.add(n);
+    if (near > most) [node, most] = [n, near];
+  }
+  if (node === null) return [];
+  const [strength, baseline] = [Number(w[3]), Number(w[4])];
+  const place = bare(s.namer.place.name(node));
+  const them = s.namer.nation(from);
+  return [{
+    key: `warning|${from}`, place, node, from,
+    text: `Our intelligence warns of ${them} forces massing on our border: about ${plural(strength, 'platform')} near our ground, against ${baseline.toLocaleString('en-US')} a week ago. No shot has been fired.`,
+    figure: { value: (strength / Math.max(1, baseline)).toFixed(1), unit: 'x', caption: 'their strength on our border against the week before' },
+    reserve: nearestFree(s, node, (f) => f.posture === 'reserve' || !facing.has(f.node)),
+  }];
+}
+
+/**
+ * At war: enemy formations the player's intelligence holds massed against one stretch of its
+ * front, against what it holds there. Reads only the formations in the player's own snapshot,
+ * enemy ones as its contacts.
+ */
+function concentration(s: Situation): BuildUp[] {
   const { map } = s;
   const mine = s.nationIds.indexOf(s.me);
   const enemies = new Set(s.d.enemies);
@@ -349,25 +431,17 @@ function massing(s: Situation): Card[] {
   }
   if (!worst) return [];
   const w = worst;
-  const reserve = s.formations
-    .filter((f) => f.entry.nation === s.me && f.entry.kind === MANEUVER && f.status === 'active' && f.posture === 'reserve' && !map.isSea(f.node))
-    .map((f) => ({ f, km: map.distanceKm(f.node, w.node) }))
-    .sort((a, b) => a.km - b.km || a.f.entry.id.localeCompare(b.f.entry.id))[0];
-  const them = s.namer.nation(w.from);
-  const send: Action | undefined = reserve
-    ? { kind: 'command', label: 'Reinforce', command: { type: 'order', nation: s.me, formation: reserve.f.entry.id, order: { posture: 'move', target: w.node } } }
-    : undefined;
   return [{
-    key: `massing|${w.place}`, topic: 'threat', role: 'intel', tone: 'advice', tick: s.tick, node: w.node,
-    title: `Build-up near ${w.place}`,
-    text: `${them} has ${plural(w.enemy, 'formation')} massed on our line near ${w.place}, against ${w.ours ? `our ${w.ours}` : 'none of our manoeuvre units'}.`,
-    ask: reserve ? `Move ${reserve.f.entry.name} up to ${w.place}.` : undefined,
-    cost: reserve ? { label: 'Cost', text: `${reserve.f.entry.name} leaves the reserve, ${Math.round(reserve.km)} km away` } : undefined,
+    key: `massing|${w.place}`, place: w.place, node: w.node, from: w.from,
+    text: `${s.namer.nation(w.from)} has ${plural(w.enemy, 'formation')} massed on our line near ${w.place}, against ${w.ours ? `our ${w.ours}` : 'none of our manoeuvre units'}.`,
     figure: { value: w.ratio.toFixed(1), unit: ':1', caption: 'their strength to ours' },
-    chip: 'Intelligence',
-    primary: send ?? { kind: 'show', label: 'Show me', node: w.node },
-    secondary: send ? { kind: 'show', label: 'Show me', node: w.node } : { kind: 'later', label: 'Noted' },
+    reserve: nearestFree(s, w.node, (f) => f.posture === 'reserve'),
   }];
+}
+
+/** A build-up against the player: warned of in peacetime, or seen massing on the front at war. */
+function massing(s: Situation): Card[] {
+  return [...warned(s), ...concentration(s)].map((b) => buildUpCard(s, b));
 }
 
 /** Cities changing hands, the moments that should feel like something. */

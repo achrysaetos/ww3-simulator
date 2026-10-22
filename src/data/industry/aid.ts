@@ -38,6 +38,14 @@ export const AID_FLOWS: AidFlow[] = [
   A('USA', 'UKR', 'pac3_mse', 100),
   A('GBR', 'UKR', 'storm_shadow', 30),
   A('FRA', 'UKR', 'storm_shadow', 20),
+  // ATACMS and AGM-88: several hundred ATACMS and a few hundred HARMs fired by Ukraine from 2022 (est.).
+  A('USA', 'UKR', 'atacms', 200),
+  A('USA', 'UKR', 'harm', 150),
+  // US resupply of Israel through a war: thousands of JDAM kits and Mk 84 bombs a year from Oct 2023 (Reuters,
+  // State Department notifications 2024-25), and Arrow 3 components and funding (est.).
+  A('USA', 'ISR', 'gbu31', 3_000),
+  A('USA', 'ISR', 'gbu12', 2_000),
+  A('USA', 'ISR', 'arrow3', 50, 'market'),
   // South Korean NIS: North Korea shipped >12,000 containers, est. 6-9M+ rounds, from Aug 2023 to 2025;
   // about 2-3M a year, falling as its stocks thinned.
   A('PRK', 'RUS', 'shell_152', 2_500_000),

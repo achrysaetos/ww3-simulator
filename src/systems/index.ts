@@ -79,7 +79,7 @@ export function warTreaties(table: readonly Alliance[], profiles: Readonly<Recor
     // A guarantor extends its threshold to allies only if its doctrine says so (NuclearThreshold.coversAllies).
     const guarantors = (a.nuclearGuarantors ?? []).filter((g) => profiles[g]?.nuclearThreshold?.coversAllies);
     const triggers = a.triggers.flatMap((t) => TRIGGER[t] ?? []);
-    out.push({ id: a.id, kind, members, triggers, ...(a.area ? { area: a.area } : {}), guarantors });
+    out.push({ id: a.id, kind, members, triggers, ...(a.area ? { area: a.area } : {}), guarantors, ...(a.inForce ? { inForce: a.inForce } : {}) });
   }
   return out;
 }

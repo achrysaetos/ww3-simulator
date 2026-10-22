@@ -205,7 +205,7 @@ export const ukr = [
 
   // Air Force
   u('114th Tactical Aviation Brigade', 'air_wing', 'brigade', base('Ivano-Frankivsk', 48.88, 24.69), { mig29: 10 }, WAR),
-  u('40th Tactical Aviation Brigade', 'air_wing', 'brigade', base('Vasylkiv', 50.24, 30.3), { mig29: 10 }, WAR),
+  u('40th Tactical Aviation Brigade', 'air_wing', 'brigade', base('Vasylkiv', 50.24, 30.3), { mig29_harm: 10 }, WAR),
   u('204th Tactical Aviation Brigade', 'air_wing', 'brigade', base('Lutsk', 50.68, 25.49), { mig29: 10 }, WAR),
   u('39th Tactical Aviation Brigade', 'air_wing', 'brigade', base('Ozerne', 50.16, 28.74), { su27: 8 }, WAR),
   u('831st Tactical Aviation Brigade', 'air_wing', 'brigade', base('Myrhorod', 49.93, 33.64), { su27: 7 }, WAR),

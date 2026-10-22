@@ -100,11 +100,14 @@ export const strategicMunitions = defineMunitions([
   { id: 'df21d', name: 'DF-21D ASBM', kind: 'antiship_ballistic', producers: ['CHN'], rangeKm: 1500, speedMach: 10, warheadKg: 600, cepM: 20, pk: { ship: 0.45, structure: 0.6, soft: 0.5 }, interceptDifficulty: 0.8, unitCostUsdM: 10, weightKg: 14700 },
   { id: 'df17', name: 'DF-17 (DF-ZF HGV)', kind: 'hgv', producers: ['CHN'], rangeKm: 2000, speedMach: 8, warheadKg: 500, cepM: 10, pk: { structure: 0.8, soft: 0.7, hardened: 0.3, ship: 0.4, infantry: 0.4 }, interceptDifficulty: 0.9, unitCostUsdM: 12, weightKg: 15000 },
   { id: 'df16', name: 'DF-16 (CSS-11)', kind: 'mrbm', producers: ['CHN'], rangeKm: 1000, speedMach: 9, warheadKg: 1000, cepM: 10, pk: ballisticConv, interceptDifficulty: 0.75, unitCostUsdM: 6, weightKg: 11000 },
-  { id: 'kheibar_shekan', name: 'Kheibar Shekan', kind: 'mrbm', producers: ['IRN'], rangeKm: 1450, speedMach: 10, warheadKg: 500, cepM: 50, pk: ballisticConv, interceptDifficulty: 0.65, unitCostUsdM: 2, weightKg: 7000 },
-  { id: 'shahab3', name: 'Shahab-3 / Ghadr', kind: 'mrbm', producers: ['IRN'], rangeKm: 1600, speedMach: 9, warheadKg: 750, cepM: 500, pk: { ...ballisticConv, structure: 0.5, hardened: 0.05 }, interceptDifficulty: 0.55, unitCostUsdM: 1.5, weightKg: 17410 },
-  { id: 'emad', name: 'Emad', kind: 'mrbm', producers: ['IRN'], rangeKm: 1700, speedMach: 10, warheadKg: 750, cepM: 100, pk: ballisticConv, interceptDifficulty: 0.6, unitCostUsdM: 2, weightKg: 17500 },
-  { id: 'sejjil', name: 'Sejjil', kind: 'mrbm', producers: ['IRN'], rangeKm: 2000, speedMach: 11, warheadKg: 700, cepM: 200, pk: ballisticConv, interceptDifficulty: 0.62, unitCostUsdM: 3, weightKg: 23600 },
-  { id: 'khorramshahr', name: 'Khorramshahr-4', kind: 'mrbm', producers: ['IRN'], rangeKm: 2000, speedMach: 12, warheadKg: 1500, cepM: 100, pk: ballisticConv, interceptDifficulty: 0.65, unitCostUsdM: 4, weightKg: 26000 },
+  // Iran's Scud and Nodong derivatives are the threat Arrow, David's Sling and THAAD were built against: with US help
+  // Israel stopped ~85-90 % of them in April 2024 and June 2025 and most of the October 2024 wave (IDF; CSIS Missile
+  // Defense Project 2025), so they are harder than a Scud but easier than an Iskander or a manoeuvring Fattah.
+  { id: 'kheibar_shekan', name: 'Kheibar Shekan', kind: 'mrbm', producers: ['IRN'], rangeKm: 1450, speedMach: 10, warheadKg: 500, cepM: 50, pk: ballisticConv, interceptDifficulty: 0.5, unitCostUsdM: 2, weightKg: 7000 },
+  { id: 'shahab3', name: 'Shahab-3 / Ghadr', kind: 'mrbm', producers: ['IRN'], rangeKm: 1600, speedMach: 9, warheadKg: 750, cepM: 500, pk: { ...ballisticConv, structure: 0.5, hardened: 0.05 }, interceptDifficulty: 0.4, unitCostUsdM: 1.5, weightKg: 17410 },
+  { id: 'emad', name: 'Emad', kind: 'mrbm', producers: ['IRN'], rangeKm: 1700, speedMach: 10, warheadKg: 750, cepM: 100, pk: ballisticConv, interceptDifficulty: 0.45, unitCostUsdM: 2, weightKg: 17500 },
+  { id: 'sejjil', name: 'Sejjil', kind: 'mrbm', producers: ['IRN'], rangeKm: 2000, speedMach: 11, warheadKg: 700, cepM: 200, pk: ballisticConv, interceptDifficulty: 0.5, unitCostUsdM: 3, weightKg: 23600 },
+  { id: 'khorramshahr', name: 'Khorramshahr-4', kind: 'mrbm', producers: ['IRN'], rangeKm: 2000, speedMach: 12, warheadKg: 1500, cepM: 100, pk: ballisticConv, interceptDifficulty: 0.55, unitCostUsdM: 4, weightKg: 26000 },
   // Fattah-1: claimed manoeuvring re-entry; used against Israel Oct 2024 with partial interception.
   { id: 'fattah1', name: 'Fattah-1', kind: 'mrbm', producers: ['IRN'], rangeKm: 1400, speedMach: 13, warheadKg: 450, cepM: 50, pk: ballisticConv, interceptDifficulty: 0.75, unitCostUsdM: 3, weightKg: 8000 },
   { id: 'kn23', name: 'KN-23 (Hwasong-11A)', kind: 'srbm', producers: ['PRK'], rangeKm: 690, speedMach: 6, warheadKg: 500, cepM: 100, pk: ballisticConv, interceptDifficulty: 0.75, unitCostUsdM: 2, weightKg: 3400 },

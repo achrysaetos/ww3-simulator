@@ -36,7 +36,7 @@ describe('calibration', () => {
         const city = t.node(lat, lon);
         for (let i = 0; i < shorad; i++) battery(t, 'UKR', city, { x_shorad: 1 });
         if (patriot) battery(t, 'UKR', city, { x_patriot: 1 });
-        launchers(t, 'RUS', t.node(51.5, 36.5), { x_drone_rack: 30 }, { posture: 'strike', target: city, targetClass: 'structure' });
+        launchers(t, 'RUS', t.node(51.5, 36.5), { x_drone_rack: 8 }, { posture: 'strike', target: city, targetClass: 'structure' });
       }
     });
     console.log(`Shahed raid: ${r.fired.toFixed(0)} drones/raid, ${(r.rate * 100).toFixed(1)} % intercepted`);
@@ -61,7 +61,7 @@ describe('calibration', () => {
       const nev = t.node(...NEVATIM);
       for (let i = 0; i < 4; i++) battery(t, 'ISR', nev, { x_arrow_bty: 1 });
       for (let i = 0; i < 6; i++) battery(t, 'ISR', nev, { x_patriot: 1 });
-      launchers(t, 'IRN', t.node(...ISFAHAN), { x_mrbm_tel: 900 }, { posture: 'strike', target: nev, targetClass: 'structure' });
+      launchers(t, 'IRN', t.node(...ISFAHAN), { x_mrbm_tel: 110 }, { posture: 'strike', target: nev, targetClass: 'structure' });
     }, 1, ['x_mrbm']);
     console.log(`Iranian MRBM salvo: ${r.fired.toFixed(0)} missiles, ${(r.rate * 100).toFixed(1)} % intercepted`);
     expect(r.fired).toBeGreaterThan(150);
@@ -79,8 +79,8 @@ describe('calibration', () => {
       for (let i = 0; i < 4; i++) battery(t, 'ISR', nev, { x_shorad: 1 });
       for (let i = 0; i < 2; i++) battery(t, 'ISR', nev, { x_patriot: 1 });
       const iran = t.node(...ISFAHAN);
-      launchers(t, 'IRN', iran, { x_drone_rack: 170 }, { posture: 'strike', target: nev, targetClass: 'structure' });
-      launchers(t, 'IRN', t.node(33.5, 46), { x_cruise_tel: 50 }, { posture: 'strike', target: nev, targetClass: 'structure' });
+      launchers(t, 'IRN', iran, { x_drone_rack: 42 }, { posture: 'strike', target: nev, targetClass: 'structure' });
+      launchers(t, 'IRN', t.node(33.5, 46), { x_cruise_tel: 9 }, { posture: 'strike', target: nev, targetClass: 'structure' });
     }, 1, ['x_shahed', 't_cruise']);
     console.log(`April 2024 drone/cruise raid: ${r.fired.toFixed(0)} weapons, ${(r.rate * 100).toFixed(1)} % intercepted`);
     expect(r.fired).toBeGreaterThan(150);
@@ -135,7 +135,7 @@ describe('calibration', () => {
       t.war('USA', 'CHN');
       const base = t.node(33, 131);
       const w = wing(t, 'USA', base, { t_fighter: 150 });
-      launchers(t, 'CHN', t.node(26, 119.3), { x_mrbm_tel: 400 }, { posture: 'strike', target: base, targetClass: 'aircraft' });
+      launchers(t, 'CHN', t.node(26, 119.3), { x_mrbm_tel: 50 }, { posture: 'strike', target: base, targetClass: 'aircraft' });
       for (const e of t.strikes(t.tick())) hits += e.fired - e.intercepted;
       killed += lostFrom(w, 150);
     }

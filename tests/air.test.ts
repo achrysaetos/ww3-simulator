@@ -68,7 +68,7 @@ describe('air superiority', () => {
     const t = airWorld();
     const f35 = t.catalog.platform(pid('x_stealth'));
     expect(combatRadiusKm(f35, 0)).toBe(1100);
-    expect(combatRadiusKm(f35, 0.25)).toBeCloseTo(1375);
+    expect(combatRadiusKm(f35, 1 / 12)).toBeCloseTo(1375);
     expect(combatRadiusKm(f35, 10)).toBe(2200);
 
     const run = (tankers: number) => {
@@ -111,7 +111,7 @@ describe('integrated air defense', () => {
     t.war('RUS', 'UKR');
     const kyiv = t.node(...KYIV);
     const ad = battery(t, 'UKR', kyiv, { x_patriot: 1 });
-    launchers(t, 'RUS', t.node(53.9, 27.6), { x_mrbm_tel: 200 }, { posture: 'strike', target: kyiv, targetClass: 'structure' });
+    launchers(t, 'RUS', t.node(53.9, 27.6), { x_mrbm_tel: 25 }, { posture: 'strike', target: kyiv, targetClass: 'structure' });
     const s = t.strikes(t.tick()).find((e) => e.munition === mid('x_mrbm'))!;
     expect(s.fired).toBeGreaterThan(25);
     expect(s.intercepted).toBeGreaterThan(0);
@@ -126,15 +126,16 @@ describe('integrated air defense', () => {
     t.war('RUS', 'UKR');
     const kyiv = t.node(...KYIV);
     wing(t, 'UKR', kyiv, { t_fighter: 12 });
-    const city = launchers(t, 'RUS', t.node(53.9, 27.6), { x_mrbm_tel: 20 }, { posture: 'strike', target: kyiv, targetClass: 'structure' });
-    const base = launchers(t, 'RUS', t.node(53.9, 27.6), { x_mrbm_tel: 20 }, { posture: 'strike', target: kyiv, targetClass: 'aircraft' });
+    const city = launchers(t, 'RUS', t.node(53.9, 27.6), { x_mrbm_tel: 3 }, { posture: 'strike', target: kyiv, targetClass: 'structure' });
+    const base = launchers(t, 'RUS', t.node(53.9, 27.6), { x_mrbm_tel: 3 }, { posture: 'strike', target: kyiv, targetClass: 'aircraft' });
     expect(t.strikes(t.tick()).length).toBeGreaterThan(0);
     relationMut(t.world, RUS, UKR).atWar = false;
     const rounds = (f: Formation) => f.magazine[mid('x_mrbm')];
     const before = [rounds(city), rounds(base)], runway = t.world.slices.air?.runway?.[kyiv];
     expect(t.strikes(t.tick(4))).toEqual([]);
     expect([rounds(city), rounds(base)]).toEqual(before);
-    expect(t.world.slices.air?.runway?.[kyiv]).toBe(runway);
+    // Crews keep repairing the runway; nothing new cratered it.
+    expect(t.world.slices.air?.runway?.[kyiv] ?? 1).toBeGreaterThanOrEqual(runway ?? 1);
   });
 
   it("a strike order whose raids all vanish into the defences on two days running stops; one that lands keeps striking", () => {
@@ -143,7 +144,7 @@ describe('integrated air defense', () => {
       t.war('RUS', 'UKR');
       const kyiv = t.node(...KYIV);
       if (defended) battery(t, 'UKR', kyiv, { x_patriot: 18 });
-      const f = launchers(t, 'RUS', t.node(53.9, 27.6), { x_cruise_tel: 2 }, { posture: 'strike', target: kyiv, targetClass: 'structure' });
+      const f = launchers(t, 'RUS', t.node(53.9, 27.6), { x_cruise_tel: 1 }, { posture: 'strike', target: kyiv, targetClass: 'structure' });
       f.magazine[mid('t_cruise')] = 40;
       const s = t.strikes(t.tick(16));
       return new Set(s.map((e) => Math.floor((e.tick * t.world.dtHours) / 24))).size;
@@ -189,7 +190,7 @@ describe('integrated air defense', () => {
     t.war('RUS', 'UKR');
     const kyiv = t.node(...KYIV);
     const ad = battery(t, 'UKR', kyiv, { x_shorad: 1 });
-    launchers(t, 'RUS', t.node(53.9, 27.6), { x_drone_rack: 20 }, { posture: 'strike', target: kyiv, targetClass: 'structure' });
+    launchers(t, 'RUS', t.node(53.9, 27.6), { x_drone_rack: 5 }, { posture: 'strike', target: kyiv, targetClass: 'structure' });
     const stock: number[] = [];
     const rate: number[] = [];
     for (let i = 0; i < 8; i++) {
@@ -212,7 +213,7 @@ describe('integrated air defense', () => {
         t.war('USA', 'CHN');
         const fz = t.node(...FUZHOU), tw = t.node(...TAIPEI);
         battery(t, 'CHN', fz, { x_patriot: 1 });
-        launchers(t, 'USA', tw, { x_cruise_tel: 80 }, { posture: 'strike', target: fz, targetClass: 'structure' });
+        launchers(t, 'USA', tw, { x_cruise_tel: 15 }, { posture: 'strike', target: fz, targetClass: 'structure' });
         wing(t, 'USA', tw, { x_weasel: 24 }, sead ? { posture: 'strike', target: fz, targetClass: 'soft' } : {});
         for (const e of t.strikes(t.tick())) {
           if (e.munition === mid('t_cruise')) leaked += e.fired - e.intercepted;
@@ -234,8 +235,8 @@ describe('strikes', () => {
     t.war('USA', 'CHN');
     const fz = t.node(...FUZHOU), busan = t.node(37.5, 127);
     const tw = t.node(...TAIPEI);
-    launchers(t, 'USA', tw, { x_cruise_tel: 12 }, { posture: 'strike', target: fz, targetClass: 'structure' });
-    launchers(t, 'USA', tw, { x_cruise_tel: 12 }, { posture: 'strike', target: busan, targetClass: 'structure' });
+    launchers(t, 'USA', tw, { x_cruise_tel: 2 }, { posture: 'strike', target: fz, targetClass: 'structure' });
+    launchers(t, 'USA', tw, { x_cruise_tel: 2 }, { posture: 'strike', target: busan, targetClass: 'structure' });
     const events = t.strikes(t.tick());
     expect(t.world.theater.infrastructure[fz]).toBeLessThan(0.99);
     expect(t.world.theater.infrastructure[busan]).toBe(1);
@@ -270,7 +271,7 @@ describe('strikes', () => {
     const cell = t.node(47.5, 35);
     const aimed = launchers(t, 'UKR', cell, { x_cruise_tel: 40 });
     const bystander = launchers(t, 'UKR', cell, { x_mrbm_tel: 40 });
-    launchers(t, 'RUS', t.node(46.5, 36.5), { t_tel: 200 }, { posture: 'strike', target: cell, targetClass: 'soft', targetFormation: aimed.id });
+    launchers(t, 'RUS', t.node(46.5, 36.5), { t_tel: 37 }, { posture: 'strike', target: cell, targetClass: 'soft', targetFormation: aimed.id });
     t.tick(4);
     expect(count(aimed)).toBeLessThan(40);
     expect(count(bystander)).toBe(40);
@@ -281,7 +282,7 @@ describe('strikes', () => {
     t.war('USA', 'CHN');
     const tw = t.node(...TAIPEI), fz = t.node(...FUZHOU);
     const parked = wing(t, 'USA', tw, { t_fighter: 60 });
-    launchers(t, 'CHN', fz, { t_tel: 200 }, { posture: 'strike', target: tw, targetClass: 'aircraft' });
+    launchers(t, 'CHN', fz, { t_tel: 37 }, { posture: 'strike', target: tw, targetClass: 'aircraft' });
     t.tick();
     expect(count(parked)).toBeLessThan(60);
     expect(Object.values(parked.damaged).reduce((a, b) => a + b, 0)).toBeGreaterThan(0);
@@ -295,7 +296,7 @@ describe('strikes', () => {
     t.war('UKR', 'RUS');
     const engels = t.node(51.48, 46.21);
     const bombers = t.add({ nation: RUS, name: 'heavy bombers', kind: 'strategic', echelon: 'wing', node: engels, equipment: { [pid('x_bomber')]: 30 } });
-    launchers(t, 'UKR', t.node(49.5, 40), { t_tel: 200 }, { posture: 'strike', target: engels, targetClass: 'aircraft' });
+    launchers(t, 'UKR', t.node(49.5, 40), { t_tel: 37 }, { posture: 'strike', target: engels, targetClass: 'aircraft' });
     t.tick();
     expect(count(bombers)).toBeLessThan(30);
   });
@@ -308,7 +309,7 @@ describe('strikes', () => {
         t.war('USA', 'CHN');
         const tw = t.node(...TAIPEI), fz = t.node(...FUZHOU);
         const parked = wing(t, 'USA', tw, { t_fighter: n });
-        launchers(t, 'CHN', fz, { t_tel: 40 }, { posture: 'strike', target: tw, targetClass: 'aircraft' });
+        launchers(t, 'CHN', fz, { t_tel: 8 }, { posture: 'strike', target: tw, targetClass: 'aircraft' });
         t.tick();
         lost += n - count(parked) + Object.values(parked.damaged).reduce((a, b) => a + b, 0);
       }
