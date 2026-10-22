@@ -47,7 +47,7 @@ export const POSTURES: readonly Posture[] = ['reserve', 'defend', 'attack', 'mov
 export const STATUSES: readonly Formation['status'][] = ['active', 'routed', 'destroyed', 'embarked'];
 const NATION_STATUSES: readonly Nation['status'][] = ['peace', 'war', 'capitulated', 'collapsed'];
 /** Per-nation numbers sent every tick, packed in this order. */
-const NATION_FIELDS = ['status', 'human', 'mobilization', 'warSupport', 'reserves', 'population', 'treasuryUsdB', 'warheads', 'deployed'] as const;
+const NATION_FIELDS = ['status', 'human', 'mobilization', 'warSupport', 'reserves', 'population', 'treasuryUsdB', 'warheads', 'deployed', 'reservists'] as const;
 /** Above this many changed nodes a full control array is cheaper than pairs. */
 const DIFF_LIMIT = 2_000;
 const EVENT_LIMIT = 400;
@@ -64,6 +64,8 @@ export interface ScenarioCard {
   belligerents: NationId[];
   /** The opening wars as [aggressor, target], in declaration order. */
   wars: [NationId, NationId][];
+  /** Opening wars already under way before the scenario starts (both sides on a war footing), as "aggressor>target". */
+  ongoing: string[];
 }
 
 export interface NationCard {
@@ -144,6 +146,8 @@ export interface NationSummary {
   mobilization: number;
   warSupport: number;
   reserves: number;
+  /** Trained reservists not yet recalled: what raising mobilisation calls up. */
+  reservists: number;
   population: number;
   treasuryUsdB: number;
   gdpUsdB: number;
@@ -652,6 +656,7 @@ export class SnapshotEncoder {
       out[o + 6] = n.treasuryUsdB;
       out[o + 7] = n.nuclear.warheads;
       out[o + 8] = n.nuclear.deployed;
+      out[o + 9] = n.reservists;
     });
     return out;
   }
@@ -1114,7 +1119,7 @@ export function applySnapshot(state: ClientState, snap: Snapshot, nationIds: rea
     return [id, {
       id, name: card?.name ?? id, blocs: card?.blocs ?? [], doctrine: card?.doctrine ?? 'none', gdpUsdB: card?.gdpUsdB ?? 0,
       status: NATION_STATUSES[v[o]], controlledBy: v[o + 1] ? 'human' : 'ai',
-      mobilization: v[o + 2], warSupport: v[o + 3], reserves: v[o + 4], population: v[o + 5], treasuryUsdB: v[o + 6], warheads: v[o + 7], deployed: v[o + 8],
+      mobilization: v[o + 2], warSupport: v[o + 3], reserves: v[o + 4], population: v[o + 5], treasuryUsdB: v[o + 6], warheads: v[o + 7], deployed: v[o + 8], reservists: v[o + 9],
     }];
   }));
   const warsKey = snap.wars.map((w) => w.join('|')).sort().join(',');

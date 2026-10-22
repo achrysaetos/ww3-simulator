@@ -7,6 +7,7 @@
 import type { GameMap } from '../../core/map';
 import type { Command, FormationId, MunitionKind, NationId, NodeId, Operation, SimEvent } from '../../core/types';
 import { ITEMS } from '../../data/industry/items';
+import { allianceById } from '../../data/nations/alliances';
 import { describeResult, treatyName, type Namer } from '../events';
 import type { FormationView, MunitionGroup, NationDetail, NationSummary } from '../snapshot';
 import { capitalOf, INITIATIVE, nearestFree } from './initiative';
@@ -59,6 +60,8 @@ export const isDecision = (c: Card): boolean => c.primary?.kind === 'command';
 
 export interface Situation {
   me: NationId;
+  /** Opening wars already being fought when the scenario starts, as "aggressor>target": no news when declared at the first tick. */
+  ongoing: ReadonlySet<string>;
   tick: number;
   dtHours: number;
   map: GameMap;
@@ -214,9 +217,20 @@ function nuclear(s: Situation): Card[] {
 }
 
 /** An ally invokes a treaty: the player's to answer before the deadline. */
+/**
+ * Whether a treaty obliges its members to fight once triggered. The Taiwan Relations Act
+ * (obligation 'ambiguous') does not: it commits the US to help Taiwan defend itself, so a call
+ * under it is a request, not a debt of honour.
+ */
+export const bindsToFight = (treaty: string) => {
+  const o = allianceById[treaty]?.obligation;
+  return o === undefined || o === 'collective_defense' || o === 'bilateral_defense';
+};
+
 function treatyCalls(s: Situation): Card[] {
   return s.d.treatyCalls.map((c) => {
     const aggressor = s.namer.nation(c.aggressor), victim = s.namer.nation(c.victim), treaty = treatyName(c.treaty);
+    const binding = bindsToFight(c.treaty);
     const nuclearFoe = (s.nations.get(c.aggressor)?.warheads ?? 0) > 0;
     const shield = (s.nations.get(s.me)?.warheads ?? 0) > 0 || s.d.enemies.some((e) => e === c.aggressor) || [...s.nations.values()].some((n) => n.id !== c.aggressor && n.warheads > 0 && atWar(s, n.id, c.aggressor));
     const join = !nuclearFoe || shield;
@@ -225,10 +239,12 @@ function treatyCalls(s: Situation): Card[] {
     const no: Action = { kind: 'command', label: 'Stand aside', command: { type: 'answer_treaty', nation: s.me, war: c.war, treaty: c.treaty, join: false } };
     return {
       key: `treaty|${c.war}|${c.treaty}|${c.reconsidered ? 2 : 1}`, topic: 'diplomacy', role: 'foreign', tone: 'advice', tick: s.tick, urgent: true,
-      title: `${victim} invokes the ${treaty}`,
-      text: `${aggressor} has attacked ${victim}, which calls on us to fight${c.reconsidered ? ', asking again after our refusal' : ''}. ${join ? 'Our word is our deterrent: I advise we honour it.' : `${aggressor} has nuclear weapons and no nuclear power fights beside ${victim} yet: I advise we stand aside for now.`}`,
+      title: binding ? `${victim} invokes the ${treaty}` : `${victim} asks us to fight`,
+      text: binding
+        ? `${aggressor} has attacked ${victim}, which calls on us to fight${c.reconsidered ? ', asking again after our refusal' : ''}. ${join ? 'Our word is our deterrent: I advise we honour it.' : `${aggressor} has nuclear weapons and no nuclear power fights beside ${victim} yet: I advise we stand aside for now.`}`
+        : `${aggressor} has attacked ${victim}, which asks us to fight${c.reconsidered ? ' again after our refusal' : ''}. The ${treaty} does not bind us to war; the choice is ours. ${join ? `Every partner in the region will judge us by it: I advise we go in.` : `${aggressor} has nuclear weapons and no nuclear power fights beside ${victim} yet: I advise we stand aside for now.`}`,
       ask: join ? `Enter the war beside ${victim}.` : `Stay out of the war between ${aggressor} and ${victim}.`,
-      cost: { label: 'Risk', text: join ? `War with ${aggressor} and its allies` : `Allies may doubt the ${treaty}` },
+      cost: { label: 'Risk', text: join ? `War with ${aggressor} and its allies` : binding ? `Allies may doubt the ${treaty}` : `Partners in the region may doubt us` },
       figure: { value: String(days), unit: days === 1 ? 'day' : 'days', caption: 'to answer' },
       chip: `Answer within ${days} ${days === 1 ? 'day' : 'days'}`,
       primary: join ? yes : no, secondary: join ? no : yes,
@@ -542,13 +558,17 @@ function reserves(s: Situation): Card[] {
   if (!n || !s.d.enemies.length || (s.d.mobilizationTarget ?? 0) > n.mobilization + 0.005 || tolerance === null || n.mobilization + 0.05 > tolerance) return [];
   if (n.reserves >= 0.15 * s.d.personnel) return [];
   const level = Math.round(Math.min(tolerance, n.mobilization + 0.1) * 100) / 100;
+  const k = (people: number) => `${Math.round(people / 1000).toLocaleString('en-US')}k`;
+  const recall = n.reservists >= 1000
+    ? `${k(n.reservists)} trained reservists are still at home; raising mobilisation recalls them.`
+    : 'Every trained reservist has been recalled; only new call-ups can refill the front.';
   return [{
     key: `mobilise|${level}`, topic: 'supply', role: 'chief', tone: 'advice', tick: s.tick, node: capitalOf(s, s.me),
     title: 'Reserves will not refill the front',
-    text: `Trained reserves are down to ${Math.round(n.reserves / 1000).toLocaleString('en-US')}k, against ${Math.round(s.d.personnel / 1000).toLocaleString('en-US')}k in the field. The public would accept mobilisation up to ${pct(tolerance)}.`,
+    text: `Only ${k(n.reserves)} replacements are ready, against ${k(s.d.personnel)} in the field. ${recall} The public would accept mobilisation up to ${pct(tolerance)}.`,
     ask: `Raise mobilisation from ${pct(n.mobilization)} to ${pct(level)}.`,
     cost: { label: 'Risk', text: 'War support falls as call-ups bite' },
-    figure: { value: String(Math.round(n.reserves / 1000)), unit: 'k', caption: 'trained reserves' },
+    figure: { value: String(Math.round(n.reservists / 1000)), unit: 'k', caption: 'reservists to recall' },
     primary: { kind: 'command', label: `Mobilise to ${pct(level)}`, command: { type: 'set_mobilization', nation: s.me, level } },
     secondary: { kind: 'later', label: 'Not now' },
   }];
@@ -607,7 +627,7 @@ function wire(s: Situation): Card[] {
   for (const e of s.recent) {
     if (e.tick < s.tick - 8) continue;
     let text: string | null = null;
-    if (e.type === 'war_declared' && (e.on === s.me || e.by === s.me || s.d.enemies.includes(e.on))) {
+    if (e.type === 'war_declared' && !s.ongoing.has(`${e.by}>${e.on}`) && (e.on === s.me || e.by === s.me || s.d.enemies.includes(e.on))) {
       const key = `${Math.floor((e.tick * s.dtHours) / 24)}|${e.on}`;
       const day = declared.get(key) ?? { on: e.on, tick: e.tick, by: [] };
       day.by.push(e.by);

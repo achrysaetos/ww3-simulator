@@ -12,7 +12,11 @@ export interface Headline {
   tick: number;
 }
 
-export function headlines(feed: EventFeed, map: GameMap, limit = 6): Headline[] {
+/**
+ * The newest headlines. A war that was already being fought when the scenario opens (`ongoing`,
+ * "RUS>UKR") is declared again at the first tick; it runs as the war going on, not as news of one starting.
+ */
+export function headlines(feed: EventFeed, map: GameMap, ongoing: ReadonlySet<string> = new Set(), limit = 6): Headline[] {
   const cities = new Set(map.cities.map((c) => c.node));
   const keep = (r: LoggedEvent) => {
     const e = r.event;
@@ -22,5 +26,6 @@ export function headlines(feed: EventFeed, map: GameMap, limit = 6): Headline[] 
     if (e.type === 'message') return NEWSWORTHY_MESSAGE.test(e.text);
     return true;
   };
-  return feed.newest(OFF, null, 600).filter(keep).slice(0, limit).map((r) => ({ seq: r.seq, text: r.text, tick: r.event.tick }));
+  const text = (r: LoggedEvent) => (r.event.type === 'war_declared' && ongoing.has(`${r.event.by}>${r.event.on}`) ? r.text.replace(/^(.+?) declares war on (.+?): .*$/, '$1 and $2 remain at war') : r.text);
+  return feed.newest(OFF, null, 600).filter(keep).slice(0, limit).map((r) => ({ seq: r.seq, text: text(r), tick: r.event.tick }));
 }

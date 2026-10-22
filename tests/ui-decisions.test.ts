@@ -40,7 +40,7 @@ function decisionsOver(g: Game, days: number): { card: Card; tick: number }[] {
 
 function situation(g: Game, over: Partial<Situation> = {}): Situation {
   return {
-    me: g.desk.me, tick: g.state.tick, dtHours: 6, map, nationIds: map.nationIds, control: g.state.control, formations: g.state.formations,
+    me: g.desk.me, ongoing: new Set(), tick: g.state.tick, dtHours: 6, map, nationIds: map.nationIds, control: g.state.control, formations: g.state.formations,
     nations: g.state.nations, d: g.state.focusNation!, recent: g.desk.recent, namer: g.namer, ammoPerDay: null, burnPerDay: {}, ops: g.state.ops, contest: g.state.contest, known: () => undefined,
     munitionKind: () => undefined, unitCostUsdM: () => 10, ...over,
   };

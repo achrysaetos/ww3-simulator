@@ -30,7 +30,28 @@ const TITLE: Record<Role, string> = {
   security: 'National Security Adviser',
 };
 
+/** Offices that go by another name in a nation's own government; a seat not listed keeps TITLE. */
+const TITLES: Record<string, Partial<Record<Role, string>>> = {
+  USA: {
+    chief: 'Chairman of the Joint Chiefs of Staff', intel: 'Director of the Defense Intelligence Agency', air: 'Chief of Staff of the Air Force',
+    navy: 'Chief of Naval Operations', economy: 'Secretary of the Treasury', foreign: 'Secretary of State',
+  },
+  GBR: {
+    chief: 'Chief of the Defence Staff', intel: 'Chief of Defence Intelligence', air: 'Chief of the Air Staff', navy: 'First Sea Lord',
+    economy: 'Chancellor of the Exchequer', foreign: 'Foreign Secretary',
+  },
+  AUS: { chief: 'Chief of the Defence Force', air: 'Chief of Air Force', navy: 'Chief of Navy', economy: 'Treasurer' },
+  CAN: { chief: 'Chief of the Defence Staff', air: 'Commander of the Royal Canadian Air Force', economy: 'Minister of Finance' },
+  FRA: { chief: 'Chief of the Defence Staff', air: 'Chief of Staff of the Air and Space Force', navy: 'Chief of Staff of the Navy', economy: 'Minister of the Economy' },
+  DEU: { chief: 'Chief of Defence', air: 'Chief of the Air Force', navy: 'Chief of the Navy' },
+  JPN: { chief: 'Chief of Staff, Joint Staff', air: 'Chief of Staff, Air Self-Defense Force', navy: 'Chief of Staff, Maritime Self-Defense Force' },
+  IND: { chief: 'Chief of Defence Staff', air: 'Chief of the Air Staff', navy: 'Chief of the Naval Staff', foreign: 'Minister of External Affairs' },
+  CHN: { chief: 'Chief of the Joint Staff Department', navy: 'Commander of the PLA Navy', air: 'Commander of the PLA Air Force' },
+};
+
 const RANK: Partial<Record<Role, string>> = { chief: 'Gen.', intel: 'Maj. Gen.', air: 'Lt. Gen.', navy: 'Adm.' };
+/** Ranks that differ by nation, as with TITLES. */
+const RANKS: Record<string, Partial<Record<Role, string>>> = { USA: { intel: 'Lt. Gen.', air: 'Gen.' }, GBR: { intel: 'Lt. Gen.', air: 'Air Chf. Mshl.' } };
 const MILITARY: ReadonlySet<Role> = new Set(['chief', 'intel', 'air', 'navy']);
 
 /**
@@ -93,11 +114,11 @@ export function advisorOf(nation: NationId, role: Role): Advisor {
   const i = ROLES.indexOf(role);
   const h = hash(`${nation}:${role}`);
   const military = MILITARY.has(role);
-  const rank = RANK[role];
+  const rank = RANKS[nation]?.[role] ?? RANK[role];
   return {
     role,
     name: rank ? `${rank} ${names[i]}` : names[i],
-    title: TITLE[role],
+    title: TITLES[nation]?.[role] ?? TITLE[role],
     look: {
       skin: SKINS[first + (h % count)],
       hair: HAIR[(h >>> 4) % HAIR.length],

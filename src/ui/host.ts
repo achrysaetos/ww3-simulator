@@ -17,7 +17,8 @@ export const SCENARIO_CARDS: ScenarioCard[] = SCENARIOS.map((s) => {
   for (const m of s.opening) if (m.type === 'declare_war') belligerents.add(m.nation);
   for (const m of s.opening) if (m.type === 'declare_war') belligerents.add(m.target);
   const wars = s.opening.flatMap((m): [NationId, NationId][] => (m.type === 'declare_war' ? [[m.nation, m.target]] : []));
-  return { id: s.id, name: s.name, summary: s.summary, startDate: s.startDate, suggestedNation: s.suggestedNation as NationId, belligerents: [...belligerents], wars };
+  const ongoing = wars.filter(([a, b]) => s.mobilized?.[a] !== undefined && s.mobilized?.[b] !== undefined).map(([a, b]) => `${a}>${b}`);
+  return { id: s.id, name: s.name, summary: s.summary, startDate: s.startDate, suggestedNation: s.suggestedNation as NationId, belligerents: [...belligerents], wars, ongoing };
 });
 
 /** Most formations one radial menu works out orders for. */
