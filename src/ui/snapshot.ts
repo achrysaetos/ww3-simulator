@@ -32,8 +32,10 @@ import type { IntelSource } from '../systems/intel';
 import { believedWorld, viewOf, type View } from '../systems/intel/view';
 import { OutputsRecorder } from '../outputs';
 import { outputsView, type OutputsView } from './outputs/view';
+import type { OperationForecastInput, OperationPlan } from '../forecast/operation';
+import type { OptionsResult } from './orders/options';
 import type {
-  Command, CommandDomain, Echelon, Formation, FormationId, FormationKind, ItemId, MunitionId, MunitionKind, Nation, NationId, NodeId, PlatformId, Posture, SimEvent, World,
+  Command, CommandDomain, Echelon, Formation, FormationId, FormationKind, ItemId, MunitionId, MunitionKind, Nation, NationId, NodeId, Operation, PlatformId, Posture, SimEvent, World,
 } from '../core/types';
 
 export const NO_NATION = 0xffff;
@@ -86,7 +88,11 @@ export type ToWorker =
   /** Untrusted until the worker's boundary (commands.ts) has checked it. */
   | { type: 'command'; command: Command }
   | { type: 'play_as'; nation: NationId }
-  | { type: 'focus'; nation?: NationId; formation?: FormationId };
+  | { type: 'focus'; nation?: NationId; formation?: FormationId }
+  /** Which orders the selection (or, with none, the staff's nearest units) can be given at `node`; answered with 'options'. */
+  | { type: 'options'; seq: number; formations: FormationId[]; node: NodeId }
+  /** Build the staff forecast's input for a battle plan, from the player's picture of the war; answered with 'forecast_input'. */
+  | { type: 'forecast'; seq: number; plan: OperationPlan; days: number };
 
 export interface RunStats {
   /** Wall time of the latest engine step. */
@@ -104,6 +110,9 @@ export type FromWorker =
   /** A command the boundary rejected, and why. */
   | { type: 'refused'; reason: string }
   | { type: 'snapshot'; snapshot: Snapshot; stats: RunStats }
+  | { type: 'options'; seq: number; tick: number; result: OptionsResult }
+  /** The input to run the forecast on, or why the plan cannot be forecast. */
+  | { type: 'forecast_input'; seq: number; input: OperationForecastInput | null; reason?: string }
   | { type: 'error'; message: string };
 
 export interface SessionMeta {
@@ -249,6 +258,10 @@ export interface NationDetail {
   peaceOffers: { from: NationId; to: NationId }[];
   /** Nations it has sanctions in force with. */
   sanctions: NationId[];
+  /** Nations whose troops it lets cross its land, nations whose land its troops may cross, and belligerents its air defence covers. */
+  access: NationId[];
+  accessFrom: NationId[];
+  aid: NationId[];
   /** Mobilisation level ordered and still being reached; null when none is pending. */
   mobilizationTarget: number | null;
   bulk: Nation['bulk'];
@@ -399,6 +412,8 @@ export interface Snapshot {
   focusContact?: ContactDetail;
   /** War cost and production race, sent once a day of game time: it moves slowly and costs a few KB. */
   outputs?: OutputsView;
+  /** The viewer's operations (ops/state.ts), ended ones while the engine keeps them; sent when any changed. Never another nation's. */
+  ops?: Operation[];
 }
 
 /** What the viewer's intelligence holds on a foreign formation: never its orders, supply or magazines. */
@@ -433,6 +448,7 @@ export class SnapshotEncoder {
   /** First war_declared that put each nation into each war, keyed `nation|enemy`. */
   private readonly entries = new Map<string, WarEntry>();
   private readonly lastPacked: Partial<Record<Packed, PackedArray>> = {};
+  private opsKey = '[]';
 
   constructor(readonly nationIds: NationId[], private readonly catalog: Catalog, mapSize: number) {
     if (mapSize >= NO_NODE) throw new Error(`map has ${mapSize} nodes; the wire format packs nodes in 16 bits`);
@@ -539,6 +555,15 @@ export class SnapshotEncoder {
     if (viewer && (world.tick - this.outputsTick) * world.dtHours >= 24) {
       this.outputsTick = world.tick;
       snap.outputs = outputsView(world, this.outputs.outputs(world, map), viewer);
+    }
+
+    if (viewer) {
+      const ops = Object.values(world.slices.ops?.byId ?? {}).filter((o) => o.nation === viewer);
+      const key = JSON.stringify(ops);
+      if (key !== this.opsKey) {
+        this.opsKey = key;
+        snap.ops = structuredClone(ops);
+      }
     }
 
     if (focus.nation && world.nations[focus.nation]) snap.focusNation = this.nationDetail(world, map, focus.nation, view);
@@ -684,6 +709,9 @@ export class SnapshotEncoder {
         return a === id || b === id ? [{ from, to: from === a ? b : a }] : [];
       }),
       sanctions,
+      access: diplomacy?.access[id] ?? [],
+      accessFrom: Object.entries(diplomacy?.access ?? {}).flatMap(([host, guests]) => (guests.includes(id) ? [host as NationId] : [])),
+      aid: diplomacy?.aid[id] ?? [],
       mobilizationTarget: eco?.mobilizationTarget ?? null,
       bulk: n.bulk,
       enemies: enemiesOf(world, id),
@@ -952,6 +980,8 @@ export interface ClientState {
   latestEvents: SimEvent[];
   /** The wire's arrays as last decoded, which the next snapshot's diffs apply to. */
   packed: Record<Packed, PackedArray>;
+  /** The player's operations, as the latest snapshot that changed them sent them. */
+  ops: Operation[];
 }
 
 export function emptyClientState(size: number): ClientState {
@@ -960,6 +990,7 @@ export function emptyClientState(size: number): ClientState {
     formations: [], rosterVersion: 0, nations: new Map(), wars: [], warsKey: '',
     air: new Float32Array(0), sea: new Float32Array(0), infra: new Float32Array(0), fallout: new Float32Array(0), contest: new Float32Array(0), weather: new Uint8Array(0),
     latestEvents: [],
+    ops: [],
     packed: {
       fNode: new Uint16Array(0), fStrength: new Uint8Array(0), fPosture: new Uint8Array(0), fStatus: new Uint8Array(0), fTarget: new Uint16Array(0),
       cConfidence: new Uint8Array(0), cAgeHours: new Uint16Array(0), cErrorKm: new Uint16Array(0), nations: new Float32Array(0),
@@ -1031,5 +1062,6 @@ export function applySnapshot(state: ClientState, snap: Snapshot, nationIds: rea
   state.focusFormation = snap.focusFormation;
   state.focusContact = snap.focusContact;
   if (snap.outputs) state.outputs = snap.outputs;
+  if (snap.ops) state.ops = snap.ops;
   state.latestEvents = snap.events;
 }
