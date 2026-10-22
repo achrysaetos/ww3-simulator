@@ -98,8 +98,10 @@ export function applyLandOrder(world: World, cmd: OrderCommand, ctx: SimContext)
 }
 
 function commit(f: Formation, order: Order, etaHours?: number): OrderOutcome {
+  // The same march ordered again keeps the ground already covered toward its next cell.
+  const same = f.order.posture === order.posture && f.order.target === order.target && !!f.order.path?.length && f.order.path[0] === order.path?.[0];
   f.order = order;
-  f.progressKm = 0;
+  if (!same) f.progressKm = 0;
   return etaHours === undefined ? { ok: true } : { ok: true, etaHours };
 }
 
