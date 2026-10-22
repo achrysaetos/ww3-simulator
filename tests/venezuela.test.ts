@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { NationId } from '../src/core/types';
+import type { NationId, PlatformId } from '../src/core/types';
 import { createSession } from '../src/scenarios';
 
 const VEN = 'VEN' as NationId;
@@ -9,7 +9,7 @@ describe('peace-2027: Venezuela (Red Team XP-6)', () => {
     const s = createSession('peace-2027', 1);
     const w = s.world;
     const forces = Object.values(w.formations).filter((f) => f.nation === VEN);
-    const count = (id: string) => forces.reduce((n, f) => n + (f.equipment[id] ?? 0), 0);
+    const count = (id: string) => forces.reduce((n, f) => n + (f.equipment[id as PlatformId] ?? 0), 0);
     // Main: 21 identical infantry divisions with T-55s and MiG-21s that Venezuela never operated.
     expect({ t72: count('t72m1'), amx30: count('amx30'), su30: count('su30mk'), s300: count('s300vm'), t55: count('t55'), mig21: count('mig21') })
       .toEqual({ t72: 92, amx30: 81, su30: 21, s300: 12, t55: 0, mig21: 0 });

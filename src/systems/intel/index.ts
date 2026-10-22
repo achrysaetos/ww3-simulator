@@ -21,7 +21,7 @@ import { isrJammed } from '../c2';
 import { DECEPTION } from '../c2/tables';
 import { infiltrating } from '../land/tables';
 import { conditionsAt, sortieFactorAt } from '../weather/effects';
-import { COMMERCIAL_IMAGERY, LIAISON_SOURCES, SUPPORT_SHARE, supportSources } from './sharing';
+import { COMMERCIAL_IMAGERY, LIAISON_SOURCES, SUPPORT_SHARE, supportersOf, supportSources } from './sharing';
 import { seaNeighbour } from '../naval/geography';
 
 export type IntelSource = 'base' | 'territory' | 'contact' | 'airborne' | 'satellite' | 'naval';
@@ -328,10 +328,6 @@ export const intel: System = {
       const share = SUPPORT_SHARE();
       return share >= 1 || draw(f.id, world.tick, `${n}>${o}`) < share;
     };
-    /** Nations that pass collection to a state that is not their ally or co-belligerent (sharing.ts), by recipient. */
-    const supporters = new Map<NationId, NationId[]>();
-    for (const n of Object.keys(world.nations) as NationId[])
-      for (const o of Object.keys(world.nations) as NationId[]) if (n !== o && supportSources(n, o)) (supporters.get(o) ?? supporters.set(o, []).get(o)!).push(n);
 
     for (const f of formations) {
       if (f.status !== 'active' && f.status !== 'routed') continue;
@@ -360,7 +356,7 @@ export const intel: System = {
       if (garrisoned) for (const o of observers) if (!enemies.get(f.nation)?.has(o)) fixWith(o, 'base');
       // Sensing nations: the formation's observers and their supporters, each with the first sensor that fixed it.
       let extra: Set<NationId> | undefined;
-      for (const o of observers) for (const n of supporters.get(o) ?? []) if (!observers.has(n)) (extra ??= new Set(observers)).add(n);
+      for (const o of observers) for (const n of supportersOf(o) as NationId[]) if (world.nations[n] && !observers.has(n)) (extra ??= new Set(observers)).add(n);
       const sensors: ReadonlySet<NationId> = extra ?? observers;
       const seen = new Map<NationId, IntelSource>();
       const see = (n: NationId, src: IntelSource) => {

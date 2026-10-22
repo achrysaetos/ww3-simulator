@@ -43,9 +43,18 @@ export const SUPPORT_SHARE = defineParam({
 export const COMMERCIAL_IMAGERY: Readonly<Record<string, number>> = { UKR: 10 };
 
 const supportBy = new Map<string, Set<IntelSource>>();
-for (const s of INTEL_SUPPORT) supportBy.set(`${s.from}|${s.to}`, new Set(s.sources));
+const supportersTo = new Map<string, string[]>();
+for (const s of INTEL_SUPPORT) {
+  supportBy.set(`${s.from}|${s.to}`, new Set(s.sources));
+  (supportersTo.get(s.to) ?? supportersTo.set(s.to, []).get(s.to)!).push(s.from);
+}
 
 /** Sources `from` passes to `to` while not fighting beside it, if any. */
 export function supportSources(from: string, to: string): ReadonlySet<IntelSource> | undefined {
   return supportBy.get(`${from}|${to}`);
+}
+
+/** Nations that pass collection to `to` while not fighting beside it. */
+export function supportersOf(to: string): readonly string[] {
+  return supportersTo.get(to) ?? [];
 }

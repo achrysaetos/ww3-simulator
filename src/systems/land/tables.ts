@@ -68,12 +68,10 @@ export const fireScaleOf = (c: PlatformClass): number => (c === 'loitering_munit
 export const SOF_PLATFORMS: ReadonlySet<string> = new Set(['sof_squad']);
 export function isSof(f: Formation): boolean {
   let sof = 0, all = 0;
-  for (const pid in f.equipment) {
-    const n = f.equipment[pid as PlatformId];
-    if (SOF_PLATFORMS.has(pid)) sof += n;
-    else if (pid.includes('squad')) all += n;
-  }
-  return sof > 0 && sof >= all;
+  for (const pid of SOF_PLATFORMS) sof += f.equipment[pid as PlatformId] ?? 0;
+  if (sof <= 0) return false;
+  for (const pid in f.equipment) if (!SOF_PLATFORMS.has(pid) && pid.includes('squad')) all += f.equipment[pid as PlatformId];
+  return sof >= all;
 }
 /** An infiltrating special-forces formation: behind the lines it avoids battle rather than seeking it. */
 export const infiltrating = (f: Formation): boolean => f.order.posture !== 'attack' && isSof(f);
