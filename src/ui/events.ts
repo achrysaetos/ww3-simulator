@@ -235,6 +235,7 @@ const nation = (s: string, n: Namer) => n.nation(s as NationId);
 const REASONS: Rule[] = [
   [/^no sea route to node (\d+)$/, (m, n) => `no sea route to ${n.place.to(+m[1] as NodeId)}`],
   [/^no land route to node (\d+)(;.*)?$/, (m, n) => `no land route to ${n.place.to(+m[1] as NodeId)}. It lies across the sea or past territory closed to you. To cross the sea, embark on amphibious lift at a port from the unit panel, or Move to a friendly port or airfield on the far shore`],
+  [/^node (\d+) lies across the sea with no friendly port or airfield to land at;.*$/, (m, n) => `${n.place.name(+m[1] as NodeId)} lies across the sea with no friendly port or airfield to land at. To land under fire, embark on amphibious lift at a port from the unit panel, then order the lift group to attack the coast`],
   [/^no friendly (port|airfield) to embark at$/, (m) => m[1] === 'port'
     ? 'no friendly port on the far shore to sail into, or no sea lane to one. To land on a hostile coast, march to a port and embark on amphibious lift from the unit panel'
     : 'no friendly airfield on the far shore to fly into'],
