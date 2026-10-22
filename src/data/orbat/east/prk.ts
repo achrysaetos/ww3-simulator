@@ -24,6 +24,27 @@ const MECH_CORPS: Kit = merge(mix(400, NEW_TANKS), { vtt323: 300, koksan: 48, bm
 
 const corps = (name: string, base: Base, kit: Kit): OrbatEntry => unit(PRK, name, 'maneuver', 'corps', base, kit, KPA);
 
+/**
+ * The 11th (Storm) Corps, the core of the KPA's special operations forces: airborne and sniper
+ * brigades flown in by An-2 and light infantry brigades that cross the DMZ on foot, to raid command
+ * posts, airbases and ports in the South's rear (ROK Defense White Paper 2022: some 200,000 special
+ * operations troops across the KPA; IISS Military Balance 2025). Brigade count and sizes are
+ * estimates holding the corps' former 4,000 squads.
+ */
+function stormCorps(): OrbatEntry[] {
+  const SOF = { readiness: 0.65, experience: 0.3 };
+  const men = (squads: number) => ({ ...SOF, personnel: squads * 9 });
+  const out: OrbatEntry[] = [];
+  const lift = [at('Taechon', 39.9, 125.5), at('Sondok', 39.75, 127.47), at('Tokchon', 39.75, 126.3), at('Kaechon', 39.7, 125.9)];
+  lift.forEach((b, i) => {
+    out.push(unit(PRK, `11th Storm Corps ${i + 1}${['st', 'nd', 'rd', 'th'][i]} Airborne Brigade`, 'maneuver', 'brigade', b, { sof_squad: 150 }, { ...men(150), airborne: true }));
+    out.push(unit(PRK, `11th Storm Corps ${i + 1}${['st', 'nd', 'rd', 'th'][i]} Sniper Brigade`, 'maneuver', 'brigade', b, { sof_squad: 150 }, { ...men(150), airborne: true }));
+  });
+  const forward = [at('Kaesong', 38.0, 126.55), at('Pyongsan', 38.33, 126.4), at('Hoeyang', 38.7, 127.6), at('Kumgang', 38.6, 128.0)];
+  for (let i = 0; i < 8; i++) out.push(unit(PRK, `11th Storm Corps Light Infantry Brigade ${i + 1}`, 'maneuver', 'brigade', forward[i % 4], { sof_squad: 350, truck: 30 }, men(350)));
+  return out;
+}
+
 const ground: OrbatEntry[] = [
   corps('I Corps', at('Hoeyang', 38.7, 127.6), FORWARD_CORPS),
   corps('II Corps', at('Pyongsan', 38.33, 126.4), FORWARD_CORPS),
@@ -40,7 +61,7 @@ const ground: OrbatEntry[] = [
   corps('815th Mechanised Corps', at('Hwangju', 38.67, 125.75), MECH_CORPS),
   corps('820th Tank Corps', at('Sariwon', 38.5, 125.76), merge(mix(550, NEW_TANKS), { vtt323: 200, koksan: 24, bm21_grad: 36, infantry_squad: 400, truck: 900 })),
   corps('Pyongyang Defence Command', at('Pyongyang', 39.03, 125.75), merge(mix(150, NEW_TANKS), { vtt323: 100, bm21_grad: 150, d30: 300, infantry_squad: 2000, truck: 800 })),
-  unit(PRK, '11th Storm Corps', 'maneuver', 'corps', at('Tokchon', 39.75, 126.3), { infantry_squad: 4000, truck: 400 }, { readiness: 0.65, experience: 0.3 }),
+  ...stormCorps(),
   // Deployed to Russia from October 2024; ~4,000 casualties by spring 2025 (South Korean NIS).
   unit(PRK, 'KPA Expeditionary Force (Kursk)', 'maneuver', 'division', at('Kursk oblast (KPA)', 51.45, 35.6), { infantry_squad: 900, koksan: 30, mrl_240mm: 15, truck: 150 }, { readiness: 0.6, experience: 0.6 }),
 ];
@@ -77,6 +98,8 @@ const airForce: OrbatEntry[] = [
   air('3rd Air Division Taetan', at('Taetan', 38.13, 125.25), { j5: 55 }),
   air('3rd Air Division Onchon', at('Onchon', 38.9, 125.23), { j5: 52, j6: 50 }),
   air('8th Air Division Uiju', at('Uiju', 40.15, 125.1), { h5: 80 }),
+  // Estimates of the An-2/Y-5 fleet run from about 200 to 300 (IISS Military Balance 2025; 38 North); kept ready for the special forces.
+  unit(PRK, 'Special operations air regiments (An-2)', 'air_wing', 'wing', at('Taechon', 39.9, 125.5), { an2: 250 }, { readiness: 0.6, experience: 0.3 }),
   unit(PRK, 'Air and Anti-Air Force SAM Belt', 'air_defense', 'corps', at('Pyongyang SAM belt', 39.1, 125.6), { s200_launcher: 24, s75_launcher: 120, s125_launcher: 80, pongae5_launcher: 24 }, KPAF),
 ];
 

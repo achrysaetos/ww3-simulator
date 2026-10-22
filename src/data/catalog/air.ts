@@ -133,6 +133,8 @@ const support: PlatformSpec<MunitionKey>[] = [
   { id: 'y9', name: 'Y-9', cls: 'transport_aircraft', producers: ['CHN'], inService: 2012, unitCostUsdM: 40, speedKph: 550, rangeKm: 1800, fuelTph: 2.5, capacity: { cargoTons: 20, troops: 106 } },
   { id: 'kc390', name: 'Embraer C-390 Millennium', cls: 'transport_aircraft', crew: 3, producers: ['BRA'], inService: 2019, unitCostUsdM: 130, speedKph: 850, rangeKm: 1800, fuelTph: 3.5, capacity: { cargoTons: 26, troops: 80 } },
   { id: 'an124', name: 'An-124 Ruslan', cls: 'transport_aircraft', crew: 6, producers: [], inService: 1986, unitCostUsdM: 150, speedKph: 800, rangeKm: 2500, fuelTph: 12, capacity: { cargoTons: 150, troops: 88, vehicles: 2 } },
+  // Fabric-skinned biplane flying low and slow: hard for radar to pick out of the ground clutter, the KPA's special-forces lift.
+  { id: 'an2', name: 'An-2 / Y-5 Colt', cls: 'transport_aircraft', producers: [], inService: 1957, unitCostUsdM: 0.3, speedKph: 185, rangeKm: 845, fuelTph: 0.15, stealth: 0.4, capacity: { cargoTons: 1.5, troops: 12 } },
   { id: 'an26', name: 'An-26 / Y-7', cls: 'transport_aircraft', producers: [], inService: 1969, unitCostUsdM: 5, speedKph: 440, rangeKm: 500, fuelTph: 0.8, capacity: { cargoTons: 5.5, troops: 40 } },
   { id: 'c2_kawasaki', name: 'Kawasaki C-2', cls: 'transport_aircraft', producers: ['JPN'], inService: 2017, unitCostUsdM: 170, speedKph: 850, rangeKm: 2000, fuelTph: 6, capacity: { cargoTons: 37, troops: 110 } },
   { id: 'c295', name: 'C-295', cls: 'transport_aircraft', crew: 3, producers: ['ESP', 'IND'], inService: 2001, unitCostUsdM: 30, speedKph: 480, rangeKm: 800, fuelTph: 0.8, capacity: { cargoTons: 9.25, troops: 71 } },
@@ -176,13 +178,15 @@ const drones: PlatformSpec<MunitionKey>[] = [
   { id: 'shahed129', name: 'Shahed-129', cls: 'strike_drone', producers: ['IRN'], inService: 2013, unitCostUsdM: 1, speedKph: 150, rangeKm: 1000, fuelTph: 0.02, stealth: 0.3, detectionKm: 40, q: 0.5, load: { qaem5: 4 } },
   { id: 'mohajer6', name: 'Mohajer-6', cls: 'strike_drone', producers: ['IRN'], inService: 2018, unitCostUsdM: 1, speedKph: 150, rangeKm: 200, fuelTph: 0.01, stealth: 0.35, detectionKm: 30, q: 0.4, load: { qaem5: 2 } },
   { id: 'shahed_launcher', name: 'Shahed-136 / Geran-2 launch truck (5 rails)', cls: 'loitering_munition_launcher', producers: ['IRN', 'RUS'], inService: 2022, unitCostUsdM: 0.2, load: { shahed136: 5 } },
-  { id: 'lancet_team', name: 'Lancet launch team', cls: 'loitering_munition_launcher', producers: ['RUS'], inService: 2022, unitCostUsdM: 0.05, speedKph: 40, load: { lancet3: 4 } },
-  { id: 'switchblade_team', name: 'Switchblade 600 team', cls: 'loitering_munition_launcher', producers: ['USA'], inService: 2021, unitCostUsdM: 0.05, speedKph: 40, load: { switchblade600: 2, switchblade300: 2 } },
+  { id: 'lancet_team', name: 'Lancet launch team', cls: 'loitering_munition_launcher', producers: ['RUS'], inService: 2022, unitCostUsdM: 0.05, speedKph: 40, fp: { armor: 0.015, soft: 0.06, infantry: 0.01 }, load: { lancet3: 4 } },
+  { id: 'switchblade_team', name: 'Switchblade 600 team', cls: 'loitering_munition_launcher', producers: ['USA'], inService: 2021, unitCostUsdM: 0.05, speedKph: 40, fp: { armor: 0.02, soft: 0.03, infantry: 0.02 }, load: { switchblade600: 2, switchblade300: 2 } },
   { id: 'harop_launcher', name: 'Harop launcher (12 canisters)', cls: 'loitering_munition_launcher', producers: ['ISR', 'IND'], inService: 2009, unitCostUsdM: 5, load: { harop: 12 } },
-  { id: 'fpv_team', name: 'FPV drone team', cls: 'loitering_munition_launcher', producers: ['UKR', 'RUS', 'CHN', 'USA', 'POL', 'TUR', 'IRN'], inService: 2023, unitCostUsdM: 0.02, speedKph: 30, stealth: 0.6, detectionKm: 10, load: { fpv: 30, fpv_fiber: 5 } },
+  // Armour fire is low because a tank takes several FPV hits to kill (judgment; set so a stacked
+  // drone-heavy defence does not out-kill the ukraine-2026 2-8 Russian tanks a day band).
+  { id: 'fpv_team', name: 'FPV drone team', cls: 'loitering_munition_launcher', producers: ['UKR', 'RUS', 'CHN', 'USA', 'POL', 'TUR', 'IRN'], inService: 2023, unitCostUsdM: 0.02, speedKph: 30, stealth: 0.6, detectionKm: 10, fp: { infantry: 0.2, soft: 0.12, armor: 0.004 }, load: { fpv: 30, fpv_fiber: 5 } },
   { id: 'bober_launcher', name: 'Long-range strike drone launch site (UJ-26 Bober)', cls: 'loitering_munition_launcher', producers: ['UKR'], inService: 2023, unitCostUsdM: 0.1, load: { bober: 4 } },
   { id: 'lyutyi_launcher', name: 'Long-range strike drone launch site (FP-1 / Lyutyi)', cls: 'loitering_munition_launcher', producers: ['UKR'], inService: 2023, unitCostUsdM: 0.2, load: { lyutyi: 4 } },
-  { id: 'kargu_team', name: 'Kargu-2 team', cls: 'loitering_munition_launcher', producers: ['TUR'], inService: 2020, unitCostUsdM: 0.05, speedKph: 40, load: { kargu2: 4 } },
+  { id: 'kargu_team', name: 'Kargu-2 team', cls: 'loitering_munition_launcher', producers: ['TUR'], inService: 2020, unitCostUsdM: 0.05, speedKph: 40, fp: { infantry: 0.02, soft: 0.03, armor: 0.01 }, load: { kargu2: 4 } },
 ];
 
 const helicopters: PlatformSpec<MunitionKey>[] = [

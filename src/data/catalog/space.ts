@@ -21,6 +21,14 @@ const satellites: PlatformSpec<MunitionKey>[] = [
   { id: 'yaogan_elint', name: 'Yaogan ELINT triplet (est.)', cls: 'recon_satellite', producers: ['CHN'], inService: 2017, unitCostUsdM: 50, detectionKm: 1500 },
   { id: 'yaogan_sar', name: 'Yaogan SAR/optical (est.)', cls: 'recon_satellite', producers: ['CHN'], inService: 2015, unitCostUsdM: 100, detectionKm: 500 },
   { id: 'ofek16', name: 'Ofek-16', cls: 'recon_satellite', producers: ['ISR'], inService: 2020, unitCostUsdM: 100, detectionKm: 200 },
+  // Allied national imagers: France's CSO optical (3, DGA), Japan's IGS optical and radar (~8 operational,
+  // Cabinet Satellite Intelligence Center), Korea's 425 Project SAR/EO (5 by end-2025, ADD), Germany's
+  // SARah (3, Bundeswehr) and Italy's COSMO-SkyMed (4 first and second generation, ASI). Costs are estimates.
+  { id: 'cso', name: 'CSO optical reconnaissance', cls: 'recon_satellite', producers: ['FRA'], inService: 2018, unitCostUsdM: 450, detectionKm: 300 },
+  { id: 'igs', name: 'IGS optical / radar (est.)', cls: 'recon_satellite', producers: ['JPN'], inService: 2003, unitCostUsdM: 400, detectionKm: 300 },
+  { id: 'k425', name: '425 Project SAR / EO', cls: 'recon_satellite', producers: ['KOR'], inService: 2023, unitCostUsdM: 250, detectionKm: 300 },
+  { id: 'sarah', name: 'SARah radar reconnaissance', cls: 'recon_satellite', producers: ['DEU'], inService: 2022, unitCostUsdM: 300, detectionKm: 300 },
+  { id: 'cosmo_skymed', name: 'COSMO-SkyMed radar', cls: 'recon_satellite', producers: ['ITA'], inService: 2007, unitCostUsdM: 300, detectionKm: 300 },
   { id: 'aehf', name: 'AEHF', cls: 'comms_satellite', producers: ['USA'], inService: 2010, unitCostUsdM: 1500 },
   { id: 'wgs', name: 'WGS', cls: 'comms_satellite', producers: ['USA'], inService: 2007, unitCostUsdM: 440 },
   // Starlink/Starshield: ~$0.5-1M per satellite; Ukraine's front-line comms depend on it.
@@ -46,7 +54,7 @@ export const spacePlatforms = satellites.map(toPlatform);
 export const ORBIT_KM: Readonly<Record<string, number>> = {
   gps3: 20200, glonass_k2: 19100, beidou3: 21500, galileo: 23200,
   kh11: 600, us_sar_sat: 1100, sbirs_geo: 35786, sda_tracking: 1000, persona: 700, tundra_eks: 39000,
-  yaogan_elint: 1100, yaogan_sar: 700, ofek16: 600,
+  yaogan_elint: 1100, yaogan_sar: 700, ofek16: 600, cso: 800, igs: 490, k425: 500, sarah: 750, cosmo_skymed: 620,
   aehf: 35786, wgs: 35786, starshield: 550, sda_transport: 1000, meridian: 39000, tianlian: 35786, skynet5: 35786, syracuse4: 35786,
   nivelir: 600, shijian21: 35786,
 };

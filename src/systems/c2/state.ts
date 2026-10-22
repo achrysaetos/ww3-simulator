@@ -1,7 +1,7 @@
 import type { Command, FormationId, NationId, NodeId } from '../../core/types';
 
 export type HqLevel = 'national' | 'front' | 'army';
-export type Band = 'gnss' | 'comms' | 'radar';
+export type Band = 'gnss' | 'comms' | 'radar' | 'drone';
 export type OrderCommand = Extract<Command, { type: 'order' }>;
 
 /** A headquarters: where it sits, who it answers to, and how intact it is. */
@@ -15,6 +15,8 @@ export interface CommandNode {
   parent?: string;
   /** 1 intact .. 0 destroyed; a replacement stands up over HQ[level].recoverDays. */
   integrity: number;
+  /** Cell it was last struck in, and the tick until which it keeps out of it (DISPLACE_DAYS). */
+  displaced?: { from: NodeId; until: number };
 }
 
 /** Jamming a nation's emitters put on one cell, per band, 0..1. */
@@ -60,6 +62,12 @@ export interface C2State {
   /** Space formations and formations carrying EW platforms, found when formations are attached. */
   space: FormationId[];
   emitters: FormationId[];
+  /** Platforms each commanded formation had when attached: its organic EW shrinks with it. */
+  size: Record<FormationId, number>;
+  /** Per nation, the last tick its intelligence warned it of each foreign build-up. */
+  warned: Record<NationId, Record<NationId, number>>;
+  /** Nations attacked without warning, by whom, and until when their forces are caught unready. */
+  surprised: Record<NationId, { by: NationId; until: number }>;
 }
 
 declare module '../../core/types' {

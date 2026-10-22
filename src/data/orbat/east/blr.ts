@@ -23,7 +23,7 @@ export const blr: OrbatEntry[] = [
   bde('120th Guards Mechanised Brigade', at('Uruchye, Minsk', 53.95, 27.68), MECH_BDE, 'maneuver', MECH_PERSONNEL),
   { ...bde('38th Guards Air Assault Brigade', at('Brest', 52.1, 24.1), AIRMOBILE_BDE, 'maneuver', AIRMOBILE_PERSONNEL), airborne: true },
   { ...bde('103rd Guards Airborne Brigade', at('Vitebsk', 55.19, 30.2), AIRMOBILE_BDE, 'maneuver', AIRMOBILE_PERSONNEL), airborne: true },
-  bde('5th Spetsnaz Brigade', at('Maryina Gorka', 53.5, 28.15), { infantry_squad: 80, truck: 60 }),
+  bde('5th Spetsnaz Brigade', at('Maryina Gorka', 53.5, 28.15), { sof_squad: 80, truck: 60 }),
   bde('51st Guards Artillery Brigade', at('Asipovichy', 53.3, 28.65), { '2s19_msta': 18, '2s7m': 12, '2a65': 18, bm27: 12, truck: 200 }, 'artillery'),
   bde('336th Rocket Artillery Brigade', at('Asipovichy rocket range', 53.32, 28.55), { polonez_launcher: 12, bm30: 6, truck: 80 }, 'artillery'),
   bde('465th Missile Brigade', at('Tsel, Asipovichy', 53.25, 28.75), { iskander_m_tel: 4, truck: 30 }, 'missile'),

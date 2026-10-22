@@ -7,7 +7,7 @@ import type { PlatformClass } from '../../../core/types';
  * tanks, combat aircraft, principal surface combatants and submarines per nation.
  */
 const BY_CLASS = {
-  infantry: ['infantry_squad'],
+  infantry: ['infantry_squad', 'infantry_squad_pro', 'militia_squad'],
   mbt: [
     'type10', 'type90', 'k2_black_panther', 'k1a2', 'k1a1', 'k1', 't80u', 'm48a5', 'm48a5t', 'm1a2t', 'cm11', 'cm12', 'm60a3', 'm60a1',
     'm60t_sabra', 'm60_phoenix', 'm1a1', 'm1a2s', 't90s', 't72', 't72ms', 't62', 't55', 'type59', 'type69', 'type85', 'arjun',
@@ -36,11 +36,11 @@ const BY_CLASS = {
     'fh2000', 'msta_b', 'atags',
   ],
   mlrs: [
-    'm270', 'himars', 'k239_chunmoo', 'k136_kooryong', 'ravs_mlrs', 'pinaka', 'smerch', 'bm21', 'a100_mlrs', 'fatah_mlrs', 'astros2',
+    'm270', 'himars', 'k239_chunmoo', 'k136_kooryong', 'ravs_mlrs', 'pinaka', 'smerch', 'bm21', 'fajr5_launcher', 'a100_mlrs', 'fatah_mlrs', 'astros2',
     'jobaria_mlrs', 'pulse_mlrs', 't122_sakarya', 't300_kasirga', 'polonez_mlrs', 'lynx_mlrs', 'tos1a', 'phl03', 'dti1_mlrs', 'sr4_mlrs',
     'rm70', 'm77_oganj', 'sumadija_mlrs', 'bateleur', 'type63_mlrs',
   ],
-  atgm: ['spike_ngl_launcher'],
+  atgm: ['spike_ngl_launcher', 'kornet_team', 'toophan_team'],
   truck: ['truck'],
   sam_long: [
     'patriot_pac3', 'patriot_pac2', 's400_launcher', 's300pmu1', 's300pmu2', 's300ps', 's300vm_launcher', 'tien_kung_3', 'hq9p_launcher',
@@ -59,7 +59,7 @@ const BY_CLASS = {
   radar: ['green_pine_radar'],
   tel_srbm: [
     'hyunmoo2_tel', 'ktssm_launcher', 'scud_b_tel', 'iskander_e_tel', 'bora_tel', 'j600t_yildirim', 'lora_launcher', 'prithvi2_tel',
-    'nasr_tel', 'ghaznavi_tel', 'abdali_tel', 'shaheen1_tel',
+    'nasr_tel', 'ghaznavi_tel', 'abdali_tel', 'shaheen1_tel', 'fateh_tel',
   ],
   tel_mrbm: ['agni1_tel', 'agni2_tel', 'ghauri_tel', 'shaheen2_tel', 'df21_tel', 'jericho2_tel', 'ababeel_tel'],
   tel_irbm: ['agni3_tel', 'agni4_tel', 'shaheen3_tel'],
@@ -144,7 +144,7 @@ for (const [cls, ids] of Object.entries(BY_CLASS) as [PlatformClass, readonly Ki
 
 /** Munitions named in `extraMagazine`; same reconciliation role as the platform registry. */
 export const MUNITION_KIT = [
-  'tamir', 'stunner', 'arrow2', 'arrow3', 'nuclear_gravity_bomb', 'popeye_turbo_slcm', 'babur3_slcm', 'kalibr_club',
+  'tamir', 'stunner', 'arrow2', 'arrow3', 'nuclear_gravity_bomb', 'popeye_turbo_slcm', 'babur3_slcm', 'kalibr_club', 'rocket_122', 'fajr5', 'fateh110',
 ] as const;
 export type MunitionKitId = (typeof MUNITION_KIT)[number];
 

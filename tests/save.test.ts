@@ -59,6 +59,13 @@ describe('save and resume', () => {
       ['no formations', (w) => delete w.formations, 'world.formations'],
       ['control not an array', (w) => (w.control = {}), 'world.control'],
       ['bad start date', (w) => (w.startDate = 'soon'), 'world.startDate'],
+      // Hand-edited saves (Red Team XP-10): negative armies, a bottomless treasury, ground held by nobody that exists.
+      ['negative equipment', (w) => { for (const f of Object.values<any>(w.formations)) if (f.nation === 'GRC') for (const k in f.equipment) f.equipment[k] = -5; }, 'must be a count of at least 0'],
+      ['negative personnel', (w) => { for (const f of Object.values<any>(w.formations)) if (f.nation === 'GRC') f.personnel = -100; }, 'personnel must be at least 0'],
+      ['a trillion-dollar treasury', (w) => (w.nations.TUR.treasuryUsdB = 1e9), 'treasury'],
+      ['reserves below zero', (w) => (w.nations.TUR.reserves = -1), 'reserves'],
+      ['morale above one', (w) => { Object.values<any>(w.formations)[0].morale = 5; }, 'morale must lie in 0..1'],
+      ['ground held by an unknown nation', (w) => (w.control[0] = 'XXX'), 'unknown nation XXX'],
     ])('%s', (_, edit, message) => {
       expect(() => resumeRun(broken(edit))).toThrow(message);
     });

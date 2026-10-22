@@ -4,8 +4,8 @@
  * some of them: their bases (peacetime intelligence), anything on its ground or next to its
  * troops, what airborne ISR and reconnaissance satellites image, and the warships the naval
  * system tracks. A fix records where the formation was, what
- * it was and roughly how strong. Co-belligerents and treaty allies pool fixes, as US,
- * Japanese and Taiwanese sensors would feed one picture. Between fixes the belief goes stale: the position error grows
+ * it was and roughly how strong. Treaty allies pool fixes, as US and Japanese sensors feed
+ * one picture; other co-belligerents and supporting powers pass on only some sources (sharing.ts). Between fixes the belief goes stale: the position error grows
  * with how fast that kind of formation moves, and confidence decays with it.
  *
  * A daily indications-and-warning pass (WARN_RISE) warns a nation of a build-up on its border.
@@ -18,6 +18,10 @@ import { atWar, hostility, type SimContext, type System } from '../../core/engin
 import type { GameMap } from '../../core/map';
 import type { Formation, FormationId, FormationKind, NationId, NodeId, PlatformClass, PlatformId, World } from '../../core/types';
 import { isrJammed } from '../c2';
+import { DECEPTION } from '../c2/tables';
+import { infiltrating } from '../land/tables';
+import { conditionsAt, sortieFactorAt } from '../weather/effects';
+import { COMMERCIAL_IMAGERY, LIAISON_SOURCES, SUPPORT_SHARE, supportersOf, supportSources } from './sharing';
 import { seaNeighbour } from '../naval/geography';
 
 export type IntelSource = 'base' | 'territory' | 'contact' | 'airborne' | 'satellite' | 'naval';
@@ -40,6 +44,8 @@ export interface Contact {
   inshore?: NodeId;
   /** A ship seen under way, though still in its home port. */
   underway?: true;
+  /** Share of its true size the formation showed when fixed, when concealment or a feint skewed it. */
+  apparent?: number;
 }
 
 /** A build-up on a nation's border that its intelligence has read as warning. */
@@ -119,10 +125,39 @@ const SAT_FIX_PER_SATELLITE = 0.02;
 const SAT_VISIBILITY: Partial<Record<FormationKind, number>> = {
   maneuver: 0.5, artillery: 0.4, air_defense: 0.4, missile: 0.05, logistics: 0.5, surface_group: 0.5, strategic: 0.2,
 };
+/**
+ * Satellite visibility of a missile formation at its home garrison in wartime: its launchers have
+ * dispersed, but to hides around a known base or tunnel complex, a small search area against a
+ * country-wide TEL hunt. Israel struck about a third to half of Iran's ~400 launchers within the
+ * first week of June 2025, largely around known bases (IDF statements; ISW). Judgment.
+ */
+const SAT_VISIBILITY_MISSILE_BASE = 0.3;
 
-/** Reach of airborne ISR over land and sea: AWACS and maritime patrol radar, JSTARS-class and drone sensors. Judgment. */
+/** Furthest reach of airborne ISR from its orbit: AEW and maritime patrol radar, and long-endurance drones' sensors. Judgment. */
 const AIRBORNE_ISR_KM = 300;
-const ISR_CLASSES: ReadonlySet<PlatformClass> = new Set(['awacs', 'maritime_patrol', 'isr_drone']);
+/**
+ * What each airborne ISR class can fix. An AEW radar is built to track aircraft and sees ships on
+ * the sea's flat surface, not ground forces among terrain clutter; maritime patrol aircraft hunt
+ * ships; ISR drones carry EO/IR and SAR/GMTI sensors that find ground units (Predator, Heron and
+ * Orlan-10 work over the battle area). Ground-moving-target radar is what tracks a ground force
+ * from the air (JSTARS, Sentinel R1).
+ */
+const ISR_SEES: Partial<Record<PlatformClass, { ground: boolean; sea: boolean }>> = {
+  awacs: { ground: false, sea: true },
+  maritime_patrol: { ground: false, sea: true },
+  isr_drone: { ground: true, sea: true },
+};
+/** Postures that put a wing over its order target; otherwise its ISR orbits near its base. */
+const ORBIT_POSTURES: ReadonlySet<string> = new Set(['patrol', 'strike', 'air_superiority', 'escort']);
+/** Enemy air control over its orbit at which a high-value ISR aircraft stands off and fixes nothing. Judgment: A-50 losses in 2024 pushed Russian AEW back from the front. */
+const ISR_STANDOFF_AIR = 0.5;
+/**
+ * Share of reconnaissance-satellite collection that is radar (SAR), which sees through cloud and
+ * darkness; the rest is electro-optical and needs a clear sky in daylight. US Topaz, China's Yaogan
+ * SAR, Japan's IGS radar and Korea's 425 SAR satellites, against KH-11 and the optical constellations.
+ * Judgment.
+ */
+const SAT_SAR_SHARE = 0.4;
 
 /**
  * Who watches a nation's forces in peacetime besides its enemies. Foreign troops within this
@@ -230,32 +265,46 @@ export const intel: System = {
 
     const watchers = new Map<number, Set<NationId>>();
     const watch = (node: number, n: NationId) => (watchers.get(node) ?? watchers.set(node, new Set()).get(node)!).add(n);
-    const isr: { node: NodeId; nation: NationId }[] = [];
+    const present = new Map<number, Set<NationId>>();
+    const isr: { node: NodeId; nation: NationId; ground: boolean; sea: boolean; reachKm: number }[] = [];
     for (const f of formations) {
       if (f.status !== 'active') continue;
       if (f.kind === 'air_wing') {
-        if (Object.entries(f.equipment).some(([pid, k]) => k > 0 && ISR_CLASSES.has(ctx.catalog.platform(pid as PlatformId).class))) isr.push({ node: f.node, nation: f.nation });
+        const orbit = isrOrbit(world, map, ctx, f);
+        if (orbit) isr.push(orbit);
         continue;
       }
       if (map.isSea(f.node) || f.kind === 'space') continue;
       watch(f.node, f.nation);
+      (present.get(f.node) ?? present.set(f.node, new Set()).get(f.node)!).add(f.nation);
       for (let k = map.adjStart[f.node]; k < map.adjStart[f.node + 1]; k++) watch(map.adj[k], f.nation);
     }
     const sats = new Map<NationId, number>();
-    for (const [n, space] of Object.entries(world.slices.strategic?.space ?? {})) {
-      const alive = space.recon_satellite?.alive ?? 0;
-      if (alive > 0) sats.set(n as NationId, 1 - Math.exp(-alive * SAT_FIX_PER_SATELLITE));
+    const space = world.slices.strategic?.space ?? {};
+    for (const n of new Set([...Object.keys(space), ...Object.keys(COMMERCIAL_IMAGERY)]) as Set<NationId>) {
+      const alive = (space[n]?.recon_satellite?.alive ?? 0) + (COMMERCIAL_IMAGERY[n] ?? 0);
+      if (alive > 0) sats.set(n, 1 - Math.exp(-alive * SAT_FIX_PER_SATELLITE));
     }
+    const imaging = new Map<number, number>();
+    /** Share of satellite passes over a cell that image it: radar always, optical under a clear daytime sky. */
+    const imagingAt = (node: NodeId) => {
+      let v = imaging.get(node);
+      if (v === undefined) {
+        const c = conditionsAt(world, map, node);
+        imaging.set(node, (v = c ? SAT_SAR_SHARE + (1 - SAT_SAR_SHARE) * (1 - c.cloud) * (1 - c.nightHours / 24) : 1));
+      }
+      return v;
+    };
     const tracks = world.slices.naval?.tracks ?? {};
-    const fix = (o: NationId, f: Formation, source: IntelSource) => {
+    const fix = (o: NationId, f: Formation, source: IntelSource, node = f.node, apparent = 1) => {
       const known = pictures[o]?.[f.id];
       // The same sensor seeing it in the same place again only refreshes the fix.
-      if (known && known.node === f.node && known.source === source && known.embarkedOn === f.embarkedOn) {
+      if (known && known.node === node && known.source === source && known.embarkedOn === f.embarkedOn && (known.apparent ?? 1) === apparent) {
         known.tick = world.tick;
         if (f.kind === 'surface_group') observeShip(known, f);
         return;
       }
-      const scale = 1 + SOURCE_ERROR[source].strength * (2 * draw(f.id, world.tick, o) - 1);
+      const scale = apparent * (1 + SOURCE_ERROR[source].strength * (2 * draw(f.id, world.tick, o) - 1));
       let count = 0;
       const equipment: Record<PlatformId, number> = {};
       for (const [pid, k] of Object.entries(f.equipment) as [PlatformId, number][]) {
@@ -263,49 +312,73 @@ export const intel: System = {
         if (k > 0) equipment[pid] = Math.round(k * scale);
       }
       const strength = Math.max(0, Math.round(count * scale));
-      const c: Contact = { node: f.node, tick: world.tick, kind: f.kind, strength, equipment, source };
+      const c: Contact = { node, tick: world.tick, kind: f.kind, strength, equipment, source };
+      if (apparent !== 1) c.apparent = apparent;
       if (f.embarkedOn) c.embarkedOn = f.embarkedOn;
       if (f.kind === 'surface_group') observeShip(c, f);
       (pictures[o] ??= {})[f.id] = c;
     };
-    /** Whether `o` takes `n`'s fix on a formation of `of`: co-belligerents against it pool, and so do treaty allies. */
-    const shares = (o: NationId, n: NationId, of: NationId) => {
+    /** Whether `o` takes `n`'s fix by `src` on formation `f` (see sharing.ts). */
+    const shares = (o: NationId, n: NationId, f: Formation, src: IntelSource) => {
       if (enemies.get(o)?.has(n)) return false;
-      const foes = enemies.get(of);
-      return (!!foes && foes.has(o) && foes.has(n)) || sharesBloc(world, o, n);
+      if (sharesBloc(world, o, n)) return true;
+      const foes = enemies.get(f.nation);
+      if (foes?.has(o) && foes.has(n)) return LIAISON_SOURCES.has(src);
+      if (!supportSources(n, o)?.has(src)) return false;
+      const share = SUPPORT_SHARE();
+      return share >= 1 || draw(f.id, world.tick, `${n}>${o}`) < share;
     };
 
     for (const f of formations) {
       if (f.status !== 'active' && f.status !== 'routed') continue;
       const observers = observersOf(f);
       if (!observers.size) continue;
+      const d = f.order.deception;
+      // Share of a concealed formation that sensors outside its cell see, and the chance a tick that they see any of it.
+      const sof = infiltrating(f);
+      const exposed = (d?.disperse || sof ? DECEPTION.dispersedSeen() : 1) * (d?.emcon || sof ? DECEPTION.emconSeen() : 1);
+      const spotted = (src: IntelSource) => exposed >= 1 || draw(f.id, world.tick, `~${src}`) < exposed;
+      // Overhead sensors find mock-ups where the formation laid them; troops across the line are not fooled.
+      const overhead = d?.decoy !== undefined && d.decoy !== f.node ? d.decoy : f.node;
       const fixWith = (o: NationId, source: IntelSource) => {
-        fix(o, f, source);
-        for (const g of aboard.get(f.id) ?? []) fix(o, g, source);
+        const at = source === 'satellite' || source === 'airborne' ? overhead : f.node;
+        const close = source === 'base' || (!sof && (source === 'territory' || present.get(f.node)?.has(o)));
+        const apparent = close ? 1 : exposed * (d?.feint ? DECEPTION.feintScale() : 1);
+        fix(o, f, source, at, apparent);
+        for (const g of aboard.get(f.id) ?? []) fix(o, g, source, at, apparent);
       };
       if (atBase(map, f)) {
         for (const o of observers) fixWith(o, 'base');
         continue;
       }
-      // Sensing nations: the formation's observers, each with the first sensor that fixed it.
+      // A missile brigade in its garrison is known in peace; at war its launchers disperse around it.
+      const garrisoned = f.kind === 'missile' && f.node === f.home;
+      if (garrisoned) for (const o of observers) if (!enemies.get(f.nation)?.has(o)) fixWith(o, 'base');
+      // Sensing nations: the formation's observers and their supporters, each with the first sensor that fixed it.
+      let extra: Set<NationId> | undefined;
+      for (const o of observers) for (const n of supportersOf(o) as NationId[]) if (world.nations[n] && !observers.has(n)) (extra ??= new Set(observers)).add(n);
+      const sensors: ReadonlySet<NationId> = extra ?? observers;
       const seen = new Map<NationId, IntelSource>();
       const see = (n: NationId, src: IntelSource) => {
-        if (observers.has(n) && !seen.has(n)) seen.set(n, src);
+        if (sensors.has(n) && !seen.has(n)) seen.set(n, src);
       };
       if (!map.isSea(f.node)) {
         const holder = world.control[f.node];
-        if (holder) see(holder, 'territory');
-        for (const n of watchers.get(f.node) ?? []) see(n, 'contact');
+        if (holder && (!sof || spotted('territory'))) see(holder, 'territory');
+        for (const n of watchers.get(f.node) ?? []) if ((!sof && present.get(f.node)?.has(n)) || spotted('contact')) see(n, 'contact');
       }
-      if (f.kind !== 'submarine')
-        for (const w of isr) if (!seen.has(w.nation) && observers.has(w.nation) && map.distanceKm(w.node, f.node) <= AIRBORNE_ISR_KM && !isrJammed(world, f.node, w.nation, f.id)) see(w.nation, 'airborne');
-      const vis = SAT_VISIBILITY[f.kind] ?? 0;
-      if (vis > 0) for (const [n, p] of sats) if (observers.has(n) && !seen.has(n) && draw(f.id, world.tick, n) < p * vis) see(n, 'satellite');
+      if (f.kind !== 'submarine') {
+        const sea = f.kind === 'surface_group';
+        for (const w of isr) if (!seen.has(w.nation) && sensors.has(w.nation) && (sea ? w.sea : w.ground) && map.distanceKm(w.node, overhead) <= w.reachKm && spotted('airborne') && !isrJammed(world, overhead, w.nation, f.id)) see(w.nation, 'airborne');
+      }
+      const vis = (garrisoned ? SAT_VISIBILITY_MISSILE_BASE : (SAT_VISIBILITY[f.kind] ?? 0)) * exposed * (map.isSea(overhead) ? 1 : imagingAt(overhead));
+      if (vis > 0) for (const [n, p] of sats) if (sensors.has(n) && !seen.has(n) && draw(f.id, world.tick, n) < p * vis) see(n, 'satellite');
       for (const n of tracks[f.id] ?? []) see(n, 'naval');
       if (!seen.size) continue;
       for (const o of observers) {
+        if (garrisoned && !enemies.get(f.nation)?.has(o)) continue;
         let source = seen.get(o);
-        if (!source) for (const [n, src] of seen) if (shares(o, n, f.nation)) { source = src; break; }
+        if (!source) for (const [n, src] of seen) if (shares(o, n, f, src)) { source = src; break; }
         if (source) fixWith(o, source);
       }
     }
@@ -314,10 +387,13 @@ export const intel: System = {
       const p = pictures[o as NationId];
       for (const id in p) {
         const c = p[id as FormationId];
-        if ((c.tick !== world.tick && confidenceAt(world, c) < FORGET) || world.formations[id as FormationId]?.status === 'destroyed') delete p[id as FormationId];
+        // A loss is learnt by troops in or beside the cell where the formation died; elsewhere its contact only goes stale.
+        const lost = world.formations[id as FormationId]?.status === 'destroyed' && !!watchers.get(world.formations[id as FormationId].node)?.has(o as NationId);
+        if ((c.tick !== world.tick && confidenceAt(world, c) < FORGET) || lost) delete p[id as FormationId];
       }
     }
     if (world.tick % ticksPerDay(world) === 0) indications(world, map, ctx);
+    orbits.set(world, { tick: world.tick, isr });
     stamps.set(world, pictureStamp(world) + 1);
   },
 };
@@ -328,6 +404,22 @@ export const intel: System = {
  */
 const stamps = new WeakMap<World, number>();
 export const pictureStamp = (world: World): number => stamps.get(world) ?? 0;
+
+/** The airborne ISR flying in the tick intel last stepped. Runtime only: it is rebuilt by the next step. */
+const orbits = new WeakMap<World, { tick: number; isr: { node: NodeId; nation: NationId; ground: boolean; reachKm: number }[] }>();
+
+/**
+ * Whether `observer`'s ground-watching ISR (drones over the battle area) covered `node` this tick and
+ * kept its link through the jamming there: what finds a command post or a launcher, rather than
+ * a formation somewhere in a cell. Without the intel system, everything is watched.
+ */
+export function isrOverwatch(world: World, map: GameMap, observer: NationId, node: NodeId, key: string): boolean {
+  if (!world.slices.intel) return true;
+  const o = orbits.get(world);
+  if (!o || o.tick !== world.tick) return false;
+  for (const w of o.isr) if (w.nation === observer && w.ground && map.distanceKm(w.node, node) <= w.reachKm) return !isrJammed(world, node, observer, key as FormationId);
+  return false;
+}
 
 const ticksPerDay = (world: World) => Math.max(1, Math.round(24 / world.dtHours));
 
@@ -373,6 +465,29 @@ function indications(world: World, map: GameMap, ctx: SimContext): void {
 function sharesBloc(world: World, a: NationId, b: NationId): boolean {
   const x = world.nations[a]?.blocs, y = world.nations[b]?.blocs;
   return !!x && !!y && x.some((bloc) => y.includes(bloc));
+}
+
+/**
+ * Where an air wing's ISR aircraft fly this tick and what they can fix, or undefined when it has
+ * none or they are grounded: by the weather at base, or by enemy air control over their orbit.
+ */
+function isrOrbit(world: World, map: GameMap, ctx: SimContext, f: Formation): { node: NodeId; nation: NationId; ground: boolean; sea: boolean; reachKm: number } | undefined {
+  let ground = false, sea = false, reachKm = 0;
+  for (const pid in f.equipment) {
+    if (f.equipment[pid as PlatformId] <= 0) continue;
+    const p = ctx.catalog.platform(pid as PlatformId);
+    const sees = ISR_SEES[p.class];
+    if (!sees) continue;
+    ground ||= sees.ground;
+    sea ||= sees.sea;
+    reachKm = Math.max(reachKm, Math.min(AIRBORNE_ISR_KM, p.mobility.rangeKm));
+  }
+  if (!reachKm) return undefined;
+  const node = ORBIT_POSTURES.has(f.order.posture) && f.order.target !== undefined ? f.order.target : f.node;
+  const air = world.theater.airControl[node];
+  if (air && air.level >= ISR_STANDOFF_AIR && atWar(world, f.nation, air.nation)) return undefined;
+  if (draw(f.id, world.tick, 'sortie') >= sortieFactorAt(world, map, f.node)) return undefined;
+  return { node, nation: f.nation, ground, sea, reachKm };
 }
 
 /** A formation sitting where peacetime intelligence placed it: its garrison, an air base, a port. Dispersed TELs are not. */
