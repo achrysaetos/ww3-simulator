@@ -874,6 +874,9 @@ export class MapRenderer {
     let selectedBox: CounterBox | null = null;
     let focusRing: { c: ContactInfo; x: number; y: number } | null = null;
     const labelled: { stack: Stack; box: CounterBox; side: Side }[] = [];
+    const ageTags: { l: Label; x: number; y: number }[] = [];
+    /** Designator numbers drawn beside counters, kept clear of the age tags. */
+    const marks: [number, number, number, number][] = [];
     for (const stack of order) {
       const p = this.screenOf(stack.node);
       if (!p) continue;
@@ -889,7 +892,10 @@ export class MapRenderer {
       if (side !== 'friend') {
         const picked = input.selected ? stack.members.find((f) => f.entry.id === input.selected && f.contact) : undefined;
         if (picked) focusRing = { c: picked.contact!, x: cx, y: cy };
-        else if (lead.contact) this.drawUncertainty(lead.contact, cx, cy, false);
+        else if (lead.contact) {
+          const tag = this.drawUncertainty(lead.contact, cx, cy, false);
+          if (tag) ageTags.push(tag);
+        }
       }
       const top = fanTop.get(stack);
       if (top !== undefined) {
@@ -902,7 +908,8 @@ export class MapRenderer {
           const s = this.sideOf(f, stack.nation, nationIds);
           const box = this.sprites.draw(ctx, x, y, ECHELON_W[f.entry.echelon] * scale * 0.85, f.entry.kind, f.entry.echelon, s, f.strength, f.status === 'routed');
           this.hits.push({ ...box, ids: [f.entry.id], node: stack.node, zoomTo: null });
-          this.designator(f, x + box.w / 2 + 1, y, s);
+          const mark = this.designator(f, x + box.w / 2 + 1, y, s);
+          if (mark) marks.push(mark);
           if (f.entry.id === input.selected) selectedBox = box;
         });
         if (shown.length < stack.members.length) {
@@ -923,12 +930,30 @@ export class MapRenderer {
           : { ...node, zoom: Math.max(cam.zoom + 0.6, zoomForPxPerDeg((FAN_PX * 1.1) / (2 * this.map.halfDeg[stack.node]))) };
       this.hits.push({ ...box, ids: stack.members.map((f) => f.entry.id), node: stack.node, zoomTo });
       if (input.selected && stack.members.some((f) => f.entry.id === input.selected)) selectedBox = box;
-      if (band === 'front' && stack.members.length === 1) this.designator(lead, box.x + box.w + 1, cy + nth * 9, side);
+      if (band === 'front' && stack.members.length === 1) {
+        const mark = this.designator(lead, box.x + box.w + 1, cy + nth * 9, side);
+        if (mark) marks.push(mark);
+      }
       else if (band !== 'world') labelled.push({ stack, box, side });
     }
     for (const b of this.hits) placed.push([b.x, b.y, b.x + b.w, b.y + b.h]);
+    placed.push(...marks);
     for (const l of labelled) this.stackLabel(l.stack, l.box, l.side, placed);
-    if (focusRing) this.drawUncertainty(focusRing.c, focusRing.x, focusRing.y, true);
+    // A contact's age tag yields to counters and group labels, and to other tags, rather than print over them.
+    for (const t of ageTags) {
+      const { l } = t;
+      for (const [x, y] of [[t.x - l.w / 2, t.y + 16], [t.x + 18, t.y - l.h / 2], [t.x - l.w / 2, t.y - 16 - l.h]]) {
+        const rect: [number, number, number, number] = [x, y, x + l.w, y + l.h];
+        if (placed.some((b) => rect[0] < b[2] && rect[2] > b[0] && rect[1] < b[3] && rect[3] > b[1])) continue;
+        placed.push(rect);
+        this.ageTag(l, x, y);
+        break;
+      }
+    }
+    if (focusRing) {
+      const tag = this.drawUncertainty(focusRing.c, focusRing.x, focusRing.y, true);
+      if (tag) this.ageTag(tag.l, tag.x, tag.y);
+    }
     if (selectedBox) this.drawSelection(selectedBox);
     return placed;
   }
@@ -937,7 +962,7 @@ export class MapRenderer {
    * Where a foreign contact probably is now (map/contacts.ts): a dashed ring of its error radius at
    * the last fix, and its age. The selected contact always shows both, with its error in km.
    */
-  private drawUncertainty(c: ContactInfo, x: number, y: number, focused: boolean) {
+  private drawUncertainty(c: ContactInfo, x: number, y: number, focused: boolean): { l: Label; x: number; y: number } | null {
     const ctx = this.ctx;
     const ring = contactRing(c, this.kmPerPx, focused);
     if (ring) {
@@ -952,14 +977,16 @@ export class MapRenderer {
       ctx.setLineDash([]);
     }
     const text = contactLabel(c, focused);
-    if (text && (focused || this.band !== 'world')) {
-      const l = this.label(text, '500 10px "IBM Plex Mono", ui-monospace, monospace', isStale(c) ? '#8fa6c0' : '#ff9a9b', 0);
-      // The selected contact's label sits under its ring, clear of the counters at the fix.
-      const lx = focused && ring ? x - l.w / 2 : x + 14, ly = focused && ring ? y + ring.radiusPx + 4 : y + 2;
-      ctx.fillStyle = 'rgba(8,13,22,0.8)';
-      ctx.fillRect(lx, ly, l.w, l.h - 2);
-      this.blit(l, lx, ly - 1);
-    }
+    if (!text || (!focused && this.band === 'world')) return null;
+    const l = this.label(text, '500 10px "IBM Plex Mono", ui-monospace, monospace', isStale(c) ? '#8fa6c0' : '#ff9a9b', 0);
+    // The selected contact's label sits under its ring, clear of the counters at the fix.
+    return { l, x: focused && ring ? x - l.w / 2 : x + 14, y: focused && ring ? y + ring.radiusPx + 4 : y + 2 };
+  }
+
+  private ageTag(l: Label, x: number, y: number) {
+    this.ctx.fillStyle = 'rgba(8,13,22,0.8)';
+    this.ctx.fillRect(x, y, l.w, l.h - 2);
+    this.blit(l, x, y - 1);
   }
 
   /** The nearest city of 100,000 or more within about 150 km, cached per node. */
@@ -978,11 +1005,12 @@ export class MapRenderer {
   }
 
   /** A unit's short designator (the number in its name) beside its counter, as on the front mockup. */
-  private designator(f: FormationView, x: number, y: number, side: Side) {
+  private designator(f: FormationView, x: number, y: number, side: Side): [number, number, number, number] | null {
     const num = f.entry.name.match(/\d+/)?.[0];
-    if (!num) return;
+    if (!num) return null;
     const l = this.label(num, '500 11px "IBM Plex Mono", ui-monospace, monospace', side === 'friend' ? '#cfe6ff' : side === 'enemy' ? '#ffb0b1' : '#b9c8da', 0);
     this.blit(l, x, y - l.h / 2);
+    return [x, y - l.h / 2, x + l.w, y + l.h / 2];
   }
 
   /** An army group's name, a strength bar and its size, to the right of the counter (theatre mockup). */
