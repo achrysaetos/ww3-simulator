@@ -94,24 +94,23 @@ export function createAi(profiles: Readonly<Record<string, StrategicProfile>> = 
         if (!s) byKey.set(key, (s = sectorsFor(belief.world, ctx.map, edges!, friends, foes, belief.index)));
         return s;
       };
-      const peaceOut = (n: NationId): Command[] => (world.nations[n].controlledBy === 'human' ? [] : world.pending);
       for (const { n, land, tasking } of due) {
         if (enemies.has(n)) continue;
         const surge = surging.get(n);
         const warning = land ? warningOf(world, n) : undefined;
         if (!(surge && tasking) && !warning) continue;
-        const out = peaceOut(n);
+        const out: Command[] = [];
         const base = { ctx, ai: world.slices.ai, nation: n, profile: profiles[n] ?? DEFAULT_PROFILE, out, sectors: [], memo: memo!, ...beliefOf(n) };
         // Plans against the war it expects to join; nobody fires on a nation it is not at war with.
         if (surge && tasking) planNaval({ ...base, enemies: surge.enemies, friends: surge.friends });
         if (warning) planWarning({ ...base, enemies: new Set([warning.from]), friends: new Set([n]) }, warning);
-        keepAllowed(world, n, out);
+        keepAllowed(world, out);
       }
       for (const { n, strategy, land, tasking } of due) {
         const foes = enemies.get(n);
         if (!foes?.size) continue;
         const friends = coBelligerents(n, enemies);
-        const out = peaceOut(n);
+        const out: Command[] = [];
         const belief = beliefOf(n);
         const p: Plan = {
           ctx, ai: world.slices.ai, nation: n, profile: profiles[n] ?? DEFAULT_PROFILE,
@@ -131,18 +130,17 @@ export function createAi(profiles: Readonly<Record<string, StrategicProfile>> = 
           planMissiles(p, targets);
           planNaval(p);
         }
-        keepAllowed(world, n, out);
+        keepAllowed(world, out);
       }
     },
   };
 }
 
-/** A human nation's delegate keeps only the commands its player let it give. */
-function keepAllowed(world: World, n: NationId, out: Command[]): void {
-  if (out === world.pending) return;
+/** Queues what the AI may give: a human nation's delegate only what its player let it, and nobody orders a formation an operation commands. */
+function keepAllowed(world: World, out: Command[]): void {
   for (const c of out) {
     if (aiMayIssue(world, c)) world.pending.push(c);
-    // Never sent, as the player keeps the domain: not to be taken for a refusal.
+    // Never sent: not to be taken for a refusal.
     else if (c.type === 'order') delete world.slices.ai.sent[c.formation];
   }
 }

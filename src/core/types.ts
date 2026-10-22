@@ -353,6 +353,8 @@ export type CommandResult = {
   nation: NationId;
   command: Command['type'];
   formation?: FormationId;
+  /** The operation an operation command concerns; for plan_operation, the new operation's id. */
+  operation?: OperationId;
   /** The human player issued it (an order flagged `byPlayer`, or a command only players issue). */
   byPlayer?: true;
   reason: string;
@@ -400,7 +402,78 @@ export type Command =
   /** Run, or end, a covert sabotage campaign against `target`'s rail, depots and plant (nonkinetic). */
   | { type: 'sabotage'; nation: NationId; target: NationId; on: boolean }
   /** Cut an undersea cable or pipeline by id (src/data/geo/cables.ts) (nonkinetic). */
-  | { type: 'cut_cable'; nation: NationId; cable: string };
+  | { type: 'cut_cable'; nation: NationId; cable: string }
+  /**
+   * Plan an operation (ops/index.ts). With no `axis` the staff routes one from the formations to the first objective.
+   * `launch` launches it at once (or at `hHour`); without it the operation waits as a draft. `byPlayer` as for an order.
+   */
+  | { type: 'plan_operation'; nation: NationId; name?: string; kind: OperationKind; objectives: NodeId[]; axis?: NodeId[]; formations: FormationId[]; hHour?: number; launch?: true; byPlayer?: true }
+  /** Launch a draft at `hHour` (a tick; default now), or bring a stalled operation's H-hour forward. */
+  | { type: 'launch_operation'; nation: NationId; operation: OperationId; hHour?: number; byPlayer?: true }
+  /** Call an operation off: its formations stop where they stand, on the defence, and go back to the delegate. */
+  | { type: 'cancel_operation'; nation: NationId; operation: OperationId; byPlayer?: true }
+  /** Change a draft or running operation: what is given replaces the plan's field; a running one re-plans from where it stands. */
+  | { type: 'adjust_operation'; nation: NationId; operation: OperationId; objectives?: NodeId[]; axis?: NodeId[]; formations?: FormationId[]; hHour?: number; byPlayer?: true };
+
+// ---------------------------------------------------------------- operations
+
+export type OperationId = string & { readonly __brand: 'OperationId' };
+
+/**
+ * offensive: take the objectives along the axis. counterattack: the same against ground just lost, short and fast.
+ * raid: reach the objective, then come back to the line of departure. defence: hold the objectives.
+ */
+export const OPERATION_KINDS = ['offensive', 'counterattack', 'raid', 'defence'] as const;
+export type OperationKind = (typeof OPERATION_KINDS)[number];
+
+/** draft -> launched <-> stalled -> succeeded | failed; any phase before the end -> cancelled. */
+export const OPERATION_PHASES = ['draft', 'launched', 'stalled', 'succeeded', 'failed', 'cancelled'] as const;
+export type OperationPhase = (typeof OPERATION_PHASES)[number];
+
+/**
+ * A named operation: an objective, the axis to it, the formations given to it, and when it starts. The ops system
+ * executes it (assembles the force on the axis, assaults one bound at a time with everything, relieves spent units)
+ * and reports progress. The player's and the AI's operations are the same thing.
+ */
+export interface Operation {
+  id: OperationId;
+  nation: NationId;
+  name: string;
+  kind: OperationKind;
+  /** Land cells that must all be held (taken, for an attack) for success. */
+  objectives: NodeId[];
+  /** The route, ordered: axis[0] is the line of departure, then each cell to fight through; the objectives lie on or at the end of it. */
+  axis: NodeId[];
+  /** Formations committed to it, in the order given; spent ones leave for `progress.relieved`. */
+  formations: FormationId[];
+  phase: OperationPhase;
+  /** Tick it starts (H-hour). A draft keeps the planner's intended H-hour. */
+  hHour: number;
+  /** Who planned it. The AI never cancels or adjusts the player's operations, and its delegate leaves their formations alone. */
+  planner: 'player' | 'ai';
+  plannedTick: number;
+  launchedTick?: number;
+  /** Tick it reached succeeded, failed or cancelled. */
+  endedTick?: number;
+  progress: OperationProgress;
+}
+
+export interface OperationProgress {
+  /** Index into axis of the cell being fought for now; axis.length once every cell on it is held. */
+  bound: number;
+  /** Cells of the axis gone through, fractional: whole cells taken plus the share of the current one pushed across. */
+  advance: number;
+  /** Objectives held. */
+  objectivesHeld: number;
+  /** Platforms the formations had at launch, and have now (relieved formations included at what they left with). */
+  platformsAtLaunch: number;
+  platforms: number;
+  /** Tick the operation last gained ground (launch counts). */
+  lastGainTick: number;
+  relieved: FormationId[];
+  /** Why it is in its phase, in words for the player. */
+  note: string;
+}
 
 /**
  * What a human player can delegate to the AI: the forces of each domain, the home front
