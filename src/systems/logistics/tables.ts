@@ -62,6 +62,27 @@ export const READINESS_HOURS_PER_DAY: Record<PlatformClass, number> = {
 };
 
 /**
+ * Readiness hours for ground and air-defence classes in a nation at peace, replacing the wartime
+ * figures above. A garrison army trains to a funded mileage rather than standing a defensive day:
+ * the US Army's ground OPTEMPO goal has been about 800 miles a year per M1 tank (Combined Arms
+ * Training Strategy), about 0.3 h/day of driving, and garrison generators, idling and admin moves
+ * roughly treble it. Half the wartime day, so the US total stays inside the DLA Energy band of
+ * 31-37k t/day (tests/realism-logistics); air-defence radars radiate for exercises, not around the
+ * clock. Aircraft and ship rates above are already peacetime flying-hour and OPTEMPO figures.
+ */
+// param: tag=estimated range=[0.3,2] source=US Army ground OPTEMPO ~800 tank-miles/yr (CATS); DLA Energy FY2019 total
+export const PEACETIME_GROUND_HOURS_PER_DAY = 1;
+// param: tag=estimated range=[1,4] source=judgment, exercise radiating time
+export const PEACETIME_AIR_DEFENSE_HOURS_PER_DAY = 2;
+const GROUND_CLASSES: readonly PlatformClass[] = ['infantry', 'mbt', 'ifv', 'apc', 'recon', 'sp_artillery', 'towed_artillery', 'mlrs', 'atgm', 'engineer', 'truck', 'fuel_truck'];
+const AIR_DEFENSE_CLASSES: readonly PlatformClass[] = ['sam_long', 'sam_medium', 'shorad', 'abm', 'ew', 'radar'];
+export const PEACETIME_READINESS_HOURS_PER_DAY: Record<PlatformClass, number> = {
+  ...READINESS_HOURS_PER_DAY,
+  ...Object.fromEntries(GROUND_CLASSES.map((c) => [c, PEACETIME_GROUND_HOURS_PER_DAY])),
+  ...Object.fromEntries(AIR_DEFENSE_CLASSES.map((c) => [c, PEACETIME_AIR_DEFENSE_HOURS_PER_DAY])),
+};
+
+/**
  * Most of a formation's carried load that the supply chain can push to it in one
  * day at a supply factor of 1. Formations carry three days of full-rate fuel
  * (core/forces.ts), so 0.5/day sustains continuous full-rate operations at a
@@ -207,6 +228,25 @@ export const INFRA_REPAIR_PER_DAY = 0.03;
  */
 export const FRONT_REPAIR_SHARE = 0.5;
 
+/**
+ * Share of a cell's infrastructure left when it changes hands in war, and its railway is closed until
+ * rebuilt. A retreating army blows its rail bridges and junctions and takes the rolling stock: in 2022
+ * Ukrzaliznytsia evacuated its trains and demolished bridges ahead of the Russian advance, and Russia
+ * could not run supply on the Ukrainian lines it overran, so its Kyiv axis stalled on trucks about
+ * 100 km from Belarusian railheads (RUSI, "Operation Z", 2022; Watling and Reynolds). Roads survive
+ * with blown bridges and craters, so the cell keeps most of its road capacity. Judgment.
+ */
+// param: tag=estimated range=[0.5,0.9] source=RUSI Operation Z 2022 (judgment)
+export const CAPTURED_INFRASTRUCTURE = 0.7;
+/**
+ * Share of the repair rate on ground taken from the enemy until it is rebuilt: the captor's railway
+ * troops, not the nation's own rail company and contractors, relay demolished track and bridges, and
+ * the 1944 Allied advance and Russia's 2022 southern rail reopened in weeks to months (Ruppenthal,
+ * Logistical Support of the Armies vol. 2; ISW on the Melitopol-Crimea line). Judgment.
+ */
+// param: tag=estimated range=[0.1,0.5] source=judgment; Ruppenthal 1959
+export const CAPTURED_REPAIR_SHARE = 0.25;
+
 /** Formation kinds that occupy ground and block enemy supply through their cell. */
 export const LAND_KINDS: ReadonlySet<FormationKind> = new Set(['maneuver', 'artillery', 'air_defense', 'missile', 'logistics', 'strategic']);
 
@@ -261,6 +301,14 @@ export const RECONSTITUTE_MIN_STRENGTH = 0.5;
  * and kit rather than men.
  */
 export const RAISE_EVERY_DAYS = 30;
+/**
+ * Days from the order to raise a brigade until it takes the field: forming the unit, issuing its
+ * kit and collective training. Russia's mobilised regiments of autumn 2022 went to the front after
+ * 1-2 months; Ukraine's 150th-155th mechanized brigades took about 3-6 months to stand up in 2024
+ * (ISW, RUSI); a WWII US division about a year. Judgment.
+ */
+// param: tag=estimated range=[30,180] source=ISW and RUSI on 2022-24 force generation
+export const RAISE_TRAINING_DAYS = 90;
 /** Trained reserves kept back to replace losses, as a share of the troops a nation fields (judgment: ~2 months of heavy losses). */
 export const RESERVE_BUFFER_SHARE = 0.1;
 /** Smallest establishment counted as a brigade to copy when raising one; smaller entries are battalions or cadres. */

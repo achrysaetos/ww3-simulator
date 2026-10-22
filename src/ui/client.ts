@@ -3,6 +3,8 @@ import type { Command, FormationId, NationId, SimEvent } from '../core/types';
 import { describeResult, PlaceNamer, type Namer } from './events';
 import { EventFeed } from './feed';
 import { readSlot, writeSlot, type SlotInfo } from './slot';
+import type { Action, Card } from './staff/advice';
+import { StaffDesk } from './staff/desk';
 import {
   applySnapshot, emptyClientState, type ClientState, type FromWorker, type NationCard, type RunStats, type ScenarioCard, type SessionMeta, type ToWorker,
 } from './snapshot';
@@ -27,6 +29,8 @@ export class SimClient {
   /** Bumped each time a game starts or loads, so the UI remounts with fresh state. */
   sessionId = 0;
   feed = new EventFeed();
+  /** The player's staff for this session: advisor cards, the brief, and what came of each order given from them. */
+  desk: StaffDesk | null = null;
   private formationNames = new Map<FormationId, string>();
   private namesVersion = -1;
   version = 0;
@@ -88,11 +92,13 @@ export class SimClient {
           this.meta = msg.meta;
           this.playing = msg.playing;
           this.starting = false;
+          this.desk = new StaffDesk(this.map, msg.meta, msg.playing, this.namer);
         } else this.stats = msg.stats;
         applySnapshot(this.state, msg.snapshot, this.meta!.nationIds, this.nationCards);
         this.send({ type: 'ack' });
         this.record(msg.snapshot.events);
         this.answer(msg.snapshot.events);
+        this.desk?.observe(this.state, msg.snapshot.events, this.state.focusNation?.id === this.playing ? this.state.focusNation : undefined);
         break;
     }
     this.notify();
@@ -135,6 +141,7 @@ export class SimClient {
   private reset() {
     this.state = emptyClientState(this.map.size);
     this.feed = new EventFeed();
+    this.desk = null;
     this.formationNames.clear();
     this.namesVersion = -1;
     this.meta = null;
@@ -225,6 +232,19 @@ export class SimClient {
 
   command(c: Command) {
     this.send({ type: 'command', command: c });
+  }
+
+  /** The player pressed a button on a staff card: a command goes to the engine and the card waits for its answer. */
+  act(card: Card, action: Action) {
+    if (!this.desk) return;
+    this.desk.act(card, action);
+    if (action.kind === 'command') this.command(action.command);
+    this.notify();
+  }
+
+  /** Redraw after a change that lives only in the page, such as dismissing a card. */
+  touch() {
+    this.notify();
   }
 
   focus(nation?: NationId, formation?: FormationId) {

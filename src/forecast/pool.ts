@@ -41,7 +41,8 @@ export async function runAll(input: EnsembleInput, opts: EnsembleOptions = {}): 
         w.on('message', (m: { index: number; result?: RunResult; error?: string }) => {
           if (m.error !== undefined) return reject(new Error(`run ${m.index} failed: ${m.error}`));
           results[m.index] = m.result!;
-          opts.onProgress?.(++done, total, m.result!);
+          done++;
+          opts.onProgress?.(done, total, m.result!);
           if (done === total) resolve();
           else feed(w);
         });

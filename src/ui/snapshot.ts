@@ -28,12 +28,16 @@ import { hostedBy } from '../systems/civil/state';
 import type { ElectionResult, OpinionDrivers } from '../systems/politics/state';
 import { ELECTIONS } from '../data/politics/elections';
 import { conditionsAt, type Conditions, packWeather } from '../systems/weather/effects';
+import type { IntelSource } from '../systems/intel';
+import { believedWorld, viewOf, type View } from '../systems/intel/view';
 import type {
   Command, CommandDomain, Echelon, Formation, FormationId, FormationKind, ItemId, MunitionId, MunitionKind, Nation, NationId, NodeId, PlatformId, Posture, SimEvent, World,
 } from '../core/types';
 
 export const NO_NATION = 0xffff;
 export const NO_NODE = 0xffff;
+/** fPosture of a formation known only from intelligence: enemy orders are never sent. */
+export const NO_POSTURE = 0xff;
 export const POSTURES: readonly Posture[] = ['reserve', 'defend', 'attack', 'move', 'strike', 'air_superiority', 'patrol', 'blockade', 'escort', 'embark', 'air_assault'];
 export const STATUSES: readonly Formation['status'][] = ['active', 'routed', 'destroyed', 'embarked'];
 const NATION_STATUSES: readonly Nation['status'][] = ['peace', 'war', 'capitulated', 'collapsed'];
@@ -351,6 +355,14 @@ export interface Snapshot {
   fStatus: Uint8Array;
   /** Order target node, NO_NODE for none. */
   fTarget: Uint16Array;
+  /**
+   * Intelligence on each contact, in roster order of the formations whose fPosture is NO_POSTURE
+   * (the viewer's friends carry none, so a spectator's snapshot sends nothing): confidence 0..1 as
+   * 0..255, hours since the last fix, and the radius in km within which the formation probably is.
+   */
+  cConfidence: Uint8Array;
+  cAgeHours: Uint16Array;
+  cErrorKm: Uint16Array;
   events: SimEvent[];
   droppedEvents: number;
   /** NATION_FIELDS per nation, in meta.nationIds order. */
@@ -367,7 +379,26 @@ export interface Snapshot {
   /** Today's weather per region (weather/effects.ts packWeather), sent when the day changes. */
   weather?: Uint8Array;
   focusNation?: NationDetail;
+  /** The focused formation when it is the viewer's or a friend's; a contact comes as focusContact. */
   focusFormation?: FormationDetail;
+  focusContact?: ContactDetail;
+}
+
+/** What the viewer's intelligence holds on a foreign formation: never its orders, supply or magazines. */
+export interface ContactDetail {
+  id: FormationId;
+  name: string;
+  nation: NationId;
+  kind: FormationKind;
+  echelon: Echelon;
+  /** Cell of the last fix. */
+  node: NodeId;
+  /** Estimated platforms at the fix. */
+  strength: number;
+  ageHours: number;
+  confidence: number;
+  errorKm: number;
+  source: IntelSource;
 }
 
 // ---------------------------------------------------------------- encoder (worker side)
@@ -401,7 +432,13 @@ export class SnapshotEncoder {
     }
   }
 
-  encode(world: World, map: GameMap, focus: { nation?: NationId; formation?: FormationId } = {}): Snapshot {
+  /**
+   * The snapshot `viewer` may see: its friends' formations in full, foreign ones only as its
+   * intelligence holds them (intel/view.ts). The viewer defaults to the human nation; a world
+   * with none (a spectator, a test) sees the truth.
+   */
+  encode(world: World, map: GameMap, focus: { nation?: NationId; formation?: FormationId } = {}, viewer = humanNation(world)): Snapshot {
+    const view = viewer ? viewOf(world, map, viewer) : undefined;
     const control = this.controlArray(world);
     const snap: Snapshot = {
       tick: world.tick,
@@ -411,6 +448,9 @@ export class SnapshotEncoder {
       fPosture: new Uint8Array(0),
       fStatus: new Uint8Array(0),
       fTarget: new Uint16Array(0),
+      cConfidence: new Uint8Array(0),
+      cAgeHours: new Uint16Array(0),
+      cErrorKm: new Uint16Array(0),
       events: this.events,
       droppedEvents: this.dropped,
       nations: this.nationNumbers(world),
@@ -439,8 +479,14 @@ export class SnapshotEncoder {
     }
     this.lastControl = control;
 
-    const fs = Object.values(world.formations);
-    for (const f of fs) if (!this.initial.has(f.id)) this.initial.set(f.id, Math.max(1, platformCount(f)));
+    const contactOf = (f: Formation) => (view && !view.friends.has(f.nation) ? view.contacts.get(f.id) : undefined);
+    const shown = (f: Formation) => {
+      if (!view || view.friends.has(f.nation)) return true;
+      const c = contactOf(f);
+      return !!c && !c.embarkedOn;
+    };
+    const fs = Object.values(world.formations).filter(shown);
+    for (const f of fs) if (!this.initial.has(f.id)) this.initial.set(f.id, Math.max(1, contactOf(f)?.strength ?? platformCount(f)));
     const entry = (f: Formation): RosterEntry => ({ id: f.id, name: f.name, nation: f.nation, kind: f.kind, echelon: f.echelon, platforms: this.initial.get(f.id)! });
     const prevIds = this.lastIds;
     const kept = fs.length >= prevIds.length && prevIds.every((id, i) => fs[i].id === id);
@@ -453,8 +499,24 @@ export class SnapshotEncoder {
     snap.fPosture = new Uint8Array(n);
     snap.fStatus = new Uint8Array(n);
     snap.fTarget = new Uint16Array(n);
-    for (let i = 0; i < n; i++) {
+    const contacts = view ? fs.filter((f) => !view.friends.has(f.nation)).length : 0;
+    snap.cConfidence = new Uint8Array(contacts);
+    snap.cAgeHours = new Uint16Array(contacts);
+    snap.cErrorKm = new Uint16Array(contacts);
+    for (let i = 0, j = 0; i < n; i++) {
       const f = fs[i];
+      const c = contactOf(f);
+      if (c) {
+        snap.fNode[i] = c.node;
+        snap.fStrength[i] = Math.round(Math.min(1, c.strength / this.initial.get(f.id)!) * 255);
+        snap.fPosture[i] = NO_POSTURE;
+        snap.fStatus[i] = STATUSES.indexOf('active');
+        snap.fTarget[i] = NO_NODE;
+        snap.cConfidence[j] = Math.round(c.confidence * 255);
+        snap.cAgeHours[j] = Math.min(0xffff, Math.round(c.ageHours));
+        snap.cErrorKm[j++] = Math.min(0xffff, Math.round(c.errorKm));
+        continue;
+      }
       snap.fNode[i] = f.node;
       snap.fStrength[i] = Math.round(Math.min(1, platformCount(f) / this.initial.get(f.id)!) * 255);
       snap.fPosture[i] = POSTURES.indexOf(f.order.posture);
@@ -462,8 +524,13 @@ export class SnapshotEncoder {
       snap.fTarget[i] = f.order.target ?? NO_NODE;
     }
 
-    if (focus.nation && world.nations[focus.nation]) snap.focusNation = this.nationDetail(world, map, focus.nation);
-    if (focus.formation && world.formations[focus.formation]) snap.focusFormation = formationDetail(world, map, this.catalog, world.formations[focus.formation]);
+    if (focus.nation && world.nations[focus.nation]) snap.focusNation = this.nationDetail(world, map, focus.nation, view);
+    const focused = focus.formation ? world.formations[focus.formation] : undefined;
+    if (focused) {
+      const c = contactOf(focused);
+      if (c) snap.focusContact = { id: c.id, name: focused.name, nation: c.nation, kind: c.kind, echelon: focused.echelon, node: c.node, strength: c.strength, ageHours: c.ageHours, confidence: c.confidence, errorKm: c.errorKm, source: c.source };
+      else if (!view || view.friends.has(focused.nation)) snap.focusFormation = formationDetail(world, map, this.catalog, focused);
+    }
     return snap;
   }
 
@@ -518,9 +585,11 @@ export class SnapshotEncoder {
     return out;
   }
 
-  private nationDetail(world: World, map: GameMap, id: NationId): NationDetail {
+  /** A foreign nation's forces are counted as the viewer believes them (believedWorld): contacts only, magazines by doctrine. */
+  private nationDetail(world: World, map: GameMap, id: NationId, view: View | undefined): NationDetail {
     const n = world.nations[id];
     const { catalog } = this;
+    const forces = view && !view.friends.has(id) ? believedWorld(world, map, view.nation, catalog).formations : world.formations;
     let held = 0, home = 0;
     for (let i = 0; i < map.landCount; i++) {
       if (world.control[i] === id) held++;
@@ -538,7 +607,7 @@ export class SnapshotEncoder {
     }
     let formations = 0, personnel = 0, launchers = 0, loadedWarheads = 0;
     const weapons = new Map<MunitionId, NuclearWeapon>();
-    for (const f of Object.values(world.formations)) {
+    for (const f of Object.values(forces)) {
       if (f.nation !== id || f.status === 'destroyed') continue;
       formations++;
       personnel += f.personnel;
@@ -764,6 +833,11 @@ function formationDetail(world: World, map: GameMap, catalog: Catalog, f: Format
   };
 }
 
+function humanNation(world: World): NationId | undefined {
+  for (const n of Object.values(world.nations)) if (n.controlledBy === 'human') return n.id;
+  return undefined;
+}
+
 function dateOf(world: World): string {
   return new Date(Date.parse(world.startDate) + world.tick * world.dtHours * 3_600_000).toISOString();
 }
@@ -806,11 +880,15 @@ export function sessionMeta(scenario: ScenarioCard, world: World, map: GameMap, 
 
 export interface FormationView {
   entry: RosterEntry;
+  /** For a contact, the cell of the last fix. */
   node: NodeId;
   strength: number;
-  posture: Posture;
+  /** Null for a contact: enemy orders are never seen. */
+  posture: Posture | null;
   status: Formation['status'];
   target: NodeId | null;
+  /** Null for the viewer's own and friends' formations; for a foreign one, what intelligence holds (stale below intel/view CURRENT_CONFIDENCE). */
+  contact: { ageHours: number; confidence: number; errorKm: number } | null;
 }
 
 export interface ClientState {
@@ -832,6 +910,7 @@ export interface ClientState {
   weather: Uint8Array;
   focusNation?: NationDetail;
   focusFormation?: FormationDetail;
+  focusContact?: ContactDetail;
   /** Events from the latest snapshot only. */
   latestEvents: SimEvent[];
 }
@@ -864,14 +943,19 @@ export function applySnapshot(state: ClientState, snap: Snapshot, nationIds: rea
     roster = [...roster, ...snap.rosterAdd];
     state.rosterVersion++;
   }
-  state.formations = roster.map((entry, i) => ({
-    entry,
-    node: snap.fNode[i] as NodeId,
-    strength: snap.fStrength[i] / 255,
-    posture: POSTURES[snap.fPosture[i]],
-    status: STATUSES[snap.fStatus[i]],
-    target: snap.fTarget[i] === NO_NODE ? null : (snap.fTarget[i] as NodeId),
-  }));
+  let j = 0;
+  state.formations = roster.map((entry, i) => {
+    const contact = snap.fPosture[i] === NO_POSTURE;
+    return {
+      entry,
+      node: snap.fNode[i] as NodeId,
+      strength: snap.fStrength[i] / 255,
+      posture: contact ? null : POSTURES[snap.fPosture[i]],
+      status: STATUSES[snap.fStatus[i]],
+      target: snap.fTarget[i] === NO_NODE ? null : (snap.fTarget[i] as NodeId),
+      contact: contact ? { confidence: snap.cConfidence[j] / 255, ageHours: snap.cAgeHours[j], errorKm: snap.cErrorKm[j++] } : null,
+    };
+  });
   const k = NATION_FIELDS.length, v = snap.nations;
   state.nations = new Map(nationIds.map((id, i) => {
     const card = cards.get(id);
@@ -895,5 +979,6 @@ export function applySnapshot(state: ClientState, snap: Snapshot, nationIds: rea
   if (snap.weather) state.weather = snap.weather;
   state.focusNation = snap.focusNation;
   state.focusFormation = snap.focusFormation;
+  state.focusContact = snap.focusContact;
   state.latestEvents = snap.events;
 }

@@ -6,6 +6,7 @@
 import type { Catalog } from '../core/catalog';
 import type { GameMap } from '../core/map';
 import { COMMAND_DOMAINS, TARGET_CLASSES, type Command, type CommandDomain, type FormationId, type ItemId, type MunitionId, type NationId, type NodeId, type Order, type TargetClass, type World } from '../core/types';
+import { CURRENT_CONFIDENCE, viewOf } from '../systems/intel/view';
 import { POSTURES } from './snapshot';
 
 export type Checked = { ok: true; command: Command } | { ok: false; reason: string };
@@ -62,7 +63,10 @@ function parse(world: World, map: GameMap, catalog: Catalog, player: NationId, r
       if (o.targetClass !== undefined) order.targetClass = oneOf(o.targetClass, TARGET_CLASSES, 'target class') as TargetClass;
       if (o.targetFormation !== undefined) {
         const t = str(o.targetFormation, 'target formation') as FormationId;
-        if (!world.formations[t]) fail(`unknown formation ${t}`);
+        // A foreign formation is a target only while intelligence holds a current fix on it; an unknown id gets the same answer, so a refusal never confirms one exists.
+        const view = viewOf(world, map, nation);
+        const target = world.formations[t];
+        if (!target || (!view.friends.has(target.nation) && (view.contacts.get(t)?.confidence ?? 0) < CURRENT_CONFIDENCE)) fail('no current intelligence fix on that formation: it can be targeted once your sensors find it');
         order.targetFormation = t;
       }
       if (o.munition !== undefined) {

@@ -24,13 +24,15 @@ export const IISS_RESERVES: Record<string, number> = {
 export const RESERVIST_RECALL_MONTHS = 2;
 
 /**
- * Recall reservists for one step. A nation calls up reservists in proportion to its
- * mobilization: full mobilization recalls the pool at 1/RESERVIST_RECALL_MONTHS a month, a
- * peacetime nation none. Moves the recalled men out of `nation.reservists` and returns them.
+ * Recall reservists for one step toward a call-up of `called` (0..1) of the `pool` a nation opened
+ * with. A call-up follows a mobilization order: a nation holding the level it opened at recalls no
+ * one, since a war footing already in force (Russia's, Ukraine's) has drawn on its reservists
+ * before the scenario starts. Moves the recalled men out of `nation.reservists` and returns them.
  */
-export function recallReservists(nation: Nation, dtMonths: number): number {
-  if (nation.mobilization <= 0 || nation.reservists <= 0) return 0;
-  const recalled = nation.reservists * nation.mobilization * (1 - Math.exp(-dtMonths / RESERVIST_RECALL_MONTHS));
+export function recallReservists(nation: Nation, dtMonths: number, pool: number, called: number): number {
+  const due = nation.reservists - pool * (1 - called);
+  if (due <= 0) return 0;
+  const recalled = due * (1 - Math.exp(-dtMonths / RESERVIST_RECALL_MONTHS));
   nation.reservists -= recalled;
   return recalled;
 }

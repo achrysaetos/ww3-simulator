@@ -75,7 +75,7 @@ export function clearTreatyAnswer(world: World, n: NationId, war: string, treaty
 }
 
 const STRATEGIC: ReadonlySet<Command['type']> = new Set(['declare_war', 'offer_peace', 'nuclear_release', 'nuclear_alert', 'sanction']);
-const HOME_FRONT: ReadonlySet<Command['type']> = new Set(['set_mobilization', 'produce']);
+const HOME_FRONT: ReadonlySet<Command['type']> = new Set(['set_mobilization', 'produce', 'raise_formation']);
 
 /** Whether the AI may issue `cmd` on behalf of its nation. */
 export function aiMayIssue(world: World, cmd: Command): boolean {

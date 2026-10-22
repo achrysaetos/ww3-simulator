@@ -6,6 +6,7 @@ import { createSession, type Session } from '../src/scenarios';
 import { SYSTEMS } from '../src/systems';
 import { buildPicture } from '../src/systems/air/picture';
 import { c2, c2FireFactor, jamAgainst, jammedHits, orderDelayHours } from '../src/systems/c2';
+import { chainOf } from '../src/systems/c2/command';
 import { landCombat, landMovement } from '../src/systems/land';
 import { id, testWorld } from '../src/testkit';
 
@@ -182,8 +183,14 @@ describe('ukraine-2026: satellite communications', () => {
     nudol.order = { posture: 'strike', target: leo.node, targetFormation: leo.id, issuedTick: asat.world.tick };
     for (const run of [asat, calm]) for (let i = 0; i < 2; i++) run.engine.step(run.world);
     expect(asat.world.slices.c2.satcom[USA]).toBeLessThan(0.4);
+    // Once the two runs' dice diverge, strikes on headquarters land differently: compare formations whose chain of
+    // command fared the same in both, so only the satellites differ.
+    const sameChain = (id: FormationId) => {
+      const a = chainOf(asat.world.slices.c2, id), b = chainOf(calm.world.slices.c2, id);
+      return a.length === b.length && a.every((hq, i) => hq.integrity === b[i].integrity);
+    };
     const mean = (w: World, nation: NationId, pick: (id: FormationId) => number) => {
-      const ids = (Object.keys(w.slices.c2.formations) as FormationId[]).filter((id) => w.formations[id].nation === nation && id in calm.world.slices.c2.formations);
+      const ids = (Object.keys(w.slices.c2.formations) as FormationId[]).filter((id) => w.formations[id].nation === nation && id in calm.world.slices.c2.formations && sameChain(id));
       return ids.reduce((a, id) => a + pick(id), 0) / ids.length;
     };
     const coord = (w: World, n: NationId) => mean(w, n, (id) => w.slices.c2.formations[id].coordination);
@@ -195,7 +202,10 @@ describe('ukraine-2026: satellite communications', () => {
 });
 
 describe('land combat after an HQ loss', () => {
-  /** A Ukrainian brigade attacks a Russian division for two days; returns the share of the division lost. */
+  /**
+   * A Ukrainian brigade attacks a Russian division for three days, long enough that a few platforms either way do not
+   * decide it; returns the share of the division lost.
+   */
   function assault(hqDown: boolean): number {
     const t = testWorld([landMovement, landCombat, c2], 3);
     t.war('RUS', 'UKR');
@@ -207,7 +217,7 @@ describe('land combat after an HQ loss', () => {
     if (hqDown) t.world.slices.c2.hqs[t.world.slices.c2.chain[att.id]].integrity = 0;
     att.order = { posture: 'attack', target: rus, path: [rus], issuedTick: t.world.tick };
     const before = platformCount(def);
-    t.engine.run(t.world, 8);
+    t.engine.run(t.world, 12);
     return 1 - platformCount(def) / before;
   }
 

@@ -1,5 +1,7 @@
+import { chokepointsOf, type Chokepoint } from '../data/geo/chokepoints';
 import type { NationId, NodeId, Terrain } from './types';
 import { TERRAINS } from './types';
+import { RIVER_NAMES, riverCrossings } from '../data/geo/rivers';
 
 /** Shape of src/data/generated/world.json (built by scripts/build-data.ts). */
 export interface WorldData {
@@ -102,9 +104,13 @@ export class GameMap {
   readonly adj: Int32Array;
   /** Great-circle km to each neighbor, parallel to adj. */
   readonly adjKm: Float32Array;
+  /** Per adjacency entry, parallel to adj: 1 + the RIVER_NAMES index of a major river the edge crosses, else 0. */
+  readonly adjRiver: Uint8Array;
   readonly cities: City[];
   /** Land edges that cross water by bridge or tunnel (the Channel Tunnel, the Crimean Bridge), for capacity limits. */
   readonly fixedLinks: { name: string; a: NodeId; b: NodeId }[];
+  /** Bridges, tunnels and isthmuses that strikes can close (src/data/geo/chokepoints.ts); their state is `theater.chokepoints`. */
+  readonly chokepoints: Chokepoint[];
   readonly nationIds: NationId[];
   private readonly cellIndex: SquareIndex;
   private readonly seaIndex: Map<number, number>;
@@ -181,8 +187,10 @@ export class GameMap {
         this.adjKm[this.adjStart[n] + k] = this.distanceKm(n as NodeId, m as NodeId);
       });
 
+    this.adjRiver = riverCrossings(this.lat, this.lon, this.adjStart, this.adj, L);
     this.fixedLinks = data.fixedLinks.map((l) => ({ name: l.name, a: l.a as NodeId, b: l.b as NodeId }));
     this.cities = data.cities.map((c) => ({ name: c.name, nation: this.nationIds[c.nation], node: c.cell as NodeId, pop: c.pop, capital: c.capital, lat: c.lat, lon: c.lon }));
+    this.chokepoints = chokepointsOf(this);
   }
 
   isSea(n: NodeId): boolean {
@@ -197,6 +205,12 @@ export class GameMap {
 
   *neighbors(n: NodeId): Iterable<NodeId> {
     for (let k = this.adjStart[n]; k < this.adjStart[n + 1]; k++) yield this.adj[k] as NodeId;
+  }
+
+  /** The major river between two adjacent land cells, or undefined. */
+  riverBetween(a: NodeId, b: NodeId): string | undefined {
+    for (let k = this.adjStart[a]; k < this.adjStart[a + 1]; k++) if (this.adj[k] === b) return this.adjRiver[k] ? RIVER_NAMES[this.adjRiver[k] - 1] : undefined;
+    return undefined;
   }
 
   distanceKm(a: NodeId, b: NodeId): number {
