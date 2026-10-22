@@ -27,7 +27,7 @@ import { OutputsPanel } from './outputs/OutputsPanel';
 import { Routes } from './routes';
 import type { LoggedEvent } from './feed';
 import { domainNames, OpeningTitle, SituationCard } from './start/Opening';
-import { openingFacts } from './start/opening';
+import { openingFacts } from './start/openingFacts';
 import { StartScreen } from './start/StartScreen';
 import { shortName } from './start/scenarioInfo';
 import type { Overlays } from './renderer';
@@ -597,7 +597,7 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
           me={playAs}
           date={date}
           day={day}
-          cards={brief.cards}
+          cards={brief.cards.filter((c) => desk.answered.some((s) => s.card.key === c.key) || desk.cards.some((o) => o.key === c.key))}
           sent={new Map(desk.answered.map((s) => [s.card.key, s]))}
           days={desk.days}
           world={news}

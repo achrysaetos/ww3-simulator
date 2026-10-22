@@ -330,8 +330,10 @@ export class GlobeGL {
         this.ready.push({ key, img });
         this.onTile();
       })
-      .catch(() => this.failed.add(key))
-      .finally(() => this.inflight.delete(key));
+      .catch(() => {
+        this.failed.add(key);
+        this.inflight.delete(key);
+      });
   }
 
   private upload(key: string, img: ImageBitmap) {
@@ -347,6 +349,8 @@ export class GlobeGL {
     if (this.aniso) gl.texParameterf(gl.TEXTURE_2D, this.aniso.TEXTURE_MAX_ANISOTROPY_EXT, 4);
     img.close();
     this.textures.set(key, { tex, used: this.frame });
+    // A tile stays in flight until it is uploaded, so the frames between its arrival and its upload do not fetch it again.
+    this.inflight.delete(key);
   }
 
   private evict() {

@@ -7,7 +7,7 @@ import { advisorOf } from '../staff/advisors';
 import { Portrait } from '../staff/Portrait';
 import type { CommandRole } from '../staff/roles';
 import { TopicIcon } from '../staff/WarRoom';
-import type { OpeningFacts } from './opening';
+import type { OpeningFacts } from './openingFacts';
 import './opening.css';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
