@@ -3,9 +3,11 @@ import { loadMap } from '../data/load';
 import { profiles } from '../data/nations';
 import { createSession, SCENARIOS } from '../scenarios';
 import { resumeRun, saveRun, type ResumedSession } from '../scenarios/save';
+import { authority } from '../systems/orders';
 import { checkCommand } from './commands';
 import { COMMAND_LABEL } from './events';
 import { Pacer } from './pacer';
+import { delegateCommands, roleById } from './staff/roles';
 import { nationCards, sessionMeta, SnapshotEncoder, type FromWorker, type ScenarioCard, type ToWorker } from './snapshot';
 
 export const SCENARIO_CARDS: ScenarioCard[] = SCENARIOS.map((s) => {
@@ -58,7 +60,10 @@ export class SimHost {
       case 'start': {
         const session = createSession(msg.scenario, msg.seed);
         setPlayer(session.world, msg.nation);
-        return this.open(session, msg.nation);
+        this.open(session, msg.nation);
+        const role = typeof msg.role === 'string' ? roleById(msg.role) : undefined;
+        if (role) for (const c of delegateCommands(msg.nation, authority(session.world, msg.nation).ai, role.ai)) this.command(c);
+        return;
       }
       case 'load': {
         let session: ResumedSession;

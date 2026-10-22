@@ -1,10 +1,12 @@
 import { loadMap } from '../data/load';
-import type { Command, FormationId, NationId, SimEvent } from '../core/types';
+import { COMMAND_DOMAINS, type Command, type FormationId, type NationId, type SimEvent } from '../core/types';
 import { describeResult, PlaceNamer, type Namer } from './events';
 import { EventFeed } from './feed';
+import { nationName } from './placeNames';
 import { readSlot, writeSlot, type SlotInfo } from './slot';
 import type { Action, Card } from './staff/advice';
 import { StaffDesk } from './staff/desk';
+import { roleById, type Delegation, type RoleId } from './staff/roles';
 import {
   applySnapshot, emptyClientState, type ClientState, type FromWorker, type NationCard, type RunStats, type ScenarioCard, type SessionMeta, type ToWorker,
 } from './snapshot';
@@ -41,6 +43,12 @@ export class SimClient {
   notice: Notice | null = null;
   /** The quick-save slot's contents, when one exists. */
   slot: SlotInfo | null = null;
+  /**
+   * Domains the role picked at start hands to or takes from the staff, until the engine applies
+   * the delegation on the first tick; empty for a loaded game.
+   */
+  openingDelegation: Partial<Delegation> = {};
+  private startRole: RoleId | null = null;
   private saveTo: 'download' | 'slot' | null = null;
   private noticeSeq = 0;
   private readonly worker: Worker;
@@ -95,6 +103,7 @@ export class SimClient {
           this.desk = new StaffDesk(this.map, msg.meta, msg.playing, this.namer);
         } else this.stats = msg.stats;
         applySnapshot(this.state, msg.snapshot, this.meta!.nationIds, this.nationCards);
+        if (msg.type === 'ready') this.openingDelegation = this.pendingDelegation();
         this.send({ type: 'ack' });
         this.record(msg.snapshot.events);
         this.answer(msg.snapshot.events);
@@ -105,12 +114,20 @@ export class SimClient {
   }
 
   readonly namer: Namer = {
-    nation: (id) => this.nationCards.get(id)?.name ?? id,
+    nation: (id) => nationName(id, this.nationCards.get(id)?.name),
     formation: (id) => this.formationNames.get(id),
     item: (id) => this.namer.known(id) ?? id.replace(/_/g, ' '),
     known: (id) => this.meta?.platforms[id]?.name ?? this.meta?.munitions[id]?.name,
     place: this.places,
   };
+
+  private pendingDelegation(): Partial<Delegation> {
+    const role = this.startRole ? roleById(this.startRole) : undefined;
+    const ai = this.state.focusNation?.authority.ai;
+    this.startRole = null;
+    if (!role || !ai) return {};
+    return Object.fromEntries(COMMAND_DOMAINS.filter((k) => ai[k] !== role.ai[k]).map((k) => [k, role.ai[k]]));
+  }
 
   private record(events: readonly SimEvent[]) {
     if (!events.length) return;
@@ -189,10 +206,11 @@ export class SimClient {
 
   getVersion = () => this.version;
 
-  start(scenario: string, nation: NationId, seed = 1) {
+  start(scenario: string, nation: NationId, role?: RoleId, seed = 1) {
     this.starting = true;
     this.notify();
-    this.send({ type: 'start', scenario, nation, seed });
+    this.startRole = role ?? null;
+    this.send({ type: 'start', scenario, nation, seed, role });
   }
 
   /** Save the running game as a file download or into the browser's quick-save slot. */
@@ -211,6 +229,7 @@ export class SimClient {
       return;
     }
     this.starting = true;
+    this.startRole = null;
     this.notify();
     this.send({ type: 'load', text: body });
   }

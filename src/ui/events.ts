@@ -2,6 +2,7 @@ import type { GameMap } from '../core/map';
 import type { CommandResult, EscalationLevel, FormationId, NationId, NodeId, SimEvent, StrikeEffect } from '../core/types';
 import { allianceById } from '../data/nations/alliances';
 import { geography } from '../systems/naval/geography';
+import { cityName } from './placeNames';
 
 export const EVENT_CATEGORIES = ['combat', 'strikes', 'nuclear', 'diplomacy', 'territory', 'economy', 'messages'] as const;
 export type EventCategory = (typeof EVENT_CATEGORIES)[number];
@@ -105,10 +106,10 @@ export class PlaceNamer {
   private readonly pop = new Map<string, number>();
   constructor(private readonly map: GameMap) {
     for (const c of [...map.cities].sort((a, b) => a.pop - b.pop)) {
-      this.cityAt.set(c.node, c.name);
-      this.pop.set(c.name, c.pop);
+      this.cityAt.set(c.node, cityName(c.name));
+      this.pop.set(cityName(c.name), c.pop);
     }
-    this.places = [...map.cities.map((c) => ({ name: c.name === 'Sevastapol' ? 'Sevastopol' : c.name, lat: c.lat, lon: c.lon })), ...FRONT_PLACES];
+    this.places = [...map.cities.map((c) => ({ name: cityName(c.name), lat: c.lat, lon: c.lon })), ...FRONT_PLACES];
   }
   name(node: NodeId): string {
     let s = this.cache.get(node);

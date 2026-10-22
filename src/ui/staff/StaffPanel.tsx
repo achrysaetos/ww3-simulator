@@ -1,20 +1,7 @@
 import { COMMAND_DOMAINS, type Command, type CommandDomain, type NationId } from '../../core/types';
 import { DOMAIN_OF_KIND } from '../../systems/orders';
 import type { FormationView } from '../snapshot';
-
-type Delegation = Record<CommandDomain, boolean>;
-
-/**
- * The three ways to command (design doc, "Choose how much you command") as delegation presets.
- * The engine delegates by domain, so a role is the set of domains its staff runs.
- */
-export const COMMAND_ROLES = [
-  { id: 'cinc', name: 'Commander-in-Chief', short: 'C-in-C', ai: { land: true, air: true, naval: true, homefront: true, strategic: false } },
-  { id: 'marshal', name: 'Field Marshal', short: 'Marshal', ai: { land: true, air: false, naval: false, homefront: true, strategic: false } },
-  { id: 'brigade', name: 'Every Brigade', short: 'Every brigade', ai: { land: false, air: false, naval: false, homefront: false, strategic: false } },
-] as const satisfies readonly { id: string; name: string; short: string; ai: Delegation }[];
-
-export const roleOf = (ai: Delegation) => COMMAND_ROLES.find((r) => COMMAND_DOMAINS.every((k) => r.ai[k] === ai[k])) ?? null;
+import { COMMAND_ROLES, delegateCommands, roleOf, type Delegation } from './roles';
 
 const ROW: Record<CommandDomain, { label: string; unit?: [string, string] }> = {
   land: { label: 'Land', unit: ['formation', 'formations'] },
@@ -23,11 +10,6 @@ const ROW: Record<CommandDomain, { label: string; unit?: [string, string] }> = {
   homefront: { label: 'Economy and mobilisation' },
   strategic: { label: 'War, peace, nuclear' },
 };
-
-/** The delegate commands that turn `from` into `to`, one per domain that differs. */
-export function delegateCommands(nation: NationId, from: Delegation, to: Delegation): Command[] {
-  return COMMAND_DOMAINS.filter((k) => from[k] !== to[k]).map((k) => ({ type: 'delegate', nation, domain: k, ai: to[k] }));
-}
 
 interface Props {
   me: NationId;

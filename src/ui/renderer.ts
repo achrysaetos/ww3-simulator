@@ -11,6 +11,7 @@ import { eventNode } from './events';
 import { contactLabel, contactRing, isStale, type ContactInfo } from './map/contacts';
 import { GlobeGL } from './map/globe';
 import { ControlMask, OverlayRaster, Rel, relations } from './map/situation';
+import { cityName } from './placeNames';
 import type { Manifest } from './map/tiles';
 import { weatherLayer } from '../systems/weather/effects';
 import type { ClientState, FormationView } from './snapshot';
@@ -126,7 +127,7 @@ export class MapRenderer {
     this.ctx = canvas.getContext('2d')!;
     this.mask = new ControlMask(map, nationIds);
     this.overlay = new OverlayRaster(map);
-    this.places = map.cities.map((c) => ({ name: c.name, lon: c.lon, lat: c.lat, pop: c.pop, capital: c.capital }))
+    this.places = map.cities.map((c) => ({ name: cityName(c.name), lon: c.lon, lat: c.lat, pop: c.pop, capital: c.capital }))
       .sort((a, b) => Number(b.capital) - Number(a.capital) || b.pop - a.pop);
   }
 
@@ -142,7 +143,7 @@ export class MapRenderer {
 
   /** GeoNames towns (public/tiles/places.json), which name the front down to villages the engine has no city for. */
   setPlaces(rows: readonly [string, number, number, number, number][]) {
-    this.places = rows.map(([name, lon, lat, pop, kind]) => ({ name, lon, lat, pop, capital: kind === 2 }));
+    this.places = rows.map(([name, lon, lat, pop, kind]) => ({ name: cityName(name), lon, lat, pop, capital: kind === 2 }));
     this.areaNames.clear();
     this.onInvalidate();
   }

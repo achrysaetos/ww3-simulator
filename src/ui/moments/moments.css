@@ -1,0 +1,19 @@
+.mo-root { --mo: #ff4d4f; --mo-rgb: 255, 77, 79; position: absolute; inset: 0; z-index: 11; cursor: pointer; pointer-events: auto; animation: mo-out 4.2s linear both; }
+.mo-root.triumph { --mo: #ffb547; --mo-rgb: 255, 181, 71; }
+.mo-root.nuclear { --mo: #fff1d6; --mo-rgb: 255, 230, 190; }
+.mo-root::before { content: ''; position: absolute; inset: 0; background: radial-gradient(ellipse at 50% 45%, rgba(2, 4, 8, 0.25), rgba(2, 4, 8, 0.6)); animation: mo-dim 0.5s ease-out both; }
+@keyframes mo-dim { from { opacity: 0; } }
+@keyframes mo-out { 0%, 88% { opacity: 1; } 100% { opacity: 0; } }
+.mo-flash { position: absolute; inset: 0; background: radial-gradient(ellipse at 50% 50%, rgba(var(--mo-rgb), 0.55), rgba(var(--mo-rgb), 0.12) 60%, rgba(0, 0, 0, 0.35)); animation: mo-flash 1.6s ease-out both; pointer-events: none; }
+.mo-root.nuclear .mo-flash { background: radial-gradient(ellipse at 50% 50%, #fff 0%, rgba(255, 236, 200, 0.95) 30%, rgba(255, 140, 60, 0.4) 70%, rgba(40, 10, 0, 0.5)); animation-duration: 2.6s; }
+@keyframes mo-flash { 0% { opacity: 0; } 6% { opacity: 1; } 100% { opacity: 0.18; } }
+.mo-band { position: absolute; left: 0; right: 0; top: 36%; display: flex; align-items: center; justify-content: center; gap: 26px; padding: 22px 40px; background: linear-gradient(90deg, transparent, rgba(4, 7, 12, 0.88) 20%, rgba(4, 7, 12, 0.88) 80%, transparent); border-top: 1px solid rgba(var(--mo-rgb), 0.5); border-bottom: 1px solid rgba(var(--mo-rgb), 0.5); animation: mo-band 0.6s cubic-bezier(0.2, 0.9, 0.3, 1) both 0.15s; }
+@keyframes mo-band { from { opacity: 0; transform: scaleY(0.2); } }
+.mo-mark { color: var(--mo); filter: drop-shadow(0 0 14px rgba(var(--mo-rgb), 0.8)); }
+.mo-root.nuclear .mo-mark { color: #ffcf7a; }
+.mo-words { display: flex; flex-direction: column; gap: 4px; }
+.mo-kicker { font-family: var(--ww-mono); font-size: 13px; letter-spacing: 0.3em; text-transform: uppercase; color: var(--mo); }
+.mo-root.nuclear .mo-kicker { color: #ffcf7a; }
+.mo-title { font-size: clamp(40px, 5.6vw, 76px); letter-spacing: 0.06em; color: #fff; text-shadow: 0 0 26px rgba(var(--mo-rgb), 0.7); animation: mo-title 0.7s cubic-bezier(0.2, 1.3, 0.4, 1) both 0.2s; }
+@keyframes mo-title { from { opacity: 0; letter-spacing: 0.3em; } }
+.mo-sub { font-size: 16px; color: #d3dde9; }

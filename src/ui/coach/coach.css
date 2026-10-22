@@ -1,0 +1,21 @@
+.cm-root { position: absolute; inset: 0; z-index: 13; pointer-events: auto; }
+.cm-dim { position: absolute; inset: 0; background: rgba(2, 4, 8, 0.55); }
+.cm-hole { position: absolute; border-radius: 4px; box-shadow: 0 0 0 200vmax rgba(2, 4, 8, 0.62), 0 0 0 1px rgba(255, 181, 71, 0.9), 0 0 30px rgba(255, 181, 71, 0.45); transition: left 0.35s cubic-bezier(0.3, 0.8, 0.3, 1), top 0.35s cubic-bezier(0.3, 0.8, 0.3, 1), width 0.35s, height 0.35s; pointer-events: none; }
+.cm-hole i, .cm-hole b { position: absolute; width: 14px; height: 14px; }
+.cm-hole i { left: -4px; top: -4px; border-left: 2px solid var(--ww-gold); border-top: 2px solid var(--ww-gold); }
+.cm-hole b { right: -4px; bottom: -4px; border-right: 2px solid var(--ww-gold); border-bottom: 2px solid var(--ww-gold); }
+.cm-hole::after { content: ''; position: absolute; inset: -6px; border-radius: 6px; border: 1px solid rgba(255, 181, 71, 0.6); animation: cm-ping 1.6s ease-out infinite; }
+@keyframes cm-ping { from { opacity: 1; transform: scale(1); } to { opacity: 0; transform: scale(1.06); } }
+.cm-card { position: absolute; padding: 16px 18px 14px; box-sizing: border-box; display: flex; flex-direction: column; gap: 8px; animation: cm-in 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+@keyframes cm-in { from { opacity: 0; transform: translateY(8px); } }
+.cm-head { display: flex; justify-content: space-between; align-items: center; }
+.cm-head .ww-label { font-size: 10.5px; color: var(--ww-gold); }
+.cm-dots { display: flex; gap: 4px; }
+.cm-dots i { width: 14px; height: 3px; background: rgba(150, 195, 240, 0.2); }
+.cm-dots i.done { background: rgba(255, 181, 71, 0.5); }
+.cm-dots i.on { background: var(--ww-gold); box-shadow: 0 0 6px rgba(255, 181, 71, 0.8); }
+.cm-card h3 { margin: 2px 0 0; font-size: 24px; letter-spacing: 0.05em; }
+.cm-card p { margin: 0; font-size: 14px; line-height: 1.5; color: #d3dde9; }
+.cm-foot { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.cm-foot .ww-btn { min-height: 32px; font-size: 13px; }
+.cm-key .ww-kbd { height: 22px; padding: 0 7px; color: var(--ww-gold); border-color: rgba(255, 181, 71, 0.5); }
