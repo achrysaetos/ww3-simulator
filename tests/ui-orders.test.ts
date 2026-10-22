@@ -29,12 +29,12 @@ const refusal = (tick: number, code: RefusalCode = 'no_route', reason = 'no sea 
 describe('event wording', () => {
   it('names nations and places, never prints "-0", and gives each fight its domain', () => {
     const ground = describeEvent(battle({ losses: { [N('RUS')]: { [id.platform('t_mbt')]: 3 }, [N('UKR')]: {} }, casualties: { [N('RUS')]: 120, [N('UKR')]: 0 } }), namer);
-    expect(ground).toMatch(/^Ground battle (at|near) Kiev: Russia attacks Ukraine\. Lost: Russia 3 platforms, 120 casualties\.$/);
+    expect(ground).toMatch(/^Ground battle (at|near) Kyiv: Russia attacks Ukraine\. Lost: Russia 3 platforms, 120 casualties\.$/);
     expect(ground).not.toMatch(/-0|UKR|RUS/);
     const sea = describeEvent(battle({ domain: 'sea', attacker: N('CHN'), defender: N('TWN'), losses: { [N('TWN')]: { [id.platform('t_lst')]: 2 } }, casualties: { [N('TWN')]: 90 } }), namer);
     expect(sea).toMatch(/^Naval engagement .*China attacks Taiwan's ships\. Lost: Taiwan 2 ships, 90 sailors\.$/);
     const air = describeEvent(battle({ domain: 'air', losses: { [N('UKR')]: { [id.platform('t_fighter')]: 1 } }, casualties: { [N('UKR')]: 1 } }), namer);
-    expect(air).toMatch(/^Air battle (over|near) Kiev: Russia against Ukraine\. Lost: Ukraine 1 aircraft, 1 aircrew\.$/);
+    expect(air).toMatch(/^Air battle (over|near) Kyiv: Russia against Ukraine\. Lost: Ukraine 1 aircraft, 1 aircrew\.$/);
   });
 
   it('names front-line towns the city list lacks, and a port\'s sea zone after the port', () => {

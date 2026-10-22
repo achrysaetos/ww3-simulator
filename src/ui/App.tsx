@@ -289,10 +289,13 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
   const defcon = desk.nuclearStep === 2 ? 1 : desk.nuclearStep === 1 ? 2 : atWar ? 3 : 5;
   const role = roleOf(ai);
   const stats: TopBarStat[] = n ? [
-    { label: 'Front · 7d', value: front === null ? '—' : `${front > 0 ? '+' : ''}${front} cells`, tone: front === null || front === 0 ? undefined : front > 0 ? 'good' : 'bad' },
+    ...(atWar ? [{ label: 'Front · 7d', value: !front ? 'Holding' : `${front > 0 ? '+' : ''}${front} cells`, tone: !front ? undefined : front > 0 ? 'good' as const : 'bad' as const }] : []),
     { label: 'War support', value: `${Math.round(n.warSupport * 100)}%`, tone: n.warSupport < 0.4 ? 'bad' : undefined },
     { label: 'Economy', value: d?.economy ? `${Math.round(d.economy.gdpIndex * 100)}%` : '—', tone: d?.economy && d.economy.gdpIndex < 0.85 ? 'warn' : undefined },
-    { label: 'Reserves', value: n.reserves >= 1e6 ? `${(n.reserves / 1e6).toFixed(1)}M` : `${Math.round(n.reserves / 1e3)}k` },
+    // A nation with every trained reservist already called up has no reserve to show; how far it has mobilised says more.
+    n.reserves >= 1000
+      ? { label: 'Reserves', value: n.reserves >= 1e6 ? `${(n.reserves / 1e6).toFixed(1)}M` : `${Math.round(n.reserves / 1e3)}k` }
+      : { label: 'Mobilised', value: `${Math.round(n.mobilization * 100)}%`, tone: 'warn' },
   ] : [];
   const reportsSince = useMemo(() => client.feed.newest(new Set(), playAs, 400).filter((r) => r.event.tick >= client.state.tick - 24 / (client.meta?.dtHours ?? 6)).length, [brief]);
 
