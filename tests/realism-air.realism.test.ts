@@ -1,13 +1,28 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { measureRun, type RunMetrics, type StrikeWeaponClass } from '../src/metrics';
+import type { MunitionId, NationId, World } from '../src/core/types';
 import { createSession } from '../src/scenarios';
 
 const CREWED = new Set(['fighter', 'multirole', 'attack_aircraft', 'bomber', 'stealth_bomber', 'awacs', 'tanker', 'ew_aircraft', 'maritime_patrol', 'transport_aircraft', 'attack_helo', 'transport_helo', 'asw_helo']);
 
+/** Israel's upper-tier missile defence rounds, launchers and warehouse together: Arrow 2 and 3, David's Sling, THAAD. */
+const UPPER_TIER = ['arrow2', 'arrow3', 'stunner', 'thaad_int'];
+const upperTier = new WeakMap<RunMetrics, { start: number; end: number }>();
+
+function upperTierStock(world: World, nation: string): number {
+  let n = 0;
+  for (const m of UPPER_TIER) n += world.nations[nation as NationId]?.stockpile[m as MunitionId] ?? 0;
+  for (const f of Object.values(world.formations)) if (f.nation === nation) for (const m of UPPER_TIER) n += f.magazine[m as MunitionId] ?? 0;
+  return n;
+}
+
 function run(scenario: string, days: number, seeds: number[]): RunMetrics[] {
   return seeds.map((seed) => {
     const s = createSession(scenario, seed);
-    return measureRun(s.engine, s.world, s.map, days);
+    const start = upperTierStock(s.world, 'ISR');
+    const r = measureRun(s.engine, s.world, s.map, days);
+    upperTier.set(r, { start, end: upperTierStock(s.world, 'ISR') });
+    return r;
   });
 }
 
@@ -102,7 +117,7 @@ describe('gulf-2027, 30 days', () => {
   // June 2025: THAAD fired ~100-150 rounds, about a quarter of US stocks, in 12 days; Arrow stocks ran short (WSJ, CSIS 2025).
   it('interceptor stocks deplete measurably within the month', () => {
     for (const r of runs) {
-      const i = r.nations.ISR!.interceptors;
+      const i = upperTier.get(r)!;
       expect(i.end).toBeLessThan(0.85 * i.start);
     }
   });

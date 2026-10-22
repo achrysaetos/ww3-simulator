@@ -283,7 +283,7 @@ function exportSites(map: GameMap): { nation: NationId; node: NodeId; share: num
 }
 
 /** Share of each listed exporter's energy export capacity its export sites still give, 0..1: a site lost or wrecked takes its share of what is left. */
-function exportCapacity(world: World, map: GameMap): Map<NationId, number> {
+export function exportCapacity(world: World, map: GameMap): Map<NationId, number> {
   const out = new Map<NationId, number>();
   for (const { nation, node, share } of exportSites(map)) {
     const up = world.control[node] === nation ? Math.max(0, world.theater.infrastructure[node] ?? 1) : 0;

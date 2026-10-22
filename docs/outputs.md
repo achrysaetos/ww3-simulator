@@ -1,0 +1,77 @@
+# Outputs: what a war costs and where it is heading
+
+A run reports three things beside the front line. These are the humanitarian toll, the production race, and how well each side's economic workarounds are holding. The same record feeds the game's War Cost drawer, the `npm run sim -- --report` after-action report, and the war-cost table that `npm run ensemble` prints.
+
+## The record
+
+`src/outputs` builds an `Outputs` record (`src/outputs/types.ts`) from daily samples of the World. It is plain JSON. It never writes to the World and never draws on the RNG, so a run that is read gives exactly the same result as one that is not (`tests/outputs.test.ts` checks this).
+
+```ts
+Outputs { tick, day, nations: Record<NationId, NationOutputs>, hosts: { nation, refugees }[] }
+NationOutputs { humanitarian: Humanitarian, race: ItemRace[], workarounds: Workaround[] }
+```
+
+- `OutputsRecorder.observe(world)` takes a sample (`sampleOutputs`) at most once a game day. `outputs(world, map)` turns the samples into the record.
+- The record covers every nation a war touches. That means belligerents, nations whose people were killed in it, and arms donors that have shipped.
+
+### Humanitarian
+
+| Field | Source in the engine | Compare with |
+| --- | --- | --- |
+| `militaryCasualties` | `civil.nations[n].military`: killed and wounded from every battle event | UK Defence Intelligence daily estimates (Russia ~1,000-1,500 a day in 2024-25) |
+| `civiliansKilled`, `civiliansInjured` | civil system (fighting in a cell, warheads that get through, nuclear detonations) | UN OHCHR verified counts (2,088 killed in Ukraine in 2024) |
+| `idps`, `refugees`, `hosting`, `underOccupation` | civil system | UNHCR (~6.9M refugees from Ukraine, 2025), IOM (~3.7M IDPs) |
+| `infrastructure`, `power` | `theater.infrastructure` and `theater.power` over the nation's home cells, weighted by population | |
+| `food`, `energy`, `fuel` | economy: the share of need met after drawing on stocks | |
+
+The engine kept no tally of military casualties, so this unit added one counter, `CivilNation.military`. It is written where the civil system already reads each tick's battle events.
+
+### The production race
+
+Each `ItemRace` row covers one key item for one nation:
+
+- `shells` counts gun artillery rounds made, shipped in, and fired. Shells are stocked as tons of `ammo`, so this row has no stock.
+- `ammo` is the national depots' ammunition in tons.
+- `interceptors`, `cruise`, `ballistic` and `drones` count rounds in magazines and warehouses. `drones` covers long-range one-way drones only.
+
+The rates (`producedPerMonth`, `aidPerMonth`, `usedPerMonth`) are per 30 days over the trailing month. `zeroDay` is the day the stock would reach zero at those rates. `ranOutDay` is the day it actually fell below one unit in this run. `monthly` gives the month-by-month history.
+
+The figures to compare against are these:
+
+- Russia made ~3-4M rounds a year in 2024-25 (Estonian intelligence, CSIS). North Korea shipped it ~2-3M a year (South Korean NIS).
+- The US made ~40k rounds of 155 mm a month in early 2025 (US Army). Europe's ramp aims at 1-2M a year.
+- Partners and the Czech initiative supplied most of Ukraine's shells (Kiel Institute Ukraine Support Tracker; Czech government, January 2025).
+
+The rates themselves are B4's industry data (`src/data/industry`).
+
+### Workarounds
+
+Each workaround reads the economy model and is graded `holding`, `strained` or `failing`.
+
+| Id | Applies when | `level` | Source |
+| --- | --- | --- | --- |
+| `trade_rerouting` | sanctioned: its sanctions partners hold at least 10% of its trade partners' GDP | 1 − `tradeLoss` | Bank of Russia balance of payments: goods imports near 2021 levels by 2023 |
+| `dual_use_imports` | sanctioned or blockaded | semiconductor need met; strained under 3 months of stock | KSE Institute 2023-24; Conflict Armament Research |
+| `shadow_fleet` | a sanctioned energy exporter | export capacity left after blockade, war damage and strikes on export sites | KSE Institute: ~70% of Russian seaborne crude moved on shadow-fleet tankers in 2024 |
+| `foreign_arms` | a recipient of an arms pipeline (`AID_FLOWS`) | deliveries over the last month against the planned rate | `src/data/industry/aid.ts` |
+
+The economy reroutes sanctioned oil in full. Only blockade and damage cut it, so `shadow_fleet` holds until a navy or a strike campaign acts.
+
+## In the game
+
+Press **C**, or choose **War cost** on the dock, to open the drawer. It has three tabs:
+
+- **Human cost** sets your side against the enemy, shows your home-front meters, and lists where the refugees went.
+- **Production** compares supply per month on each side, shows how your consumption compares, and gives each stock's runway with the day it runs out.
+- **Lifelines** shows each side's workarounds.
+
+The snapshot carries the reading once a game day (`Snapshot.outputs`, built by `src/ui/outputs/view.ts`). For the enemy it keeps only what reaches a real staff from outside: battle reports and public counts, damage seen from above, assessed industrial output, counter-battery tallies of shells fired, and open-source sanctions tracking. It never sends the enemy's stocks or its rationing.
+
+## On the command line
+
+```sh
+npm run sim -- --scenario ukraine-2026 --days 60 --quiet --report
+npm run ensemble -- --scenario ukraine-2026 --days 30 --runs 16
+```
+
+`--report` ends a run with the after-action report. The ensemble reads Outputs in the same pass as its metrics and prints p10, p50 and p90 for the nations in the opening wars. A run-out day of `never` means the stock is not falling. `--json` adds the ranges under `outputs`.
