@@ -13,6 +13,10 @@ import type { Sent } from '../src/ui/staff/desk';
 import { COMMAND_ROLES, delegateCommands, roleOf } from '../src/ui/staff/roles';
 import { operations } from '../src/ui/staff/operations';
 import { StaffCard, WarRoom } from '../src/ui/staff/WarRoom';
+import { EventFeed } from '../src/ui/feed';
+import { SCENARIO_CARDS } from '../src/ui/host';
+import { headlines } from '../src/ui/staff/ticker';
+import { crisisOf } from '../src/ui/crisis/crisis';
 import { degradeChain } from './c2.fixture';
 import { playWithStaff } from './staff-mirror';
 
@@ -56,7 +60,7 @@ const shown = (g: Game, s: Sent) => renderToStaticMarkup(createElement(StaffCard
 function situation(g: Game, over: Partial<Situation> = {}): Situation {
   const d = g.state.focusNation!;
   return {
-    me: g.desk.me, tick: g.state.tick, dtHours: 6, map, nationIds: map.nationIds, control: g.state.control, formations: g.state.formations,
+    me: g.desk.me, ongoing: new Set(), tick: g.state.tick, dtHours: 6, map, nationIds: map.nationIds, control: g.state.control, formations: g.state.formations,
     nations: g.state.nations, d, recent: g.desk.recent, namer: g.namer, ammoPerDay: null, burnPerDay: {}, ops: g.state.ops, contest: g.state.contest, known: () => undefined,
     munitionKind: () => undefined, unitCostUsdM: () => 10, ...over,
   };
@@ -71,7 +75,7 @@ describe('advisor cards: the recommended button issues the command, and the answ
     // A treaty calls only on a war inside its area (A4), so how many arrive on day one is the scenario's, not the card's.
     expect(calls.length).toBeGreaterThan(0);
     for (const c of calls) {
-      expect(advisorOf(N('USA'), c.role!).title).toBe('Foreign Minister');
+      expect(advisorOf(N('USA'), c.role!).title).toBe('Secretary of State');
       expect(c.urgent).toBe(true);
       const a = approve(g, c);
       expect(a.command).toMatchObject({ type: 'answer_treaty', nation: 'USA', join: true });
@@ -329,4 +333,92 @@ describe('the War Room after the player answers (P1 M7)', () => {
     expect(html).toContain('Commit the reserve');
     expect(html.indexOf('Commit the reserve')).toBeLessThan(html.indexOf('Call 1'));
   });
+});
+
+describe('the Operations panel at war with no land front (P1 H4)', () => {
+  const rows = (g: Game) => operations({
+    me: g.desk.me, map, nationIds: map.nationIds, control: g.state.control, contest: g.state.contest, formations: g.state.formations, planned: g.state.ops,
+    tick: g.state.tick, enemies: g.state.focusNation!.enemies, places: g.namer.place, commandOf: () => 'delegate',
+  });
+
+  it('gulf-2027 as Iran: the missile strikes and the fleet at sea are rows, not "No front yet"', () => {
+    const g = start('gulf-2027', 'IRN');
+    g.step(8);
+    const ops = rows(g);
+    expect(ops.map((o) => o.kind)).toEqual(expect.arrayContaining(['strike', 'naval']));
+    const strike = ops.find((o) => o.kind === 'strike')!;
+    expect(strike.detail).toMatch(/^On /);
+    for (const id of strike.formations) expect(g.world.formations[id].nation).toBe('IRN');
+  }, 240_000);
+
+  it('ww3-2027 as the United States: campaigns keep a place beside the land sectors', () => {
+    const g = start('ww3-2027', 'USA');
+    for (let i = 0; i < 12; i++) {
+      g.step();
+      for (const c of g.state.focusNation?.treatyCalls ?? []) g.send({ type: 'answer_treaty', nation: N('USA'), war: c.war, treaty: c.treaty, join: true });
+    }
+    const ops = rows(g);
+    expect(ops.length).toBeLessThanOrEqual(4);
+    expect(ops.filter((o) => o.kind === 'strike' || o.kind === 'air' || o.kind === 'naval').length).toBeGreaterThanOrEqual(1);
+  }, 300_000);
+});
+
+describe('what the staff says is true to the nation and the war (P1 H9, M6)', () => {
+  it('ukraine-2026 as Ukraine: the reserves card counts the reservists mobilisation would recall, not the empty replacement pool', () => {
+    const g = start('ukraine-2026', 'UKR');
+    g.step();
+    const card = g.desk.cards.find((c) => c.key.startsWith('mobilise|'));
+    expect(card, 'Ukraine at war with an empty replacement pool is told to mobilise').toBeDefined();
+    const reservists = g.world.nations[N('UKR')].reservists;
+    expect(reservists).toBeGreaterThan(1000);
+    expect(card!.figure).toMatchObject({ value: String(Math.round(reservists / 1000)), caption: 'reservists to recall' });
+    expect(card!.text).toContain(`${Math.round(reservists / 1000).toLocaleString('en-US')}k trained reservists`);
+  }, 120_000);
+
+  it('ukraine-2026: the war that began in 2022 is not news of a declaration on day one; a new war still is', () => {
+    const run = (scenario: string, nation: string) => {
+      const g = start(scenario, nation);
+      const feed = new EventFeed();
+      for (let i = 0; i < 2; i++) {
+        g.step();
+        feed.record(g.state.latestEvents, g.namer);
+      }
+      const ongoing = new Set(SCENARIO_CARDS.find((s) => s.id === scenario)!.ongoing);
+      return { g, news: headlines(feed, map, ongoing).map((h) => h.text) };
+    };
+    const ukr = run('ukraine-2026', 'UKR');
+    expect(ukr.news.join(' | ')).not.toMatch(/declares war on Ukraine/);
+    expect(ukr.news).toContain('Russia and Ukraine remain at war');
+    expect(ukr.g.desk.cards.filter((c) => c.key.startsWith('wire|war|'))).toEqual([]);
+    const gulf = run('gulf-2027', 'IRN');
+    expect(gulf.news.join(' | ')).toMatch(/Iran declares war on Israel/);
+  }, 240_000);
+
+  it('the United States table has a Secretary of State and a Chairman of the Joint Chiefs, under invented names', () => {
+    expect(advisorOf(N('USA'), 'foreign')).toMatchObject({ title: 'Secretary of State', name: 'Elena Marsh' });
+    expect(advisorOf(N('USA'), 'chief')).toMatchObject({ title: 'Chairman of the Joint Chiefs of Staff', name: 'Gen. Margaret Hale' });
+    expect(advisorOf(N('GBR'), 'navy').title).toBe('First Sea Lord');
+    expect(advisorOf(N('UKR'), 'chief').title).toBe('Chief of the General Staff');
+  });
+
+  it('ww3-2027 as the United States: Taiwan asks for help under the Taiwan Relations Act, which binds no one to fight; a NATO ally invokes its treaty', () => {
+    const g = start('ww3-2027', 'USA');
+    g.step(2);
+    const calls = g.desk.cards.filter((c) => c.key.startsWith('treaty|'));
+    const tra = calls.find((c) => c.key.includes('US-TWN-TRA'));
+    expect(tra, 'a call under the Taiwan Relations Act').toBeDefined();
+    expect(tra!.title).toBe('Taiwan asks us to fight');
+    expect(tra!.text).not.toMatch(/invoke|Our word is our deterrent/);
+    expect(tra!.text).toContain('does not bind us');
+    const ctx = {
+      me: g.desk.me, tick: g.state.tick, dtHours: 6, d: g.state.focusNation!, nations: g.state.nations, name: (id: NationId) => g.namer.nation(id),
+      capital: () => undefined,
+    };
+    const crisis = crisisOf(tra!, ctx)!;
+    expect(crisis.headline).toBe('Call for help');
+    expect(crisis.options[0].button).toBe('Enter the war');
+    const pact = calls.find((c) => c.key.includes('|NATO|'))!;
+    expect(pact.title).toMatch(/invokes the/);
+    expect(crisisOf(pact, ctx)!.headline).toBe('Treaty invoked');
+  }, 120_000);
 });

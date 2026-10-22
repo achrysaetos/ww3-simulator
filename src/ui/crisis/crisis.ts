@@ -9,7 +9,7 @@ import type { NationId, NodeId } from '../../core/types';
 import { NUCLEAR_ALERT } from '../../data/nations';
 import { treatyName } from '../events';
 import type { NationDetail, NationSummary } from '../snapshot';
-import type { Action, Card } from '../staff/advice';
+import { bindsToFight, type Action, type Card } from '../staff/advice';
 import type { Role } from '../staff/advisors';
 
 export type CrisisKind = 'treaty' | 'nuclear' | 'peace' | 'capital';
@@ -80,14 +80,15 @@ function treaty(card: Card, c: CrisisContext): Crisis | null {
   const aggressor = c.name(call.aggressor), victim = c.name(call.victim), name = treatyName(call.treaty);
   const theirWarheads = c.nations.get(call.aggressor)?.warheads ?? 0;
   const ours = c.nations.get(c.me)?.warheads ?? 0;
-  const join: Action = { kind: 'command', label: 'Honour the treaty', command: { type: 'answer_treaty', nation: c.me, war: call.war, treaty: call.treaty, join: true } };
+  const binding = bindsToFight(call.treaty);
+  const join: Action = { kind: 'command', label: binding ? 'Honour the treaty' : 'Enter the war', command: { type: 'answer_treaty', nation: c.me, war: call.war, treaty: call.treaty, join: true } };
   const stay: Action = { kind: 'command', label: 'Stand aside', command: { type: 'answer_treaty', nation: c.me, war: call.war, treaty: call.treaty, join: false } };
   const hoursLeft = Math.max(0, (call.dueTick - c.tick) * c.dtHours);
   const joinFirst = card.primary?.kind === 'command' && card.primary.command.type === 'answer_treaty' && card.primary.command.join;
   const options: CrisisOption[] = [
     {
-      title: 'Go to war', text: `We declare war on ${aggressor} and fight beside ${victim}.`, button: 'Honour the treaty', tone: 'red', advisor: 'chief', irreversible: true,
-      quote: theirWarheads ? `Our word is the deterrent. If it bends now, it breaks everywhere.` : `${aggressor} cannot match us. Every day we wait, ${victim} loses ground.`,
+      title: 'Go to war', text: `We declare war on ${aggressor} and fight beside ${victim}.`, button: join.label, tone: 'red', advisor: 'chief', irreversible: true,
+      quote: !binding ? `Nothing obliges us. Every partner in the region is watching what we do.` : theirWarheads ? `Our word is the deterrent. If it bends now, it breaks everywhere.` : `${aggressor} cannot match us. Every day we wait, ${victim} loses ground.`,
       action: join, recommended: joinFirst,
     },
     {
@@ -95,7 +96,7 @@ function treaty(card: Card, c: CrisisContext): Crisis | null {
       quote: 'Let me sound out the other members first. We have time, not much.', action: later('Decide later'), defer: true, recommended: false,
     },
     {
-      title: 'Stand aside', text: `We stay out of the war. Allies may doubt the ${name}.`, button: 'Stand aside', tone: 'blue', advisor: 'security',
+      title: 'Stand aside', text: binding ? `We stay out of the war. Allies may doubt the ${name}.` : `We stay out of the war. The ${name} asks no more of us, but partners will weigh it.`, button: 'Stand aside', tone: 'blue', advisor: 'security',
       quote: theirWarheads && !ours ? `${aggressor} holds ${n(theirWarheads)} warheads. This is not a war we can finish.` : 'This is not our war. Our forces stay ours.',
       action: stay, recommended: !joinFirst,
     },
@@ -110,8 +111,8 @@ function treaty(card: Card, c: CrisisContext): Crisis | null {
   return {
     key: card.key, kind: 'treaty', card, node: c.capital(call.victim),
     source: 'Foreign ministry · Treaty desk',
-    headline: 'Treaty invoked',
-    sub: `${victim} calls on the ${name}${call.reconsidered ? ' again' : ''} · ${aggressor} has attacked`,
+    headline: binding ? 'Treaty invoked' : 'Call for help',
+    sub: binding ? `${victim} calls on the ${name}${call.reconsidered ? ' again' : ''} · ${aggressor} has attacked` : `${victim} asks us to fight${call.reconsidered ? ' again' : ''} · ${aggressor} has attacked`,
     hoursLeft, windowHours: Math.max(hoursLeft, 7 * 24), clock: 'Answer due in',
     facts: factsNow(c), factsNow,
     options,

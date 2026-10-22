@@ -70,12 +70,15 @@ export class StaffDesk {
   /** When each subject last had a new decision put on the table. */
   private readonly raised = new Map<string, number>();
   private tick = 0;
+  private readonly ongoing: ReadonlySet<string>;
   /** The highest nuclear step any war the player is in has reached: 0 none, 1 an alert, 2 a detonation. */
   nuclearStep = 0;
   /** The player's orders still moving down a degraded chain of command: hours until each arrives, by formation. */
   inTransit = new Map<FormationId, number>();
 
-  constructor(private readonly map: GameMap, private readonly meta: SessionMeta, readonly me: NationId, private readonly namer: Namer) {}
+  constructor(private readonly map: GameMap, private readonly meta: SessionMeta, readonly me: NationId, private readonly namer: Namer) {
+    this.ongoing = new Set(meta.scenario.ongoing);
+  }
 
   /** Take in one snapshot's worth of the world, as the player sees it. */
   observe(state: ClientState, events: readonly SimEvent[], d: NationDetail | undefined): void {
@@ -91,7 +94,7 @@ export class StaffDesk {
     }
     this.record(state, events, d);
     const situation: Situation = {
-      me: this.me, tick: state.tick, dtHours: this.meta.dtHours, map: this.map, nationIds: this.meta.nationIds, control: state.control,
+      me: this.me, ongoing: this.ongoing, tick: state.tick, dtHours: this.meta.dtHours, map: this.map, nationIds: this.meta.nationIds, control: state.control,
       formations: state.formations, nations: state.nations, d, recent: this.recent, namer: this.namer, ammoPerDay: this.ammoPerDay(), burnPerDay: this.burnPerDay(),
       ops: state.ops, contest: state.contest, known: this.known(),
       munitionKind: (id) => this.meta.munitions[id]?.kind as MunitionKind | undefined,

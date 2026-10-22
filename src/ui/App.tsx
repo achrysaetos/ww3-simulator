@@ -412,7 +412,8 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
     me: playAs, map: client.map, nationIds, control: client.state.control, contest: client.state.contest, formations: client.state.formations,
     planned: client.state.ops, tick: client.state.tick, enemies: d?.enemies ?? [], places, commandOf,
   }), [client.state.tick, client.state.formations, client.state.ops, commandOf, enemiesKey]);
-  const news = useMemo(() => headlines(client.feed, client.map), [client.feed.version]);
+  const ongoing = useMemo(() => new Set(client.meta?.scenario.ongoing ?? []), [client.meta]);
+  const news = useMemo(() => headlines(client.feed, client.map, ongoing), [client.feed.version, ongoing]);
   const pinned = lastMoment && lastMoment.tick >= client.state.tick - 8 ? lastMoment : null;
   const front = desk.frontChange(7);
   const lostNow = client.state.formations.filter((f) => f.entry.nation === playAs && f.status === 'destroyed').length;
