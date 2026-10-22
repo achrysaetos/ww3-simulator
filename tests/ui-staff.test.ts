@@ -1,7 +1,8 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { Command, CommandDomain, FormationId, NationId, SimEvent } from '../src/core/types';
+import { atWar } from '../src/core/engine';
+import type { Command, CommandDomain, FormationId, NationId, NodeId, SimEvent } from '../src/core/types';
 import { loadMap } from '../src/data/load';
 import { orderDelayHours } from '../src/systems/c2';
 import { authority } from '../src/systems/orders';
@@ -107,6 +108,41 @@ describe('advisor cards: the recommended button issues the command, and the answ
     const f = g.world.formations[cmd.formation];
     // On the way, or already there and dug in: a reserve one cell back can arrive inside a tick.
     if (s.answer!.ok) expect(f.node === card!.node ? f.order.posture : f.order).toEqual(f.node === card!.node ? 'defend' : expect.objectContaining({ posture: 'move', target: card!.node }));
+    expect(shown(g, s)).toContain(s.answer!.text.replace(/&/g, '&amp;'));
+  }, 300_000);
+
+  it('a warned build-up (peace-2027 as South Korea): Reinforce sends a brigade to the DMZ before any shot, and only when warned', () => {
+    const korea = (buildUp: boolean) => {
+      const g = start('peace-2027', 'KOR');
+      const { world } = g;
+      const [kor, prk] = [N('KOR'), N('PRK')];
+      const dmz = new Set<NodeId>();
+      for (let n = 0 as NodeId; n < map.landCount; n++)
+        if (world.control[n] === kor && [...map.neighbors(n)].some((m) => m < map.landCount && world.control[m] === prk)) dmz.add(n);
+      // The CE-5 build-up (tests/belief.test.ts): every KPA manoeuvre formation marched to the DMZ.
+      const kpa = Object.values(world.formations).filter((f) => f.nation === prk && f.kind === 'maneuver' && f.status === 'active');
+      const across = [...map.nodesOf(prk)].filter((n) => world.control[n] === prk && [...map.neighbors(n)].some((m) => dmz.has(m)));
+      if (buildUp) kpa.forEach((f, i) => world.pending.push({ type: 'order', nation: prk, formation: f.id, order: { posture: 'move', target: across[i % across.length] } }));
+      let card: Card | undefined;
+      for (let i = 0; i < 16 && !card; i++) {
+        g.step();
+        card = g.desk.cards.find((c) => c.key === 'warning|PRK');
+      }
+      return { g, card, dmz };
+    };
+    const quiet = korea(false);
+    expect(quiet.card, 'no warning, no card').toBeUndefined();
+    const { g, card, dmz } = korea(true);
+    expect(card).toBeDefined();
+    expect(atWar(g.world, N('KOR'), N('PRK'))).toBe(false);
+    expect(card!.text).toMatch(/North Korea|PRK/);
+    const a = approve(g, card!);
+    const cmd = a.command as Extract<Command, { type: 'order' }>;
+    expect(cmd).toMatchObject({ type: 'order', nation: 'KOR', order: { posture: 'move', target: card!.node } });
+    expect(dmz.has(card!.node!)).toBe(true);
+    expect(dmz.has(g.world.formations[cmd.formation].node)).toBe(false);
+    const s = settle(g, card!.key);
+    expect(s.answer!.ok).toBe(true);
     expect(shown(g, s)).toContain(s.answer!.text.replace(/&/g, '&amp;'));
   }, 300_000);
 
