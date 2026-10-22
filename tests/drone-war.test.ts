@@ -5,6 +5,7 @@ import type { Formation, MunitionId, NationId, NodeId, PlatformId, World } from 
 import { createSession, type Session } from '../src/scenarios';
 import { SYSTEMS } from '../src/systems';
 import { c2FireFactor, jamAgainst, jammedHits } from '../src/systems/c2';
+import { karabakh2020 } from '../src/validation/cases/karabakh-2020';
 
 const UKR = 'UKR' as NationId, RUS = 'RUS' as NationId;
 
@@ -85,5 +86,22 @@ describe('ukraine-2026: the drone war (Red Team CE-4)', () => {
     expect(full).toBeGreaterThan(0);
     // Main: a brigade with 30% of its strength jams as hard as a full one.
     expect(worn).toBeLessThan(full * 0.6);
+  }, 300_000);
+});
+
+describe('karabakh-2020: Azerbaijan\'s drones fly', () => {
+  it('TB2s strike Armenian armour in the first ten days', () => {
+    const k = karabakh2020.setup(1);
+    const fired: Record<string, number> = {};
+    let armourStruck = 0;
+    for (let i = 0; i < (10 * 24) / k.world.dtHours; i++)
+      for (const e of k.engine.step(k.world)) {
+        if (e.type !== 'strike' || e.by !== 'AZE') continue;
+        fired[e.munition] = (fired[e.munition] ?? 0) + e.fired;
+        for (const x of e.effects) if (x.kind === 'losses') for (const [pid, n] of Object.entries(x.platforms)) if (s.catalog.platform(pid as PlatformId).class === 'mbt') armourStruck += n ?? 0;
+      }
+    // Main: TB2s share a wing with the Su-25s and fly only in their FAB-500 packages, so no MAM-L is fired.
+    expect(fired.mam_l ?? 0).toBeGreaterThan(50);
+    expect(armourStruck).toBeGreaterThan(5);
   }, 300_000);
 });
