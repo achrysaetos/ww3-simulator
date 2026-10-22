@@ -4,9 +4,9 @@ import { runOne, type EnsembleInput, type RunSpec } from './run';
 const input = (workerData as { input: EnsembleInput }).input;
 const port = parentPort!;
 
-port.on('message', ({ index, spec }: { index: number; spec: RunSpec }) => {
+port.on('message', ({ index, job }: { index: number; job: RunSpec }) => {
   try {
-    port.postMessage({ index, result: runOne(input, spec) });
+    port.postMessage({ index, result: runOne(input, job) });
   } catch (e) {
     port.postMessage({ index, error: e instanceof Error ? (e.stack ?? e.message) : String(e) });
   }

@@ -7,7 +7,7 @@
  */
 import { sampleRuns } from '../forecast';
 import { caseById } from '../validation/cases';
-import { runJobs, type CaseJob } from '../validation/pool';
+import { runJobs, type CaseJob } from '../validation/ensemble';
 import { formatTable } from '../validation/report';
 import { scoreCase } from '../validation/score';
 import { CliError } from './args';

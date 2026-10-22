@@ -1,5 +1,5 @@
 import { parentPort } from 'node:worker_threads';
-import type { CaseJob } from './pool';
+import type { CaseJob } from './ensemble';
 import { runCase } from './run';
 
 const port = parentPort!;

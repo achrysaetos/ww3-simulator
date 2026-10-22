@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { NationId } from '../../src/core/types';
 import { parseValidateArgs } from '../../src/cli/validate-args';
-import { runJobs } from '../../src/validation/pool';
+import { runJobs } from '../../src/validation/ensemble';
 import { runCase } from '../../src/validation/run';
 import { CASES, caseById } from '../../src/validation/cases';
 

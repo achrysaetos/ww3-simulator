@@ -1,7 +1,18 @@
 import { sampleRuns } from '../forecast/sample';
-import { runJobs } from './pool';
-import type { CaseResult } from './run';
+import { runPooled } from '../forecast/pool';
+import type { RunSpec } from '../forecast/run';
+import { runCase, type CaseResult } from './run';
 import { quantile } from './score';
+
+export interface CaseJob {
+  caseId: string;
+  spec: RunSpec;
+}
+
+/** Runs case draws on worker threads (0 workers: serially here); results land in job order. */
+export function runJobs(jobs: readonly CaseJob[], opts: { workers?: number; onProgress?: (done: number, total: number) => void } = {}): Promise<CaseResult[]> {
+  return runPooled(jobs, { worker: new URL('./worker-boot.mjs', import.meta.url), serial: (j) => runCase(j.caseId, j.spec) }, opts);
+}
 
 /**
  * A band checked over an ensemble instead of one seed (issue #2 section 2): `runs` draws, the seeds
