@@ -1,4 +1,5 @@
 import { atWar } from '../../core/engine';
+import { allied } from '../land/state';
 import type { Formation, NodeId, PlatformId } from '../../core/types';
 import type { TickEnv } from './env';
 import { geography, seaNeighbour } from './geography';
@@ -41,6 +42,17 @@ export function landings(env: TickEnv): void {
   const { offshore } = world.slices.naval;
   for (const lift of env.naval) {
     const aboard = (env.embarked.get(lift.id) ?? []).filter((e) => e.status === 'embarked');
+    // A group with every ship disabled, or sent home and back alongside, lands its troops in the friendly port it lies in.
+    const troops = aboard.filter((e) => e.kind !== 'air_wing');
+    const done = env.comp(lift).crippled || (lift.order.posture === 'reserve' && lift.node === lift.home && !lift.order.path?.length);
+    if (troops.length && done && !ctx.map.isSea(lift.node) && world.control[lift.node] && allied(world, lift.nation, world.control[lift.node])) {
+      for (const f of troops) {
+        disembark(env, f, lift.node, 0);
+        ctx.emit({ type: 'message', tick: world.tick, nation: f.nation, text: `${f.name} came ashore at node ${lift.node} from ${lift.name}` });
+      }
+      delete offshore[lift.id];
+      continue;
+    }
     const target = lift.order.target;
     const landing = aboard.length > 0 && target !== undefined && !ctx.map.isSea(target) && !lift.order.path?.length && (lift.order.posture === 'attack' || lift.order.posture === 'move');
     if (!landing || lift.node !== seaNeighbour(ctx.map, target)) delete offshore[lift.id];

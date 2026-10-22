@@ -11,13 +11,18 @@ const MINE_HIT = 1.5;
 /**
  * A minehunter works a field deliberately: it finds mines with high-frequency sonar ahead of the hull and
  * destroys them with remote vehicles, on a glass-fibre or non-magnetic hull with a low acoustic signature,
- * and the LCS package hunts from MH-60S helicopters and unmanned boats with no crew in the field. In
- * 1991 some 30 coalition MCM vessels hunted the Kuwaiti fields for months and none was mined; the
- * ships struck were Tripoli and Princeton, which were not hunting. Wonsan 1950 cost four sweepers that
- * swept mechanically through an uncharted field (Melia, "Damn the Torpedoes", 1991; estimate).
+ * and the LCS package hunts from MH-60S helicopters and unmanned boats with no crew in the field.
+ * Calibration: in 1991 some 30 coalition MCM vessels hunted the Kuwaiti fields (~1,200 mines cleared) for
+ * about two months and none was mined; the ships struck, Tripoli and Princeton, were not hunting. In the
+ * model's terms that is ~7,000 hull-ticks at an average ~600 mines (strike chance ~0.33 a tick, MINE_DENSITY),
+ * ~2,300 unscaled strikes against none seen, so the factor is at most ~3/2,300 = 0.0013 at 95% (rule of
+ * three). The European and US hunters clearing Iran's mines in 1987-88 (Earnest Will; Operations Calendar
+ * and Cleaver) were not mined either, while Bridgeton and Samuel B. Roberts were. Wonsan 1950 cost four
+ * sweepers that swept mechanically through an uncharted field, the upper end for older methods
+ * (Melia, "Damn the Torpedoes", 1991). 0.003 allows for hulls not all on task at once.
  */
-// param: tag=estimated range=[0.01,0.1] source=Gulf 1991 MCM operations; Melia 1991
-const MCM_STRIKE_FACTOR = 0.02;
+// param: tag=estimated range=[0.001,0.02] source=Gulf 1991 MCM operations (no hunter mined); Earnest Will 1987-88; Melia 1991
+const MCM_STRIKE_FACTOR = 0.003;
 
 /**
  * A dived submarine passes under moored mines and below most ground mines' influence fields: the
