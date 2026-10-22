@@ -89,7 +89,7 @@ export interface NavalGeography {
   chokepoints: { def: Chokepoint; nodes: NodeId[] }[];
   /** Land cells ships may sail through. */
   canalNodes: ReadonlySet<number>;
-  /** Port cells (ports > 0 with a sea neighbour) and the sea zone each opens onto. */
+  /** Port cells (ports > 0 with a sea neighbour), the sea zone each opens onto, and its share-weight of its nation's cargo. */
   ports: { node: NodeId; zone: NodeId; weight: number }[];
   portZone: Map<number, NodeId>;
   /** Connected body of water each sea zone and canal cell belongs to (-1 for other land): what seaPath can join. */
@@ -107,14 +107,24 @@ export function geography(map: GameMap): NavalGeography {
   return g;
 }
 
+/**
+ * Cargo a port cell handles, as a weight among its nation's ports: its port count, scaled up by the city it
+ * serves. Throughput follows the hinterland: Karachi and Port Qasim handle over 95% of Pakistan's seaborne
+ * cargo and Gwadar under 2% (Pakistan Ministry of Maritime Affairs); Bandar Abbas about half of Iran's.
+ * One port of a city of a million counts as two ports of a town (estimate).
+ */
+const CITY_PORT_MILLION = 1e6;
+
 function build(map: GameMap): NavalGeography {
   const ports: NavalGeography['ports'] = [];
   const portZone = new Map<number, NodeId>();
+  const cityPop = new Map<number, number>();
+  for (const c of map.cities) cityPop.set(c.node, (cityPop.get(c.node) ?? 0) + c.pop);
   for (let n = 0; n < map.landCount; n++) {
     if (!map.ports[n]) continue;
     const zone = seaNeighbour(map, n as NodeId);
     if (zone === undefined) continue;
-    ports.push({ node: n as NodeId, zone, weight: map.ports[n] });
+    ports.push({ node: n as NodeId, zone, weight: map.ports[n] * (1 + (cityPop.get(n) ?? 0) / CITY_PORT_MILLION) });
     portZone.set(n, zone);
   }
   const canalNodes = new Set(CANALS.flatMap((c) => c.points.map(([la, lo]) => map.nodeAt(la, lo) as number)));

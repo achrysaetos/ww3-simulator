@@ -137,6 +137,9 @@ export const CREW_LOSS_SUNK = 0.3;
  */
 export const OCEAN_SURVEILLANCE: Record<string, number> = {
   USA: 1.2, CHN: 1, RUS: 0.4, FRA: 0.3, GBR: 0.25, JPN: 0.3, IND: 0.25, ISR: 0.2, DEU: 0.15, ITA: 0.15, KOR: 0.1,
+  // No satellites of its own: US, UK and commercial (Maxar, Planet, ICEYE SAR) imagery and NATO maritime patrol
+  // tracks over the Black Sea shared since 2022 cued the GUR and SBU drone-boat raids (RUSI 2023; NYT 2023-24).
+  UKR: 0.3,
 };
 
 // ------------------------------------------------------------- mines

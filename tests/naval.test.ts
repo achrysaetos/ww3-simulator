@@ -10,6 +10,7 @@ import { createAi } from '../src/systems/ai';
 import { airWar } from '../src/systems/air';
 import { applyNavalOrder, CHOKEPOINTS, navalWar, resolveSalvo, strikeNavalGroup } from '../src/systems/naval';
 import { geography, nearestSea, seaNeighbour } from '../src/systems/naval/geography';
+import { logistics } from '../src/systems/logistics';
 import { OFFLOAD_HOURS } from '../src/systems/naval/tables';
 import { testMunitions, testPlatforms } from '../src/testkit';
 
@@ -524,7 +525,8 @@ describe('sea control and blockade', () => {
     t.order(patrol, { posture: 'patrol', target: at });
     t.engine.step(t.world);
     expect((t.world.theater.tradeBlocked as Record<string, number>).IRN).toBe(0);
-    const ssn = t.add({ nation: USA, name: 'SSN', kind: 'submarine', echelon: 'squadron', node: at, equipment: t.eq({ t_ssn: 1 }), magazine: {} });
+    // Sails with its torpedoes: interdiction comes from the weapons aboard (NV-1).
+    const ssn = t.add({ nation: USA, name: 'SSN', kind: 'submarine', echelon: 'squadron', node: at, equipment: t.eq({ t_ssn: 1 }) });
     t.order(ssn, { posture: 'patrol', target: at });
     t.engine.step(t.world);
     expect((t.world.theater.tradeBlocked as Record<string, number>).IRN).toBeGreaterThan(0.2);
@@ -536,7 +538,7 @@ describe('sea control and blockade', () => {
       const t = navalWorld();
       const at = geography(t.map).chokepoints.find((c) => c.def.name === 'Strait of Hormuz')!.nodes[0];
       t.war('USA', 'IRN');
-      const boats = t.add({ nation: USA, name: 'Boats', kind: 'submarine', echelon: 'squadron', node: at, equipment: t.eq(equipment), magazine: {} });
+      const boats = t.add({ nation: USA, name: 'Boats', kind: 'submarine', echelon: 'squadron', node: at, equipment: t.eq(equipment) });
       t.order(boats, { posture: 'patrol', target: at });
       t.engine.step(t.world);
       return (t.world.theater.tradeBlocked as Record<string, number>).IRN;
@@ -614,9 +616,11 @@ describe('naval movement and lift', () => {
   });
 
   it('a ship alongside at its base draws fuel and stores from it, with no land supply line, while one on station at sea uses hers up', () => {
-    const t = navalWorld();
+    // Logistics eats the rations; the naval system sizes a ship's stores to its endurance.
+    const t = navalWorld(42, [navalWar, logistics]);
     const port = t.portOf('RUS', 54.65, 19.9);
-    const sea = t.nodeAt(56, 18);
+    // Off Gotland, outside the sea zone Baltiysk opens onto, where a ship still victuals from her base.
+    const sea = t.nodeAt(58, 19);
     const alongside = t.add({ nation: RUS, name: 'Alongside', kind: 'surface_group', node: port, equipment: t.eq({ n_frigate: 2 }), magazine: {} });
     const onStation = t.add({ nation: RUS, name: 'On station', kind: 'surface_group', node: sea, equipment: t.eq({ n_frigate: 2 }) });
     onStation.home = port;
@@ -627,7 +631,8 @@ describe('naval movement and lift', () => {
     t.order(onStation, { posture: 'patrol', target: sea });
     t.engine.run(t.world, Math.round((10 * 24) / t.world.dtHours));
     expect(alongside.node).toBe(port);
-    expect(alongside.supply.food).toBeCloseTo(alongside.supplyCapacity.food);
+    // Topped up each tick, less the rations logistics issues after the naval step.
+    expect(alongside.supply.food).toBeGreaterThan(0.95 * alongside.supplyCapacity.food);
     expect(alongside.supply.fuel).toBeCloseTo(alongside.supplyCapacity.fuel);
     expect(bulk.food).toBeLessThan(1e5);
     expect(bulk.fuel).toBeLessThanOrEqual(1e5 - short);
