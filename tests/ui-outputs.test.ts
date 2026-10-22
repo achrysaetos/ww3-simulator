@@ -35,15 +35,15 @@ describe('War Cost drawer for Iran at day 10 of gulf-2027', () => {
   });
 
   it('reads the burn as a rate over the days actually elapsed, and says so', () => {
-    const cruise = view.nations[IRN].race.find((r) => r.item === 'cruise')!;
-    const usedInTenDays = (first.nations[IRN].stock.cruise ?? 0) + (last.nations[IRN].produced.cruise ?? 0) - (first.nations[IRN].produced.cruise ?? 0) - (last.nations[IRN].stock.cruise ?? 0);
+    const ballistic = view.nations[IRN].race.find((r) => r.item === 'ballistic')!;
+    const usedInTenDays = (first.nations[IRN].stock.ballistic ?? 0) + (last.nations[IRN].produced.ballistic ?? 0) - (first.nations[IRN].produced.ballistic ?? 0) - (last.nations[IRN].stock.ballistic ?? 0);
     expect(usedInTenDays).toBeGreaterThan(10);
-    expect(cruise.usedPerMonth! / 3).toBeCloseTo(usedInTenDays, -1);
-    const net = (cruise.usedPerMonth! - cruise.producedPerMonth - cruise.aidPerMonth) / 30;
-    expect(cruise.zeroDay! - view.day).toBeCloseTo(cruise.stock! / net, 0);
+    expect(ballistic.usedPerMonth! / 3).toBeCloseTo(usedInTenDays, -1);
+    const net = (ballistic.usedPerMonth! - ballistic.producedPerMonth - ballistic.aidPerMonth) / 30;
+    expect(ballistic.zeroDay! - view.day).toBeCloseTo(ballistic.stock! / net, 0);
 
     const html = renderToStaticMarkup(createElement(Race, { view }));
-    expect(html).toContain(`used ${Math.round(cruise.usedPerMonth!)}<small>/mo</small>`);
+    expect(html).toContain(`used ${(ballistic.usedPerMonth! / 1e3).toFixed(1)}k<small>/mo</small>`);
     expect(html).toContain('from the last 10 days');
   });
 });
