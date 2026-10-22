@@ -103,7 +103,7 @@ export function FormationPanel({ client, palette, places, routes, playAs, comman
           {POSTURES_BY_KIND[f.kind].includes('strike') && (
             <label className="field inline">
               <span>Strike target class</span>
-              <select value={tc} onChange={(e) => { setTc(e.target.value as TargetClass); if (pending === 'strike') onPickPosture('strike', e.target.value as TargetClass); }}>
+              <select value={pending !== 'strike' && f.order.posture === 'strike' && f.order.targetClass ? f.order.targetClass : tc} onChange={(e) => { setTc(e.target.value as TargetClass); if (pending === 'strike') onPickPosture('strike', e.target.value as TargetClass); }}>
                 {TARGET_CLASSES.map((c) => <option key={c} value={c}>{STRIKE_CLASS_LABEL[c]}</option>)}
               </select>
             </label>
@@ -319,7 +319,7 @@ export function activity(d: FormationDetail, place: (n: NodeId) => string, natio
   const parts = [DOING[f.order.posture](place(f.order.target ?? f.node))];
   const escorted = f.order.posture === 'escort' && f.order.targetFormation ? formationName?.(f.order.targetFormation) : undefined;
   if (escorted) parts[0] = `Escorting ${escorted} near ${place(f.order.target ?? f.node)}`;
-  if (f.order.targetClass && f.order.posture === 'strike') parts[0] += ` (${f.order.targetClass} targets)`;
+  if (f.order.targetClass && f.order.posture === 'strike') parts[0] += `: ${STRIKE_CLASS_LABEL[f.order.targetClass].toLowerCase()}`;
   if (f.order.path?.length) parts.push(`${f.order.path.length} ${f.order.path.length === 1 ? 'cell' : 'cells'} to go`);
   if (f.status === 'routed') parts.push('routed and falling back');
   if (d.engaged) parts.push('in contact with the enemy');

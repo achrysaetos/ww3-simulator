@@ -12,7 +12,7 @@ import { NO_NATION } from '../snapshot';
 import { FORECAST_DAYS, FORECAST_RUNS } from './forecaster';
 import { NEEDS_TARGET } from './postures';
 import type { OrderOption, OptionsResult } from './options';
-import { draftOf, newDraft, planCommand, planKey, planOf, type Planning } from './plan';
+import { draftOf, freshName, newDraft, planCommand, planKey, planOf, type Planning } from './plan';
 import { PlanPanel } from './PlanPanel';
 import { optionLabel, Radial } from './Radial';
 
@@ -73,8 +73,8 @@ export function useOrders(h: OrdersHost) {
 
   const startPlan = useCallback((formations: FormationId[], objective: NodeId | null) => {
     setRadial(null);
-    setPlanning({ stage: objective === null ? 'drawing' : 'review', draft: newDraft(formations, objective), forecast: { status: 'idle' } });
-  }, []);
+    setPlanning({ stage: objective === null ? 'drawing' : 'review', draft: newDraft(formations, objective, freshName(client.state.ops)), forecast: { status: 'idle' } });
+  }, [client]);
 
   const openOperation = useCallback((op: Operation) => {
     setRadial(null);

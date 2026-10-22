@@ -27,7 +27,7 @@ const MAX_LEAD_DAYS = 90;
 /** Ended operations stay on the books this long for their after-action report, then drop out of the save. */
 const KEEP_ENDED_DAYS = 7;
 
-const CODE_NAMES = [
+export const CODE_NAMES = [
   'Zenith', 'Anvil', 'Bastion', 'Cobalt', 'Driftwood', 'Ember', 'Falchion', 'Granite', 'Harrow', 'Ironside', 'Javelin', 'Kestrel',
   'Lodestar', 'Meridian', 'Nightfall', 'Onyx', 'Palisade', 'Quarry', 'Rampart', 'Sabre', 'Tempest', 'Umbra', 'Vanguard', 'Wolfram',
 ] as const;

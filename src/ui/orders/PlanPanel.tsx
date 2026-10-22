@@ -72,6 +72,8 @@ export function PlanPanel({ planning, op, units, from, objective, via, dayOf, on
   const running = op && (op.phase === 'launched' || op.phase === 'stalled');
   const ready = draft.objective !== null && draft.formations.length > 0;
   const status = op ? PHASE_LABEL[op.phase] : 'Draft';
+  const odds = forecast.status === 'done' ? forecast.forecast.pObjectiveByDay[forecast.forecast.days - 1] ?? 0 : null;
+  const strength = units.length ? units.reduce((t, u) => t + u.strength, 0) / units.length : 0;
   return (
     <section className="ww-glass ww-corners ww-plan" aria-label="Battle plan" data-testid="plan-panel">
       <div className="ww-plan-col ww-plan-what">
@@ -81,6 +83,14 @@ export function PlanPanel({ planning, op, units, from, objective, via, dayOf, on
           {objective ? <>{from} → {via.length ? `${via.join(' → ')} → ` : ''}<b>{objective}</b></> : <>From {from}. Click the objective on the map.</>}
         </p>
         {op?.progress.note && <p className={`ww-plan-note ${op.phase === 'stalled' ? 'red' : ''}`} data-testid="plan-note">{op.progress.note}</p>}
+        {units.length > 0 && (
+          <div className="ww-plan-force" data-testid="plan-force">
+            <span className="ww-label">Force</span>
+            <span className="ww-mono">{units.length} {units.length === 1 ? 'formation' : 'formations'} · {pct(strength)} strength</span>
+            <span className="ww-bar"><i style={{ width: pct(strength) }} /></span>
+            <ul>{units.slice(0, 3).map((u) => <li key={u.entry.id}>{u.entry.name}</li>)}{units.length > 3 && <li className="ww-muted">and {units.length - 3} more</li>}</ul>
+          </div>
+        )}
         <div className="ww-plan-units" data-testid="plan-units">
           {units.slice(0, KIND_SHOWN).map((u) => (
             <button key={u.entry.id} type="button" className="ww-plan-unit" title={`${u.entry.name}. Click to take it out of the plan.`} onClick={() => onRemove(u.entry.id)} disabled={!!running}>
@@ -112,7 +122,8 @@ export function PlanPanel({ planning, op, units, from, objective, via, dayOf, on
           </>
         ) : (
           <>
-            <button type="button" className="ww-btn gold ww-plan-launch" disabled={!ready} onClick={onLaunch} data-testid="plan-launch">Launch <span className="ww-kbd" aria-label="Enter">↵</span></button>
+            <button type="button" className={`ww-btn ${odds !== null && odds < 0.25 ? 'ww-plan-risky' : 'gold'} ww-plan-launch`} disabled={!ready} onClick={onLaunch} data-testid="plan-launch">Launch <span className="ww-kbd" aria-label="Enter">↵</span></button>
+            {odds !== null && odds < 0.25 && <p className="ww-plan-advice" data-testid="plan-advice">Staff advise against: {pct(odds)} odds in {forecast.status === 'done' ? forecast.forecast.days : 0} days. Add force or pick a nearer objective.</p>}
             <button type="button" className="ww-btn" onClick={onRedraw} data-testid="plan-adjust">Redraw <span className="ww-kbd">R</span></button>
             {!op && <button type="button" className="ww-btn ghost" disabled={!ready} onClick={onSave} data-testid="plan-save">Save draft</button>}
             {op?.phase === 'draft' && <button type="button" className="ww-btn ghost" onClick={onCancelOperation} data-testid="plan-cancel-op">Scrap it</button>}
