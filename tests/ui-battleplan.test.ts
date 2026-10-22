@@ -3,10 +3,11 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeAll, describe, expect, it } from 'vitest';
 import type { Command, CommandResult, Formation, NationId, NodeId, World } from '../src/core/types';
 import { loadMap } from '../src/data/load';
-import { forecastOperation, runOperation, type OperationForecast, type OperationForecastInput, type OperationPlan } from '../src/forecast/operation';
+import { forecastInput, forecastOperation, runOperation, type OperationForecast, type OperationForecastInput, type OperationPlan } from '../src/forecast/operation';
 import { createSession } from '../src/scenarios';
 import { resumeRun, saveRun } from '../src/scenarios/save';
 import { estimate } from '../src/systems/intel';
+import { PlaceNamer } from '../src/ui/events';
 import { SimHost } from '../src/ui/host';
 import { Forecaster, type DrawReply, type DrawRequest, type DrawWorker } from '../src/ui/orders/forecaster';
 import { ForecastView } from '../src/ui/orders/PlanPanel';
@@ -147,6 +148,50 @@ describe('staff forecast panel', () => {
     expect(after.enemyContacts).toBe(shown.enemyContacts - 1);
     expect(outcome(after)).not.toEqual(outcome(shown));
   }, 180_000);
+});
+
+describe('the plan for Tokmak at D+10 of ukraine-2026', () => {
+  let s: Session;
+  let plan: OperationPlan;
+  let f: OperationForecast;
+  let committed: number;
+
+  beforeAll(() => {
+    s = war('ukraine-2026', 'UKR', 40);
+    const objective = s.map.nodeAt(47.25, 35.75);
+    expect(s.world.control[objective]).toBe(RUS);
+    const near = Object.values(s.world.formations)
+      .filter((x) => x.nation === UKR && x.kind === 'maneuver' && x.status === 'active' && x.node < s.map.landCount && s.world.control[x.node] === UKR)
+      .sort((a, b) => s.map.distanceKm(a.node, objective) - s.map.distanceKm(b.node, objective) || (a.id < b.id ? -1 : 1))
+      .slice(0, 3);
+    committed = near.reduce((t, x) => t + x.personnel, 0);
+    plan = { nation: UKR, kind: 'offensive', objectives: [objective], formations: near.map((x) => x.id) };
+    f = forecastOperation(forecastInput(s.world, s.map, s.catalog, plan, 10), 4);
+  }, 300_000);
+
+  it('names the objective for the town in its own cell, not one 50 km away that another cell holds', () => {
+    const places = new PlaceNamer(s.map);
+    const huliaipole = s.map.nodeAt(47.66, 36.26);
+    expect(places.name(plan.objectives[0])).toBe('Tokmak');
+    expect(places.name(huliaipole)).toBe('Huliaipole');
+    const bare = new Map<string, number>();
+    for (let n = 0; n < s.map.landCount; n++) {
+      if (s.map.lat[n] < 44 || s.map.lat[n] > 53 || s.map.lon[n] < 22 || s.map.lon[n] > 41) continue;
+      const name = places.name(n as NodeId);
+      if (/^near |°/.test(name)) continue;
+      expect(bare.get(name), `${name} names cells ${bare.get(name)} and ${n}`).toBeUndefined();
+      bare.set(name, n);
+    }
+  });
+
+  it('forecasts ground within the axis and casualties within the committed force', () => {
+    const legs = f.axis.length - 1;
+    expect(f.advance.p90).toBeLessThanOrEqual(legs);
+    if (f.pObjectiveByDay[f.days - 1] === 0) expect(f.advance.p90).toBeLessThan(legs);
+    expect(f.casualties.p90).toBeLessThanOrEqual(committed);
+    const html = renderToStaticMarkup(createElement(ForecastView, { forecast: f, objective: 'Tokmak', dayOf: (d: number) => `D+${d}` }));
+    expect(html).not.toMatch(/(\d+ h)–\1 old/);
+  });
 });
 
 /** The command a radial option issues for one formation, as the page sends it. */
