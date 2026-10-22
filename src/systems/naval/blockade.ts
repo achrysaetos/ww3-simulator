@@ -3,6 +3,7 @@ import type { Formation, MunitionId, NationId, NodeId, World } from '../../core/
 import type { TickEnv } from './env';
 import { chokepointShare, geography } from './geography';
 import { ledger } from './state';
+import { nonKineticState } from '../nonkinetic/reads';
 import { ANTISHIP_KINDS } from './tables';
 
 /** Postures that project presence into neighbouring sea zones. */
@@ -84,7 +85,11 @@ export function computeTradeBlocked(env: TickEnv): void {
   };
   const belligerent = new Set<NationId>();
   for (const [k, r] of Object.entries(world.relations)) if (r.atWar) for (const n of k.split('|')) belligerent.add(n as NationId);
-  if (!belligerent.size) {
+  // Ships refusing to sail for fear of attack (nonkinetic/maritime.ts) are trade not moving too; a zone both
+  // blockaded and feared loses what the worse of the two stops, counted once.
+  const feared = new Map<number, number>();
+  for (const [node, z] of Object.entries(nonKineticState(world)?.maritime ?? {})) if (z.refusing > 0) feared.set(Number(node), z.refusing);
+  if (!belligerent.size && !feared.size) {
     world.theater.tradeBlocked = Object.fromEntries(Object.keys(world.nations).map((n) => [n, 0]));
     return;
   }
@@ -124,7 +129,8 @@ export function computeTradeBlocked(env: TickEnv): void {
     for (const [nation, s] of escorts.get(node) ?? []) if (nation === victim || (nation !== blocker && atWar(world, nation, blocker) && !atWar(world, nation, victim))) e += s;
     return e;
   };
-  const intensity = (node: number, victim: NationId): number => {
+  const intensity = (node: number, victim: NationId): number => Math.max(blockade(node, victim), feared.get(node) ?? 0);
+  const blockade = (node: number, victim: NationId): number => {
     const b = blockers.get(node);
     if (!b) return 0;
     let s = 0;
@@ -144,7 +150,7 @@ export function computeTradeBlocked(env: TickEnv): void {
     if (l) l.push(p);
     else portsBy.set(owner, [p]);
   }
-  const contested = geo.chokepoints.filter((cp) => cp.nodes.some((n) => blockers.has(n)));
+  const contested = geo.chokepoints.filter((cp) => cp.nodes.some((n) => blockers.has(n) || feared.has(n)));
   const out: Record<NationId, number> = {};
   for (const [id, nation] of Object.entries(world.nations) as [NationId, World['nations'][NationId]][]) {
     let home = 0, w = 0;

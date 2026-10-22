@@ -218,3 +218,30 @@ describe('fleets lie in port (NV-8) and ports weigh by their cargo (NV-13)', () 
     expect(karachi.weight / total).toBeGreaterThan(0.8);
   }, 180_000);
 });
+
+describe('shipping fear and blockade are counted once', () => {
+  // C4's shipping fear used to cut GDP on its own beside naval's blockade, so a feared and blockaded Hormuz counted twice.
+  it('gulf-2027: a strait both blockaded and feared stops what the worse of the two stops', () => {
+    const s = createSession('gulf-2027', 1);
+    runDays(s, 10);
+    const { world } = s;
+    const qat = nation('QAT');
+    const nk = world.slices.nonKinetic!;
+    const hormuz = geography(s.map).chokepoints.find((c) => c.def.name === 'Strait of Hormuz')!.nodes;
+    const blocked = (refusing: number) => {
+      for (const z of Object.values(nk.maritime)) z.refusing = 0;
+      for (const n of hormuz) (nk.maritime[n] ??= { risk: 0, premiumPct: 0, refusing: 0, attackHeat: 0 }).refusing = refusing;
+      computeTradeBlocked(tickEnv(world, s.engine.context(world), true));
+      return world.theater.tradeBlocked[qat];
+    };
+    const blockaded = blocked(0);
+    expect(blockaded).toBeGreaterThan(0.05);
+    expect(blocked(0.01), 'fear below the blockade adds nothing').toBeCloseTo(blockaded, 9);
+    const both = blocked(1);
+    expect(both).toBeGreaterThan(blockaded);
+    for (const f of Object.values(world.formations)) if (f.nation === IRN && naval(f)) f.order = { posture: 'reserve', issuedTick: world.tick };
+    world.slices.naval.mines = {};
+    expect(blocked(0), 'Iran stood down').toBe(0);
+    expect(both, 'fear above the blockade sets the loss alone').toBeCloseTo(blocked(1), 9);
+  }, 300_000);
+});

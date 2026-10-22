@@ -10,7 +10,7 @@ import { defenseObligations } from '../../data/nations';
 import { recallReservists } from '../../data/nations/reserves';
 import { newLine, newNationEconomy, oilStockMonths, stocksOf, type LineState, type NationEconomy } from './state';
 import { defineParam } from '../../core/params';
-import { digitalLost, maritimeDeterred } from '../nonkinetic/reads';
+import { digitalLost } from '../nonkinetic/reads';
 import { DIGITAL_GDP_ELASTICITY } from '../nonkinetic/tables';
 
 export type { EconomyState, LineState, NationEconomy } from './state';
@@ -544,9 +544,8 @@ function stepNation(world: World, ctx: SimContext, s: Scan, n: Nation, e: Nation
   const labourOutput = 1 - LABOUR_GDP_ELASTICITY * clamp01((underArms - opening.underArms) / Math.max(1, labourForce));
 
   const energyImported = 1 - selfShare(n, 'energy');
-  // Non-kinetic drag: data connectivity cut by severed cables and telecom cyber, and seaborne trade
-  // deterred by shipping fear. Grid cyber and cut power/gas cables already bite through infrastructure.
-  const nkTrade = 1 - ((n.stats.importsPctGdp ?? 30) / 100) * maritimeDeterred(world, ctx.map, n.id) * IMPORT_GDP_LOSS();
+  // Non-kinetic drag: data connectivity cut by severed cables and telecom cyber. Shipping fear reaches GDP through
+  // tradeBlocked (naval/blockade.ts), and grid cyber and cut power/gas cables through infrastructure.
   e.gdpIndex =
     e.integrity *
     (1 - ENERGY_GDP_ELASTICITY() * (1 - e.supply.energy)) *
@@ -554,7 +553,6 @@ function stepNation(world: World, ctx: SimContext, s: Scan, n: Nation, e: Nation
     (1 - FOOD_GDP_ELASTICITY() * (1 - e.supply.food)) *
     (1 - SEMI_GDP_ELASTICITY() * (1 - e.supply.semiconductors)) *
     (1 - DIGITAL_GDP_ELASTICITY() * digitalLost(world, n.id)) *
-    nkTrade *
     tradeOutput *
     labourOutput;
 
