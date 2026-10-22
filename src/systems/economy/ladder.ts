@@ -17,8 +17,12 @@ import { paramTable, tableParam } from '../../core/params';
 import { BASELINE_SANCTIONS } from '../../data/industry';
 
 export type CutKind = 'sanctions' | 'war' | 'blockade';
-/** What a coverage share is of: all traded goods (for output), a traded commodity, or an export-controlled input. */
-export type FlowKind = 'goods' | 'commodity' | 'controlled';
+/**
+ * What a coverage share is of: all traded goods (for output), a traded commodity, one whose stock
+ * draw already restrains demand (ResourceSpec.rationing, so the ration rung would count it twice),
+ * or an export-controlled input.
+ */
+export type FlowKind = 'goods' | 'commodity' | 'rationed' | 'controlled';
 export const RUNGS = ['reroute', 'ration', 'neutral', 'overland', 'substitute'] as const;
 export type RungId = (typeof RUNGS)[number];
 
@@ -55,6 +59,8 @@ const L = paramTable('economy.ladder', {
     source: 'Judgment: neutral suppliers replace part of a lost enemy supplier, as Asian buyers replaced Europe for Russian oil in 2023 (IEA OMR)' }),
   neutralBlockade: tableParam({ value: 0.25, range: [0.05, 0.4], tag: 'judgment', affects: 'blockaded trade that runs the blockade',
     source: 'Judgment: blockade runners and shadow fleets get part of a blockaded trade through (Wise, Lifeline of the Confederacy, 1988)' }),
+  neutralIslandBlockade: tableParam({ value: 0.03, range: [0, 0.1], tag: 'estimated', affects: 'blockaded trade that runs the blockade into a nation with no land border',
+    source: 'USSBS, Oil in Japan\'s War (1946): no neutral shipping reached Japan under the 1944-45 blockade and its oil imports fell to nothing by April 1945' }),
   overlandBlockade: tableParam({ value: 0.05, range: [0, 0.15], tag: 'judgment', affects: 'blockaded trade moved over land borders',
     source: 'Issue #2 s.3: existing overland routes are fixed and usually small (rail and pipelines vs sea volumes, UNCTAD 2024)' }),
   substituteFromMonths: tableParam({ value: 12, range: [6, 18], tag: 'estimated', affects: 'how fast home substitution replaces imports',
@@ -93,7 +99,7 @@ const BASELINE_WARS: readonly (readonly [string, string])[] = [['RUS', 'UKR']];
 interface RungSpec {
   from: () => number;
   to: () => number;
-  cap: Partial<Record<CutKind, () => number>>;
+  cap: Partial<Record<CutKind, (landBorder: boolean) => number>>;
   /** Demand cuts make up a shortfall in what a nation needs, not trade that arrives. */
   needsOnly?: true;
   /** Draws on the shared neutral pool, and is what a sanctioner or blockader tightens against. */
@@ -105,7 +111,7 @@ interface RungSpec {
 const RUNG: Readonly<Record<RungId, RungSpec>> = {
   reroute: { from: () => L.rerouteFromMonths, to: () => L.rerouteToMonths, cap: { sanctions: () => L.rerouteSanctions } },
   ration: { from: () => L.rationFromMonths, to: () => L.rationToMonths, cap: { war: () => L.rationWar, blockade: () => L.rationBlockade }, needsOnly: true },
-  neutral: { from: () => L.neutralFromMonths, to: () => L.neutralToMonths, cap: { sanctions: () => L.neutralSanctions, war: () => L.neutralWar, blockade: () => L.neutralBlockade }, neutral: true },
+  neutral: { from: () => L.neutralFromMonths, to: () => L.neutralToMonths, cap: { sanctions: () => L.neutralSanctions, war: () => L.neutralWar, blockade: (landBorder) => (landBorder ? L.neutralBlockade : L.neutralIslandBlockade) }, neutral: true },
   overland: { from: () => 0, to: () => 0, cap: { blockade: () => L.overlandBlockade }, overland: true },
   substitute: { from: () => L.substituteFromMonths, to: () => L.substituteToMonths, cap: { sanctions: () => L.substituteSanctions, war: () => L.substituteWar, blockade: () => L.substituteBlockade } },
 };
@@ -121,7 +127,7 @@ export function rungShares(cut: Cut, flow: FlowKind, landBorder: boolean, pool: 
   for (const id of RUNGS) {
     const r = RUNG[id];
     const cap = r.cap[cut.kind];
-    let x = cap && !(r.needsOnly && flow === 'goods') && !(r.overland && !landBorder) ? cap() * ramp(cut.months, r.from(), r.to()) : 0;
+    let x = cap && !(r.needsOnly && (flow === 'goods' || flow === 'rationed')) && !(r.overland && !landBorder) ? cap(landBorder) * ramp(cut.months, r.from(), r.to()) : 0;
     if (r.neutral) x *= unenforced(cut) * pool;
     if (flow === 'controlled') x *= L.controlledLeak;
     out[id] = x;
@@ -136,7 +142,7 @@ export function coverage(cut: Cut, flow: FlowKind, landBorder: boolean, pool: nu
 }
 
 /** What the cut-off asks of the shared neutral pool: its neutral rung's share before rationing. */
-export const neutralAsk = (cut: Cut): number => (RUNG.neutral.cap[cut.kind]?.() ?? 0) * ramp(cut.months, RUNG.neutral.from(), RUNG.neutral.to()) * unenforced(cut);
+export const neutralAsk = (cut: Cut, landBorder: boolean): number => (RUNG.neutral.cap[cut.kind]?.(landBorder) ?? 0) * ramp(cut.months, RUNG.neutral.from(), RUNG.neutral.to()) * unenforced(cut);
 
 /** Spare neutral supply on offer, as a share of what neutral economies trade. */
 export const neutralSpare = (): number => L.neutralSpare;

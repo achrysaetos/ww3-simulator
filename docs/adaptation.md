@@ -37,8 +37,8 @@ Hooks read one lookup, `measureEffect(world, pair, user, counter)`. A hook that 
 | --- | --- | --- | --- |
 | draw stocks | instant | all | the existing national buffers |
 | `reroute` | 1 week to 1 month | sanctions | trade through third countries |
-| `ration` | 1-6 months | war, blockade | demand cuts; closes a supply gap, so it does not count toward trade loss |
-| `neutral` | 3-12 months | all | new and neutral suppliers and shadow fleets, from the shared pool |
+| `ration` | 1-6 months | war, blockade | demand cuts; closes a supply gap, so it does not count toward trade loss, nor for energy, whose stock draw already restrains demand |
+| `neutral` | 3-12 months | all | new and neutral suppliers and shadow fleets, from the shared pool; under blockade, an island without a land border gets only `neutralIslandBlockade` (USSBS: almost nothing ran the 1944-45 blockade of Japan) |
 | `overland` | instant, fixed | blockade, land borders only | small |
 | `substitute` | 1-3 years | all | home production |
 

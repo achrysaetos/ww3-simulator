@@ -53,14 +53,24 @@ describe('the workaround ladder', () => {
     expect(at[540].rungs.neutral).toBeLessThan(at[360].rungs.neutral);
   }, 120_000);
 
-  it('the ladder is what keeps more energy reaching a blockaded Taiwan after months', () => {
+  it('gets energy past a blockade over land borders and through neutral runners, but not into an island', () => {
+    const KOR = n('KOR');
     const energyAfter = (params?: Record<string, number>) => {
       const r = economyRun('taiwan-2027', params);
-      r.days(270, () => (r.s.world.theater.tradeBlocked[TWN] = 0.9));
-      return r.s.world.slices.economy.nations[TWN].supply.energy;
+      r.days(270, () => {
+        r.s.world.theater.tradeBlocked[TWN] = 0.9;
+        r.s.world.theater.tradeBlocked[KOR] = 0.9;
+      });
+      const e = r.s.world.slices.economy.nations;
+      return { twn: e[TWN].supply.energy, kor: e[KOR].supply.energy };
     };
-    const none = { 'economy.ladder.rationBlockade': 0, 'economy.ladder.neutralBlockade': 0, 'economy.ladder.substituteBlockade': 0, 'economy.ladder.overlandBlockade': 0 };
-    expect(energyAfter()).toBeGreaterThan(energyAfter(none) + 0.05);
+    const none = { 'economy.ladder.rationBlockade': 0, 'economy.ladder.neutralBlockade': 0, 'economy.ladder.neutralIslandBlockade': 0, 'economy.ladder.substituteBlockade': 0, 'economy.ladder.overlandBlockade': 0 };
+    const ladder = energyAfter(), stocks = energyAfter(none);
+    // South Korea borders North Korea, so its blockade has an overland rung and the full runner rung.
+    expect(ladder.kor).toBeGreaterThan(stocks.kor + 0.05);
+    // Next to nothing ran the 1944-45 blockade of Japan (USSBS); energy demand restraint is already in the stock draw.
+    expect(ladder.twn).toBeGreaterThan(stocks.twn);
+    expect(ladder.twn).toBeLessThan(stocks.twn + 0.03);
   }, 120_000);
 
   it('opens the 2024 sanctions on Russia mature, at the 80% of trade Russia rerouted by 2023', () => {
