@@ -159,7 +159,24 @@ export interface UmbrellaCase {
   dueTick: number;
 }
 
+/**
+ * How far outward a party has carried its war against another, tracked apart from the ladder rung (issue #2,
+ * section 4): strikes on the homeland and the capital, on a nuclear power's soil, on civilian systems (grid,
+ * infrastructure), on dual-use systems tied to the nuclear forces (nuclear-capable launchers, SSBNs, early warning),
+ * in space, and on a third country. The seabed is not modelled.
+ */
+export type OutwardStep = 'homeland' | 'capital' | 'nuclear_homeland' | 'civilian' | 'dual_use' | 'space' | 'third_country';
+
+export interface OutwardRecord {
+  /** Tick the step was first taken. */
+  first: number;
+  /** Strikes of this kind since. */
+  count: number;
+}
+
 export interface DiplomacyState {
+  /** Outward steps taken, keyed `${by}>${against}`; created by the first strike that takes one. */
+  outward?: Record<string, Partial<Record<OutwardStep, OutwardRecord>>>;
   wars: War[];
   joins: PendingJoin[];
   records: Record<NationId, WarRecord>;

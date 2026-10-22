@@ -361,6 +361,8 @@ export type WestPlatform = keyof typeof WEST_PLATFORMS;
 /** Munition ids used in `extraMagazine` (reloads beyond the platforms' standard loadouts). */
 export const WEST_MUNITIONS = [
   'trident2_d5',
+  'trident2_d5_w88',
+  'm51',
   'asmp_a',
   'b61_12',
   'agm86b_alcm',

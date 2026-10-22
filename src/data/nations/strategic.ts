@@ -85,6 +85,17 @@ const NUCLEAR_THRESHOLDS: Record<string, NuclearThreshold> = {
   PRK: { firstUse: true, coreLossShare: 0.05, forceLossShare: 0.2, economicLossShare: null, onStrategicAttack: true, onChemBio: true, coversAllies: false, answer: { scale: 'massive', targets: 'countervalue' } },
 };
 
+/**
+ * Any other armed state, such as a scenario or test nation armed by hand: it never uses first, and answers a nuclear
+ * attack in kind, which every doctrine above also promises.
+ */
+const RETALIATION_ONLY: NuclearThreshold = { firstUse: false, coreLossShare: null, forceLossShare: null, economicLossShare: null, onStrategicAttack: false, onChemBio: false, coversAllies: false };
+
+/** The one source of nuclear use thresholds: the sourced entry for `nation`, else retaliation only. */
+export function nuclearThreshold(nation: string): NuclearThreshold {
+  return NUCLEAR_THRESHOLDS[nation] ?? RETALIATION_ONLY;
+}
+
 const o = (id: string, kind: ObjectiveKind, targets: string, priority: 1 | 2 | 3, description: string): StrategicObjective => ({
   id, kind, targets: targets ? (targets.split(' ') as NationId[]) : [], priority, description,
 });
