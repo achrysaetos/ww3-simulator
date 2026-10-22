@@ -13,7 +13,11 @@ import { nextCrisis, type Crisis, type CrisisContext } from './crisis/crisis';
 import { ConfirmDialog, EndDialog, GameMenu, type Confirmation } from './GameFlow';
 import { crisesOn } from './prefs';
 import { EventLog } from './EventLog';
-import { FormationList, FormationPanel, GROUND_KINDS, postureLabel, type Command as CommandHolder } from './FormationPanel';
+import { humanizeReason } from './events';
+import { FormationList, FormationPanel, type Command as CommandHolder } from './FormationPanel';
+import { GROUND_KINDS, postureLabel } from './orders/postures';
+import { useOrders } from './orders/useOrders';
+import './orders/orders.css';
 import { MapView, openingFocus } from './MapView';
 import { TopBar, type TopBarStat } from './map/TopBar';
 import { ContactPanel } from './map/ContactPanel';
@@ -295,6 +299,20 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
     focusHandle.current?.(node, 'wide');
   }, [selectFormation]);
 
+  const date = client.state.date ? new Date(client.state.date) : null;
+  const day = date && client.meta ? Math.max(0, Math.floor((date.getTime() - new Date(client.meta.scenario.startDate).getTime()) / 864e5)) : 0;
+  const orders = useOrders({
+    client, playAs, places, selected, enemies: d?.enemies ?? [],
+    dayOf: (n) => `D+${day + n}`,
+    select: (id) => { setSelected(id); setPending(null); },
+    pickTarget: (posture, targetClass) => {
+      setNuclearPick(false);
+      setPending({ posture, targetClass });
+      if (selectedView && (RANGED.has(posture) || selectedView.entry.kind === 'air_wing')) focusHandle.current?.(selectedView.node, 'wide');
+    },
+    toast: (text, tone) => setToast({ text, tone }),
+  });
+
   const sendCommand = (c: Command, label: string) => {
     client.command(c);
     setToast({ tone: 'info', text: `${label}. ${client.ticksPerSec ? 'Takes effect next tick.' : 'Takes effect when the clock runs.'}` });
@@ -302,8 +320,22 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
 
   /** The engine answers next tick (client.answer): accepted, the order takes the formation from the AI delegate; refused, the delegate keeps it. */
   const sendOrder = (formation: FormationId, order: Omit<Order, 'issuedTick'>, label: string) => {
-    client.command({ type: 'order', nation: playAs, formation, order });
+    client.order({ type: 'order', nation: playAs, formation, order }, label);
     setToast({ tone: 'info', text: `${label}. ${client.ticksPerSec ? 'Awaiting acknowledgement next tick.' : 'Acknowledged when the clock runs.'}` });
+  };
+
+  /** Asks the engine first: a target it would refuse keeps the picker open and says why. */
+  const sendChecked = (formation: FormationId, order: Omit<Order, 'issuedTick'>, label: string, node: NodeId) => {
+    void client.options([formation], node).then((r) => {
+      const o = r.options.find((x) => x.key === order.posture);
+      const no = o && !o.ok.length ? o.refused.find((x) => x.formation === formation) : undefined;
+      if (no) {
+        setToast({ tone: 'error', text: `${places.name(node)}: ${humanizeReason(no.reason, client.namer)}. Pick another target, or Esc.` });
+        return;
+      }
+      sendOrder(formation, order, label);
+      setPending(null);
+    });
   };
 
   const onTarget = (node: NodeId) => {
@@ -330,8 +362,7 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
       return;
     }
     const what = f ? postureLabel(f.entry.kind, pending.posture) : pending.posture.replace(/_/g, ' ');
-    sendOrder(selected, { posture: pending.posture, target: node, targetClass: pending.targetClass }, `${what} order sent → ${places.name(node)}`);
-    setPending(null);
+    sendChecked(selected, { posture: pending.posture, target: node, targetClass: pending.targetClass }, `${what} → ${places.name(node)}`, node);
   };
 
   const releaseAll = () => {
@@ -359,8 +390,6 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
     client.act(card, action);
   };
 
-  const date = client.state.date ? new Date(client.state.date) : null;
-  const day = date && client.meta ? Math.max(0, Math.floor((date.getTime() - new Date(client.meta.scenario.startDate).getTime()) / 864e5)) : 0;
   const selectedView = selected ? client.state.formations.find((f) => f.entry.id === selected) : undefined;
   const targeting = nuclearPick ? 'nuclear' : pending ? 'order' : null;
   const want = { ...ai, ...delegating };
@@ -373,8 +402,8 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
 
   const ops = useMemo(() => operations({
     me: playAs, map: client.map, nationIds, control: client.state.control, contest: client.state.contest, formations: client.state.formations,
-    enemies: d?.enemies ?? [], places, commandOf,
-  }), [client.state.tick, client.state.formations, commandOf, enemiesKey]);
+    planned: client.state.ops, tick: client.state.tick, enemies: d?.enemies ?? [], places, commandOf,
+  }), [client.state.tick, client.state.formations, client.state.ops, commandOf, enemiesKey]);
   const news = useMemo(() => headlines(client.feed, client.map), [client.feed.version]);
   const pinned = lastMoment && lastMoment.tick >= client.state.tick - 8 ? lastMoment : null;
   const front = desk.frontChange(7);
@@ -438,7 +467,7 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
   );
 
   return (
-    <div className={`ww-shell ${drawer ? 'drawer-open' : ''} ${targeting ? 'targeting' : ''} ${crisis || opening === 'title' ? 'hud-off' : ''}`} data-testid="shell">
+    <div className={`ww-shell ${drawer ? 'drawer-open' : ''} ${targeting ? 'targeting' : ''} ${orders.planning ? 'planning' : ''} ${crisis || opening === 'title' ? 'hud-off' : ''}`} data-testid="shell">
       <MapView
         client={client}
         palette={palette}
@@ -447,8 +476,11 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
         selected={selected}
         targeting={targeting}
         overlays={overlays}
+        orders={orders.overlay}
         onSelectFormation={selectFormation}
         onTarget={onTarget}
+        onContext={orders.openRadial}
+        onPlanClick={orders.planClick}
         focusHandle={focusHandle}
       />
       <TopBar
@@ -465,7 +497,18 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
       {dock}
 
       <div className="ww-hud-left">
-        <OperationsPanel ops={ops} inTransit={desk.inTransit.size} onShow={(node) => focusHandle.current?.(node)} onForces={() => setDrawer('forces')} />
+        <OperationsPanel
+          ops={ops}
+          inTransit={desk.inTransit.size}
+          onShow={(node) => focusHandle.current?.(node)}
+          onOpen={(id) => {
+            const op = client.state.ops.find((o) => o.id === id);
+            if (!op) return;
+            orders.openOperation(op);
+            focusHandle.current?.(op.objectives[0] ?? op.axis[0], 'wide');
+          }}
+          onForces={() => setDrawer('forces')}
+        />
         <StaffPanel me={playAs} ai={ai} pending={delegating} formations={client.state.formations} onDelegate={delegate} />
       </div>
 
@@ -535,6 +578,8 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
           <button type="button" className="ww-btn small" onClick={() => { setPending(null); setNuclearPick(false); }} data-testid="cancel-target">Cancel <span className="ww-kbd">Esc</span></button>
         </div>
       )}
+      {orders.panel}
+      {orders.radial}
       {toast && <div className={`ww-toast ww-glass ${toast.tone}`} data-testid="toast" role="status">{toast.text}</div>}
       {client.error && <div className="ww-toast ww-glass error">Simulation error: {client.error}</div>}
 

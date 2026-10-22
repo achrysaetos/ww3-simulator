@@ -245,13 +245,19 @@ function apply(rules: Rule[], text: string, n: Namer): string | null {
   return null;
 }
 
-function reason(text: string, n: Namer): string {
-  return apply(REASONS, text, n) ?? text.replace(/\bnode (\d+)/g, (_, id) => node(id, n)).replace(/_/g, ' ');
+/** Place names for the engine's node and cell numbers. */
+export function namePlaces(text: string, places: PlaceNamer): string {
+  return text.replace(/\b(?:node|cell) (\d+)/g, (_, id) => places.name(+id as NodeId));
+}
+
+/** An engine refusal in the player's words. */
+export function humanizeReason(text: string, n: Namer): string {
+  return apply(REASONS, text, n) ?? namePlaces(text, n.place).replace(/_/g, ' ');
 }
 
 /** Engine messages in the player's words: names for ids, places for node numbers. */
 export function humanizeMessage(text: string, n: Namer): string {
-  return apply(MESSAGES, text, n) ?? text.replace(/\bnode (\d+)/g, (_, id) => node(id, n));
+  return apply(MESSAGES, text, n) ?? namePlaces(text, n.place);
 }
 
 /** About how long until an accepted order is carried out, in the player's units. */
@@ -272,7 +278,7 @@ export const COMMAND_LABEL: Record<CommandResult['command'], string> = {
 /** The answer to a command in the player's words: who, accepted or refused, and why or when. */
 export function describeResult(e: CommandResult, n: Namer): string {
   const who = e.formation ? (n.formation(e.formation) ?? 'Formation') : COMMAND_LABEL[e.command];
-  if (!e.ok) return `${who}: ${e.command === 'order' ? 'order ' : ''}refused, ${reason(e.reason, n)}`;
+  if (!e.ok) return `${who}: ${e.command === 'order' ? 'order ' : ''}refused, ${humanizeReason(e.reason, n)}`;
   if (e.code === 'relayed') return `${who}: order relayed down a degraded chain of command, arrives ${etaText(e.etaHours ?? 0)}`;
   if (e.command !== 'order') return `${who}: ${e.reason}`;
   const when = e.etaHours === undefined ? '' : `, ${e.etaHours < 1 ? 'carried out now' : `there ${etaText(e.etaHours)}`}`;

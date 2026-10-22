@@ -291,7 +291,7 @@ describe('display errors (BA-14)', () => {
     const brigade = [...moved][0];
     const formations = g.state.formations.map((f) => (moved.has(f) ? { ...f, node: cell!, posture: 'defend' as const, target: null } : f));
     const ops = operations({
-      me: N('UKR'), map, nationIds: map.nationIds, control, contest: new Float32Array(0), formations,
+      me: N('UKR'), map, nationIds: map.nationIds, control, contest: new Float32Array(0), formations, planned: [], tick: 0,
       enemies: g.state.focusNation!.enemies, places: g.namer.place, commandOf: () => 'delegate',
     });
     const there = ops.find((o) => o.formations.includes(brigade.entry.id));
