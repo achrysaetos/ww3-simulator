@@ -159,10 +159,11 @@ export interface NationSummary {
 /** One munition family a dashboard tracks, totalled across warehouses and loaded magazines. */
 export interface MunitionStock {
   group: MunitionGroup;
-  warehoused: number;
+  /** Rounds in national depots; null for a nation the viewer sees only through its intelligence, which holds no count of them. */
+  warehoused: number | null;
   loaded: number;
-  /** Current production capacity of the nation's lines in this group, per month. */
-  perMonth: number;
+  /** Current production capacity of the nation's lines in this group, per month; null where `warehoused` is. */
+  perMonth: number | null;
 }
 
 export const MUNITION_GROUPS = ['interceptor', 'aam', 'cruise', 'ballistic', 'rocket', 'atgm', 'drone', 'bomb', 'torpedo', 'nuclear'] as const;
@@ -269,13 +270,15 @@ export interface NationDetail {
   aid: NationId[];
   /** Mobilisation level ordered and still being reached; null when none is pending. */
   mobilizationTarget: number | null;
-  bulk: Nation['bulk'];
+  /** National bulk stocks; null for a nation the viewer sees only through its intelligence. */
+  bulk: Nation['bulk'] | null;
   enemies: NationId[];
   /** Land cells currently held, and how many of them were held at start. */
   nodesHeld: number;
   nodesHome: number;
   formations: number;
   personnel: number;
+  /** Its war economy: production lines, resource stocks and output. Null for a nation the viewer sees only through its intelligence. */
   economy: EconomyView | null;
   homeFront: HomeFrontView;
   munitions: MunitionStock[];
@@ -289,7 +292,7 @@ export interface NationDetail {
     /** Launchers in strategic formations and their loaded nuclear rounds. */
     launchers: number;
     loadedWarheads: number;
-    /** Remaining interceptors per national missile-defence system. */
+    /** Remaining interceptors per national missile-defence system; empty for a nation the viewer sees only through its intelligence. */
     bmd: Record<string, number>;
     satellites: number;
     /** Nuclear rounds on launchers, by weapon: where each launching formation stands and how far it reaches. */
@@ -489,17 +492,27 @@ export class SnapshotEncoder {
     this.outputs = new OutputsRecorder(catalog);
   }
 
-  /** Buffer events from ticks that run between two snapshots. The AI's answers to its own commands never leave the worker. */
-  collect(events: readonly SimEvent[]): void {
+  /**
+   * Buffer events from ticks that run between two snapshots, as `viewer` learns of them (knownTo) in the world they
+   * were emitted in. The AI's answers to its own commands never leave the worker. Without a world (a spectator, a
+   * test) every event is kept.
+   */
+  collect(events: readonly SimEvent[], world?: World, map?: GameMap, viewer = world && humanNation(world)): void {
+    const view = world && map && viewer ? viewOf(world, map, viewer) : undefined;
     for (const e of this.admit(events)) {
+      if (view && !knownTo(world!, map!, view, e)) continue;
       if (this.events.length < EVENT_LIMIT) this.events.push(e);
       else this.dropped++;
     }
   }
 
-  /** The newest of a resumed World's notable events, to send once with the first snapshot; it also restores how each war began. */
-  resumed(world: World): SimEvent[] {
-    return this.admit(world.history).slice(-EVENT_LIMIT);
+  /**
+   * The newest of a resumed World's notable events that `viewer` knows of (knownTo, as the world stands now), to send
+   * once with the first snapshot; it also restores how each war began.
+   */
+  resumed(world: World, map?: GameMap, viewer = humanNation(world)): SimEvent[] {
+    const view = map && viewer ? viewOf(world, map, viewer) : undefined;
+    return this.admit(world.history).filter((e) => !view || knownTo(world, map!, view, e)).slice(-EVENT_LIMIT);
   }
 
   private admit(events: readonly SimEvent[]): SimEvent[] {
@@ -709,11 +722,16 @@ export class SnapshotEncoder {
     return out.sort((a, b) => (a.id < b.id ? -1 : 1));
   }
 
-  /** A foreign nation's forces are counted as the viewer believes them (believedWorld): contacts only, magazines by doctrine. */
+  /**
+   * A foreign nation's forces are counted as the viewer believes them (believedWorld): contacts only, magazines by
+   * doctrine. Its depots, bulk stocks, production lines and war economy are not in the viewer's intelligence picture,
+   * so they are not sent.
+   */
   private nationDetail(world: World, map: GameMap, id: NationId, view: View | undefined): NationDetail {
     const n = world.nations[id];
     const { catalog } = this;
-    const forces = view && !view.friends.has(id) ? believedWorld(world, map, view.nation, catalog).formations : world.formations;
+    const believed = !!view && !view.friends.has(id);
+    const forces = believed ? believedWorld(world, map, view.nation, catalog).formations : world.formations;
     let held = 0, home = 0;
     for (let i = 0; i < map.landCount; i++) {
       if (world.control[i] === id) held++;
@@ -725,9 +743,9 @@ export class SnapshotEncoder {
       if (!m) return null;
       return m.yieldKt ? 'nuclear' : GROUP_OF_KIND[m.kind];
     };
-    for (const [item, count] of Object.entries(n.stockpile)) {
+    if (!believed) for (const [item, count] of Object.entries(n.stockpile)) {
       const g = groupOf(item);
-      if (g) groups.get(g)!.warehoused += count;
+      if (g) groups.get(g)!.warehoused! += count;
     }
     let formations = 0, personnel = 0, launchers = 0, loadedWarheads = 0;
     const weapons = new Map<MunitionId, NuclearWeapon>();
@@ -747,10 +765,10 @@ export class SnapshotEncoder {
         w.sites.push({ node: f.node, reachKm: deliveryReachKm(catalog, f, catalog.munitions.get(mid)!), rounds: count });
       }
     }
-    const eco = world.slices.economy?.nations[id];
+    const eco = believed ? undefined : world.slices.economy?.nations[id];
     if (eco) for (const line of Object.values(eco.lines)) {
       const g = groupOf(line.item);
-      if (g) groups.get(g)!.perMonth += line.capacityPerMonth;
+      if (g) groups.get(g)!.perMonth! += line.capacityPerMonth;
     }
     const strategic = world.slices.strategic;
     const space = strategic?.space[id];
@@ -777,7 +795,7 @@ export class SnapshotEncoder {
       accessFrom: Object.entries(diplomacy?.access ?? {}).flatMap(([host, guests]) => (guests.includes(id) ? [host as NationId] : [])),
       aid: diplomacy?.aid[id] ?? [],
       mobilizationTarget: eco?.mobilizationTarget ?? null,
-      bulk: n.bulk,
+      bulk: believed ? null : n.bulk,
       enemies: enemiesOf(world, id),
       nodesHeld: held,
       nodesHome: home,
@@ -793,7 +811,7 @@ export class SnapshotEncoder {
           }
         : null,
       homeFront: homeFront(world, id),
-      munitions: [...groups.values()].filter((g) => g.warehoused || g.loaded || g.perMonth),
+      munitions: [...groups.values()].filter((g) => g.warehoused || g.loaded || g.perMonth).map((g) => (believed ? { ...g, warehoused: null, perMonth: null } : g)),
       wars: this.warViews(world, id),
       covert: covertView(world, id, view),
       strikers: view && view.nation !== id ? [] : this.strikers(world, id),
@@ -801,7 +819,7 @@ export class SnapshotEncoder {
         posture: strategic?.posture[id] ?? null,
         launchers,
         loadedWarheads,
-        bmd: bmdOf(strategic?.interceptors ?? {}, id),
+        bmd: believed ? {} : bmdOf(strategic?.interceptors ?? {}, id),
         satellites: space ? Object.values(space).reduce((a, s) => a + s.alive, 0) : 0,
         weapons: [...weapons.values()],
         alert: nuclearAlert(n, id, strategic?.alerts[id]),
@@ -969,6 +987,36 @@ function formationDetail(world: World, map: GameMap, catalog: Catalog, f: Format
     deploy: canShip ? deployView(world, map, catalog, f) : null,
     weather: conditionsAt(world, map, f.node) ?? null,
   };
+}
+
+/**
+ * Whether `view`'s nation learns of an event. Wars, peace, escalation, captures (the control map is public) and
+ * nuclear detonations are public. A battle, strike or loss reaches it when its side took part, or when it happened on
+ * or next to its side's ground, or where its intelligence holds a contact. Production and shortages are its side's own.
+ */
+export function knownTo(world: World, map: GameMap, view: View, e: SimEvent): boolean {
+  const { friends } = view;
+  const watched = (node: NodeId) => {
+    const holder = world.control[node];
+    if (holder && friends.has(holder)) return true;
+    for (const n of map.neighbors(node)) if (n < map.landCount && world.control[n] && friends.has(world.control[n])) return true;
+    return view.contactsAt(node).length > 0;
+  };
+  switch (e.type) {
+    case 'battle':
+      return friends.has(e.attacker) || friends.has(e.defender) || watched(e.node);
+    case 'strike':
+      return friends.has(e.by) || e.effects.some((x) => x.kind === 'ship_hits' && friends.has(world.formations[x.formation]?.nation)) || watched(e.target);
+    case 'formation_destroyed': {
+      const f = world.formations[e.formation];
+      return friends.has(e.nation) || (!!f && watched(f.node));
+    }
+    case 'production':
+    case 'shortage':
+      return friends.has(e.nation);
+    default:
+      return true;
+  }
 }
 
 function humanNation(world: World): NationId | undefined {

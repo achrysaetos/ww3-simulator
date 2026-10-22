@@ -313,7 +313,7 @@ function orderAnswers(s: Situation): Card[] {
 /** Shells run short at the current rate of fire, and the shell line that can still surge. */
 function shells(s: Situation): Card[] {
   const eco = s.d.economy;
-  if (!s.ammoPerDay || s.ammoPerDay <= 0 || !eco) return [];
+  if (!s.ammoPerDay || s.ammoPerDay <= 0 || !eco || !s.d.bulk) return [];
   const weeks = s.d.bulk.ammo / s.ammoPerDay / 7;
   if (weeks >= 8) return [];
   const best = Object.entries(eco.capacity)
@@ -565,7 +565,7 @@ function reserves(s: Situation): Card[] {
   return [{
     key: `mobilise|${level}`, topic: 'supply', role: 'chief', tone: 'advice', tick: s.tick, node: capitalOf(s, s.me),
     title: 'Reserves will not refill the front',
-    text: `Only ${k(n.reserves)} replacements are ready, against ${k(s.d.personnel)} in the field. ${recall} The public would accept mobilisation up to ${pct(tolerance)}.`,
+    text: `${n.reserves < 500 ? 'No replacements are ready' : `Only ${k(n.reserves)} replacements are ready`}, against ${k(s.d.personnel)} in the field. ${recall} The public would accept mobilisation up to ${pct(tolerance)}.`,
     ask: `Raise mobilisation from ${pct(n.mobilization)} to ${pct(level)}.`,
     cost: { label: 'Risk', text: 'War support falls as call-ups bite' },
     figure: { value: String(Math.round(n.reservists / 1000)), unit: 'k', caption: 'reservists to recall' },

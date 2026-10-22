@@ -139,8 +139,8 @@ export class StaffDesk {
     }
     rec.held = d.nodesHeld;
     rec.warSupport = state.nations.get(this.me)?.warSupport ?? 0;
-    rec.ammo = d.bulk.ammo;
-    rec.stock = Object.fromEntries(d.munitions.map((m) => [m.group, m.warehoused + m.loaded]));
+    rec.ammo = d.bulk?.ammo ?? 0;
+    rec.stock = Object.fromEntries(d.munitions.map((m) => [m.group, (m.warehoused ?? 0) + m.loaded]));
     const mine = this.meta.nationIds.indexOf(this.me);
     for (const e of events) {
       if (e.type === 'strike' && e.by !== this.me && state.control[e.target] === mine && RAID_KINDS[this.meta.munitions[e.munition]?.kind as MunitionKind]) {

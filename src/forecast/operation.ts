@@ -90,11 +90,14 @@ function planAxis(world: World, map: GameMap, plan: OperationPlan): NodeId[] {
 
 /**
  * The world as `nation` believes it, cut to the theatre of `plan`: its own forces true, the enemy's as its intelligence
- * holds them, everything far from the axis left out. Built on the caller's thread from the live world; the result is
- * plain JSON for the workers.
+ * holds them, everything far from the axis left out. Per-formation records in the slices are kept only for the
+ * formations in the cut, and foreign depots and bulk stocks are left out: the result goes to the page, so it carries
+ * nothing the planner does not know. Built on the caller's thread from the live world; the result is plain JSON for
+ * the workers.
  */
 export function theatreWorld(world: World, map: GameMap, catalog: Catalog, nation: NationId, plan: OperationPlan): World {
   const belief = believedWorld(world, map, nation, catalog);
+  const { friends } = viewOf(world, map, nation);
   const anchors = new Set<number>(plan.objectives);
   for (const id of plan.formations) if (belief.formations[id]) anchors.add(belief.formations[id].node);
   for (const n of planAxis(belief, map, plan)) anchors.add(n);
@@ -108,9 +111,20 @@ export function theatreWorld(world: World, map: GameMap, catalog: Catalog, natio
     if (f.status === 'destroyed' || f.embarkedOn || f.kind === 'air_wing' || f.kind === 'surface_group' || f.kind === 'submarine' || f.kind === 'space' || f.kind === 'strategic') continue;
     if (near(f.node) || plan.formations.includes(id as FormationId)) formations[id as FormationId] = f;
   }
+  const kept = <T>(r: Record<FormationId, T>) => Object.fromEntries(Object.entries(r).filter(([id]) => id in formations)) as Record<FormationId, T>;
   const slices: Partial<World['slices']> = {};
   for (const k of THEATRE_SLICES) if (world.slices[k]) (slices as Record<string, unknown>)[k] = world.slices[k];
-  return structuredClone({ ...world, formations, slices: slices as World['slices'], pending: [], events: [], history: [] });
+  const { land, logistics } = world.slices;
+  if (land) slices.land = { ...land, baseline: kept(land.baseline), isolatedDays: kept(land.isolatedDays), airlifted: kept(land.airlifted), airheads: kept(land.airheads) };
+  // The forecast runs only logistics' supply network (theatreSupply); establishments, raisings and national ledgers stay behind.
+  if (logistics)
+    slices.logistics = {
+      networks: logistics.networks, networkOf: logistics.networkOf, seen: logistics.seen, captured: logistics.captured,
+      establishment: {}, fallen: {}, lift: {}, short: {}, raised: {}, raising: [], peaceBurn: {},
+    };
+  const nations = { ...world.nations };
+  for (const id of Object.keys(nations) as NationId[]) if (!friends.has(id)) nations[id] = { ...nations[id], stockpile: {}, bulk: { fuel: 0, ammo: 0, food: 0 } };
+  return structuredClone({ ...world, nations, formations, slices: slices as World['slices'], pending: [], events: [], history: [] });
 }
 
 /**

@@ -3,6 +3,7 @@ import { atWar } from '../src/core/engine';
 import type { Formation, MunitionId, NationId, NodeId, SimEvent } from '../src/core/types';
 import { createSession, type Session } from '../src/scenarios';
 import { canEnter } from '../src/systems/land';
+import { checkCommand } from '../src/ui/commands';
 
 /**
  * Coalition war on the real world: who fights whom, where, and who may make peace or march
@@ -58,6 +59,46 @@ describe('XP-1: armies do not march through neutral states', () => {
     expect([...transit]).toEqual([]);
     expect(atWar(world, N('TUR'), N('BGR')) || atWar(world, N('TUR'), N('MKD'))).toBe(false);
   }, 180_000);
+
+  it('Turkey at war with Greece cannot plan an offensive on ground NATO partner Bulgaria holds', () => {
+    const s = createSession('peace-2027', 1);
+    const { map, world } = s;
+    playerRuns(s, 'TUR');
+    world.pending.push({ type: 'declare_war', nation: N('TUR'), target: N('GRC'), reason: 'flank' });
+    runDays(s, 1);
+    const plovdiv = map.nodeAt(42.15, 24.75);
+    expect(world.control[plovdiv]).toBe('BGR');
+    const busy = new Set(Object.values(world.slices.ops?.byId ?? {}).flatMap((o) => o.formations));
+    const brigades = Object.values(world.formations).filter((f) => f.nation === 'TUR' && f.kind === 'maneuver' && !f.territorial && f.status === 'active' && !busy.has(f.id) && map.lon[f.node] < 30).slice(0, 6);
+    expect(brigades.length).toBeGreaterThan(0);
+    const checked = checkCommand(world, map, s.catalog, N('TUR'), { type: 'plan_operation', nation: 'TUR', kind: 'offensive', objectives: [plovdiv], formations: brigades.map((f) => f.id), launch: true });
+    expect(checked.ok).toBe(true);
+    if (checked.ok) world.pending.push({ ...checked.command, byPlayer: true } as never);
+    const results: SimEvent[] = [];
+    runDays(s, 0.25, (events) => results.push(...events.filter((e) => e.type === 'command_result' && e.command === 'plan_operation')));
+    expect(results.map((e) => e.type === 'command_result' && `${e.code} ${e.reason}`)).toEqual([expect.stringMatching(/^neutral_territory BGR holds/)]);
+  }, 120_000);
+
+  it('a sealift does not land US armour in the port of a partner that has granted no passage', () => {
+    const s = createSession('peace-2027', 1);
+    const { map, world } = s;
+    playerRuns(s, 'USA');
+    playerRuns(s, 'ISR');
+    world.pending.push({ type: 'declare_war', nation: N('USA'), target: N('IRN'), reason: 'probe' });
+    runDays(s, 1);
+    const shiraz = map.cities.find((c) => c.name === 'Shiraz')!.node;
+    const brigades = Object.values(world.formations).filter((f) => f.nation === 'USA' && f.kind === 'maneuver' && f.status === 'active' && map.owner[f.node] === 'USA' && map.lon[f.node] > -100).slice(0, 4);
+    for (const f of brigades) world.pending.push({ type: 'order', nation: N('USA'), formation: f.id, order: { posture: 'move', target: shiraz, lift: 'sea' } });
+    const ashore = new Set<string>();
+    runDays(s, 21, () => {
+      for (const f of brigades) {
+        const h = world.control[f.node];
+        if (f.status === 'active' && f.node < map.landCount && h && h !== 'USA' && !atWar(world, N('USA'), h)) ashore.add(`${f.name} on ${h}`);
+      }
+    });
+    expect(atWar(world, N('ISR'), N('IRN'))).toBe(false);
+    expect([...ashore]).toEqual([]);
+  }, 300_000);
 });
 
 describe('CD-2: treaties apply where the attack lands', () => {

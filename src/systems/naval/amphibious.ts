@@ -1,5 +1,4 @@
 import { atWar } from '../../core/engine';
-import { allied } from '../land/state';
 import type { Formation, NodeId, PlatformId } from '../../core/types';
 import type { TickEnv } from './env';
 import { geography, seaNeighbour } from './geography';
@@ -7,6 +6,8 @@ import { type Composition, ledger, liftDemand } from './state';
 import { LANDING_AIR_SUPPORT, LANDING_BASE_LOSS, LANDING_OPPOSED_LOSS, LANDING_SEA_SUPPORT, OFFLOAD_HOURS } from './tables';
 import type { Catalog } from '../../core/catalog';
 import { amphibiousFactorAt } from '../weather/effects';
+import { openTo } from '../land/state';
+import { hostsTroops } from './sealift';
 
 /** Kinds that defend a beach. */
 const GROUND_KINDS = new Set<Formation['kind']>(['maneuver', 'artillery', 'air_defense', 'missile', 'logistics']);
@@ -32,8 +33,9 @@ export function canBoard(env: TickEnv, f: Formation, lift: Formation): boolean {
 }
 
 /**
- * Lift groups that reached their objective put their troops ashore. At a friendly or
- * neutral port: administrative unload, no losses. Off any other coast: the group lies off the
+ * Lift groups that reached their objective put their troops ashore. At a port of its own, a
+ * co-belligerent's or a host's that granted passage: administrative unload, no losses. A neutral's
+ * coast takes no landing at all (land/state.ts openTo). Off any other coast: the group lies off the
  * beach for OFFLOAD_HOURS, then makes an opposed landing whose losses grow with the
  * defender/attacker ratio and shrink with own sea and air control.
  */
@@ -45,7 +47,7 @@ export function landings(env: TickEnv): void {
     // A group with every ship disabled, or sent home and back alongside, lands its troops in the friendly port it lies in.
     const troops = aboard.filter((e) => e.kind !== 'air_wing');
     const done = env.comp(lift).crippled || (lift.order.posture === 'reserve' && lift.node === lift.home && !lift.order.path?.length);
-    if (troops.length && done && !ctx.map.isSea(lift.node) && world.control[lift.node] && allied(world, lift.nation, world.control[lift.node])) {
+    if (troops.length && done && !ctx.map.isSea(lift.node) && hostsTroops(world, lift.nation, world.control[lift.node])) {
       for (const f of troops) {
         disembark(env, f, lift.node, 0);
         ctx.emit({ type: 'message', tick: world.tick, nation: f.nation, text: `${f.name} came ashore at node ${lift.node} from ${lift.name}` });
@@ -54,7 +56,9 @@ export function landings(env: TickEnv): void {
       continue;
     }
     const target = lift.order.target;
-    const landing = aboard.length > 0 && target !== undefined && !ctx.map.isSea(target) && !lift.order.path?.length && (lift.order.posture === 'attack' || lift.order.posture === 'move');
+    const holder = target === undefined ? undefined : world.control[target];
+    const landing = aboard.length > 0 && target !== undefined && !ctx.map.isSea(target) && !lift.order.path?.length && (lift.order.posture === 'attack' || lift.order.posture === 'move')
+      && (!holder || openTo(world, lift.nation, holder));
     if (!landing || lift.node !== seaNeighbour(ctx.map, target)) delete offshore[lift.id];
     if (!landing) continue;
     if (lift.node === target) {

@@ -129,18 +129,20 @@ export function NationPanel({ client, palette, playAs, objectives, onCommand, on
       <Section title="Munitions and stocks">
         {d ? (
           <>
-            <div className="stat-grid">
-              <Stat label="Ammunition incl. shells">{fmtNum(d.bulk.ammo)} t</Stat>
-              <Stat label="Fuel">{fmtNum(d.bulk.fuel)} t</Stat>
-              <Stat label="Food">{fmtNum(d.bulk.food)} t</Stat>
-            </div>
+            {d.bulk && (
+              <div className="stat-grid">
+                <Stat label="Ammunition incl. shells">{fmtNum(d.bulk.ammo)} t</Stat>
+                <Stat label="Fuel">{fmtNum(d.bulk.fuel)} t</Stat>
+                <Stat label="Food">{fmtNum(d.bulk.food)} t</Stat>
+              </div>
+            )}
             <table className="tbl" data-testid="munitions">
               <thead><tr><th>Family</th><th className="num">Depots</th><th className="num">Loaded</th><th className="num">+/mo</th></tr></thead>
               <tbody>
                 {d.munitions.map((m) => (
                   <tr key={m.group}>
                     <td>{GROUP_LABEL[m.group]}</td>
-                    <td className="num">{fmtNum(m.warehoused)}</td>
+                    <td className="num">{m.warehoused === null ? '—' : fmtNum(m.warehoused)}</td>
                     <td className="num">{fmtNum(m.loaded)}</td>
                     <td className="num muted">{m.perMonth ? fmtNum(m.perMonth) : '—'}</td>
                   </tr>

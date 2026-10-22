@@ -170,7 +170,7 @@ describe('advisor cards: the recommended button issues the command, and the answ
     const g = start('ukraine-2026', 'UKR');
     g.step(4);
     const d = g.state.focusNation!;
-    const card = advise(situation(g, { ammoPerDay: d.bulk.ammo / 21 })).find((c) => c.key.startsWith('shells|'));
+    const card = advise(situation(g, { ammoPerDay: d.bulk!.ammo / 21 })).find((c) => c.key.startsWith('shells|'));
     expect(card?.title).toBe('Artillery shells run out in 3 weeks');
     const a = approve(g, card!);
     const cmd = a.command as Extract<Command, { type: 'produce' }>;

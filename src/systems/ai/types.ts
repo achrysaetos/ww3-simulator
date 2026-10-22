@@ -22,6 +22,11 @@ export interface NuclearLadder {
   strikes?: number;
   /** Warheads launched on warning since its last answer; the next answer counts them. */
   launchedOnWarning?: number;
+  /**
+   * The leadership held its answer: the attacks it had suffered and the warheads it had deployed then. It weighs the
+   * answer again after a further attack or once its alert has mated more warheads.
+   */
+  held?: { attacks: number; deployed: number };
 }
 
 export interface AiState {
