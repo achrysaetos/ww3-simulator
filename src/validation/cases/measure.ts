@@ -34,11 +34,15 @@ export const holderAt = (run: CaseRun, lat: number, lon: number): NationId | und
 /** Area of a land cell in km2. */
 const areaKm2 = (run: CaseRun, n: number) => (2 * run.map.halfDeg[n] * 111.32) ** 2 * Math.cos((run.map.lat[n] * Math.PI) / 180);
 
-/** Share of a cell `nation` holds or has pushed across, 0..1, as the forecast `ground_km2` metric reads contest progress. */
+/**
+ * Share of a cell `nation` holds or has pushed across, 0..1. A cell it holds counts less the share an enemy has pushed
+ * back across it: a Kursk cell Russia has retaken all but a sliver of is not 1,900 km2 of Ukrainian ground.
+ */
 function progress(run: CaseRun, control: readonly NationId[], contest: Readonly<Record<number, { by: NationId; km: number }>>, nation: string, n: number): number {
-  if (control[n] === nation) return 1;
   const c = contest[n];
-  return c?.by === nation ? Math.min(1, c.km / cellDepthKm(run.map, n as NodeId)) : 0;
+  const share = c ? Math.min(1, c.km / cellDepthKm(run.map, n as NodeId)) : 0;
+  if (control[n] === nation) return c && c.by !== nation ? 1 - share : 1;
+  return c?.by === nation ? share : 0;
 }
 
 /** Ground `nation` gained, net, in km2, on land `owner` owns, counting partial advances across contested cells. */
