@@ -4,7 +4,7 @@ import { findPath } from '../../core/path';
 import type { Formation, FormationId, NationId, NodeId, World } from '../../core/types';
 import { applyLandOrder } from '../land/movement';
 import { allied } from '../land/state';
-import { awaitingLift, debarkation, deckSlots, landMass, liftMode, overseas } from '../land/strategic';
+import { awaitingLift, debarkation, deckSlots, landMass, lifted, liftMode } from '../land/strategic';
 import type { TickEnv } from './env';
 import { geography } from './geography';
 import { navalDestination, seaPath, shoreThreat } from './movement';
@@ -91,7 +91,7 @@ export function sealift(env: TickEnv): void {
     if (!nations.has(f.nation) || f.status !== 'active' || f.order.posture !== 'move' || f.order.target === undefined) continue;
     const path = f.order.path;
     if (path?.length) {
-      if (overseas(map, path[path.length - 1], f.order.target)) marching.add(`${f.nation}|${path[path.length - 1]}`);
+      if (lifted(map, path[path.length - 1], f.order)) marching.add(`${f.nation}|${path[path.length - 1]}`);
       continue;
     }
     if (!awaitingLift(map, f) || !geo.portZone.has(f.node) || liftMode(world, catalog, f) !== 'sea') continue;

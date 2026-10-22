@@ -2,6 +2,7 @@ import { chokepointsOf, type Chokepoint } from '../data/geo/chokepoints';
 import type { NationId, NodeId, Terrain } from './types';
 import { TERRAINS } from './types';
 import { RIVER_NAMES, riverCrossings } from '../data/geo/rivers';
+import { SEA_CUTS, STRAITS, type StraitRegime } from '../data/geo/straits';
 
 /** Shape of src/data/generated/world.json (built by scripts/build-data.ts). */
 export interface WorldData {
@@ -111,6 +112,8 @@ export class GameMap {
   readonly fixedLinks: { name: string; a: NodeId; b: NodeId }[];
   /** Bridges, tunnels and isthmuses that strikes can close (src/data/geo/chokepoints.ts); their state is `theater.chokepoints`. */
   readonly chokepoints: Chokepoint[];
+  /** Sea edges added across straits narrower than a zone (src/data/geo/straits.ts), with the land cell whose holder applies a regime. */
+  readonly straits: { name: string; a: NodeId; b: NodeId; regime: StraitRegime; holder?: NodeId }[];
   readonly nationIds: NationId[];
   private readonly cellIndex: SquareIndex;
   private readonly seaIndex: Map<number, number>;
@@ -175,7 +178,21 @@ export class GameMap {
       for (const j of cells.adj[i]) link(i, j);
       if (cells.coastZone[i] >= 0) link(i, L + cells.coastZone[i]);
     }
-    sea.neighbors.forEach((ns, j) => ns.forEach((k) => link(L + j, L + k)));
+    const zoneAt = (lat: number, lon: number) => {
+      const z = this.seaIndex.get(Math.floor((90 - lat) / sea.res) * seaCols + Math.floor((lon + 180) / sea.res));
+      if (z === undefined) throw new Error(`no sea zone at ${lat},${lon}`);
+      return z;
+    };
+    const cut = new Set(SEA_CUTS.flatMap(([p, q]) => {
+      const a = zoneAt(p[0], p[1]), b = zoneAt(q[0], q[1]);
+      return [a * this.size + b, b * this.size + a];
+    }));
+    sea.neighbors.forEach((ns, j) => ns.forEach((k) => cut.has((L + j) * this.size + L + k) || link(L + j, L + k)));
+    this.straits = STRAITS.map((s) => ({
+      name: s.name, a: zoneAt(...s.a) as NodeId, b: zoneAt(...s.b) as NodeId, regime: s.regime,
+      ...(s.holder ? { holder: this.nodeAt(...s.holder) } : {}),
+    }));
+    for (const s of this.straits) link(s.a, s.b);
 
     this.adjStart = new Int32Array(this.size + 1);
     for (let n = 0; n < this.size; n++) this.adjStart[n + 1] = this.adjStart[n] + lists[n].length;

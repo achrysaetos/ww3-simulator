@@ -80,7 +80,7 @@ export const india = [
   ...army.map(([name, place, lat, lon, kind]) => u(kind === 'artillery' ? 'artillery' : 'maneuver', kind.startsWith('armouredBrigade') ? 'brigade' : 'division', name, base(place, lat, lon), template[kind], { personnel: divisionPersonnel[kind] })),
   u('maneuver', 'brigade', '43rd Armoured Brigade (Arjun)', base('Jaisalmer', 26.92, 70.9), { arjun: 120, bmp2: 45, infantry_squad: 30, truck: 400 }, { personnel: 4500 }),
   u('maneuver', 'brigade', 'Armoured Corps Centre and School (reserve)', base('Ahmednagar', 19.09, 74.74), { t72: 300, bmp2: 200, truck: 300 }, { personnel: 5000, readiness: 0.5 }),
-  u('maneuver', 'division', 'Para SF and 50th Parachute Brigade', base('Agra', 27.18, 78.01), { infantry_squad: 250, truck: 200 }, { personnel: 8000, readiness: 0.9, experience: 0.6 }),
+  u('maneuver', 'division', 'Para SF and 50th Parachute Brigade', base('Agra', 27.18, 78.01), { infantry_squad: 250, truck: 200 }, { personnel: 8000, readiness: 0.9, experience: 0.6, airborne: true }),
   u('maneuver', 'division', 'Assam Rifles and Rashtriya Rifles (counter-insurgency)', base('Srinagar', 34.08, 74.8), { infantry_squad: 2500, truck: 3000 }, { personnel: 65000, readiness: 0.75, experience: 0.7 }),
   u('missile', 'brigade', 'Army BrahMos Regiments', base('Pokhran', 26.92, 71.92), { brahmos_tel: 30, truck: 120 }),
   u('artillery', 'brigade', 'Pinaka and Smerch Regiments', base('Deolali', 19.95, 73.83), { pinaka: 60, smerch: 42, m777: 145, dhanush: 60, truck: 600 }),

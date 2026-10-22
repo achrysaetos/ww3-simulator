@@ -118,7 +118,7 @@ export const USV_STRIKE: Munition = {
 /** Strike USVs a group launches at one target in a raid: one wave (2024 attacks used 5-10 boats). */
 export const USV_WAVE = 8;
 /**
- * Hours between raids by one USV group. A raid waits on a located target, weather and a night
+ * Hours between a nation's USV raids. A raid waits on a located target, weather and a night
  * approach: GUR's Group 13 struck Ivanovets on 1 Feb, Tsezar Kunikov on 14 Feb and Sergei Kotov
  * on 5 Mar 2024, two to three weeks apart.
  */
@@ -137,6 +137,9 @@ export const CREW_LOSS_SUNK = 0.3;
  */
 export const OCEAN_SURVEILLANCE: Record<string, number> = {
   USA: 1.2, CHN: 1, RUS: 0.4, FRA: 0.3, GBR: 0.25, JPN: 0.3, IND: 0.25, ISR: 0.2, DEU: 0.15, ITA: 0.15, KOR: 0.1,
+  // No satellites of its own: US, UK and commercial (Maxar, Planet, ICEYE SAR) imagery and NATO maritime patrol
+  // tracks over the Black Sea shared since 2022 cued the GUR and SBU drone-boat raids (RUSI 2023; NYT 2023-24).
+  UKR: 0.3,
 };
 
 // ------------------------------------------------------------- mines

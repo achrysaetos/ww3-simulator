@@ -1,4 +1,5 @@
 import { atWar } from '../../core/engine';
+import { allied } from '../land/state';
 import type { MunitionId, NationId } from '../../core/types';
 import { applyHits } from './combat';
 import type { TickEnv } from './env';
@@ -7,8 +8,16 @@ import { LAY_PER_HULL, MINE_DENSITY, SWEEP_PER_HULL_DAY } from './tables';
 
 /** Damage of one mine strike in Exocet equivalents. Princeton and Tripoli (1991) and Samuel B. Roberts (1988) each survived one mine; small craft do not. */
 const MINE_HIT = 1.5;
-/** MCM hulls hunt deliberately and suffer fewer strikes (Wonsan 1950 still cost four sweepers). */
-const MCM_STRIKE_FACTOR = 0.3;
+/**
+ * A minehunter works a field deliberately: it finds mines with high-frequency sonar ahead of the hull and
+ * destroys them with remote vehicles, on a glass-fibre or non-magnetic hull with a low acoustic signature,
+ * and the LCS package hunts from MH-60S helicopters and unmanned boats with no crew in the field. In
+ * 1991 some 30 coalition MCM vessels hunted the Kuwaiti fields for months and none was mined; the
+ * ships struck were Tripoli and Princeton, which were not hunting. Wonsan 1950 cost four sweepers that
+ * swept mechanically through an uncharted field (Melia, "Damn the Torpedoes", 1991; estimate).
+ */
+// param: tag=estimated range=[0.01,0.1] source=Gulf 1991 MCM operations; Melia 1991
+const MCM_STRIKE_FACTOR = 0.02;
 
 /**
  * A dived submarine passes under moored mines and below most ground mines' influence fields: the
@@ -39,7 +48,9 @@ export function mineWarfare(env: TickEnv): void {
     if (mcm && laid) {
       let capacity = mcm * SWEEP_PER_HULL_DAY * (world.dtHours / 24) * f.readiness;
       for (const layer of Object.keys(laid) as NationId[]) {
-        if (layer === f.nation || !atWar(world, layer, f.nation) || capacity <= 0) continue;
+        // Sweeping clears a sea lane, not an act of war: in 1987-88 Belgian, Dutch, British, French and Italian
+        // minehunters cleared Iran's Gulf mines without being at war with Iran (Operations Calendar and Cleaver).
+        if (layer === f.nation || allied(world, f.nation, layer) || capacity <= 0) continue;
         const swept = Math.min(laid[layer], capacity);
         laid[layer] -= swept;
         capacity -= swept;

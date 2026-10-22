@@ -82,12 +82,13 @@ describe('one player nation per game (BA-1)', () => {
 });
 
 describe('every order answers back (BB-4, BA-5)', () => {
-  it('refuses an Iskander strike on Rzeszow about 1,000 km out, an air assault without airlift and a march with no land route, and the AI keeps each unit', () => {
+  it('refuses an Iskander strike on Rzeszow about 1,000 km out, an air assault without air cover and a march with no land route, and the AI keeps each unit', () => {
     const g = play('ww3-2027', 'RUS');
     g.step();
     const cases: [Formation, Extract<Command, { type: 'order' }>['order'], CommandResult['code']][] = [
       [g.named('448th Missile Brigade'), { posture: 'strike', target: map.nodeAt(50.04, 22.0), targetClass: 'structure' }, 'out_of_range'],
-      [g.named('76th Guards Air Assault'), { posture: 'air_assault', target: map.nodeAt(56.95, 24.1) }, 'no_lift'],
+      // The transports carry an assault echelon of the division, but NATO holds the air over Riga.
+      [g.named('76th Guards Air Assault'), { posture: 'air_assault', target: map.nodeAt(56.95, 24.1) }, 'no_air_cover'],
       [g.named('47th Guards Tank Division'), { posture: 'attack', target: map.nodeAt(51.5, -0.1) }, 'no_route'],
     ];
     for (const [f, order, code] of cases) {

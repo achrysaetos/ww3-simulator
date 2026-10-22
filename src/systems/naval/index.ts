@@ -2,17 +2,19 @@ import type { SimContext, System } from '../../core/engine';
 import type { GameMap } from '../../core/map';
 import type { Formation, FormationId, MunitionId, MunitionKind, NationId, NodeId, World } from '../../core/types';
 import { estimate, SOURCE_ERROR, STALENESS } from '../intel';
+import { allied } from '../land/state';
 import { landings } from './amphibious';
 import { computeSeaControl, computeTradeBlocked } from './blockade';
 import { applyHits, fire, navalCombat, targetValue } from './combat';
 import { detect } from './detection';
-import { harbour, seaNeighbour } from './geography';
+import { geography, harbour, seaNeighbour } from './geography';
 import { reindex, tickEnv } from './env';
 import { mineWarfare } from './mines';
 import { advance } from './movement';
 import { refreshOrders } from './orders';
 import { sealift } from './sealift';
-import { isNavalFormation, ledger } from './state';
+import { compose, isNavalFormation, ledger } from './state';
+import { FOOD_TONS_PER_PERSON_DAY } from '../logistics/tables';
 import type { SalvoOutcome } from './salvo';
 import { OCEAN_SURVEILLANCE } from './tables';
 
@@ -32,8 +34,10 @@ export const navalWar: System = {
   id: 'naval',
   init(world, ctx) {
     for (const f of Object.values(world.formations)) {
-      if (!isNavalFormation(f) || ctx.map.isSea(f.node) || f.node !== f.home) continue;
-      f.node = f.home = harbour(ctx.map, f.home);
+      if (!isNavalFormation(f)) continue;
+      stores(f, compose(f, ctx.catalog).enduranceDays);
+      if (f.node !== f.home) continue;
+      f.node = f.home = ctx.map.isSea(f.home) ? berth(ctx.map, world, f.nation, f.home) : harbour(ctx.map, f.home);
     }
     world.slices.naval = {
       mines: {},
@@ -66,6 +70,36 @@ export const navalWar: System = {
     computeTradeBlocked(env);
   },
 };
+
+/** Farthest a fleet whose base coordinate fell on a sea zone looks for its own port. */
+const BERTH_SEARCH_KM = 400;
+
+/**
+ * The port a fleet whose base rounds to open water lies at: the nearest port of its own that opens onto that zone,
+ * or failing that the nearest own or allied host port within BERTH_SEARCH_KM (San Diego, Rota, Novorossiysk and Sasebo
+ * sit on coasts the 1-degree grid puts in the sea; Rota and Sasebo are host-nation bases). Ships at their pier are a port target, not a contact at sea.
+ */
+function berth(map: GameMap, world: World, nation: NationId, zone: NodeId): NodeId {
+  const geo = geography(map);
+  let best: NodeId | undefined, bestKm = BERTH_SEARCH_KM;
+  for (const p of geo.ports) {
+    const host = world.control[p.node];
+    if (!host || !allied(world, nation, host)) continue;
+    const km = map.distanceKm(p.node, zone) - (p.zone === zone ? BERTH_SEARCH_KM : 0) - (host === nation ? BERTH_SEARCH_KM : 0);
+    if (km < bestKm) { bestKm = km; best = p.node; }
+  }
+  return best ?? zone;
+}
+
+/**
+ * A ship sails with stores for its class's endurance (HULLS.enduranceDays: a carrier or SSN about 90 days,
+ * a corvette 15), not the ten days' rations a land unit carries; logistics eats them at the ration rate.
+ */
+function stores(f: Formation, days: number): void {
+  const cap = f.personnel * FOOD_TONS_PER_PERSON_DAY * days;
+  f.supply.food = f.supplyCapacity.food > 0 ? (f.supply.food / f.supplyCapacity.food) * cap : cap;
+  f.supplyCapacity.food = cap;
+}
 
 function isTrackedByOwnSide(tracks: Record<FormationId, NationId[]>, target: FormationId | undefined, nation: NationId): boolean {
   return !!target && (tracks[target]?.includes(nation) ?? false);

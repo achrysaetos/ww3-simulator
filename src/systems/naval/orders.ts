@@ -6,7 +6,7 @@ import { canBoard, liftShare, liftUsed } from './amphibious';
 import { tickEnv } from './env';
 import { navalDestination, transitPath } from './movement';
 import { isNavalFormation } from './state';
-import { INTERCEPTOR_KINDS } from './tables';
+import { ANTISHIP_KINDS, INTERCEPTOR_KINDS } from './tables';
 
 type OrderCommand = Extract<Command, { type: 'order' }>;
 
@@ -59,6 +59,11 @@ export function applyNavalOrder(world: World, cmd: OrderCommand, ctx: SimContext
   if (!isNavalFormation(f)) return refuse('wrong_role', 'not a naval formation');
 
   if (f.readiness < SEAWORTHY && order.posture !== 'reserve' && f.node === f.home) return refuse('not_ready', `${f.name} is in a shipyard availability and cannot sail`);
+  // Strike USVs raid from where they lie: the boats themselves cross to the target and expend themselves (USV_STRIKE range).
+  if (order.posture === 'attack' && order.targetFormation && launchedFromShore(ctx, f)) {
+    f.order = { ...order, path: [] };
+    return { ok: true };
+  }
   const goal = order.posture === 'reserve' ? f.home : goalNode(world, order.target, order.targetFormation);
   if (goal === undefined) {
     f.order = { ...order, path: [] };
@@ -84,8 +89,8 @@ export function boardable(room: number, share: number): boolean {
   return room > 0 && room >= MIN_LANDING_TEAM * share;
 }
 
-/** Split `share` of a formation off as a landing team; the parent keeps the rest at the port. */
-export function detach(world: World, ctx: SimContext, f: Formation, share: number): Formation {
+/** Split `share` of a formation off as a landing team (or another `echelon`); the parent keeps the rest where it is. */
+export function detach(world: World, ctx: SimContext, f: Formation, share: number, echelon = 'landing team'): Formation {
   const take = <K extends string>(r: Record<K, number>): Record<K, number> => {
     const out = {} as Record<K, number>;
     for (const [k, n] of Object.entries(r) as [K, number][]) {
@@ -100,7 +105,7 @@ export function detach(world: World, ctx: SimContext, f: Formation, share: numbe
   const team: Formation = {
     ...f,
     id: newId(world, `${f.id}-lt`),
-    name: f.name.endsWith(' landing team') ? f.name : `${f.name} landing team`,
+    name: f.name.endsWith(` ${echelon}`) ? f.name : `${f.name} ${echelon}`,
     equipment: take(f.equipment),
     damaged: {},
     magazine: take(f.magazine),
@@ -113,7 +118,7 @@ export function detach(world: World, ctx: SimContext, f: Formation, share: numbe
   f.supply = scaled(f.supply, 1 - share);
   f.supplyCapacity = scaled(f.supplyCapacity, 1 - share);
   world.formations[team.id] = team;
-  ctx.emit({ type: 'message', tick: world.tick, nation: f.nation, text: `${team.name} formed to embark (${Math.round(share * 100)}% of ${f.name})` });
+  ctx.emit({ type: 'message', tick: world.tick, nation: f.nation, text: `${team.name} formed (${Math.round(share * 100)}% of ${f.name})` });
   return team;
 }
 
@@ -142,15 +147,22 @@ const BINGO_FUEL = 0.3;
 // param: tag=estimated range=[0.3,0.7] source=judgment
 const DAMAGED_RTB = 0.5;
 
+/** A group of strike USVs only: crewless boats launched from their base against targets within their range. */
+function launchedFromShore(ctx: SimContext, f: Formation): boolean {
+  const pids = Object.keys(f.equipment) as PlatformId[];
+  return pids.length > 0 && pids.every((pid) => ctx.catalog.platform(pid).class === 'usv');
+}
+
 /** Keep escorts and hunters on their moving target, and send home groups that ran out of stores, fuel or weapons, or are mostly damaged. */
 export function refreshOrders(world: World, ctx: SimContext, f: Formation, tracked: boolean): void {
   const o = f.order;
   if (o.posture === 'reserve' && f.node !== f.home && !o.path?.length) repath(world, ctx, f, f.home);
   if (o.targetFormation && (o.posture === 'escort' || o.posture === 'attack')) {
     const t = world.formations[o.targetFormation];
-    if (t?.status === 'active' && t.node !== o.target && (o.posture === 'escort' || tracked)) repath(world, ctx, f, t.node);
+    if (t?.status === 'active' && t.node !== o.target && (o.posture === 'escort' || tracked) && !launchedFromShore(ctx, f)) repath(world, ctx, f, t.node);
   }
-  const spent = f.supply.food <= 0 || f.supply.fuel < BINGO_FUEL * f.supplyCapacity.fuel || mostlyDamaged(f);
+  // Crewless groups (strike USVs) carry no stores: no food, nothing to run out of.
+  const spent = (f.supplyCapacity.food > 0 && f.supply.food <= 0) || f.supply.fuel < BINGO_FUEL * f.supplyCapacity.fuel || mostlyDamaged(f);
   if (f.node !== f.home && o.posture !== 'reserve' && (spent || (ON_STATION.has(o.posture) && outOfWeapons(ctx, f)))) {
     o.posture = 'reserve';
     repath(world, ctx, f, f.home);
@@ -201,7 +213,11 @@ export function areaDefenseShare(ctx: SimContext, f: Formation): number {
   return full > 0 ? Math.min(1, have / full) : 1;
 }
 
-/** Attack submarines with no torpedoes or missiles left, and surface groups with their area-defence rounds spent, go home to rearm. */
+/**
+ * Attack submarines with no anti-ship weapons left (torpedoes, anti-ship missiles), and surface groups with
+ * their area-defence rounds spent, go home to rearm. Land-attack missiles left aboard do not keep a boat on a
+ * patrol line it can no longer threaten.
+ */
 function outOfWeapons(ctx: SimContext, f: Formation): boolean {
   if (f.kind === 'surface_group') return areaDefenseShare(ctx, f) < WINCHESTER;
   if (f.kind !== 'submarine') return false;
@@ -210,6 +226,7 @@ function outOfWeapons(ctx: SimContext, f: Formation): boolean {
     const p = ctx.catalog.platform(pid as PlatformId);
     if (p.class === 'ssbn') return false;
     for (const l of p.loadout) {
+      if (!ANTISHIP_KINDS.has(ctx.catalog.munition(l.munition).kind)) continue;
       classes++;
       if ((f.magazine[l.munition] ?? 0) >= 1) armed++;
     }

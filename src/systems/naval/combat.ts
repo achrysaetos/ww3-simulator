@@ -1,5 +1,7 @@
 import { atWar } from '../../core/engine';
 import type { Formation, FormationId, Munition, MunitionId, NationId, PlatformId, TargetClass } from '../../core/types';
+import { estimate } from '../intel';
+import { CURRENT_CONFIDENCE } from '../intel/view';
 import { smallCraftFactorAt } from '../weather/effects';
 import { tracked } from './detection';
 import type { TickEnv } from './env';
@@ -8,7 +10,8 @@ import { type Composition, effectiveHitsToKill, type HullStack, ledger, recordFl
 import { ANTISHIP_KINDS, CREW_LOSS_SUNK, INTERCEPTOR_KINDS, LAUNCHES_PER_HULL, SORTIES_PER_HOUR, TORPEDO_SPREAD, USV_RAID_HOURS, USV_STRIKE, USV_WAVE } from './tables';
 
 type Tracks = Map<FormationId, Set<NationId>>;
-type Queue = (target: Formation, by: NationId, hits: number[]) => void;
+/** `aimed` hits are torpedoes a boat steered at the group's worthwhile hulls (BELOW_TORPEDO). */
+type Queue = (target: Formation, by: NationId, hits: number[], aimed?: boolean) => void;
 
 /** Postures in which a group initiates fire; others only defend. */
 const ENGAGING = new Set(['attack', 'patrol', 'blockade', 'escort', 'defend', 'strike']);
@@ -45,6 +48,16 @@ const DATUM_EFFORT = 0.6;
  */
 const SCREEN_K = 0.9;
 const NUCLEAR_ATTACK: ReadonlySet<string> = new Set(['ssn', 'ssgn']);
+/**
+ * Hull classes a submarine does not spend heavyweight torpedoes on: planing craft and drones drawing under a
+ * metre, which a torpedo set to run under the keel passes beneath, and which cost less than the spread fired at
+ * them (a Mk 48 is about $4M, an IRGC fast attack craft $1-2M). Small boats are left to helicopters, aircraft and
+ * guns: Praying Mantis 1988, the Bubiyan "turkey shoot" 1991.
+ */
+const BELOW_TORPEDO: ReadonlySet<string> = new Set(['patrol', 'usv']);
+const worthTorpedoes = (c: Composition) => c.hulls.some((h) => !BELOW_TORPEDO.has(h.platform.class));
+/** A boat attacking a mixed group picks its torpedo target among the hulls worth the spread: the corvette, not the speedboats around it. */
+const torpedoTarget = (h: HullStack) => !BELOW_TORPEDO.has(h.platform.class);
 /** Decoy/evasion chance for a surface ship against one torpedo (Nixie-type towed decoys; estimate). */
 const SHIP_TORPEDO_DEFENSE = 0.15;
 
@@ -56,12 +69,12 @@ export interface Losses { sunk: Record<PlatformId, number>; damaged: Record<Plat
  * from pre-exchange strength, damage applied after, as in Hughes' model).
  */
 export function navalCombat(env: TickEnv, tracks: Tracks): void {
-  const pending = new Map<FormationId, { target: Formation; hits: number[]; by: NationId }>();
-  const queue: Queue = (target, by, hits) => {
+  const pending = new Map<FormationId, { target: Formation; hits: number[]; aimed: number[]; by: NationId }>();
+  const queue: Queue = (target, by, hits, aimed = false) => {
     if (!hits.length) return;
-    const p = pending.get(target.id);
-    if (p) p.hits.push(...hits);
-    else pending.set(target.id, { target, hits: [...hits], by });
+    let p = pending.get(target.id);
+    if (!p) pending.set(target.id, (p = { target, hits: [], aimed: [], by }));
+    (aimed ? p.aimed : p.hits).push(...hits);
   };
 
   for (const f of env.naval) {
@@ -72,7 +85,8 @@ export function navalCombat(env: TickEnv, tracks: Tracks): void {
     // Nuclear boats keep station outside a screen and sprint in to attack groups in the next zone, then clear
     // the datum (shoot and scoot). A diesel boat on its battery makes a few knots and lies in wait where it is.
     const sprint = c.hulls.every((h) => NUCLEAR_ATTACK.has(h.platform.class));
-    const target = pickTarget(env, tracks, f, (t) => (sprint || t.node === f.node) && !env.comp(t).submerged);
+    // Ships alongside in a defended harbour are out of a submarine's reach (Royal Oak at Scapa Flow 1939 is the rare exception).
+    const target = pickTarget(env, tracks, f, (t) => (sprint || t.node === f.node) && env.ctx.map.isSea(t.node) && !env.comp(t).submerged && worthTorpedoes(env.comp(t)));
     if (!target) continue;
     // Whether or not the boat is caught, its victims now know a submarine works this zone (intel 'naval' source),
     // which tells their hunters where to search; it is not a firing track.
@@ -87,7 +101,7 @@ export function navalCombat(env: TickEnv, tracks: Tracks): void {
       // A boat caught on its approach breaks off without firing.
       if (!env.ctx.rng.chance(1 - Math.exp(-screen(env, target) * quiet * SCREEN_K))) {
         const n = Math.min(Math.floor(f.magazine[torp.id]), TORPEDO_SPREAD);
-        queue(target, f.nation, fire(env, f, target, torp, n, 'ship').hits);
+        queue(target, f.nation, fire(env, f, target, torp, n, 'ship').hits, true);
       }
       if (env.ctx.rng.chance(1 - Math.exp(-DATUM_EFFORT * quiet))) prosecute(env, f, screenOf(env, target), queue);
     }
@@ -116,7 +130,7 @@ export function navalCombat(env: TickEnv, tracks: Tracks): void {
 
   for (const f of env.naval) if (ENGAGING.has(f.order.posture)) usvAttack(env, tracks, f, queue);
 
-  for (const { target, hits, by } of pending.values()) applyHits(env, target, hits, by);
+  for (const { target, hits, aimed, by } of pending.values()) applyHits(env, target, hits, by, aimed);
 }
 
 /**
@@ -148,8 +162,14 @@ function usvAttack(env: TickEnv, tracks: Tracks, f: Formation, queue: Queue): vo
   const boats = env.comp(f).hulls.filter((h) => h.platform.class === 'usv' && (h.platform.firepower.ship ?? 0) > 0);
   if (!boats.length) return;
   const { lastFired } = env.world.slices.naval;
-  if ((env.world.tick - (lastFired[f.id] ?? -Infinity)) * env.world.dtHours < USV_RAID_HOURS) return;
-  const target = pickTarget(env, tracks, f, (t) => !env.comp(t).submerged && env.ctx.map.distanceKm(f.node, t.node) <= USV_STRIKE.rangeKm, env.naval);
+  // The pace is the nation's: raids wait on one intelligence and planning cell, located targets and weather.
+  const raiders = env.naval.filter((g) => g.nation === f.nation && g.id in lastFired && env.comp(g).hulls.some((h) => h.platform.class === 'usv'));
+  const raided = Math.max(-Infinity, ...raiders.map((g) => lastFired[g.id]));
+  if ((env.world.tick - raided) * env.world.dtHours < USV_RAID_HOURS) return;
+  // A raid ordered on one target waits for that target to be located rather than spending the wave on another.
+  const ordered = f.order.targetFormation ? env.world.formations[f.order.targetFormation] : undefined;
+  const among = ordered?.status === 'active' && atWar(env.world, f.nation, ordered.nation) ? [ordered] : env.naval;
+  const target = pickTarget(env, tracks, f, (t) => !env.comp(t).submerged && env.ctx.map.distanceKm(f.node, t.node) <= USV_STRIKE.rangeKm, among, (t) => moored(env, f.nation, t));
   if (!target || smallCraftFactorAt(env.world, env.ctx.map, target.node) < 0.5) return;
   lastFired[f.id] = env.world.tick;
   let launched = 0;
@@ -169,6 +189,17 @@ function usvAttack(env: TickEnv, tracks: Tracks, f: Formation, queue: Queue): vo
   if (out.hits.length) queue(target, f.nation, [out.hits.reduce((a, h) => a + h, 0)]);
 }
 
+/**
+ * A group lying in its home port where the raider's intelligence currently places it: a fixed target that
+ * imagery and agents locate without a naval track. Ukraine's 2023-24 USV raids on Novorossiysk and Sevastopol
+ * were cued this way, not by an ocean surveillance track.
+ */
+function moored(env: TickEnv, by: NationId, t: Formation): boolean {
+  if (t.node !== t.home || t.order.path?.length || !env.world.slices.intel) return false;
+  const est = estimate(env.world, by, t.id);
+  return !!est && est.node === t.node && est.confidence >= CURRENT_CONFIDENCE;
+}
+
 /** One of the formation's boats, drawn in proportion to their numbers. */
 function attackingBoat(env: TickEnv, c: Composition): HullStack {
   let r = env.ctx.rng.next() * c.hullCount;
@@ -180,7 +211,7 @@ function attackingBoat(env: TickEnv, c: Composition): HullStack {
 function screenOf(env: TickEnv, target: Formation): Formation[] {
   const out = [target];
   for (const g of env.byNode.get(target.node) ?? [])
-    if (g !== target && g.nation === target.nation && g.order.posture === 'escort' && g.order.targetFormation === target.id) out.push(g);
+    if (g !== target && g.order.posture === 'escort' && g.order.targetFormation === target.id && !atWar(env.world, g.nation, target.nation)) out.push(g);
   return out;
 }
 
@@ -222,14 +253,15 @@ export function targetValue(env: TickEnv, t: Formation): number {
  * Most valuable tracked hostile formation the predicate allows; an ordered targetFormation wins if eligible.
  * Candidates are the groups at f's node and next door, or `among` when given.
  */
-function pickTarget(env: TickEnv, tracks: Tracks, f: Formation, ok: (t: Formation) => boolean, among?: Formation[]): Formation | undefined {
+function pickTarget(env: TickEnv, tracks: Tracks, f: Formation, ok: (t: Formation) => boolean, among?: Formation[], located?: (t: Formation) => boolean): Formation | undefined {
   const { map } = env.ctx;
+  const found = (t: Formation) => tracked(tracks, f.nation, t) || (located?.(t) ?? false);
   const ordered = f.order.targetFormation ? env.world.formations[f.order.targetFormation] : undefined;
-  if (ordered && ordered.status === 'active' && tracked(tracks, f.nation, ordered) && ok(ordered)) return ordered;
+  if (ordered && ordered.status === 'active' && atWar(env.world, f.nation, ordered.nation) && found(ordered) && ok(ordered)) return ordered;
   let best: Formation | undefined, bestValue = 0;
   const consider = (candidates: Formation[]) => {
     for (const t of candidates) {
-      if (!atWar(env.world, f.nation, t.nation) || !tracked(tracks, f.nation, t) || !ok(t)) continue;
+      if (!atWar(env.world, f.nation, t.nation) || !found(t) || !ok(t)) continue;
       const v = targetValue(env, t);
       if (v > bestValue) { bestValue = v; best = t; }
     }
@@ -335,19 +367,26 @@ export function fire(env: TickEnv, shooter: Formation | null, target: Formation,
  * goes to `damaged`. Sinking takes its crew share, its magazine share, carrier aircraft and
  * embarked troops down with it.
  */
-export function applyHits(env: TickEnv, target: Formation, hits: number[], by: NationId): Losses {
+export function applyHits(env: TickEnv, target: Formation, hits: number[], by: NationId, aimed: number[] = []): Losses {
   const { world, ctx } = env;
   const c = env.comp(target);
   const hulls: { stack: (typeof c.hulls)[number]; dmg: number }[] = [];
   for (const stack of c.hulls) for (let i = 0; i < stack.count; i++) hulls.push({ stack, dmg: 0 });
   const losses: Losses = { sunk: {}, damaged: {}, casualties: 0 };
   if (!hulls.length) return losses;
-  const totalSig = hulls.reduce((s, h) => s + h.stack.profile.signature, 0);
-  for (const w of hits) {
-    let r = ctx.rng.next() * totalSig;
-    let h = hulls[hulls.length - 1];
-    for (const x of hulls) if ((r -= x.stack.profile.signature) <= 0) { h = x; break; }
-    h.dmg += w;
+  const spread = (pool: typeof hulls, ws: number[]) => {
+    const totalSig = pool.reduce((s, h) => s + h.stack.profile.signature, 0);
+    for (const w of ws) {
+      let r = ctx.rng.next() * totalSig;
+      let h = pool[pool.length - 1];
+      for (const x of pool) if ((r -= x.stack.profile.signature) <= 0) { h = x; break; }
+      h.dmg += w;
+    }
+  };
+  spread(hulls, hits);
+  if (aimed.length) {
+    const worthy = hulls.filter((h) => torpedoTarget(h.stack));
+    spread(worthy.length ? worthy : hulls, aimed);
   }
   let liftLost = 0, deckLost = 0, aircraftCapLost = 0, aircraftCap = 0;
   for (const s of c.hulls) aircraftCap += (s.platform.capacity?.aircraft ?? 0) * s.count;

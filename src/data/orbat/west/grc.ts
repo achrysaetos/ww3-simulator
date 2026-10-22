@@ -30,7 +30,7 @@ export const grc = [
   u('79th Higher Military Command (Samos)', 'maneuver', 'brigade', base('Samos', 37.75, 26.95), ISLAND(40), { readiness: 0.7, personnel: 2500 }),
   u('80th Higher Military Command (Kos)', 'maneuver', 'brigade', base('Kos', 36.85, 27.15), ISLAND(25), { readiness: 0.7, personnel: 2000 }),
   u('88th Military Command (Lemnos)', 'maneuver', 'brigade', base('Lemnos', 39.9, 25.2), ISLAND(40), { readiness: 0.7, personnel: 2500 }),
-  u('71st Airmobile Brigade', 'maneuver', 'brigade', base('Nea Santa, Kilkis', 40.85, 22.87), { infantry_squad: 54, ah64d: 28, ch47f: 15, truck: 150 }, { ...ACTIVE, personnel: 3500 }),
+  u('71st Airmobile Brigade', 'maneuver', 'brigade', base('Nea Santa, Kilkis', 40.85, 22.87), { infantry_squad: 54, ah64d: 28, ch47f: 15, truck: 150 }, { ...ACTIVE, personnel: 3500, airborne: true }),
   u('32nd Marine Brigade', 'maneuver', 'brigade', base('Volos', 39.36, 22.94), { infantry_squad: 54, m113: 40, truck: 100 }, { ...ACTIVE, personnel: 2500 }),
   u('Army artillery (MLRS and M110)', 'artillery', 'brigade', base('Thessaloniki', 40.64, 22.94), { m270a1: 36, m110a2: 60, m109a5: 30 }, { ...ACTIVE, personnel: 3000, extraMagazine: { atacms: 40 } }),
   u('Hellenic Air Force Patriot wing', 'air_defense', 'wing', base('Tanagra', 38.34, 23.56), { patriot_pac3: 36 }, { ...ACTIVE, personnel: 1500 }),

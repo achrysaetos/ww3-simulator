@@ -41,7 +41,7 @@ export const gbr = [
   u('11th Security Force Assistance Brigade', 'maneuver', 'brigade', base('Aldershot Garrison', 51.25, -0.76), { infantry_squad: 30, foxhound: 40 }, { readiness: 0.6, personnel: 1500 }),
 
   // Global Response Force
-  u('16 Air Assault Brigade Combat Team', 'maneuver', 'brigade', colchester, { infantry_squad: 60, jackal: 30, l118: 18, truck: 200 }, { readiness: 0.85, personnel: 4500 }),
+  u('16 Air Assault Brigade Combat Team', 'maneuver', 'brigade', colchester, { infantry_squad: 60, jackal: 30, l118: 18, truck: 200 }, { readiness: 0.85, personnel: 4500, airborne: true }),
   u('3 Commando Brigade, Royal Marines', 'maneuver', 'brigade', base('Stonehouse Barracks, Plymouth', 50.37, -4.16), { infantry_squad: 72, l118: 18, truck: 200 }, { readiness: 0.85, personnel: 4000 }),
   u('1st Aviation Brigade Combat Team', 'air_wing', 'brigade', base('Wattisham Flying Station', 52.13, 0.96), { ah64e: 50, wildcat: 34 }, { readiness: 0.75, personnel: 2500 }),
   u('Joint Helicopter Command Chinook Wing', 'air_wing', 'wing', base('RAF Odiham', 51.23, -0.94), { ch47f: 60 }, ACTIVE),

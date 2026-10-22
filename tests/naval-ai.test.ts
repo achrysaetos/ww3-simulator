@@ -166,7 +166,8 @@ describe('naval AI fleet in being', () => {
     const battered = createSession('ukraine-2026', 1);
     const home = blackSeaFleet(battered)[0].home;
     recordFleetLoss(battered.world, blackSeaFleet(battered)[0], 3);
-    for (const s of [fresh, battered]) for (let i = 0; i < 4; i++) s.engine.step(s.world);
+    // Read the first plan: by the third tick Ukraine's drone boats have sunk a frigate of the fresh fleet as well.
+    for (const s of [fresh, battered]) for (let i = 0; i < 2; i++) s.engine.step(s.world);
     expect(blackSeaFleet(fresh).some((f) => f.order.target !== home)).toBe(true);
     expect(blackSeaFleet(battered).every((f) => f.order.target === home)).toBe(true);
   }, 120_000);

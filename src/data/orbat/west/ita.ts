@@ -22,7 +22,7 @@ export const ita = [
   // Divisione "Vittorio Veneto"
   u('Brigata corazzata "Ariete"', 'maneuver', 'brigade', base('Pordenone', 45.96, 12.66), add(TANK_REGT, TANK_REGT, MECH_REGT, { centauro: 30, pzh2000: 18, truck: 400 }), { ...ACTIVE, personnel: 4500 }),
   u('Brigata di cavalleria "Pozzuolo del Friuli"', 'maneuver', 'brigade', base('Gorizia', 45.94, 13.62), add(LIGHT_REGT, { centauro: 40, aav7: 30, truck: 250 }), { ...ACTIVE, personnel: 4000 }),
-  u('Brigata paracadutisti "Folgore"', 'maneuver', 'brigade', base('Livorno', 43.55, 10.31), add(LIGHT_REGT, LIGHT_REGT, LIGHT_REGT, { truck: 200 }), { readiness: 0.8, personnel: 4500 }),
+  u('Brigata paracadutisti "Folgore"', 'maneuver', 'brigade', base('Livorno', 43.55, 10.31), add(LIGHT_REGT, LIGHT_REGT, LIGHT_REGT, { truck: 200 }), { readiness: 0.8, personnel: 4500, airborne: true }),
   u('Brigata aeromobile "Friuli"', 'air_wing', 'brigade', base('Bologna', 44.49, 11.34), { a129: 40, nh90: 40, ch47f: 16 }, { ...ACTIVE, personnel: 3000 }),
 
   // Divisione "Acqui"

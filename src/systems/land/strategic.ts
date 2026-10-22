@@ -1,8 +1,9 @@
 import type { Catalog } from '../../core/catalog';
 import { atWar, type SimContext } from '../../core/engine';
 import type { GameMap } from '../../core/map';
-import type { Formation, FormationId, NationId, NodeId, PlatformClass, PlatformId, World } from '../../core/types';
+import type { Formation, FormationId, NationId, NodeId, Order, PlatformClass, PlatformId, World } from '../../core/types';
 import { geography } from '../naval/geography';
+import { airBridge, dropLoss } from './airborne';
 import { seaPath } from '../naval/movement';
 import { allied, landSlice } from './state';
 
@@ -139,10 +140,18 @@ export function liftMode(world: World, catalog: Catalog, f: Formation, lift = f.
   return lift !== 'sea' && airPortable(catalog, f) && airliftTonsPerDay(world, catalog, f.nation) > 0 ? 'air' : 'sea';
 }
 
+/**
+ * Whether a move from `from` crosses by lift: its target lies on another land mass, or the order was given a lift
+ * because no land route reached it (Vicenza to Korea runs through Russia and China).
+ */
+export function lifted(map: GameMap, from: NodeId, order: Order): boolean {
+  const { posture, target, lift } = order;
+  return posture === 'move' && target !== undefined && (overseas(map, from, target) || (lift !== undefined && from !== target));
+}
+
 /** Whether a land formation is standing at its gateway waiting for lift to `order.target`. */
 export function awaitingLift(map: GameMap, f: Formation): boolean {
-  const { posture, target, path } = f.order;
-  return f.status === 'active' && posture === 'move' && target !== undefined && !path?.length && overseas(map, f.node, target);
+  return f.status === 'active' && !f.order.path?.length && lifted(map, f.node, f.order);
 }
 
 const friendly = (world: World, nation: NationId, n: number) => {
@@ -162,7 +171,7 @@ const MARCH_KM_WEIGHT = 3;
 const SHORTLIST = 6;
 
 /**
- * Gateway on the near shore: one of the nation's own ports (or airfields) on the formation's
+ * Gateway on the near shore: a port (or airfield) of the nation or a host ally on the formation's
  * land mass, minimising the weighted march to it plus the passage on to the far-shore
  * gateway (by sea lane for ships, great circle for aircraft).
  */
@@ -172,7 +181,7 @@ export function embarkation(world: World, map: GameMap, f: Formation, target: No
   const mass = landMass(map);
   const near: { n: NodeId; km: number }[] = [];
   const consider = (n: number) => {
-    if (mass[n] !== mass[f.node] || world.control[n] !== f.nation) return;
+    if (mass[n] !== mass[f.node] || !friendly(world, f.nation, n)) return;
     near.push({ n: n as NodeId, km: MARCH_KM_WEIGHT * map.distanceKm(f.node, n as NodeId) + map.distanceKm(n as NodeId, far) });
   };
   if (mode === 'sea') for (const p of geography(map).ports) consider(p.node);
@@ -190,18 +199,53 @@ export function embarkation(world: World, map: GameMap, f: Formation, target: No
   return best;
 }
 
-/** Gateway on the far shore: the friendly, unthreatened port or airfield on the target's land mass nearest the target. */
-export function debarkation(world: World, map: GameMap, nation: NationId, target: NodeId, mode: LiftMode): NodeId | undefined {
+/**
+ * Gateway on the far shore: the friendly, unthreatened port or airfield on the target's land mass nearest the target,
+ * among those `open` passes.
+ */
+export function debarkation(world: World, map: GameMap, nation: NationId, target: NodeId, mode: LiftMode, open: (n: NodeId) => boolean = () => true): NodeId | undefined {
   const mass = landMass(map);
   let best: NodeId | undefined, bestKm = Infinity;
   const consider = (n: number) => {
-    if (mass[n] !== mass[target] || !friendly(world, nation, n) || exposed(world, map, nation, n)) return;
+    if (mass[n] !== mass[target] || !friendly(world, nation, n) || exposed(world, map, nation, n) || !open(n as NodeId)) return;
     const km = map.distanceKm(n as NodeId, target);
     if (km < bestKm) { bestKm = km; best = n as NodeId; }
   };
   if (mode === 'sea') for (const p of geography(map).ports) consider(p.node);
   else for (let n = 0; n < map.landCount; n++) if (map.airports[n]) consider(n);
   return best;
+}
+
+/**
+ * Drop loss (base loss included) over a field above which no transport stream flies into it: in practice any enemy SAM
+ * battery that reaches the field closes it (estimate: transports do not fly a daily stream through an engagement zone).
+ */
+// param: tag=judgment range=[0.02,0.1] source=judgment: no daily transport stream through an engagement zone
+const AIRLIFT_MAX_LOSS = 0.05;
+/** Runway capacity below which a field takes no strategic airlift (estimate: a C-17 needs a 1,060 m minimum operating strip; USAF RADR restores one in ~8 h). */
+// param: tag=estimated range=[0.3,0.7] source=C-17 1,060 m minimum operating strip; USAF RADR
+const MIN_RUNWAY = 0.5;
+/** Block speed of a strategic transport, km/h (C-17 cruise ~830 km/h, less climb, descent and routing; AMC planning factor ~750). */
+// param: tag=estimated range=[650,830] source=AMC planning factors; C-17 cruise ~830 km/h
+const BLOCK_KMH = 750;
+/** Hours on the ground per round trip: onload, offload, refuel and crew rest (estimate fitted so SORTIES_PER_DAY holds on the ~7,000 km CONUS-Germany route). */
+// param: tag=judgment range=[20,40] source=judgment, fitted to SORTIES_PER_DAY on CONUS-Germany
+const GROUND_HOURS = 30;
+const REFERENCE_KM = 7000;
+/**
+ * Aircraft-days a ton costs on a route, relative to the reference route SORTIES_PER_DAY describes. AMC planning factors
+ * put a CONUS to Korea C-17 cycle at about 1.5x CONUS to Germany once en-route stops are counted; the straight round
+ * trip here gives about 1.3x.
+ */
+const cycle = (km: number) => (2 * km / BLOCK_KMH + GROUND_HOURS) / (2 * REFERENCE_KM / BLOCK_KMH + GROUND_HOURS);
+
+/**
+ * Whether transports can land at a field: friendly air over it, its air defence threat light, its runway usable
+ * (CSIS 2023: no US ground reinforcement of Taiwan once the PLA denies the air).
+ */
+function airOpen(world: World, ctx: SimContext, nation: NationId, n: NodeId): boolean {
+  const { map, catalog } = ctx;
+  return (world.slices.air?.runway[n] ?? 1) >= MIN_RUNWAY && airBridge(world, map, catalog, nation, n) && dropLoss(world, map, catalog, nation, n) <= AIRLIFT_MAX_LOSS;
 }
 
 /**
@@ -226,9 +270,9 @@ export function airlift(world: World, ctx: SimContext, route: (f: Formation, to:
     queue.sort((a, b) => a.order.issuedTick - b.order.issuedTick || (a.id < b.id ? -1 : 1));
     for (const f of queue) {
       if (credit <= 0) break;
-      const dest = debarkation(world, map, nation, f.order.target!, 'air');
+      const dest = debarkation(world, map, nation, f.order.target!, 'air', (n) => airOpen(world, ctx, nation, n));
       if (dest === undefined) continue;
-      const need = airTons(catalog, f) - (flown[f.id] ?? 0);
+      const need = airTons(catalog, f) * cycle(map.distanceKm(f.node, dest)) - (flown[f.id] ?? 0);
       const lift = Math.min(credit, need);
       credit -= lift;
       flown[f.id] = (flown[f.id] ?? 0) + lift;
