@@ -229,18 +229,23 @@ function condemn(world: World, victim: NationId, aggressor: NationId, by: number
  * `by` goes to war with `on`. Treaties are called later, by the armed attacks that follow (treatyCalls). A new war
  * takes the declarer's aim (stated, or read by declaredAim) and the answering aim for its victim; a nation entering a
  * war already under way fights for that side's aim.
+ *
+ * A belligerent that attacks a new state widens its own war: the victim comes into it, against the attacker's side
+ * only (Germany into Norway in 1940, Japan on the US in 1941). Only a state at peace joins its victim's war, against
+ * that whole coalition (Italy on France and Britain in 1940). Were it the other way round, a Chinese strike on Okinawa
+ * would put China in Japan's war with Russia, at war with every NATO member fighting there.
  */
 export function declareWar(world: World, ctx: SimContext, s: DiplomacyState, by: NationId, on: NationId, reason: string, aim?: DeclaredAim): void {
   if (by === on || atWar(world, by, on)) return;
   if (!world.nations[by] || !world.nations[on]) return;
   if (world.nations[by].status === 'capitulated' || world.nations[on].status === 'capitulated') return;
-  let war = s.wars.find((w) => sideOf(w, on) !== -1 && sideOf(w, by) === -1);
+  let war = s.wars.find((w) => sideOf(w, by) !== -1 && sideOf(w, on) === -1);
   if (war) {
-    joinSide(world, ctx, s, war, by, (1 - sideOf(war, on)) as 0 | 1, reason, 'aggressor', 'declared');
+    joinSide(world, ctx, s, war, on, (1 - sideOf(war, by)) as 0 | 1, reason, 'attacked', 'attacked');
   } else {
-    war = s.wars.find((w) => sideOf(w, by) !== -1 && sideOf(w, on) === -1);
+    war = s.wars.find((w) => sideOf(w, on) !== -1 && sideOf(w, by) === -1);
     if (war) {
-      joinSide(world, ctx, s, war, on, (1 - sideOf(war, by)) as 0 | 1, reason, 'attacked', 'attacked');
+      joinSide(world, ctx, s, war, by, (1 - sideOf(war, on)) as 0 | 1, reason, 'aggressor', 'declared');
     } else {
       const declared = declaredAim(world, ctx.map, by, on, aim);
       war = {

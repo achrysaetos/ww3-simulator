@@ -53,6 +53,26 @@ describe('alliances', () => {
     expect(atWar(t.world, N('USA'), N('POL'))).toBe(false);
   });
 
+  it("a belligerent that attacks a state fighting another war brings it into its own war, not itself into that state's coalition", () => {
+    const t = testWorld([assault('RUS', 'POL'), createDiplomacy({ alliances: [NATO] })]);
+    const declare = (by: string, on: string) => {
+      t.world.pending.push({ type: 'declare_war', nation: N(by), target: N(on) });
+      t.engine.step(t.world);
+    };
+    declare('RUS', 'POL');
+    t.engine.run(t.world, days(11));
+    expect(atWar(t.world, N('RUS'), N('DEU'))).toBe(true);
+    declare('CHN', 'TWN');
+    declare('RUS', 'JPN');
+    declare('CHN', 'JPN');
+    expect(atWar(t.world, N('CHN'), N('JPN'))).toBe(true);
+    for (const n of ['POL', 'EST', 'DEU', 'USA']) expect(atWar(t.world, N('CHN'), N(n)), n).toBe(false);
+    expect(atWar(t.world, N('JPN'), N('TWN'))).toBe(false);
+
+    declare('BLR', 'POL');
+    for (const n of ['POL', 'EST', 'DEU', 'USA', 'JPN']) expect(atWar(t.world, N('BLR'), N(n)), n).toBe(true);
+  });
+
   it('does not trigger when the member is the aggressor', () => {
     const t = testWorld([assault('POL', 'RUS'), assault('RUS', 'POL'), createDiplomacy({ alliances: [NATO] })]);
     t.world.pending.push({ type: 'declare_war', nation: N('POL'), target: N('RUS') });
