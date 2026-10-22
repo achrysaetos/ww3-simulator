@@ -1,6 +1,10 @@
 import { loadMap } from '../data/load';
-import { COMMAND_DOMAINS, type Command, type FormationId, type NationId, type SimEvent } from '../core/types';
-import { describeResult, PlaceNamer, type Namer } from './events';
+import { COMMAND_DOMAINS, type Command, type FormationId, type NationId, type NodeId, type SimEvent } from '../core/types';
+import type { OperationForecast, OperationForecastInput, OperationPlan } from '../forecast/operation';
+import { FORECAST_RUNS, Forecaster, type DrawWorker } from './orders/forecaster';
+import type { OptionsResult } from './orders/options';
+import { OrderTracks } from './orders/tracks';
+import { describeResult, humanizeReason, PlaceNamer, type Namer } from './events';
 import { EventFeed } from './feed';
 import { nationName } from './placeNames';
 import { readSlot, writeSlot, type SlotInfo } from './slot';
@@ -12,6 +16,9 @@ import {
 } from './snapshot';
 
 export interface Notice { text: string; tone: 'info' | 'error'; seq: number }
+
+/** Web Workers for the staff forecast: one core stays with the simulation and one with the page. */
+const forecastWorkers = () => Math.max(1, Math.min(3, (navigator.hardwareConcurrency || 2) - 2));
 
 /**
  * Main-thread handle on the simulation worker. Holds the decoded mirror of the
@@ -48,11 +55,16 @@ export class SimClient {
    * the delegation on the first tick; empty for a loaded game.
    */
   openingDelegation: Partial<Delegation> = {};
+  /** The player's orders from sent to answered, for the map and the unit card. */
+  tracks = new OrderTracks();
   private startRole: RoleId | null = null;
   private saveTo: 'download' | 'slot' | null = null;
   private noticeSeq = 0;
   private readonly worker: Worker;
   private readonly listeners = new Set<() => void>();
+  private asked = 0;
+  private readonly waiting = new Map<number, { resolve(v: never): void; reject(e: Error): void }>();
+  private forecaster: Forecaster | null = null;
 
   constructor() {
     this.worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
@@ -92,6 +104,13 @@ export class SimClient {
       case 'closed':
         this.reset();
         break;
+      case 'options':
+        this.settle(msg.seq, msg.result);
+        return;
+      case 'forecast_input':
+        if (msg.input) this.settle(msg.seq, msg.input);
+        else this.settle(msg.seq, new Error(msg.reason ?? 'the staff cannot forecast this plan'));
+        return;
       case 'ready':
       case 'snapshot':
         if (msg.type === 'ready') {
@@ -107,6 +126,7 @@ export class SimClient {
         this.send({ type: 'ack' });
         this.record(msg.snapshot.events);
         this.answer(msg.snapshot.events);
+        this.tracks.observe(msg.snapshot.events, this.state.tick, (r) => humanizeReason(r, this.namer));
         this.desk?.observe(this.state, msg.snapshot.events, this.state.focusNation?.id === this.playing ? this.state.focusNation : undefined);
         break;
     }
@@ -146,8 +166,43 @@ export class SimClient {
     for (const e of events) {
       if (e.type !== 'command_result' || e.nation !== this.playing) continue;
       if (!e.ok) this.say(describeResult(e, this.namer), 'error');
-      else if (e.command === 'order') this.say(describeResult(e, this.namer), 'info');
+      else if (e.command === 'order' || e.operation) this.say(describeResult(e, this.namer), 'info');
     }
+  }
+
+  private settle(seq: number, value: unknown) {
+    const w = this.waiting.get(seq);
+    if (!w) return;
+    this.waiting.delete(seq);
+    if (value instanceof Error) w.reject(value);
+    else w.resolve(value as never);
+  }
+
+  private ask<T>(m: (seq: number) => ToWorker): Promise<T> {
+    const seq = ++this.asked;
+    return new Promise<T>((resolve, reject) => {
+      this.waiting.set(seq, { resolve: resolve as (v: never) => void, reject });
+      this.send(m(seq));
+    });
+  }
+
+  /** The orders `formations` can take at `node` (with none, what the staff's nearest units can), as the engine would answer them. */
+  options(formations: readonly FormationId[], node: NodeId): Promise<OptionsResult> {
+    return this.ask((seq) => ({ type: 'options', seq, formations: [...formations], node }));
+  }
+
+  /** The staff's forecast for a plan, from the player's picture of the war. */
+  async forecast(plan: OperationPlan, days: number, onProgress: (done: number, total: number) => void): Promise<OperationForecast> {
+    const input = await this.ask<OperationForecastInput>((seq) => ({ type: 'forecast', seq, plan, days }));
+    this.forecaster ??= new Forecaster(this.map, () => new Worker(new URL('./orders/forecast.worker.ts', import.meta.url), { type: 'module' }) as unknown as DrawWorker, forecastWorkers());
+    return this.forecaster.run(input, FORECAST_RUNS, onProgress);
+  }
+
+  /** Sends the player's order and follows it on the map until the engine answers. */
+  order(c: Extract<Command, { type: 'order' }>, label: string) {
+    this.tracks.sent(c.formation, label, c.order.target ?? null, this.state.tick);
+    this.command(c);
+    this.notify();
   }
 
   private say(text: string, tone: Notice['tone']) {
@@ -158,6 +213,7 @@ export class SimClient {
   private reset() {
     this.state = emptyClientState(this.map.size);
     this.feed = new EventFeed();
+    this.tracks = new OrderTracks();
     this.desk = null;
     this.formationNames.clear();
     this.namesVersion = -1;

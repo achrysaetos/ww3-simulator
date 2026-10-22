@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { Engine } from '../src/core/engine';
 import { addFormation, platformCount } from '../src/core/forces';
-import type { Formation, FormationId, MunitionId, NationId, NodeId, PlatformId, World } from '../src/core/types';
+import { COMMAND_DOMAINS, type Formation, type FormationId, type MunitionId, type NationId, type NodeId, type PlatformId, type World } from '../src/core/types';
 import { createSession, type Session } from '../src/scenarios';
 import { SYSTEMS } from '../src/systems';
 import { buildPicture } from '../src/systems/air/picture';
@@ -184,10 +184,15 @@ describe('ukraine-2026: satellite communications', () => {
   it('Russian ASAT kills on the US LEO constellation degrade Starlink-dependent Ukrainian units, not Russian ones', () => {
     const base = fork(s.world);
     base.world.pending.push({ type: 'declare_war', nation: RUS, target: USA, reason: 'test' });
+    // Held, or Russia's AI retargets the battalion and spends the first volley on the NRO imaging satellites.
+    const battalion = Object.values(base.world.formations).find((f) => f.nation === RUS && (f.equipment['nudol' as PlatformId] ?? 0) > 0)!;
+    base.world.nations[RUS].controlledBy = 'human';
+    for (const domain of COMMAND_DOMAINS) base.world.pending.push({ type: 'delegate', nation: RUS, domain, ai: true });
+    base.world.pending.push({ type: 'hold', nation: RUS, formations: [battalion.id], held: true });
     base.engine.step(base.world);
     const asat = fork(base.world), calm = fork(base.world);
     const leo = Object.values(asat.world.formations).find((f) => f.nation === USA && (f.equipment['starshield' as PlatformId] ?? 0) > 0)!;
-    const nudol = Object.values(asat.world.formations).find((f) => f.nation === RUS && (f.equipment['nudol' as PlatformId] ?? 0) > 0)!;
+    const nudol = asat.world.formations[battalion.id];
     nudol.equipment['nudol' as PlatformId] = 400;
     nudol.magazine['nudol_int' as MunitionId] = 400;
     nudol.order = { posture: 'strike', target: leo.node, targetFormation: leo.id, issuedTick: asat.world.tick };

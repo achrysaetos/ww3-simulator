@@ -63,56 +63,56 @@ The scores are printed, never asserted. Other units are changing the engine, and
 
 ## Current scores
 
-Measured on 2026-10-22 at commit 7ddb19b, which includes integration commit 6323589 (A1, B3, B4 and D3 merged). Command: `npx tsx src/cli/validate.ts --cases karabakh-2020,kursk-2024,sindoor-2025,twelve-day-war-2025,ukraine-2026-60d,baltic-2027-21d --workers 2 --json`, 8 runs per case, seeds 1-4, tagged params by Latin hypercube with sample seed 1.
+Measured on 2026-10-22 on the L1 branch, which is integration commit 2216910 plus the L1 land calibration (commits 3499151, ec2ae5e and d2dfb9d). Command: `npx tsx src/cli/validate.ts --cases karabakh-2020,kursk-2024,sindoor-2025,twelve-day-war-2025,ukraine-2026-60d,baltic-2027-21d --workers 2 --json`, 8 runs per case, seeds 1-4, tagged params by Latin hypercube with sample seed 1. The six-case run is from ec2ae5e. The `kursk-2024` rows are from a rerun of that case at d2dfb9d, which changes only that case's setup.
 
 `[T]` marks an observable the engine was tuned on. `[C]` would mark a range only combatant claims back; no question needs it yet. Brier 0.003 means all 8 runs landed in range, 0.892 means none did.
 
 | Case | Question | Observed | Model p10 / p50 / p90 | Baseline Brier | Model Brier | Beats baseline |
 | --- | --- | --- | --- | --- | --- | --- |
-| `karabakh-2020` | `cells_taken` | 1.0 | 5.0 / 5.0 / 5.0 | 0.892 | 0.892 | no |
-| `karabakh-2020` | `armenia_taken` | 0.00 | 12 / 12 / 13 | 0.003 | 0.892 | no |
-| `karabakh-2020` | `south_taken` | 1.0 | 1.0 / 1.0 / 1.0 | 0.892 | 0.003 | yes |
-| `karabakh-2020` | `stepanakert_held` | 1.0 | 0.00 / 0.00 / 0.00 | 0.003 | 0.892 | no |
-| `karabakh-2020` | `casualty_ratio` | 1.3-1.7 | 1.3 / 2.0 / 4.8 | 0.892 | 0.522 | yes |
-| `karabakh-2020` | `tank_ratio` | 3.3-4.9 | 2.7 / 5.5 / 27 | 0.892 | 0.522 | yes |
-| `karabakh-2020` | `others_join` | 0.00 | 0.00 / 0.00 / 1.0 | 0.003 | 0.077 | no |
-| `kursk-2024` | `ukr_ground_km2` | 800-1,300 | 710 / 1,959 / 3,453 | 0.892 | 0.694 | yes |
+| `karabakh-2020` | `cells_taken` | 1.0 | 0.00 / 2.5 / 5.0 | 0.892 | 0.892 | no |
+| `karabakh-2020` | `armenia_taken` | 0.00 | 0.00 / 0.00 / 0.30 | 0.003 | 0.028 | no |
+| `karabakh-2020` | `south_taken` | 1.0 | 0.00 / 0.00 / 1.0 | 0.892 | 0.373 | yes |
+| `karabakh-2020` | `stepanakert_held` | 1.0 | 0.00 / 0.00 / 1.0 | 0.003 | 0.373 | no |
+| `karabakh-2020` | `casualty_ratio` | 1.3-1.7 | 0.62 / 1.3 / 1.7 | 0.892 | 0.373 | yes |
+| `karabakh-2020` | `tank_ratio` | 3.3-4.9 | 11 / 16 / 42 | 0.892 | 0.892 | no |
+| `karabakh-2020` | `others_join` | 0.00 | 0.00 / 0.00 / 0.00 | 0.003 | 0.003 | no |
+| `kursk-2024` | `ukr_ground_km2` | 800-1,300 | 1,153 / 1,779 / 2,364 | 0.892 | 0.892 | no |
 | `kursk-2024` | `nuclear_use` [T] | 0.00 | 0.00 / 0.00 / 0.00 | 0.003 | 0.003 | no |
 | `sindoor-2025` | `territory` | 0.00 | 0.00 / 0.00 / 0.00 | 0.003 | 0.003 | no |
-| `sindoor-2025` | `land_casualties` | 0.00-300 | 5,173 / 6,541 / 10,841 | 0.003 | 0.892 | no |
-| `sindoor-2025` | `ind_aircraft_lost` | 2.0-5.0 | 0.00 / 0.00 / 0.00 | 0.892 | 0.892 | no |
-| `sindoor-2025` | `ind_strikes_land` | 1.0 or more | 0.00 / 0.00 / 1.3 | 0.892 | 0.373 | yes |
-| `sindoor-2025` | `warships_lost` | 0.00 | 15 / 16 / 16 | 0.003 | 0.892 | no |
+| `sindoor-2025` | `land_casualties` | 0.00-300 | 42 / 89 / 252 | 0.003 | 0.028 | no |
+| `sindoor-2025` | `ind_aircraft_lost` | 2.0-5.0 | 0.00 / 0.00 / 1.0 | 0.892 | 0.892 | no |
+| `sindoor-2025` | `ind_strikes_land` | 1.0 or more | 122 / 196 / 228 | 0.892 | 0.003 | yes |
+| `sindoor-2025` | `warships_lost` | 0.00 | 0.00 / 0.00 / 0.00 | 0.003 | 0.003 | no |
 | `sindoor-2025` | `nuclear_use` | 0.00 | 0.00 / 0.00 / 0.00 | 0.003 | 0.003 | no |
-| `twelve-day-war-2025` | `irn_bm_fired` [T] | 500-600 | 214 / 227 / 234 | 0.892 | 0.892 | no |
-| `twelve-day-war-2025` | `bm_intercepted` | 0.80-0.90 | 0.41 / 0.41 / 0.44 | 0.892 | 0.892 | no |
-| `twelve-day-war-2025` | `isr_aircraft_lost` | 0.00 | 3.0 / 4.5 / 7.6 | 0.003 | 0.892 | no |
-| `twelve-day-war-2025` | `usa_aircraft_lost` | 0.00 | 30 / 42 / 47 | 0.003 | 0.892 | no |
-| `twelve-day-war-2025` | `isr_civilians_killed` | 16-64 | 294 / 314 / 345 | 0.892 | 0.892 | no |
+| `twelve-day-war-2025` | `irn_bm_fired` [T] | 500-600 | 317 / 360 / 405 | 0.892 | 0.892 | no |
+| `twelve-day-war-2025` | `bm_intercepted` | 0.80-0.90 | 0.90 / 0.96 / 0.97 | 0.892 | 0.694 | yes |
+| `twelve-day-war-2025` | `isr_aircraft_lost` | 0.00 | 10 / 16 / 22 | 0.003 | 0.892 | no |
+| `twelve-day-war-2025` | `usa_aircraft_lost` | 0.00 | 0.70 / 5.0 / 16 | 0.003 | 0.694 | no |
+| `twelve-day-war-2025` | `isr_civilians_killed` | 16-64 | 15 / 22 / 80 | 0.892 | 0.077 | yes |
 | `twelve-day-war-2025` | `us_enters` [T] | 1.0 | 1.0 / 1.0 / 1.0 | 0.892 | 0.003 | yes |
 | `twelve-day-war-2025` | `others_join` | 0.00 | 0.00 / 0.00 / 0.00 | 0.003 | 0.003 | no |
-| `ukraine-2026-60d` | `rus_net_cells` [T] | 0.00-2.0 | 0.25 / 1.1 / 3.1 | 0.003 | 0.077 | no |
-| `ukraine-2026-60d` | `rus_km2_per_year` [T] | 3,500-5,000 | 47,594 / 113,790 / 227,303 | 0.892 | 0.892 | no |
-| `ukraine-2026-60d` | `rus_casualties_per_day` [T] | 500-2,000 | 791 / 1,681 / 2,251 | 0.892 | 0.077 | yes |
-| `ukraine-2026-60d` | `ukr_minus_rus_casualties` [T] | below 0 | -1,335 / -780 / -228 | 0.892 | 0.003 | yes |
-| `ukraine-2026-60d` | `rus_tanks_per_day` [T] | 2.0-8.0 | 2.1 / 7.1 / 15 | 0.892 | 0.250 | yes |
-| `ukraine-2026-60d` | `ukr_tanks_per_day` [T] | 0.50-8.0 | 2.6 / 3.6 / 4.2 | 0.892 | 0.003 | yes |
-| `ukraine-2026-60d` | `ukr_minus_rus_tanks` [T] | below 0 | -12 / -3.3 / 0.42 | 0.892 | 0.077 | yes |
+| `ukraine-2026-60d` | `rus_net_cells` [T] | 0.00-2.0 | 0.00 / 0.00 / 0.25 | 0.003 | 0.003 | no |
+| `ukraine-2026-60d` | `rus_km2_per_year` [T] | 3,500-5,000 | 7,549 / 13,173 / 18,146 | 0.892 | 0.892 | no |
+| `ukraine-2026-60d` | `rus_casualties_per_day` [T] | 500-2,000 | 1,248 / 1,564 / 1,873 | 0.892 | 0.003 | yes |
+| `ukraine-2026-60d` | `ukr_minus_rus_casualties` [T] | below 0 | -884 / -666 / -371 | 0.892 | 0.003 | yes |
+| `ukraine-2026-60d` | `rus_tanks_per_day` [T] | 2.0-8.0 | 3.1 / 4.7 / 6.7 | 0.892 | 0.003 | yes |
+| `ukraine-2026-60d` | `ukr_tanks_per_day` [T] | 0.50-8.0 | 3.7 / 4.4 / 6.3 | 0.892 | 0.003 | yes |
+| `ukraine-2026-60d` | `ukr_minus_rus_tanks` [T] | below 0 | -1.1 / -0.14 / 0.97 | 0.892 | 0.250 | yes |
 | `ukraine-2026-60d` | `capitulations` [T] | 0.00 | 0.00 / 0.00 / 0.00 | 0.003 | 0.003 | no |
-| `baltic-2027-21d` | `baltic_cells` [T] | 1.0-6.0 | 2.4 / 3.2 / 3.9 | 0.892 | 0.003 | yes |
+| `baltic-2027-21d` | `baltic_cells` [T] | 1.0-6.0 | 0.18 / 1.4 / 2.1 | 0.892 | 0.077 | yes |
 
-Of the 19 questions not tuned on, the model beats the naive baseline on 5 and ties on 7. On the other 7 the baseline wins.
+Of the 19 questions not tuned on, the model beats the naive baseline on 5 and ties on 9. On the other 5 the baseline wins.
 
 ## What the scores say
 
 Each finding is an engine result, not a harness choice. Units that own the engine should treat them as leads. None was tuned away here.
 
-- **Ground advances run 20-30 times too fast in area** (`ukraine-2026-60d`, `rus_km2_per_year`). The median run takes Ukrainian ground at 113,790 km2 a year, against 3,500-5,000 km2 in 2024-25. A default run (seed 1) after 30 days has Russia pushing into 16 Ukrainian cells at once, 7.8 km deep on average and 20-33 km deep on the busiest three. A half-degree cell is about 45 km wide, so each push stands for 45 km of front. This answers the calibration lead in A3's report: the `ground_km2` metric reads the model correctly, and the model is wrong. The 0-2 cell band misses it because a cell changes hands only when a push crosses all of it.
-- **Kursk 2024 overshoots** (`kursk-2024`). Ukraine holds or has pushed across 1,959 km2 by day 21 in the median run (p10 710, p90 3,453) against 800-1,300 km2. One run of eight took nothing. The Russian reaction is slow and the advance does not culminate.
-- **The Karabakh defence collapses everywhere** (`karabakh-2020`). Azerbaijan takes all five cells of the 1994 line in every run, Stepanakert included, and 12 cells of Armenia proper, where the real war took the south and Shusha and stopped. The engine has no war aim smaller than conquest. Turkey joins under the 2021 pact in two runs of eight. The loss ratios land near the observed ones in a quarter of the runs.
-- **A limited war cannot be represented** (`sindoor-2025`). In four days the model fights a ground war with about 6,500 casualties, sinks about 16 warships and patrol craft (mostly Pakistan's), and loses no Indian aircraft. The real crisis had 21 military dead, no naval action and two to five Indian jets lost.
-- **Iranian ballistic missiles get through four times too often** (`twelve-day-war-2025`). Israel and its partners shoot down 41% of Iran's ballistic missiles, against 80-90%. The model also loses 4-5 Israeli and about 40 US crewed aircraft where none were lost, and kills about 310 Israeli civilians against 32. Iran fires 227 ballistic missiles in 12 days against about 550, even though the salvo rules cite the 550; the order of battle has Iran's war losses removed already.
-- **The tuned bands hold over the ensemble, but with wide tails.** Every converted band passes at the median. The tails show what single seeds hid: Russian tank losses run 2.1-15 a day (p10-p90) against a 2-8 band, and Russian casualties reach 2,251 a day at p90 against a 2,000 ceiling.
+- **Ground advances still run about three times too fast in area** (`ukraine-2026-60d`, `rus_km2_per_year`). The median run takes Ukrainian ground at 13,173 km2 a year (p10 7,549, p90 18,146), against 3,500-5,000 km2 in 2024-25. On integration 2216910 the median was 21,035 (p10 8,119, p90 31,446). Most of that drop came from a setup bug: 41 Ukrainian formations started inside Russian-held cells, so the line they should have held was a token garrison. The rest of the gap is Ukraine's land AI, which stops sending reinforcements to a sector once the sector's total is met, even when single cells stay far short of it. See [Calibration](calibration.md#l1-the-ground-war-starts-on-the-right-side-of-the-line).
+- **Kursk 2024 overshoots** (`kursk-2024`). Ukraine holds or has pushed across 1,779 km2 by day 21 in the median run (p10 1,153, p90 2,364) against 800-1,300 km2. On 2216910 it was 1,920 (p10 983, p90 3,674). The spread narrowed because the case no longer lets Ukraine's land AI attack across the rest of the border. The advance itself still does not culminate early enough.
+- **The Karabakh line holds too well, and Azerbaijan loses too few tanks** (`karabakh-2020`). Azerbaijan takes 0-5 cells of the 1994 line (median 2.5) and none of Armenia proper. The real war took the south and Shusha. Stepanakert falls in most runs. With the Artsakh army's own armour added, the casualty ratio lands in the observed range at the median (1.3 against 1.3-1.7). The tank ratio is now 16 against 4.1. In seed 1, Armenia loses 149 tanks against Oryx's 255, and Azerbaijan loses 8 against Oryx's 62. The tank ratio on 2216910 (6.7) was nearer the record only because Armenia had too few tanks to lose (62 lost, against 12 Azerbaijani).
+- **India loses no aircraft in a limited war** (`sindoor-2025`). The four-day ground war now stays within the casualty range (median 89), and no warships are lost. India loses no aircraft, where it lost two to five.
+- **The Twelve-Day War loses too many aircraft and fires too few missiles** (`twelve-day-war-2025`). Interception now runs 90-97%, just above the 80-90% range. The model loses 10-22 Israeli crewed aircraft where none were lost, and Iran fires about 360 ballistic missiles against about 550.
+- **The tuned bands hold at the median.** Russian tank losses run 3.1-6.7 a day (p10-p90), inside the 2-8 band. Russian casualties run 1,248-1,873 a day, inside 500-2,000. The `rus_km2_per_year` band is the one tuned band the ensemble misses.
 
 ## False precision
 

@@ -5,7 +5,7 @@
  */
 import type { Catalog } from '../core/catalog';
 import type { GameMap } from '../core/map';
-import { COMMAND_DOMAINS, TARGET_CLASSES, type Command, type CommandDomain, type FormationId, type ItemId, type MunitionId, type NationId, type NodeId, type Order, type TargetClass, type World } from '../core/types';
+import { COMMAND_DOMAINS, OPERATION_KINDS, TARGET_CLASSES, type Command, type CommandDomain, type FormationId, type ItemId, type MunitionId, type NationId, type NodeId, type OperationId, type Order, type TargetClass, type World } from '../core/types';
 import { CURRENT_CONFIDENCE, viewOf } from '../systems/intel/view';
 import { POSTURES } from './snapshot';
 
@@ -24,6 +24,11 @@ const oneOf = <T extends string>(v: unknown, options: readonly T[], what: string
 
 /** Largest monthly production order the boundary passes on; the economy caps real lines far below this. */
 export const MAX_ORDER_PER_MONTH = 1_000_000;
+/** Sizes the boundary passes for an operation; the ops system holds plans to its own, tighter limits. */
+const MAX_OBJECTIVES = 8;
+const MAX_AXIS = 64;
+const MAX_OP_FORMATIONS = 64;
+const MAX_LEAD_DAYS = 90;
 
 export function checkCommand(world: World, map: GameMap, catalog: Catalog, player: NationId, raw: unknown): Checked {
   try {
@@ -50,6 +55,14 @@ function parse(world: World, map: GameMap, catalog: Catalog, player: NationId, r
     const f = world.formations[id];
     if (!f) fail(`unknown formation ${id}`);
     if (f.nation !== nation) fail(`${f.name} is not yours`);
+    return id;
+  };
+  const list = (v: unknown, what: string, max: number): unknown[] => (Array.isArray(v) && v.length > 0 && v.length <= max ? v : fail(`${what}: give 1 to ${max}`));
+  const nodes = (v: unknown, what: string, max: number): NodeId[] => list(v, what, max).map((n) => Math.floor(node(n, what)) as NodeId);
+  // Another nation's operation gets the same answer as one that does not exist, so a refusal never confirms one.
+  const operation = (v: unknown): OperationId => {
+    const id = str(v, 'operation') as OperationId;
+    if (world.slices.ops?.byId[id]?.nation !== nation) fail('no such operation');
     return id;
   };
 
@@ -105,6 +118,39 @@ function parse(world: World, map: GameMap, catalog: Catalog, player: NationId, r
     }
     case 'answer_treaty':
       return { type: 'answer_treaty', nation, war: str(raw.war, 'war'), treaty: str(raw.treaty, 'treaty'), join: bool(raw.join, 'join') };
+    case 'grant_access':
+      return { type: 'grant_access', nation, target: other(raw.target), on: bool(raw.on, 'on') };
+    case 'set_aid':
+      return { type: 'set_aid', nation, target: other(raw.target), on: bool(raw.on, 'on') };
+    case 'plan_operation': {
+      const cmd: Extract<Command, { type: 'plan_operation' }> = {
+        type: 'plan_operation', nation, kind: oneOf(raw.kind, OPERATION_KINDS, 'kind of operation'),
+        objectives: nodes(raw.objectives, 'objectives', MAX_OBJECTIVES), formations: list(raw.formations, 'formations', MAX_OP_FORMATIONS).map(own),
+      };
+      if (raw.axis !== undefined) cmd.axis = nodes(raw.axis, 'axis', MAX_AXIS);
+      if (raw.name !== undefined) cmd.name = str(raw.name, 'name');
+      if (raw.hHour !== undefined) cmd.hHour = Math.floor(num(raw.hHour, 'H-hour', world.tick, world.tick + (MAX_LEAD_DAYS * 24) / world.dtHours));
+      if (raw.launch !== undefined) {
+        if (raw.launch !== true) fail('launch must be true when given');
+        cmd.launch = true;
+      }
+      return cmd;
+    }
+    case 'launch_operation': {
+      const cmd: Extract<Command, { type: 'launch_operation' }> = { type: 'launch_operation', nation, operation: operation(raw.operation) };
+      if (raw.hHour !== undefined) cmd.hHour = Math.floor(num(raw.hHour, 'H-hour', world.tick, world.tick + (MAX_LEAD_DAYS * 24) / world.dtHours));
+      return cmd;
+    }
+    case 'cancel_operation':
+      return { type: 'cancel_operation', nation, operation: operation(raw.operation) };
+    case 'adjust_operation': {
+      const cmd: Extract<Command, { type: 'adjust_operation' }> = { type: 'adjust_operation', nation, operation: operation(raw.operation) };
+      if (raw.objectives !== undefined) cmd.objectives = nodes(raw.objectives, 'objectives', MAX_OBJECTIVES);
+      if (raw.axis !== undefined) cmd.axis = nodes(raw.axis, 'axis', MAX_AXIS);
+      if (raw.formations !== undefined) cmd.formations = list(raw.formations, 'formations', MAX_OP_FORMATIONS).map(own);
+      if (raw.hHour !== undefined) cmd.hHour = Math.floor(num(raw.hHour, 'H-hour', world.tick, world.tick + (MAX_LEAD_DAYS * 24) / world.dtHours));
+      return cmd;
+    }
     default:
       return fail(`unknown command type ${String(raw.type)}`);
   }

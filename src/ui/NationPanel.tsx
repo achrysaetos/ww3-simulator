@@ -65,6 +65,10 @@ export function NationPanel({ client, palette, playAs, objectives, onCommand, on
   const sanctioned = target !== '' && sanctions.includes(target);
   const myOffer = target !== '' && !!d?.peaceOffers.some((o) => o.from === n.id && o.to === target);
   const theirOffer = target !== '' && !!d?.peaceOffers.some((o) => o.from === target && o.to === n.id);
+  const letsIn = target !== '' && !!d?.access.includes(target);
+  const letsUsIn = target !== '' && !!d?.accessFrom.includes(target);
+  const aiding = target !== '' && !!d?.aid.includes(target);
+  const targetAtWar = target !== '' && client.state.wars.some(([a, b]) => a === target || b === target);
   const mobTarget = d?.mobilizationTarget ?? null;
   const mob = mobDraft ?? mobTarget ?? n.mobilization;
 
@@ -201,6 +205,25 @@ export function NationPanel({ client, palette, playAs, objectives, onCommand, on
           <button disabled={!target || !atWarWithTarget || myOffer} onClick={() => target && onCommand({ type: 'offer_peace', nation: n.id, target }, `Peace offered to ${name(target)}`)} data-testid="offer-peace">{myOffer ? 'Offer pending' : theirOffer ? 'Accept peace' : 'Offer peace'}</button>
           <button disabled={!target || atWarWithTarget} onClick={() => target && onCommand({ type: 'sanction', nation: n.id, target, on: !sanctioned }, `${sanctioned ? 'Sanctions lifted on' : 'Sanctions imposed on'} ${name(target)}`)} data-testid="sanction">{sanctioned ? 'Lift sanctions' : 'Sanction'}</button>
         </div>
+        <div className="row gap">
+          <button
+            disabled={!target || (atWarWithTarget && !letsIn)}
+            title={target ? (letsIn ? `Close your land to ${name(target)}'s troops` : `Let ${name(target)}'s troops cross your land`) : undefined}
+            onClick={() => target && onCommand({ type: 'grant_access', nation: n.id, target, on: !letsIn }, letsIn ? `Your land is closed to ${name(target)}'s troops` : `${name(target)}'s troops may now cross your land`)}
+            data-testid="grant-access"
+          >{letsIn ? 'Close borders' : 'Grant passage'}</button>
+          <button
+            disabled={!target || atWarWithTarget || (!aiding && !targetAtWar)}
+            title={target && !aiding && !targetAtWar ? `${name(target)} is not at war: there is nothing to aid it in` : undefined}
+            onClick={() => target && onCommand({ type: 'set_aid', nation: n.id, target, on: !aiding }, aiding ? `Aid to ${name(target)} stopped` : `Your air defence now covers ${name(target)}`)}
+            data-testid="set-aid"
+          >{aiding ? 'Stop aid' : 'Give aid'}</button>
+        </div>
+        {target && (letsIn || letsUsIn || aiding) && (
+          <p className="small muted" data-testid="access-status">
+            {[letsIn && `${name(target)}'s troops may cross your land.`, letsUsIn && `${name(target)} lets your troops cross its land.`, aiding && `Your air defence covers ${name(target)}, short of joining its war.`].filter(Boolean).join(' ')}
+          </p>
+        )}
         {target && myOffer && <p className="small tt-warn" data-testid="peace-status">{name(target)} has not accepted your offer. It stays on the table; they may take it if the war turns against them.</p>}
         {target && theirOffer && <p className="small tt-hint">{name(target)} has offered peace. Accepting ends the war on current lines.</p>}
         {target && sanctioned && <p className="small muted">Sanctions in force: most trade between you stops, a share leaks through third countries.</p>}

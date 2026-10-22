@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { FormationId, NationId, NodeId, SimEvent } from '../src/core/types';
+import { createSession } from '../src/scenarios';
 import { id, testWorld } from '../src/testkit';
 import { nationColor, Palette } from '../src/ui/colors';
 import { applySnapshot, emptyClientState, nationCards, NO_NATION, SnapshotEncoder } from '../src/ui/snapshot';
@@ -68,6 +69,37 @@ describe('snapshot codec', () => {
     expect(grown.roster).toBeUndefined();
     expect(grown.rosterAdd?.map((r) => r.name)).toEqual(['Bravo']);
     expect(s.client.formations.map((f) => [f.entry.name, f.target])).toEqual([['Alpha', s.nodeAt(53.9, 27.6)], ['Bravo', null]]);
+  });
+
+  it('decodes a running war from per-tick diffs exactly as from whole snapshots, and keeps the AI answers in the worker', () => {
+    const s = createSession('ukraine-2026', 1);
+    s.world.nations[id.nation('UKR')].controlledBy = 'human';
+    const cards = new Map(nationCards(s.map, {}).map((c) => [c.id, c]));
+    const enc = new SnapshotEncoder(s.map.nationIds, s.catalog, s.map.size);
+    // A twin that forgets what it sent, so every snapshot it makes is whole; it shares the first-seen strengths.
+    const twin = new SnapshotEncoder(s.map.nationIds, s.catalog, s.map.size);
+    const viaDiffs = emptyClientState(s.map.size);
+    applySnapshot(viaDiffs, enc.encode(s.world, s.map), s.map.nationIds, cards);
+    twin.encode(s.world, s.map);
+    const diffed = new Set<string>();
+    let aiAnswers = 0;
+    for (let t = 0; t < 6; t++) {
+      const events = s.engine.step(s.world);
+      aiAnswers += events.filter((e) => e.type === 'command_result' && !e.byPlayer).length;
+      enc.collect(events);
+      const snap = enc.encode(s.world, s.map);
+      for (const k of Object.keys(snap.diff ?? {})) diffed.add(k);
+      expect(snap.events.filter((e) => e.type === 'command_result' && !e.byPlayer)).toEqual([]);
+      applySnapshot(viaDiffs, snap, s.map.nationIds, cards);
+      const whole = emptyClientState(s.map.size);
+      Reflect.set(twin, 'lastPacked', {});
+      Reflect.set(twin, 'lastIds', []);
+      applySnapshot(whole, twin.encode(s.world, s.map), s.map.nationIds, cards);
+      expect(viaDiffs.formations).toEqual(whole.formations);
+      expect(viaDiffs.nations).toEqual(whole.nations);
+    }
+    expect(aiAnswers).toBeGreaterThan(0);
+    expect([...diffed]).toEqual(expect.arrayContaining(['fNode', 'fStrength', 'nations']));
   });
 
   it('delivers buffered events once, capped with a dropped count', () => {

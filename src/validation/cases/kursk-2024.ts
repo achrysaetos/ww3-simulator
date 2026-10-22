@@ -54,7 +54,9 @@ export const kursk2024: ValidationCase = {
       order: { posture: 'attack', target: map.nodeAt(AXES[i % 2].lat, AXES[i % 2].lon) },
       byPlayer: true,
     }));
-    world.pending.push(...orders);
+    // Ukraine committed the Kursk grouping and widened the incursion nowhere else on the border in these three weeks (ISW,
+    // August 2024; the Tetkino probe came in September), so no delegate sends other ground forces across.
+    world.pending.push(...orders, { type: 'delegate', nation: UKR, domain: 'land', ai: false });
     return s;
   },
   questions: [

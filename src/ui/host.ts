@@ -1,12 +1,14 @@
-import type { Command, CommandResult, FormationId, NationId, SimEvent, World } from '../core/types';
+import type { Command, CommandResult, FormationId, NationId, NodeId, SimEvent, World } from '../core/types';
 import { loadMap } from '../data/load';
 import { profiles } from '../data/nations';
 import { createSession, SCENARIOS } from '../scenarios';
 import { resumeRun, saveRun, type ResumedSession } from '../scenarios/save';
-import { authority } from '../systems/orders';
+import { authority, isOperationCommand } from '../systems/orders';
 import { checkCommand } from './commands';
 import { COMMAND_LABEL } from './events';
 import { Pacer } from './pacer';
+import { forecastInput } from '../forecast/operation';
+import { orderOptions } from './orders/options';
 import { delegateCommands, roleById } from './staff/roles';
 import { nationCards, sessionMeta, SnapshotEncoder, type FromWorker, type ScenarioCard, type ToWorker } from './snapshot';
 
@@ -17,6 +19,11 @@ export const SCENARIO_CARDS: ScenarioCard[] = SCENARIOS.map((s) => {
   const wars = s.opening.flatMap((m): [NationId, NationId][] => (m.type === 'declare_war' ? [[m.nation, m.target]] : []));
   return { id: s.id, name: s.name, summary: s.summary, startDate: s.startDate, suggestedNation: s.suggestedNation as NationId, belligerents: [...belligerents], wars };
 });
+
+/** Most formations one radial menu works out orders for. */
+const MAX_SELECTION = 24;
+/** Longest forecast the staff runs: two weeks covers an operation's first bounds (A2b's checks use 7 days). */
+export const MAX_FORECAST_DAYS = 14;
 
 const setPlayer = (world: World, nation: NationId) => {
   for (const n of Object.values(world.nations)) n.controlledBy = n.id === nation ? 'human' : 'ai';
@@ -103,7 +110,30 @@ export class SimHost {
         this.focus = { nation: msg.nation, formation: msg.formation };
         this.send();
         return;
+      case 'options': {
+        const { session, player } = this;
+        if (!session || !player || !Number.isInteger(msg.node) || msg.node < 0 || msg.node >= session.map.size || !Array.isArray(msg.formations)) return;
+        const own = msg.formations.filter((id): id is FormationId => typeof id === 'string' && session.world.formations[id as FormationId]?.nation === player).slice(0, MAX_SELECTION);
+        this.post({ type: 'options', seq: msg.seq, tick: session.world.tick, result: orderOptions(session.world, session.engine, player, own, msg.node as NodeId) });
+        return;
+      }
+      case 'forecast':
+        return this.forecast(msg.seq, msg.plan, msg.days);
     }
+  }
+
+  /** The plan, checked at the command boundary like any order, cut into the forecast's input from the player's beliefs. */
+  private forecast(seq: number, raw: unknown, days: unknown): void {
+    const { session, player } = this;
+    if (!session || !player) return;
+    const checked = checkCommand(session.world, session.map, session.catalog, player, { ...(typeof raw === 'object' && raw ? raw : {}), type: 'plan_operation' });
+    if (!checked.ok || checked.command.type !== 'plan_operation') {
+      this.post({ type: 'forecast_input', seq, input: null, reason: checked.ok ? 'not a plan' : checked.reason });
+      return;
+    }
+    const { type: _t, launch: _l, hHour: _h, byPlayer: _b, ...plan } = checked.command;
+    const span = typeof days === 'number' && Number.isInteger(days) ? Math.max(1, Math.min(MAX_FORECAST_DAYS, days)) : MAX_FORECAST_DAYS;
+    this.post({ type: 'forecast_input', seq, input: forecastInput(session.world, session.map, session.catalog, plan, span) });
   }
 
   /** Queue the player's command, or answer at once with the boundary's refusal. */
@@ -113,7 +143,8 @@ export class SimHost {
     const { world } = session;
     const checked = checkCommand(world, session.map, session.catalog, player, raw);
     if (checked.ok) {
-      world.pending.push(checked.command.type === 'order' ? { ...checked.command, byPlayer: true } : checked.command);
+      const c = checked.command;
+      world.pending.push(c.type === 'order' || isOperationCommand(c) ? { ...c, byPlayer: true } : c);
       return;
     }
     const r = (typeof raw === 'object' && raw !== null ? raw : {}) as Record<string, unknown>;
