@@ -1,4 +1,5 @@
-import type { NationId } from '../../core/types';
+import { personnelOf, supplyCapacityOf } from '../../core/forces';
+import type { NationId, PlatformId } from '../../core/types';
 import type { CaseRun, ValidationCase } from '../types';
 import { battleLosses, holderAt, joiners, ratio } from './measure';
 import { formationNamed, occupy, sessionOn, station } from './setup';
@@ -22,6 +23,13 @@ const DEFENDERS: [name: string, lat: number, lon: number][] = [
   ['5th Army Corps', 40.2, 46.75], // Martakert and the Aghdam front
   ['4th Army Corps', 40.2, 46.25], // Kalbajar
 ];
+
+/**
+ * The Artsakh Defence Army's heavy equipment, which the 2025 Armenian corps above lack: 186 tanks, 68 armoured vehicles
+ * and 98 guns over 122 mm (DeRouen and Heo 2007, p. 151; Schmidt 2009, p. 12, via Wikipedia "Artsakh Defence Army").
+ * Oryx confirmed 255 Armenian tanks lost in 2020, more than the corps' 80 alone could lose. Shared evenly over the corps.
+ */
+const ARTSAKH_KIT = { t72m1: 186, bmp1: 68, d30: 98 };
 
 const ARM = 'ARM' as NationId, AZE = 'AZE' as NationId;
 
@@ -47,7 +55,15 @@ export const karabakh2020: ValidationCase = {
     const s = sessionOn('peace-2027', seed, '2020-09-27T00:00:00Z');
     const { world, map } = s;
     occupy(world, map, ARM, AZE, HELD_1994);
-    for (const [name, lat, lon] of DEFENDERS) station(world, map, ARM, name, lat, lon).entrenchment = 1;
+    for (const [name, lat, lon] of DEFENDERS) {
+      const f = station(world, map, ARM, name, lat, lon);
+      f.entrenchment = 1;
+      const kit = Object.fromEntries(Object.entries(ARTSAKH_KIT).map(([pid, n]) => [pid, Math.round(n / DEFENDERS.length)])) as Record<PlatformId, number>;
+      for (const [pid, n] of Object.entries(kit) as [PlatformId, number][]) f.equipment[pid] = (f.equipment[pid] ?? 0) + n;
+      f.personnel += personnelOf(s.catalog, kit);
+      f.supplyCapacity = supplyCapacityOf(s.catalog, f.equipment);
+      f.supply = { ...f.supplyCapacity };
+    }
     // Azerbaijan's present-day Shusha garrison stands on the 2020 eastern front instead, at Barda.
     formationNamed(world, AZE, 'Karabakh Garrison (Shusha, Khankendi)').node = map.nodeAt(40.37, 47.13);
     // Armenia under martial law from the first day, its reservists barred from leaving on 28 Sep; Azerbaijan's partial mobilisation decree, 28 Sep (the Wikipedia article above).
