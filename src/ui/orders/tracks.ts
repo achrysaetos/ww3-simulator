@@ -34,15 +34,15 @@ export class OrderTracks {
     this.version++;
   }
 
-  /** Takes in a snapshot's answers to the player's orders, and lets old answers fade. */
-  observe(events: readonly SimEvent[], tick: number): void {
+  /** Takes in a snapshot's answers to the player's orders, and lets old answers fade. `words` puts the engine's reasons in the player's words. */
+  observe(events: readonly SimEvent[], tick: number, words: (reason: string) => string = (r) => r): void {
     for (const e of events) {
       if (e.type !== 'command_result' || e.command !== 'order' || !e.formation || !e.byPlayer) continue;
       const t = this.byFormation.get(e.formation);
       if (!t || e.tick < t.sentTick) continue;
       t.answeredTick = e.tick;
-      if (!e.ok) Object.assign(t, { state: 'refused', reason: e.reason, etaHours: null });
-      else Object.assign(t, { state: e.code === 'relayed' ? 'relayed' : 'accepted', etaHours: e.etaHours ?? null, reason: e.note ?? null });
+      if (!e.ok) Object.assign(t, { state: 'refused', reason: words(e.reason), etaHours: null });
+      else Object.assign(t, { state: e.code === 'relayed' ? 'relayed' : 'accepted', etaHours: e.etaHours ?? null, reason: e.note ? words(e.note) : null });
       this.version++;
     }
     for (const [id, t] of this.byFormation) {

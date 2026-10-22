@@ -89,7 +89,7 @@ export function PlanPanel({ planning, op, units, from, objective, via, dayOf, on
             </button>
           ))}
           {units.length > KIND_SHOWN && <span className="ww-plan-more ww-mono">+{units.length - KIND_SHOWN}</span>}
-          {!running && <span className="ww-plan-hint">Shift-click units to add them</span>}
+          {!running && <span className="ww-plan-hint">Click your units on the map to add or drop them</span>}
         </div>
       </div>
       <div className="ww-plan-col ww-plan-staff">
@@ -112,7 +112,7 @@ export function PlanPanel({ planning, op, units, from, objective, via, dayOf, on
           </>
         ) : (
           <>
-            <button type="button" className="ww-btn gold ww-plan-launch" disabled={!ready} onClick={onLaunch} data-testid="plan-launch">Launch <span className="ww-kbd">Enter</span></button>
+            <button type="button" className="ww-btn gold ww-plan-launch" disabled={!ready} onClick={onLaunch} data-testid="plan-launch">Launch <span className="ww-kbd" aria-label="Enter">↵</span></button>
             <button type="button" className="ww-btn" onClick={onRedraw} data-testid="plan-adjust">Redraw <span className="ww-kbd">R</span></button>
             {!op && <button type="button" className="ww-btn ghost" disabled={!ready} onClick={onSave} data-testid="plan-save">Save draft</button>}
             {op?.phase === 'draft' && <button type="button" className="ww-btn ghost" onClick={onCancelOperation} data-testid="plan-cancel-op">Scrap it</button>}

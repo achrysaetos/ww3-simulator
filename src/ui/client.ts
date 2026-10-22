@@ -4,7 +4,7 @@ import type { OperationForecast, OperationForecastInput, OperationPlan } from '.
 import { FORECAST_RUNS, Forecaster, type DrawWorker } from './orders/forecaster';
 import type { OptionsResult } from './orders/options';
 import { OrderTracks } from './orders/tracks';
-import { describeResult, PlaceNamer, type Namer } from './events';
+import { describeResult, humanizeReason, PlaceNamer, type Namer } from './events';
 import { EventFeed } from './feed';
 import { nationName } from './placeNames';
 import { readSlot, writeSlot, type SlotInfo } from './slot';
@@ -126,7 +126,7 @@ export class SimClient {
         this.send({ type: 'ack' });
         this.record(msg.snapshot.events);
         this.answer(msg.snapshot.events);
-        this.tracks.observe(msg.snapshot.events, this.state.tick);
+        this.tracks.observe(msg.snapshot.events, this.state.tick, (r) => humanizeReason(r, this.namer));
         this.desk?.observe(this.state, msg.snapshot.events, this.state.focusNation?.id === this.playing ? this.state.focusNation : undefined);
         break;
     }

@@ -1,17 +1,18 @@
 /**
- * The Operations panel's rows, read from the player's own formations and the cells an enemy is
- * pushing into: offensives under way, stretches of front under pressure, and the biggest sector
- * held. The engine has no operation object yet (battle plans need an objective order), so an
- * operation here is a group of the player's units sharing an order and an area.
+ * The Operations panel's rows: the player's battle plans as the engine runs them, then what the
+ * player's own formations and the enemy are doing outside them: units attacking on their own
+ * orders, stretches of front under pressure, and the biggest sector held.
  */
 import type { GameMap } from '../../core/map';
-import type { FormationId, FormationKind, NationId, NodeId } from '../../core/types';
-import type { PlaceNamer } from '../events';
+import type { FormationId, FormationKind, NationId, NodeId, Operation as Planned, OperationId } from '../../core/types';
+import { namePlaces, type PlaceNamer } from '../events';
 import type { FormationView } from '../snapshot';
 
 export interface Operation {
   key: string;
-  kind: 'offensive' | 'pressure' | 'holding';
+  kind: 'planned' | 'offensive' | 'pressure' | 'holding';
+  /** The engine's operation, for a planned row. */
+  op?: OperationId;
   name: string;
   detail: string;
   status: { label: string; tone: 'gold' | 'blue' | 'red' };
@@ -28,6 +29,9 @@ export interface OperationsInput {
   control: Uint16Array;
   contest: Float32Array;
   formations: readonly FormationView[];
+  /** The player's operations as the engine holds them (ops/state.ts). */
+  planned: readonly Planned[];
+  tick: number;
   enemies: readonly NationId[];
   places: PlaceNamer;
   /** Who commands a formation: the player, the AI staff, or nobody yet. */
@@ -37,6 +41,12 @@ export interface OperationsInput {
 const LINE: ReadonlySet<FormationKind> = new Set(['maneuver', 'artillery']);
 const CODEWORDS = ['Zenith', 'Tempest', 'Anvil', 'Granite', 'Lancer', 'Bastion', 'Thunder', 'Sabre', 'Citadel', 'Meridian', 'Trident', 'Halberd', 'Aurora', 'Ironside', 'Kestrel', 'Rampart'];
 const MAX_ROWS = 4;
+/** An ended operation stays on the panel this many ticks, so its outcome is seen. */
+const ENDED_TICKS = 8;
+const PHASE: Record<Planned['phase'], Operation['status']> = {
+  draft: { label: 'Draft', tone: 'blue' }, launched: { label: 'Advancing', tone: 'gold' }, stalled: { label: 'Stalled', tone: 'red' },
+  succeeded: { label: 'Objective taken', tone: 'blue' }, failed: { label: 'Failed', tone: 'red' }, cancelled: { label: 'Called off', tone: 'blue' },
+};
 
 const bare = (place: string) => place.replace(/^near /, '');
 function codeword(seed: string): string {
@@ -51,6 +61,9 @@ function runBy(fs: readonly FormationView[], commandOf: OperationsInput['command
   return who.has('player') ? 'your command' : who.has('delegate') ? 'AI staff' : 'awaiting your orders';
 }
 
+/** Share of the axis taken: its first cell is the line of departure, held from the start. */
+export const gained = (o: Planned) => Math.max(0, Math.min(1, (o.progress.advance - 1) / Math.max(1, o.axis.length - 1)));
+
 const units = (n: number) => `${n} ${n === 1 ? 'formation' : 'formations'}`;
 
 export function operations(p: OperationsInput): Operation[] {
@@ -61,9 +74,20 @@ export function operations(p: OperationsInput): Operation[] {
   const sector = (node: NodeId) => bare(p.places.heldName(node, (cell) => p.control[cell] === mine));
   for (const f of own) at.set(f.node, [...(at.get(f.node) ?? []), f]);
 
+  const live = p.planned.filter((o) => o.phase === 'draft' || o.phase === 'launched' || o.phase === 'stalled');
+  const committed = new Set(live.filter((o) => o.phase !== 'draft').flatMap((o) => o.formations));
+  const planned: Operation[] = p.planned
+    .filter((o) => o.phase !== 'cancelled' && (o.endedTick === undefined || p.tick - o.endedTick <= ENDED_TICKS))
+    .map((o) => {
+      const cells = Math.max(1, o.axis.length - 1);
+      const goal = o.objectives[o.objectives.length - 1] ?? o.axis[o.axis.length - 1];
+      const note = o.phase === 'stalled' || o.phase === 'failed' ? namePlaces(o.progress.note, p.places) : `Toward ${bare(p.places.name(goal))} · ${units(o.formations.length)}${o.phase === 'launched' ? ` · bound ${Math.min(o.progress.bound, cells)} of ${cells}` : ''}`;
+      return { key: `op|${o.id}`, kind: 'planned', op: o.id, name: o.name, detail: note, status: PHASE[o.phase], meter: gained(o), node: goal, formations: [...o.formations] };
+    });
+
   const offensives = new Map<string, FormationView[]>();
   for (const f of own) {
-    if (f.posture !== 'attack' || f.target === null) continue;
+    if (f.posture !== 'attack' || f.target === null || committed.has(f.entry.id)) continue;
     const area = bare(p.places.name(f.target));
     offensives.set(area, [...(offensives.get(area) ?? []), f]);
   }
@@ -130,5 +154,5 @@ export function operations(p: OperationsInput): Operation[] {
   attack.sort((a, b) => b.formations.length - a.formations.length || byKey(a, b));
   pressure.sort((a, b) => b.meter - a.meter || byKey(a, b));
   holding.sort((a, b) => b.formations.length - a.formations.length || byKey(a, b));
-  return [...attack.slice(0, 2), ...pressure.slice(0, 2), ...holding].slice(0, MAX_ROWS);
+  return [...planned.slice(0, MAX_ROWS - 1), ...attack.slice(0, 2), ...pressure.slice(0, 2), ...holding].slice(0, MAX_ROWS);
 }

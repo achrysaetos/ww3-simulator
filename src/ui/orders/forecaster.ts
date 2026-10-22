@@ -20,6 +20,8 @@ export interface DrawWorker {
 
 /** Runs per forecast: A2b's default ensemble (forecast/operation.ts forecastOperation). */
 export const FORECAST_RUNS = 8;
+/** Days the planner war-games a plan over: long enough for a brigade-sized push to reach its objective or stall. */
+export const FORECAST_DAYS = 10;
 
 interface Job {
   id: number;

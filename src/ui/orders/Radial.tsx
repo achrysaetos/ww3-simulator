@@ -85,7 +85,6 @@ export function Radial({ x, y, title, holder, estimate, options, kinds, detail, 
     return () => window.removeEventListener('keydown', onKey, true);
   }, [options, hot, onPick, onClose]);
 
-  // Keep the wheel and its card on screen.
   const W = typeof window === 'undefined' ? 1440 : window.innerWidth, H = typeof window === 'undefined' ? 900 : window.innerHeight;
   const cx = Math.max(160, Math.min(W - 160, x)), cy = Math.max(170, Math.min(H - 170, y));
   const shown = list[hot];
@@ -97,8 +96,8 @@ export function Radial({ x, y, title, holder, estimate, options, kinds, detail, 
       <svg className="ww-radial" style={{ left: cx - 160, top: cy - 160 }} width="320" height="320" viewBox="-160 -160 320 320" role="menu" aria-label={`Orders for ${title}`}>
         <defs>
           <radialGradient id="ww-radial-scrim"><stop offset="0.55" stopColor="#04070c" stopOpacity="0.62" /><stop offset="1" stopColor="#04070c" stopOpacity="0" /></radialGradient>
-          <linearGradient id="ww-seg-gold" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#ffd27f" /><stop offset="1" stopColor="#f0a136" /></linearGradient>
-          <linearGradient id="ww-seg-glass" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="rgba(26,40,62,0.94)" /><stop offset="1" stopColor="rgba(10,16,27,0.94)" /></linearGradient>
+          <linearGradient id="ww-rseg-gold" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#ffd27f" /><stop offset="1" stopColor="#f0a136" /></linearGradient>
+          <linearGradient id="ww-rseg-glass" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="rgba(26,40,62,0.94)" /><stop offset="1" stopColor="rgba(10,16,27,0.94)" /></linearGradient>
           <filter id="ww-radial-glow" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="5" result="b" /><feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge></filter>
         </defs>
         <circle r="156" fill="url(#ww-radial-scrim)" />
@@ -118,7 +117,7 @@ export function Radial({ x, y, title, holder, estimate, options, kinds, detail, 
           return (
             <g
               key={i}
-              className={`ww-seg ${on ? 'on' : ''} ${off ? 'off' : ''} ${!o ? 'empty' : ''}`}
+              className={`ww-rseg ${on ? 'on' : ''} ${off ? 'off' : ''} ${!o ? 'empty' : ''}`}
               role={o ? 'menuitem' : undefined}
               aria-label={o ? `${label}, key ${OPTION_LABEL[o.key].key}${off ? `, unavailable: ${detail(o).lines[0]}` : ''}` : undefined}
               aria-disabled={off || undefined}
@@ -127,15 +126,15 @@ export function Radial({ x, y, title, holder, estimate, options, kinds, detail, 
               onClick={() => o?.ok.length && onPick(o)}
             >
               {on && <path d={segment(a0, a1, R_OUT + 6, R_IN)} fill="#ffb547" fillOpacity="0.45" filter="url(#ww-radial-glow)" />}
-              <path d={segment(a0, a1, on ? R_OUT + 6 : R_OUT, R_IN)} fill={on ? 'url(#ww-seg-gold)' : 'url(#ww-seg-glass)'} stroke={on ? '#ffe0a8' : '#96c3f0'} strokeOpacity={on ? 1 : 0.32} strokeWidth={on ? 1.2 : 1} />
+              <path d={segment(a0, a1, on ? R_OUT + 6 : R_OUT, R_IN)} fill={on ? 'url(#ww-rseg-gold)' : 'url(#ww-rseg-glass)'} stroke={on ? '#ffe0a8' : '#96c3f0'} strokeOpacity={on ? 1 : 0.32} strokeWidth={on ? 1.2 : 1} />
               {on && <path d={`M${polar(R_HOT, a0).join(' ')} A${R_HOT} ${R_HOT} 0 0 1 ${polar(R_HOT, a1).join(' ')}`} fill="none" stroke="#ffb547" strokeWidth="3" filter="url(#ww-radial-glow)" />}
               {o && (
-                <g transform={`translate(${lx.toFixed(1)} ${ly.toFixed(1)})`} className="ww-seg-label">
+                <g transform={`translate(${lx.toFixed(1)} ${ly.toFixed(1)})`} className="ww-rseg-label">
                   {ICON[o.key] && <path d={ICON[o.key]} transform="translate(-9 -30)" fill="none" stroke="currentColor" strokeWidth={on ? 2.2 : 1.7} strokeLinecap="round" strokeLinejoin="round" />}
                   {label.split(' ').length > 1 && label.length > 9
                     ? <text y="-1" textAnchor="middle">{label.split(' ')[0]}<tspan x="0" dy="13">{label.split(' ').slice(1).join(' ')}</tspan></text>
                     : <text y="4" textAnchor="middle">{label}</text>}
-                  <g transform={`translate(0 ${label.length > 9 && label.includes(' ') ? 25 : 18})`}><rect x="-8" y="-8" width="16" height="15" rx="2.5" className="ww-seg-kbd" /><text y="3.5" textAnchor="middle" className="ww-seg-key">{OPTION_LABEL[o.key].key}</text></g>
+                  <g transform={`translate(0 ${label.length > 9 && label.includes(' ') ? 25 : 18})`}><rect x="-8" y="-8" width="16" height="15" rx="2.5" className="ww-rseg-kbd" /><text y="3.5" textAnchor="middle" className="ww-rseg-key">{OPTION_LABEL[o.key].key}</text></g>
                 </g>
               )}
             </g>

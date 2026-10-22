@@ -77,7 +77,7 @@ export function StartGlobe({ client, palette, focus, marks, arcs, callout }: Pro
     const loop = (now: number) => {
       if (dirty || r.animating) {
         dirty = false;
-        r.render({ state: client.state, nationIds: client.map.nationIds, playAs: null, selected: null, hoverNode: null, targeting: null, overlays: OFF }, now, false);
+        r.render({ state: client.state, nationIds: client.map.nationIds, playAs: null, selected: null, hoverNode: null, targeting: null, overlays: OFF, orders: null, tracks: [], dtHours: 6 }, now, false);
         if (r.cam !== shown) {
           shown = r.cam;
           const rect = canvas.getBoundingClientRect();

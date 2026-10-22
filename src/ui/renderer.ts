@@ -5,10 +5,13 @@
  * flies; it never jumps, so motion on the map always means something happened.
  */
 import type { GameMap } from '../core/map';
-import type { FormationId, NodeId, SimEvent } from '../core/types';
+import type { FormationId, NodeId, Operation, SimEvent } from '../core/types';
 import type { Palette } from './colors';
 import { eventNode } from './events';
 import { contactLabel, contactRing, isStale, type ContactInfo } from './map/contacts';
+import { seenOnMap } from './map/feedback';
+import type { OrderTrack } from './orders/tracks';
+import type { OrdersOverlay } from './orders/useOrders';
 import { GlobeGL } from './map/globe';
 import { ControlMask, OverlayRaster, Rel, relations } from './map/situation';
 import { cityName } from './placeNames';
@@ -40,13 +43,24 @@ export interface RenderInput {
   hoverNode: NodeId | null;
   targeting: 'order' | 'nuclear' | null;
   overlays: Overlays;
+  /** The plan being drawn and the operation open in the planner. */
+  orders: OrdersOverlay | null;
+  /** The player's orders on their way to their units, or just answered. */
+  tracks: readonly OrderTrack[];
+  dtHours: number;
 }
 
 interface Flash {
   node: NodeId;
   kind: 'battle' | 'strike' | 'nuclear' | 'capture';
   t0: number;
+  /** Where a friendly strike was fired from, to draw its flight. */
+  from?: NodeId[];
 }
+
+/** A fight the player knows of stays marked on the map this many ticks after it is reported. */
+const MARK_TICKS = 2;
+const LIVE_PHASES: ReadonlySet<Operation['phase']> = new Set(['draft', 'launched', 'stalled']);
 
 const FLASH_MS: Record<Flash['kind'], number> = { battle: 1100, strike: 1300, capture: 900, nuclear: 4500 };
 /** Target on-screen size of a stacking cell, per band. */
@@ -96,6 +110,11 @@ export class MapRenderer {
   private overlayFor: { state: ClientState | null; air: unknown; infra: unknown; fallout: unknown; weather: unknown; sea: unknown; overlays: Overlays | null } = { state: null, air: null, infra: null, fallout: null, weather: null, sea: null, overlays: null };
   private weatherFor: { packed: Uint8Array | null; pairs: Float32Array } = { packed: null, pairs: new Float32Array(0) };
   private flashes: Flash[] = [];
+  private marks: { node: NodeId; tick: number }[] = [];
+  /** Operation labels, drawn over the counters once they are placed. */
+  private opTags: { lines: { text: string; color: string; mono?: boolean }[]; x: number; y: number; border: string }[] = [];
+  /** Names a cell for the map's labels. */
+  namePlace: ((node: NodeId) => string) | null = null;
   private fly: { path: ReturnType<typeof flight>; t0: number } | null = null;
   /** Wheel zoom eases toward a target about the cursor instead of stepping. */
   private glide: { zoom: number; x: number; y: number } | null = null;
@@ -207,12 +226,27 @@ export class MapRenderer {
     return kmPerPx(this.cam);
   }
 
-  addEvents(events: readonly SimEvent[], now: number) {
+  /** Flashes for the fights and strikes the player would know of (map/feedback.ts), and marks where the fighting is. */
+  addEvents(events: readonly SimEvent[], now: number, state: ClientState, nationIds: readonly string[]) {
+    this.marks = this.marks.filter((m) => state.tick - m.tick <= MARK_TICKS);
+    if (!events.length) return;
+    const friendIdx = (i: number) => this.rel[i] === Rel.Own || this.rel[i] === Rel.Friend;
+    const forces = new Set<number>();
+    for (const f of state.formations) if (f.status !== 'destroyed') forces.add(f.node);
+    const sight = {
+      friend: (n: string) => friendIdx(nationIds.indexOf(n)),
+      heldByFriend: (node: NodeId) => friendIdx(state.control[node]),
+      forcesAt: (node: NodeId) => forces.has(node),
+    };
     for (const e of events) {
       const node = eventNode(e);
-      if (node === null) continue;
+      if (node === null || !seenOnMap(e, sight)) continue;
       const kind = e.type === 'nuclear_detonation' ? 'nuclear' : e.type === 'strike' ? 'strike' : e.type === 'battle' ? 'battle' : 'capture';
-      this.flashes.push({ node, kind, t0: now });
+      const from = e.type === 'strike' && sight.friend(e.by)
+        ? state.formations.filter((f) => f.posture === 'strike' && f.target === node && f.entry.nation === e.by && !f.contact).slice(0, 3).map((f) => f.node)
+        : undefined;
+      this.flashes.push({ node, kind, t0: now, ...(from?.length ? { from } : {}) });
+      if (kind === 'battle' && !this.marks.some((m) => m.node === node && m.tick === e.tick)) this.marks.push({ node, tick: e.tick });
     }
     if (this.flashes.length > 300) this.flashes.splice(0, this.flashes.length - 300);
   }
@@ -310,9 +344,15 @@ export class MapRenderer {
     const band = this.band;
     if (band !== 'world') this.drawContest(input);
     this.drawHover(input);
+    this.drawMarks(input);
     this.drawOrders(input);
+    this.drawOperations(input);
+    this.drawPlan(input);
     const counters = this.drawFormations(input);
     if (input.overlays.cities) this.drawCities(counters);
+    this.drawPlanForce(input);
+    for (const t of this.opTags.splice(0)) this.tag(t.lines, t.x, t.y, t.border);
+    this.drawTracks(input);
     this.drawFlashes(now);
   }
 
@@ -529,6 +569,274 @@ export class MapRenderer {
     }
   }
 
+  /** Points along a run of cells on screen; null if any is behind the globe. */
+  private route(nodes: readonly NodeId[]): [number, number][] | null {
+    const out: [number, number][] = [];
+    for (const n of nodes) {
+      const p = this.screenOf(n);
+      if (!p) return null;
+      if (!out.length || Math.hypot(p[0] - out[out.length - 1][0], p[1] - out[out.length - 1][1]) > 0.5) out.push(p);
+    }
+    return out;
+  }
+
+  /** A smooth curve through the points: straight runs between the midpoints of each leg, bent at the cells. */
+  private curve(pts: readonly [number, number][]) {
+    const ctx = this.ctx;
+    ctx.beginPath();
+    ctx.moveTo(...pts[0]);
+    for (let i = 1; i < pts.length - 1; i++) ctx.quadraticCurveTo(pts[i][0], pts[i][1], (pts[i][0] + pts[i + 1][0]) / 2, (pts[i][1] + pts[i + 1][1]) / 2);
+    ctx.lineTo(...pts[pts.length - 1]);
+  }
+
+  /** The point `cells` legs along the route, fractional. */
+  private along(pts: readonly [number, number][], cells: number): [number, number] {
+    const i = Math.max(0, Math.min(pts.length - 1, Math.floor(cells))), u = cells - i;
+    if (i >= pts.length - 1) return pts[pts.length - 1];
+    return [pts[i][0] + (pts[i + 1][0] - pts[i][0]) * u, pts[i][1] + (pts[i + 1][1] - pts[i][1]) * u];
+  }
+
+  private arrowHead(pts: readonly [number, number][], color: string, size: number) {
+    const ctx = this.ctx, [x1, y1] = pts[pts.length - 1], [x0, y0] = pts[pts.length - 2];
+    const a = Math.atan2(y1 - y0, x1 - x0);
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(x1 + Math.cos(a) * size * 0.6, y1 + Math.sin(a) * size * 0.6);
+    ctx.lineTo(x1 - size * Math.cos(a - 0.5), y1 - size * Math.sin(a - 0.5));
+    ctx.lineTo(x1 - size * Math.cos(a + 0.5), y1 - size * Math.sin(a + 0.5));
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  /** A broad battle arrow (redesign main.png): dark casing, the axis ahead dashed, the ground taken solid. */
+  private battleArrow(pts: readonly [number, number][], advance: number, color: string, bright: boolean, dashedAhead: boolean) {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    this.curve(pts);
+    ctx.strokeStyle = 'rgba(3,6,11,0.55)';
+    ctx.lineWidth = bright ? 13 : 10;
+    ctx.stroke();
+    ctx.strokeStyle = color;
+    ctx.globalAlpha = bright ? 0.28 : 0.18;
+    ctx.lineWidth = bright ? 9 : 7;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    ctx.setLineDash(dashedAhead ? [7, 6] : []);
+    ctx.lineWidth = bright ? 2.2 : 1.6;
+    ctx.stroke();
+    ctx.setLineDash([]);
+    if (advance > 0) {
+      const done = [...pts.slice(0, Math.floor(advance) + 1), this.along(pts, advance)];
+      this.curve(done);
+      ctx.lineWidth = bright ? 5 : 4;
+      ctx.shadowColor = color;
+      ctx.shadowBlur = bright ? 10 : 6;
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+    }
+    this.arrowHead(pts, color, bright ? 16 : 12);
+    ctx.restore();
+  }
+
+  private tag(lines: { text: string; color: string; mono?: boolean }[], x: number, y: number, border: string) {
+    const ls = lines.map((l) => this.label(l.text, l.mono ? '500 10px "IBM Plex Mono", ui-monospace, monospace' : '600 12px "Barlow Condensed", "Arial Narrow", sans-serif', l.color, l.mono ? 0 : 1.2));
+    const w = Math.max(...ls.map((l) => l.w)), h = ls.reduce((a, l) => a + l.h - 6, 6);
+    const ctx = this.ctx;
+    ctx.fillStyle = 'rgba(8,13,22,0.88)';
+    ctx.strokeStyle = border;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, h, 2);
+    ctx.fill();
+    ctx.stroke();
+    let at = y;
+    for (const l of ls) {
+      this.blit(l, x, at);
+      at += l.h - 6;
+    }
+    return { w, h };
+  }
+
+  /** The player's operations along their axes: phase and progress, and why one has stalled. */
+  private drawOperations(input: RenderInput) {
+    const focus = input.orders?.focusOp ?? null;
+    for (const op of input.state.ops) {
+      if (!LIVE_PHASES.has(op.phase) || op.axis.length < 2) continue;
+      // The planner draws the operation it has open as the plan.
+      if (op.id === focus && input.orders?.plan) continue;
+      const pts = this.route(op.axis);
+      if (!pts || pts.length < 2) continue;
+      const stalled = op.phase === 'stalled', draft = op.phase === 'draft';
+      const color = stalled ? '#ff6b5e' : draft ? '#8fc4ff' : GOLD;
+      // The axis's first cell is the line of departure: the front is `advance - 1` legs along it.
+      const front = draft ? 0 : Math.max(0, op.progress.advance - 1);
+      this.battleArrow(pts, front, color, false, true);
+      const [hx, hy] = this.along(pts, front);
+      if (!draft) {
+        const ctx = this.ctx;
+        ctx.beginPath();
+        ctx.arc(hx, hy, 4.5, 0, Math.PI * 2);
+        ctx.fillStyle = color;
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(3,6,11,0.9)';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      }
+      const [ex, ey] = pts[pts.length - 1];
+      const legs = op.axis.length - 1;
+      const phase = draft ? 'DRAFT' : stalled ? 'STALLED' : `BOUND ${Math.min(op.progress.bound, legs)}/${legs}`;
+      const lines = [{ text: op.name.toUpperCase(), color: '#eef3f9' }, { text: `${phase} · ${Math.round((100 * front) / legs)}% of the axis`, color, mono: true }];
+      if (stalled && op.progress.note) {
+        const note = this.namePlace ? op.progress.note.replace(/\bcell (\d+)/g, (_, n) => this.namePlace!(+n as NodeId)) : op.progress.note;
+        lines.push({ text: note.length > 54 ? `${note.slice(0, 53)}…` : note, color: '#ffb0a8', mono: true });
+      }
+      this.opTags.push({ lines, x: ex + 22, y: ey - 34, border: stalled ? 'rgba(255,107,94,0.6)' : 'rgba(255,181,71,0.45)' });
+    }
+  }
+
+  /** The battle plan being drawn: from the force through the waypoints to the cursor, or along the staff's axis once forecast. */
+  private drawPlan(input: RenderInput) {
+    const plan = input.orders?.plan;
+    if (!plan) return;
+    const start = plan.formations.map((id) => input.state.formations.find((f) => f.entry.id === id)).find((f) => f && f.status !== 'destroyed');
+    let nodes: NodeId[];
+    if (plan.axis && !plan.drawing) nodes = plan.axis;
+    else {
+      const end = plan.objective ?? (plan.drawing ? input.hoverNode : null);
+      nodes = [...(start ? [start.node] : []), ...plan.waypoints, ...(end !== null ? [end] : [])];
+    }
+    const pts = this.route(nodes);
+    if (pts && pts.length >= 2) this.battleArrow(pts, 0, GOLD, true, plan.drawing);
+    const ctx = this.ctx;
+    for (const w of plan.waypoints) {
+      const p = this.screenOf(w);
+      if (!p) continue;
+      ctx.beginPath();
+      ctx.arc(p[0], p[1], 4, 0, Math.PI * 2);
+      ctx.fillStyle = '#0b0f18';
+      ctx.fill();
+      ctx.strokeStyle = GOLD;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+    const obj = plan.objective === null ? null : this.screenOf(plan.objective);
+    if (obj) {
+      const [x, y] = obj;
+      ctx.save();
+      ctx.strokeStyle = '#ffd27f';
+      ctx.lineWidth = 2;
+      ctx.shadowColor = 'rgba(255,181,71,0.9)';
+      ctx.shadowBlur = 8;
+      ctx.beginPath();
+      ctx.arc(x, y, 13, 0, Math.PI * 2);
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        ctx.moveTo(x + dx * 8, y + dy * 8);
+        ctx.lineTo(x + dx * 19, y + dy * 19);
+      }
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  /** Gold brackets on every unit the plan has been given. */
+  private drawPlanForce(input: RenderInput) {
+    const plan = input.orders?.plan;
+    if (!plan) return;
+    const want = new Set(plan.formations);
+    for (const h of this.hits) if (h.ids.some((id) => want.has(id))) this.drawSelection(h);
+  }
+
+  /** Fights the player knows of in the last few turns: crossed swords on the cell. */
+  private drawMarks(input: RenderInput) {
+    if (!this.marks.length || this.band === 'world') return;
+    const ctx = this.ctx;
+    for (const m of this.marks) {
+      const p = this.screenOf(m.node);
+      if (!p) continue;
+      const fresh = input.state.tick - m.tick <= 0;
+      const x = p[0] + 14, y = p[1] - 14;
+      ctx.save();
+      ctx.globalAlpha = fresh ? 1 : 0.6;
+      ctx.beginPath();
+      ctx.arc(x, y, 8, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(8,13,22,0.85)';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255,181,71,0.75)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.strokeStyle = '#ffd27f';
+      ctx.lineWidth = 1.6;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(x - 4, y - 4); ctx.lineTo(x + 4, y + 4);
+      ctx.moveTo(x + 4, y - 4); ctx.lineTo(x - 4, y + 4);
+      ctx.moveTo(x - 4.5, y + 1.5); ctx.lineTo(x - 1.5, y + 4.5);
+      ctx.moveTo(x + 4.5, y + 1.5); ctx.lineTo(x + 1.5, y + 4.5);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  /** Each order on its way to its unit, and the unit's answer (Orders.dc.html): a tag over the counter. */
+  private drawTracks(input: RenderInput) {
+    if (!input.tracks.length) return;
+    const used = new Map<CounterBox, number>();
+    for (const t of input.tracks) {
+      const box = this.hits.find((h) => h.ids.length === 1 && h.ids[0] === t.formation) ?? this.hits.find((h) => h.ids.includes(t.formation));
+      if (!box) continue;
+      const since = t.answeredTick === null ? 0 : (input.state.tick - t.answeredTick) * input.dtHours;
+      const left = t.etaHours === null ? null : Math.max(0, Math.round(t.etaHours - since));
+      const what = t.label.length > 34 ? `${t.label.slice(0, 33)}…` : t.label;
+      const reason = t.reason ?? 'refused';
+      const lines = t.state === 'sent' ? [{ text: 'ORDER SENT', color: '#ffd27f' }, { text: what, color: '#c9d5e3', mono: true }]
+        : t.state === 'relayed' ? [{ text: `IN TRANSIT${left !== null ? ` · ${left} H` : ''}`, color: '#ffd27f' }, { text: what, color: '#c9d5e3', mono: true }]
+          : t.state === 'accepted' ? [{ text: `"COPY." ${what.toUpperCase()}`, color: '#9fe0b0' }, ...(left ? [{ text: `there in about ${left} h`, color: '#c9d5e3', mono: true }] : [])]
+            : [{ text: 'ORDER REFUSED', color: '#ffb547' }, { text: reason.length > 48 ? `${reason.slice(0, 47)}…` : reason, color: '#ffcf9a', mono: true }];
+      const nth = used.get(box) ?? 0;
+      used.set(box, nth + 1);
+      const border = t.state === 'refused' ? 'rgba(255,181,71,0.85)' : t.state === 'accepted' ? 'rgba(120,210,150,0.6)' : 'rgba(255,181,71,0.45)';
+      const x = box.x + box.w / 2 - 10, y = box.y - 38 - nth * 34;
+      const ctx = this.ctx;
+      ctx.strokeStyle = border;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(box.x + box.w / 2, box.y - 2);
+      ctx.lineTo(x + 6, y + 28);
+      ctx.stroke();
+      this.tag(lines, x, y, border);
+    }
+  }
+
+  /** A friendly round in flight from its battery to the target: an arc drawn out over the first half of the flash. */
+  private strikeFlight(from: NodeId, x: number, y: number, u: number) {
+    const p = this.screenOf(from);
+    if (!p) return;
+    const ctx = this.ctx, [x0, y0] = p, len = Math.hypot(x - x0, y - y0);
+    if (len < 8) return;
+    const mx = (x0 + x) / 2, my = (y0 + y) / 2 - len * 0.35;
+    const k = Math.min(1, u * 2);
+    const at = (t: number): [number, number] => [(1 - t) ** 2 * x0 + 2 * (1 - t) * t * mx + t * t * x, (1 - t) ** 2 * y0 + 2 * (1 - t) * t * my + t * t * y];
+    ctx.save();
+    ctx.strokeStyle = `rgba(255,181,71,${0.75 * (1 - u)})`;
+    ctx.lineWidth = 1.4;
+    ctx.setLineDash([3, 4]);
+    ctx.beginPath();
+    ctx.moveTo(x0, y0);
+    for (let i = 1; i <= 16; i++) ctx.lineTo(...at((i / 16) * k));
+    ctx.stroke();
+    ctx.setLineDash([]);
+    if (k < 1) {
+      const [hx, hy] = at(k);
+      ctx.fillStyle = '#ffe0a8';
+      ctx.beginPath();
+      ctx.arc(hx, hy, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
   /** Returns the screen boxes the counters and their labels took. */
   private drawFormations(input: RenderInput): [number, number, number, number][] {
     const placed: [number, number, number, number][] = [];
@@ -595,7 +903,9 @@ export class MapRenderer {
           const rest = stack.members.slice(shown.length);
           const [x, y] = at(shown.length);
           const box = this.drawStack(rest, x, y, scale * 0.85, side);
-          this.hits.push({ ...box, ids: rest.map((f) => f.entry.id), node: stack.node, zoomTo: { lon: this.map.lon[stack.node], lat: this.map.lat[stack.node], zoom: cam.zoom + 0.7 } });
+          // At the closest zoom the overflow cannot open further: clicks cycle through it instead.
+          const closer = clampCamera({ lon: this.map.lon[stack.node], lat: this.map.lat[stack.node], zoom: cam.zoom + 0.7 }, this.vp);
+          this.hits.push({ ...box, ids: rest.map((f) => f.entry.id), node: stack.node, zoomTo: closer.zoom > cam.zoom + 0.05 ? closer : null });
           if (rest.some((f) => f.entry.id === input.selected)) selectedBox = box;
         }
         continue;
@@ -762,6 +1072,7 @@ export class MapRenderer {
           ctx.stroke();
           break;
         case 'strike':
+          for (const n of f.from ?? []) this.strikeFlight(n, x, y, u);
           ctx.strokeStyle = `rgba(255,77,79,${1 - u})`;
           ctx.lineWidth = 1.5;
           ctx.beginPath();

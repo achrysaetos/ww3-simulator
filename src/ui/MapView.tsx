@@ -8,6 +8,7 @@ import type { Manifest } from './map/tiles';
 import { ZoomControl } from './map/ZoomControl';
 import { fixAge } from './map/contacts';
 import { MapRenderer, type Overlays } from './renderer';
+import type { OrdersOverlay } from './orders/useOrders';
 import { NO_NATION, type ScenarioCard } from './snapshot';
 import { BAND_PRESET, pinTo, unproject, zoomForPxPerDeg, type ZoomBand } from './view';
 import './theme/kit.css';
@@ -20,8 +21,13 @@ export interface MapViewProps {
   selected: FormationId | null;
   targeting: 'order' | 'nuclear' | null;
   overlays: Overlays;
+  /** The battle plan being drawn, if any: left clicks then go to onPlanClick. */
+  orders: OrdersOverlay | null;
   onSelectFormation(id: FormationId | null): void;
   onTarget(node: NodeId): void;
+  /** A right-click: the cell, the counters under the cursor, and where on screen. */
+  onContext(node: NodeId, ids: readonly FormationId[], x: number, y: number): void;
+  onPlanClick(node: NodeId, ids: readonly FormationId[], shift: boolean): void;
   /**
    * Filled by the map so panels can fly to a node. 'close' zooms in to at least the theatre;
    * 'wide' zooms out to it if closer, so a target far from the unit stays on screen.
@@ -70,6 +76,7 @@ export function MapView(props: MapViewProps) {
     rendererRef.current = r;
     (window as unknown as { __map?: MapRenderer }).__map = r;
     r.onInvalidate = () => (dirty.current = true);
+    r.namePlace = (n) => propsRef.current.places.name(n).replace(/^near /, '');
     const fit = () => {
       const rect = canvas.getBoundingClientRect();
       r.resize(rect.width, rect.height, window.devicePixelRatio || 1);
@@ -108,8 +115,12 @@ export function MapView(props: MapViewProps) {
       dirty.current = true;
     });
 
+    let eventsFrom: unknown = null;
     const unsub = client.subscribe(() => {
-      r.addEvents(client.state.latestEvents, performance.now());
+      if (client.state.latestEvents !== eventsFrom) {
+        eventsFrom = client.state.latestEvents;
+        r.addEvents(client.state.latestEvents, performance.now(), client.state, client.meta?.nationIds ?? client.map.nationIds);
+      }
       dirty.current = true;
     });
 
@@ -126,8 +137,11 @@ export function MapView(props: MapViewProps) {
           playAs: p.playAs,
           selected: p.selected,
           hoverNode: hoverRef.current,
-          targeting: p.targeting,
+          targeting: p.targeting ?? (p.orders?.plan?.drawing ? 'order' : null),
           overlays: p.overlays,
+          orders: p.orders,
+          tracks: client.tracks.list(),
+          dtHours: client.meta?.dtHours ?? 6,
         }, now, changed);
         const km = Number(r.kmPerPx.toPrecision(2));
         if (r.band !== shown.band || km !== shown.km) {
@@ -148,7 +162,7 @@ export function MapView(props: MapViewProps) {
 
   useEffect(() => {
     dirty.current = true;
-  }, [props.playAs, props.selected, props.targeting, props.overlays, hover?.node]);
+  }, [props.playAs, props.selected, props.targeting, props.overlays, props.orders, hover?.node]);
 
   const drag = useRef<{ x: number; y: number; grab: [number, number] | null; last: [number, number]; moved: boolean } | null>(null);
 
@@ -157,9 +171,20 @@ export function MapView(props: MapViewProps) {
     return [e.clientX - rect.left, e.clientY - rect.top] as const;
   };
 
+  /** The counters under a screen point, topmost first. */
+  const hitAt = (x: number, y: number): FormationId[] => {
+    const r = rendererRef.current;
+    if (!r) return [];
+    for (let i = r.hits.length - 1; i >= 0; i--) {
+      const h = r.hits[i];
+      if (x >= h.x && x <= h.x + h.w && y >= h.y && y <= h.y + h.h) return h.ids;
+    }
+    return [];
+  };
+
   const onPointerDown = (e: React.PointerEvent) => {
     const r = rendererRef.current;
-    if (!r) return;
+    if (!r || e.button !== 0) return;
     const [x, y] = local(e);
     drag.current = { x, y, grab: unproject(r.cam, r.vp, x, y), last: [x, y], moved: false };
     canvasRef.current!.setPointerCapture(e.pointerId);
@@ -191,6 +216,11 @@ export function MapView(props: MapViewProps) {
     if (!d || d.moved || !r) return;
     const [x, y] = local(e);
     const p = propsRef.current;
+    if (p.orders?.plan && !p.targeting) {
+      const node = r.pick(x, y);
+      if (node !== null) p.onPlanClick(node, hitAt(x, y), e.shiftKey);
+      return;
+    }
     if (p.targeting) {
       const node = r.pick(x, y);
       if (node !== null) p.onTarget(node);
@@ -210,6 +240,16 @@ export function MapView(props: MapViewProps) {
       }
     }
     p.onSelectFormation(null);
+  };
+
+  const onContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const r = rendererRef.current;
+    const p = propsRef.current;
+    if (!r || p.targeting) return;
+    const [x, y] = local(e);
+    const node = r.pick(x, y);
+    if (node !== null) p.onContext(node, hitAt(x, y), e.clientX, e.clientY);
   };
 
   const onWheel = (e: React.WheelEvent) => {
@@ -269,7 +309,9 @@ export function MapView(props: MapViewProps) {
             {here.length > 6 && <li className="ww-muted">+{here.length - 6} more</li>}
           </ul>
         )}
-        {props.targeting && <div className="tt-hint">Click to set target</div>}
+        {props.targeting ? <div className="tt-hint">Click to set target</div>
+          : props.orders?.plan ? <div className="tt-hint">{props.orders.plan.drawing ? 'Click: objective · Shift-click: route through · Click a unit of yours: add or drop it' : 'Click a unit of yours to add or drop it · Click a cell to move the objective'}</div>
+            : <div className="tt-hint tt-quiet">Right-click for orders</div>}
       </div>
     );
   })();
@@ -287,6 +329,7 @@ export function MapView(props: MapViewProps) {
         onPointerLeave={() => setHover(null)}
         onWheel={onWheel}
         onDoubleClick={onDoubleClick}
+        onContextMenu={onContextMenu}
       />
       <div className="ww-scan" />
       <div className="ww-vig" />
