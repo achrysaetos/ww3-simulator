@@ -135,3 +135,28 @@ describe('a player-planned offensive in ukraine-2026', () => {
     }
   });
 });
+
+describe('the AI general staff in baltic-2027', () => {
+  it('Russia masses its main effort as a launched operation on a contiguous axis into the Baltic states', () => {
+    const s = createSession('baltic-2027', 1);
+    s.engine.run(s.world, 8);
+    const { map } = s.engine;
+    const ops = Object.values(s.world.slices.ops.byId).filter((o) => o.nation === RUS && o.planner === 'ai');
+    expect(ops.length).toBeGreaterThan(0);
+    for (const o of ops) {
+      expect(['launched', 'stalled', 'succeeded']).toContain(o.phase);
+      expect(['EST', 'LVA', 'LTU']).toContain(map.owner[o.objectives[0]]);
+      expect(o.formations.filter((id) => s.world.formations[id]?.kind === 'maneuver').length).toBeGreaterThanOrEqual(3);
+      for (let i = 1; i < o.axis.length; i++) expect([...map.neighbors(o.axis[i - 1])]).toContain(o.axis[i]);
+    }
+  }, 300_000);
+
+  it('Ukraine, defending in ukraine-2026, plans no offensive operation and keeps a reserve out of the line', () => {
+    const s = createSession('ukraine-2026', 1);
+    s.engine.run(s.world, 4);
+    const ukr = 'UKR' as NationId;
+    expect(Object.values(s.world.slices.ops.byId).filter((o) => o.nation === ukr)).toEqual([]);
+    const reserve = Object.values(s.world.formations).filter((f) => f.nation === ukr && f.kind === 'maneuver' && f.status === 'active' && f.order.posture === 'reserve');
+    expect(reserve.length).toBeGreaterThan(0);
+  }, 300_000);
+});
