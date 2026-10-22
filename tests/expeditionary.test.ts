@@ -109,6 +109,8 @@ describe('one transport fleet for every drop (EX-2)', () => {
   // 4,240 t two-lift fleet, and a human could drop again the next tick.
   it('Russia cannot drop two brigades on Tallinn in one day on two lifts that carry one and a third', () => {
     const s = createSession('baltic-2027', 1);
+    // Russia's own planners fly no other drop first, so the whole fleet is free on day 2.
+    command(s, 'RUS', Object.values(s.world.formations).filter((f) => f.nation === 'RUS' && f.airborne), { posture: 'defend' });
     runDays(s, 2);
     const { world, map, catalog } = s;
     const tallinn = map.nodeAt(59.44, 24.75);
