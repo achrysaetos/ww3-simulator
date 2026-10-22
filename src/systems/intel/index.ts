@@ -65,7 +65,8 @@ export interface IntelState {
   levels: Record<NationId, Record<NationId, number[]>>;
   /**
    * Per observer, the foreign formations it watches for warning (WARN_KINDS, not at war): `since`, set while it
-   * believes one is in or next to its ground, is the tick it was first believed there; `seen` the tick it last held
+   * believes one is in or next to its ground, is the tick it was first believed there (before WARN_DAYS ago for
+   * what stood there on the observer's first pass); `seen` the tick it last held
    * a contact on it. Kept WARN_DAYS past the contact itself, so a unit forgotten and seen again where it stood is
    * not read as an arrival.
    */
@@ -186,8 +187,8 @@ const RIVAL_OPINION = -75;
  * Indications and warning: once a day each nation sums the believed strength of foreign ground
  * forces in or next to its ground (contact strength times confidence). A rise to WARN_RISE times
  * the lowest level of the past WARN_DAYS, by at least WARN_MIN_PLATFORMS, warns it, if units it
- * believed elsewhere were seen arriving on the border in those days with at least WARN_MIN_PLATFORMS
- * between them. Without arrivals a rise is only the picture refreshing: contacts on units that never
+ * believed elsewhere, or had not seen, were seen arriving on the border in those days with at least
+ * WARN_MIN_PLATFORMS between them. Without arrivals a rise is only the picture refreshing: contacts on units that never
  * moved fade as they go stale and come back at full weight when re-sighted (X1 M11). The 2021-22
  * Russian build-up around Ukraine and the Egyptian and Syrian concentrations of 1973 were each
  * read from a rise in forces at the border over days to weeks. Thresholds are judgment.
@@ -446,6 +447,8 @@ function indications(world: World, map: GameMap, ctx: SimContext): void {
       return false;
     };
     const today = new Map<NationId, number>(), arrived = new Map<NationId, number>();
+    // On the first pass whatever is on the border already stood there; after it, a unit found there arrived.
+    const first = !(o in border);
     const seen = (border[o] ??= {});
     for (const [id, c] of Object.entries(s.pictures[o]) as [FormationId, Contact][]) {
       const of = world.formations[id]?.nation;
@@ -454,14 +457,12 @@ function indications(world: World, map: GameMap, ctx: SimContext): void {
         seen[id] = { seen: world.tick };
         continue;
       }
-      // An arrival is a unit believed elsewhere and now believed here; one first found on the border was already there.
-      const since = seen[id] ? seen[id].since ?? world.tick : world.tick - hold;
+      const since = seen[id] ? seen[id].since ?? world.tick : first ? world.tick - hold : world.tick;
       seen[id] = { since, seen: world.tick };
       today.set(of, (today.get(of) ?? 0) + c.strength * confidenceAt(world, c));
       if (world.tick - since < hold) arrived.set(of, (arrived.get(of) ?? 0) + c.strength);
     }
     for (const id of Object.keys(seen) as FormationId[]) if (world.tick - seen[id].seen > hold) delete seen[id];
-    if (!Object.keys(seen).length) delete border[o];
     const levels = (s.levels[o] ??= {});
     for (const of of Object.keys(levels) as NationId[]) if (!today.has(of)) today.set(of, 0);
     let worst: Warning | undefined;
