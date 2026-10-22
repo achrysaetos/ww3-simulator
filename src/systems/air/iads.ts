@@ -93,7 +93,13 @@ function interceptorFighters(world: World, ctx: SimContext, pic: AirPicture, nod
 }
 
 /** One attacker's weapons of one kind arriving together; `overflightKm` is how much defended ground they crossed. */
-export interface RaidStream { munition: Munition; count: number; overflightKm: number }
+export interface RaidStream {
+  munition: Munition;
+  count: number;
+  overflightKm: number;
+  /** A decoy's radar picture: the defence prices its interceptors against the weapon it mimics (USD M). */
+  looksLikeUsdM?: number;
+}
 
 /**
  * Km of the route from `from` to `to` that lies over land held by a nation defending
@@ -128,36 +134,21 @@ export function defendRaid(world: World, ctx: SimContext, pic: AirPicture, node:
   const leaked = streams.map((s) => s.count);
   const order = streams.map((_, i) => i).sort((a, b) => streams[a].munition.speedMach - streams[b].munition.speedMach);
   const sams = hostileDefenders(world, ctx, pic, node, attacker);
-  const fighters = interceptorFighters(world, ctx, pic, node, attacker);
+  let fighters: { g: AirGroup; aam: Munition }[] | undefined;
   for (const i of order) {
     const m = streams[i].munition;
     const cat = threatCategory(m);
     if (!cat) continue;
-    const threat = { speedMach: m.speedMach, interceptDifficulty: m.interceptDifficulty };
     if (streams[i].overflightKm > 0)
       leaked[i] -= ctx.rng.binomial(leaked[i], beltKillProbability(m.kind, streams[i].overflightKm, m.interceptDifficulty));
     if (cat === 'air_breathing' && leaked[i]) {
-      // Each group flies its own sector, so a threat meets one group, not every fighter up in turn: the stream splits
-      // evenly across the nations defending, and within a nation by intercept sorties up (13-14 Apr 2024: US, UK,
-      // French and Jordanian jets each downed drones over their own areas, IDF and allied statements).
-      const armed: { g: AirGroup; aam: Munition }[] = [];
-      const upByNation = new Map<NationId, number>();
-      for (const g of fighters) {
+      fighters ??= interceptorFighters(world, ctx, pic, node, attacker).flatMap((g) => {
         const aam = pic.aamOf(g.f);
-        if (!aam || g.interceptLeft <= 0 || (g.f.magazine[aam.id] ?? 0) < 1) continue;
-        armed.push({ g, aam });
-        upByNation.set(g.f.nation, (upByNation.get(g.f.nation) ?? 0) + g.interceptLeft);
-      }
-      const shares = splitBySorties(ctx.rng, leaked[i], armed.map(({ g }) => g.interceptLeft / upByNation.get(g.f.nation)! / upByNation.size));
-      armed.forEach(({ g, aam }, k) => {
-        if (!shares[k]) return;
-        const r = interceptSalvo({ ...threat, count: shares[k] }, { channels: g.interceptLeft, interceptors: g.f.magazine[aam.id] ?? 0, pk: pkAgainst(aam, cat), rangeKm: aam.rangeKm }, ctx.rng);
-        g.interceptLeft -= r.channelsUsed;
-        g.f.magazine[aam.id] -= r.interceptorsUsed;
-        leaked[i] -= r.intercepted;
+        return aam ? [{ g, aam }] : [];
       });
+      leaked[i] -= fighterIntercepts(ctx, fighters, m, cat, leaked[i]);
     }
-    const maxCost = Math.max(TUNING.interceptorCostFloorUsdM, TUNING.interceptorCostRatio * m.unitCostUsdM);
+    const maxCost = Math.max(TUNING.interceptorCostFloorUsdM, TUNING.interceptorCostRatio * (streams[i].looksLikeUsdM ?? m.unitCostUsdM));
     const ls = layers(ctx, sams, node, cat, m.interceptDifficulty, maxCost);
     const ready = (k: number) => ls[k].d.channels > 0 && ls[k].d.f.magazine[ls[k].shot.m.id] >= 1;
     for (let k = 0; k < ls.length && leaked[i]; k++) {
@@ -167,10 +158,33 @@ export function defendRaid(world: World, ctx: SimContext, pic: AirPicture, node:
       // tier ripples two.
       let backed = false;
       for (let j = k + 1; cat === 'ballistic' && !backed && j < ls.length; j++) backed = ready(j);
-      leaked[i] = engage(ctx, ls[k].d, ls[k].shot, cat, { ...threat, count: leaked[i] }, backed ? 'shoot_look_shoot' : undefined);
+      leaked[i] = engage(ctx, ls[k].d, ls[k].shot, cat, { count: leaked[i], speedMach: m.speedMach, interceptDifficulty: m.interceptDifficulty }, backed ? 'shoot_look_shoot' : undefined);
     }
   }
   return leaked;
+}
+
+/**
+ * Each group flies its own sector, so a threat meets one group, not every fighter up in turn: `count` threats split
+ * evenly across the nations defending, and within a nation by intercept sorties up (13-14 Apr 2024: US, UK, French
+ * and Jordanian jets each downed drones over their own areas, IDF and allied statements). Returns how many they down.
+ */
+function fighterIntercepts(ctx: SimContext, fighters: { g: AirGroup; aam: Munition }[], m: Munition, cat: ThreatCategory, count: number): number {
+  const armed = fighters.filter(({ g, aam }) => g.interceptLeft > 0 && (g.f.magazine[aam.id] ?? 0) >= 1);
+  if (!armed.length) return 0;
+  const upByNation = new Map<NationId, number>();
+  for (const { g } of armed) upByNation.set(g.f.nation, (upByNation.get(g.f.nation) ?? 0) + g.interceptLeft);
+  const shares = splitBySorties(ctx.rng, count, armed.map(({ g }) => g.interceptLeft / upByNation.get(g.f.nation)! / upByNation.size));
+  let downed = 0;
+  for (let k = 0; k < armed.length; k++) {
+    if (!shares[k]) continue;
+    const { g, aam } = armed[k];
+    const r = interceptSalvo({ count: shares[k], speedMach: m.speedMach, interceptDifficulty: m.interceptDifficulty }, { channels: g.interceptLeft, interceptors: g.f.magazine[aam.id] ?? 0, pk: pkAgainst(aam, cat), rangeKm: aam.rangeKm }, ctx.rng);
+    g.interceptLeft -= r.channelsUsed;
+    g.f.magazine[aam.id] -= r.interceptorsUsed;
+    downed += r.intercepted;
+  }
+  return downed;
 }
 
 /**

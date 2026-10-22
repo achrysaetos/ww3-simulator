@@ -17,8 +17,12 @@ export function visibility(stealth: number): number {
  * ~half a radius, an outbound plus recovery refuel roughly doubles it, which is the cap.
  */
 export function combatRadiusKm(platform: Platform, tankers = 0): number {
-  const refuels = Math.max(0, tankers) * TUNING.tankerReceiversPerTanker;
-  return platform.mobility.rangeKm * (1 + Math.min(TUNING.maxTankerExtension, refuels * 0.5));
+  return platform.mobility.rangeKm * tankerStretch(tankers);
+}
+
+/** Factor tanker support at `tankers` per receiving aircraft stretches a combat radius by. */
+export function tankerStretch(tankers: number): number {
+  return 1 + Math.min(TUNING.maxTankerExtension, Math.max(0, tankers) * TUNING.tankerReceiversPerTanker * 0.5);
 }
 
 export interface Flight {

@@ -5,6 +5,7 @@ import { isOverseas } from '../../data/territories';
 import { HOSTILE_OPINION } from '../diplomacy/escalation';
 import { delegated } from '../orders';
 import { rung, sideOf } from '../diplomacy/wars';
+import { warAgainst } from '../diplomacy/aims';
 import { aimKey, ATTRITABLE_COST_USD_M, dailyRounds, effectPk, futileAim, PENETRATOR_VISIBILITY } from '../air';
 import { ANTISHIP_KINDS } from '../naval';
 import type { HqLevel } from '../c2/state';
@@ -54,6 +55,14 @@ const VALUE_BY_KIND: Partial<Record<FormationKind, { value: number; cls: TargetC
  */
 const WORTH_REF_USD_M: Partial<Record<FormationKind, number>> = { surface_group: 1000, air_wing: 2000 };
 const WORTH = { min: 0.5, max: 3 };
+/**
+ * A missile brigade whose rounds reach the planner's capital is hunted ahead of the air defences: its launchers are
+ * what is falling on the planner's cities. In 1991 the Coalition flew some 1,500 sorties a month after Iraq's Scud
+ * launchers once they fell on Israel (GWAPS); in June 2025 the IAF went after Iran's launchers from the first night
+ * alongside its air defences, and the IDF claimed about half of them destroyed or disabled within twelve days, while
+ * Iran's salvos shrank from ~100 to a handful a night (IDF; CSIS Missile Defense Project). Judgment on the value.
+ */
+const TEL_HUNT = 6;
 const FRONT_FORCES = { value: 2, cls: 'armor' as TargetClass };
 const RAIL_HUB = { value: 1.5, cls: 'structure' as TargetClass, minRailKm: 50 };
 const CAPITAL = { value: 2.5, cls: 'structure' as TargetClass };
@@ -125,9 +134,20 @@ function cargoUsdM(p: Plan): Map<FormationId, number> {
  */
 function deepStrikeAllowed(p: Plan, owner: NationId): boolean {
   if (!p.enemies.has(owner)) return delegated(p.world, p.nation, 'strategic') && relation(p.world, p.nation, owner).opinion <= HOSTILE_OPINION;
-  if (p.world.nations[owner].nuclear.warheads <= 0) return true;
+  if (p.world.nations[owner].nuclear.warheads <= 0 || punitive(p, owner)) return true;
   if (p.world.nations[p.nation].nuclear.warheads <= 0 || p.profile.riskTolerance >= DEEP_STRIKE_RISK) return true;
   return rung(relation(p.world, p.nation, owner).escalation) >= rung('strategic_conventional');
+}
+
+/**
+ * A punitive war is a strike campaign on the enemy's homeland and nothing else: the decision to strike deep is the
+ * decision to go to war, bounded by its short length (aims PUNITIVE_DAYS), not by an escalation rung. India's
+ * Operation Sindoor (7-10 May 2025) struck nine sites from Muzaffarabad to Bahawalpur on night one and eleven Pakistani
+ * air bases, Nur Khan by Rawalpindi among them, on the last; Pakistan struck back at Indian bases (Indian MoD; ISPR).
+ */
+function punitive(p: Plan, owner: NationId): boolean {
+  const s = p.world.slices.diplomacy;
+  return !!s && warAgainst(s, p.nation, owner)?.own.aim.kind === 'punitive';
 }
 
 /**
@@ -135,9 +155,9 @@ function deepStrikeAllowed(p: Plan, owner: NationId): boolean {
  * Its original parties strike each other wherever deepStrikeAllowed lets them, but
  * a state that joined the war fights the other side's joiners only inside the
  * theatre: in Korea in 1950-53 the US kept Manchuria off limits while Soviet
- * pilots fought over the Yalu. Enemy forces on a neutral's soil are struck only
+ * pilots fought over the Yalu. Enemy air bases on a neutral's soil are struck only
  * when the host is already hostile and inside the theatre, which brings the host
- * into the war (see diplomacy processEvents). CSIS "The First Battle of the Next
+ * into the war (see diplomacy processEvents); other enemy forces there are not (strikeTargets). CSIS "The First Battle of the Next
  * War" (2023) has China strike US bases on Okinawa, ~650 km from Taipei, in most
  * iterations; mainland Japan and Korea, 1,300-1,500 km out, stay unstruck in its
  * base case. A friendly or ambivalent host is never struck: China would not hit
@@ -211,9 +231,14 @@ export function strikeTargets(p: Plan, battleArea: Set<number>): TargetGrid {
   // Aimed where intelligence last fixed each formation, worth less as the fix goes stale.
   for (const e of p.enemies)
     for (const { f, node, confidence, contact } of sighted(p, e)) {
+      // On the ground of a nation the planner is not at war with, only the air bases the enemy flies its war from are
+      // worth widening the war for (allowed, below): CSIS's 2023 Taiwan wargames had China strike US bases on Okinawa,
+      // while in 2022 Ukraine left the Russian armies and missile units staged in Belarus alone and kept Belarus out.
+      const holder = p.world.control[node];
+      if (!map.isSea(node) && holder && !p.enemies.has(holder) && !p.friends.has(holder) && f.kind !== 'air_wing' && !isBomberForce(p, f)) continue;
       const v = VALUE_BY_KIND[f.kind] ?? (isBomberForce(p, f) ? VALUE_BY_KIND.air_wing : isGround(f) && battleArea.has(node) ? FRONT_FORCES : undefined);
       if (!v) continue;
-      const value = v.value * worth(f) * confidence;
+      const value = (f.kind === 'missile' && reachesHome(p, f, node) ? TEL_HUNT : v.value) * worth(f) * confidence;
       if (f.kind !== 'surface_group') out.push({ node, cls: v.cls, value, formation: f.id, assigned: 0 });
       else {
         const fresh = confidence === 1;
@@ -251,6 +276,19 @@ export function strikeTargets(p: Plan, battleArea: Set<number>): TargetGrid {
   const kept = out.filter((t) => allowed(t) && live(t));
   for (const t of chokepointTargets(p, front)) if (live(t)) kept.push(t);
   return new TargetGrid(kept.sort((a, b) => b.value - a.value || a.node - b.node), map);
+}
+
+/** Whether a missile `f`'s launchers carry reaches the planner's capital from `node`. */
+function reachesHome(p: Plan, f: Formation, node: NodeId): boolean {
+  const km = p.ctx.map.distanceKm(node, p.world.nations[p.nation].capital);
+  for (const [id, n] of Object.entries(f.equipment)) {
+    if (n <= 0) continue;
+    for (const l of p.ctx.catalog.platform(id as PlatformId).loadout) {
+      const m = p.ctx.catalog.munition(l.munition);
+      if (!m.yieldKt && m.rangeKm >= km && HUNTED_KINDS.has(m.kind)) return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -308,7 +346,8 @@ function launchable(p: Plan, f: Formation, m: MunitionId): boolean {
  * monthly launch tallies imply roughly a year held back). Against an enemy with no
  * shared front the war is a stand-off exchange decided by stocks and launcher attrition, and stocks
  * go fast: Iran fired ~550 ballistic missiles, a quarter or more of its force, in
- * the 12 days of June 2025. Both are judgments, not doctrine figures.
+ * the 12 days of June 2025. A punitive war across a land front is the second kind: no ground war is fought, so
+ * nothing is held back for one. Both are judgments, not doctrine figures.
  */
 const ATTRITION_HORIZON_DAYS = 365;
 const STANDOFF_HORIZON_DAYS = 30;
@@ -357,14 +396,15 @@ export class FireBudget {
       const cap = capacity.get(m) ?? 0;
       if (cap <= 0) return 0;
       let stock = world.nations[nation].stockpile[m] ?? 0;
-      for (const f of this.p.index.byNation.get(nation) ?? []) if (f.kind === 'air_wing' || f.kind === 'missile') stock += f.magazine[m] ?? 0;
+      for (const f of this.p.index.byNation.get(nation) ?? []) if (f.kind === 'air_wing' || f.kind === 'missile' || f.kind === 'artillery') stock += f.magazine[m] ?? 0;
       const produced = (world.slices.economy?.nations[nation]?.lines[m]?.capacityPerMonth ?? 0) / 30;
       const cycle = SALVO_EVERY_DAYS * (produced + stock / horizon);
       return Math.min(1, (salvoDay ? cycle : Math.max(0, cycle - cap) / (SALVO_EVERY_DAYS - 1)) / cap);
     };
     for (const x of this.proposals) {
-      const horizon = front.has(world.control[x.t.node]) ? ATTRITION_HORIZON_DAYS : STANDOFF_HORIZON_DAYS;
-      const m = x.options.find((m) => ctx.rng.chance(share(m.id, horizon)));
+      const owner = world.control[x.t.node];
+      const horizon = front.has(owner) && !punitive(this.p, owner) ? ATTRITION_HORIZON_DAYS : STANDOFF_HORIZON_DAYS;
+          const m = x.options.find((m) => ctx.rng.chance(share(m.id, horizon)));
       if (m) issue(this.p, x.f, { ...x.order, munition: m.id });
       else {
         x.t.assigned--;
@@ -399,6 +439,8 @@ export function strikeOptions(stock: readonly Munition[], t: StrikeTarget): Muni
 }
 
 const INTERCEPTOR_KINDS: ReadonlySet<Munition['kind']> = new Set(['sam', 'abm', 'shorad_missile']);
+/** Rounds whose launchers are hunted (TEL_HUNT); one-way drones go up from dispersed rails no hunt has kept down (Ukraine's from 2023). */
+const HUNTED_KINDS: ReadonlySet<Munition['kind']> = new Set(['srbm', 'mrbm', 'irbm', 'cruise']);
 /**
  * How far a strike sortie will fly into a known SAM envelope before releasing.
  * Russian and Ukrainian strike aviation in 2023-25 released glide bombs and rockets

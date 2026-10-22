@@ -122,7 +122,7 @@ const artillery: PlatformSpec<Key>[] = [
 const rockets: PlatformSpec<Key>[] = [
   // Type 63: 12 x 107 mm, a salvo of ~100 kg against ~720 kg for a 40-round Grad.
   { id: 'type63_mlrs', name: 'Type 63 107 mm MRL', cls: 'mlrs', crew: 5, producers: ['CHN'], inService: 1963, unitCostUsdM: 0.02, speedKph: 30, rangeKm: 100, fuelTph: 0, armor: 0.03, stealth: 0.4, q: 0.3, load: { rocket_107: 24 } },
-  { id: 'm270', name: 'M270 / M270A1 MLRS', cls: 'mlrs', producers: [], inService: 1983, unitCostUsdM: 3, speedKph: 64, rangeKm: 480, armor: 0.15, q: 1.2, load: { rocket_227: 12 } },
+  { id: 'm270', name: 'M270 / M270A1 MLRS', cls: 'mlrs', producers: [], inService: 1983, unitCostUsdM: 3, speedKph: 64, rangeKm: 480, armor: 0.15, q: 1.2, load: { rocket_227: 12, gmlrs: 12, atacms: 2 } },
   { id: 'k136_kooryong', name: 'K136 Kooryong 130 mm', cls: 'mlrs', producers: ['KOR'], inService: 1986, unitCostUsdM: 0.8, speedKph: 70, q: 0.9, load: { rocket_130: 36 } },
   { id: 'ravs_mlrs', name: 'RT-2000 Thunderbolt', cls: 'mlrs', producers: ['TWN'], inService: 2011, unitCostUsdM: 4, speedKph: 80, q: 1.1, load: { rocket_227: 12 } },
   // Jobaria: four BM-21 pods on one carrier, 240 rockets; reload time, not tube count, bounds sustained fire.

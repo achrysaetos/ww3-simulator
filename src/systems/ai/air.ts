@@ -1,6 +1,5 @@
 import type { Formation, FormationId, Munition, MunitionId, NodeId, PlatformClass, PlatformId, TargetClass } from '../../core/types';
-import { ferryKm, visibility } from '../air';
-import { TUNING } from '../air/tables';
+import { ferryKm, tankerStretch, visibility } from '../air';
 import { dominant, issue } from './forces';
 import { arsenal, FireBudget, pickTarget, pkAgainst, SamCover, reachKm, strikeOptions, withinKm, type StrikeTarget, type TargetGrid } from './strikes';
 import type { Plan } from './types';
@@ -74,9 +73,10 @@ export function planAir(p: Plan, targets: TargetGrid): void {
   const airfields = () => (fields ??= friendlyAirfields(p, false));
   const hostFields = () => (hosted ??= friendlyAirfields(p, true));
   const fighters = wings.filter((w) => roleOf(p, w) === 'fighter').length;
-  // Sweeps, strike packages and basing are planned with the tanker support the nation can lay on;
-  // the air system then works out each day's actual radius from tanker sorties in range.
-  const tanked = wings.some((w) => Object.entries(w.equipment).some(([id, n]) => n > 0 && p.ctx.catalog.platform(id as PlatformId).class === 'tanker')) ? 1 + TUNING.maxTankerExtension : 1;
+  // Sweeps, strike packages and basing are planned with the tanker support the nation laid on the last time its wings
+  // needed it (full support before then); the air system then works out each day's actual radius from tanker sorties in range.
+  const tankers = wings.some((w) => Object.entries(w.equipment).some(([id, n]) => n > 0 && p.ctx.catalog.platform(id as PlatformId).class === 'tanker'));
+  const tanked = tankers ? tankerStretch(p.world.slices.air?.tanking?.[p.nation] ?? Infinity) : 1;
   const rebase = rebasing(p, wings, keys, targets, hostFields, tanked);
 
   const airSuperiority = (w: Formation, radius: number): boolean => {
@@ -128,8 +128,9 @@ export function planAir(p: Plan, targets: TargetGrid): void {
   };
 
   for (const w of wings) {
-    const radius = reachKm(p, w);
-    switch (roleOf(p, w)) {
+    const role = roleOf(p, w);
+    const radius = roleReachKm(p, w, role);
+    switch (role) {
       case 'fighter':
         if (!airSuperiority(w, radius * tanked)) rebase(w, radius * tanked);
         break;
@@ -150,6 +151,19 @@ export function planAir(p: Plan, targets: TargetGrid): void {
     }
   }
   budget.settle();
+}
+
+/**
+ * Unrefuelled reach of the aircraft that fly a wing's role: an ORBAT wing names its base, so Tel Nof's F-15Cs share a
+ * formation with its CH-53 helicopters, which do not fly the F-15s' sweeps over Iran and do not cut their radius.
+ */
+function roleReachKm(p: Plan, w: Formation, role: AirRole | undefined): number {
+  let r = Infinity;
+  for (const [id, n] of Object.entries(w.equipment)) {
+    const pl = p.ctx.catalog.platform(id as PlatformId);
+    if (n > 0 && AIR_ROLE[pl.class] === role) r = Math.min(r, pl.mobility.rangeKm);
+  }
+  return Number.isFinite(r) ? r : reachKm(p, w);
 }
 
 function strikersOf(p: Plan, w: Formation) {

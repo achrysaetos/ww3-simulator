@@ -5,17 +5,17 @@
  */
 import { atWar, type SimContext, type System } from '../../core/engine';
 import type { Catalog } from '../../core/catalog';
-import type { Formation, FormationKind, MunitionId, NationId, NodeId, PlatformId, Posture, RefusalCode, World } from '../../core/types';
+import type { Formation, FormationId, FormationKind, MunitionId, NationId, NodeId, PlatformId, Posture, RefusalCode, World } from '../../core/types';
 import type { OrderCommand, OrderOutcome } from '../orders';
 import { navalPosition } from '../naval';
 import { combatRadiusKm } from './combat';
-import { buildPicture } from './picture';
+import { buildPicture, type AirPicture } from './picture';
 import { rearm, stockWarReserves } from './rearm';
 import { isStrikeMunition, reloadSalvos, resolveStrikes, type AirSlice } from './strike';
 import { resolveAirSuperiority } from './superiority';
-import { AIRFRAME, LAUNCHER, OFFENSIVE_POSTURES, STRIKE_ROLES, TUNING } from './tables';
+import { AIRFRAME, DEEP_FIRE_CLASSES, LAUNCHER, OFFENSIVE_POSTURES, STRIKE_ROLES, TUNING } from './tables';
 
-export { combatRadiusKm, resolveAirBattle, visibility } from './combat';
+export { combatRadiusKm, resolveAirBattle, tankerStretch, visibility } from './combat';
 export { engagementCycles, interceptSalvo, type SalvoDefense, type SalvoResult, type SalvoThreat, type ShotDoctrine } from './intercept';
 export { aimKey, dailyRounds, effectPk, futileAim, type AirSlice, type Assessment } from './strike';
 export { ATTRITABLE_COST_USD_M, PENETRATOR_VISIBILITY } from './tables';
@@ -31,6 +31,8 @@ const POSTURES: Partial<Record<FormationKind, ReadonlySet<Posture>>> = {
   air_wing: new Set(['reserve', 'defend', 'move', 'strike', 'air_superiority', 'patrol', 'escort']),
   missile: new Set(['reserve', 'defend', 'move', 'strike']),
   air_defense: new Set(['reserve', 'defend', 'move']),
+  // An artillery formation's deep fire missions; every other order of its is the land system's.
+  artillery: new Set(['strike']),
 };
 
 /** Ferry range with drop tanks, roughly 2.5x combat radius (manufacturer ferry vs radius figures, F-16/Su-27). */
@@ -56,19 +58,33 @@ export const airWar: System = {
     const slice = (world.slices.air ??= { runway: {} });
     world.theater.airControl = {};
     const pic = buildPicture(world, ctx, slice.runway);
+    for (const [nation, share] of pic.tankerShare) (slice.tanking ??= {})[nation] = share;
+    const offered = combatSorties(pic);
     resolveAirSuperiority(world, ctx, pic);
     resolveStrikes(world, ctx, pic, slice);
-    recover(world, slice);
+    const left = combatSorties(pic);
+    recover(world, slice, (f) => offered.has(f.id) && left.get(f.id) === offered.get(f.id));
     reloadSalvos(world, slice, ctx.catalog);
     rearm(world, ctx);
   },
 };
 
-function recover(world: World, slice: AirSlice) {
+/** Sorties left to each wing's combat aircraft (fighters, strikers, bombers, helicopters); a wing with none is absent. */
+function combatSorties(pic: AirPicture): Map<FormationId, number> {
+  const out = new Map<FormationId, number>();
+  for (const g of pic.groups) if (STRIKE_ROLES.has(g.profile.role)) out.set(g.f.id, (out.get(g.f.id) ?? 0) + g.sorties);
+  return out;
+}
+
+/**
+ * Surge tempo tires crews and wears airframes; a wing whose offensive order flew nothing this tick (out of reach on
+ * the day's tanker share, no weapon to release, no war yet) stood down and rests instead.
+ */
+function recover(world: World, slice: AirSlice, idle: (f: Formation) => boolean) {
   const days = world.dtHours / 24;
   for (const f of Object.values(world.formations)) {
     if (f.kind !== 'air_wing' || f.status !== 'active') continue;
-    const delta = OFFENSIVE_POSTURES.has(f.order.posture) ? TUNING.surgeFatiguePerDay * days : -TUNING.restRecoveryPerDay * days;
+    const delta = OFFENSIVE_POSTURES.has(f.order.posture) && !idle(f) ? TUNING.surgeFatiguePerDay * days : -TUNING.restRecoveryPerDay * days;
     f.fatigue = Math.max(0, Math.min(1, f.fatigue + delta));
   }
   const grid = world.theater.power ?? {};
@@ -95,7 +111,7 @@ function recover(world: World, slice: AirSlice) {
 export function applyAirOrder(world: World, cmd: OrderCommand, ctx: SimContext): OrderOutcome | undefined {
   const f = world.formations[cmd.formation];
   const allowed = f && POSTURES[f.kind];
-  if (!f || !allowed) return undefined;
+  if (!f || !allowed || (f.kind === 'artillery' && cmd.order.posture !== 'strike')) return undefined;
   const refuse = (code: RefusalCode, reason: string): OrderOutcome => ({ ok: false, code, reason });
   if (f.nation !== cmd.nation) return refuse('not_yours', 'not your formation');
   if (f.status !== 'active') return refuse('not_ready', `formation is ${f.status}`);
@@ -171,7 +187,7 @@ function maxReachKm(world: World, f: Formation, strike: boolean, ctx: SimContext
     const p = ctx.catalog.platform(pid as PlatformId);
     const role = AIRFRAME[p.class]?.role;
     if (role && (strike ? STRIKE_ROLES.has(role) : role === 'counter_air')) reach = Math.max(reach, combatRadiusKm(p, tankers) + weapon);
-    else if (strike && LAUNCHER[p.class]) reach = Math.max(reach, weapon);
+    else if (strike && (LAUNCHER[p.class] || (f.kind === 'artillery' && DEEP_FIRE_CLASSES.has(p.class)))) reach = Math.max(reach, weapon);
   }
   return reach;
 }

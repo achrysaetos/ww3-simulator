@@ -190,8 +190,8 @@ const artillery: PlatformSpec<MunitionKey>[] = [
 
 const rockets: PlatformSpec<MunitionKey>[] = [
   // HIMARS: ~$5M per launcher (FY2024); precision makes it count far beyond its rocket count against structures.
-  { id: 'himars', name: 'M142 HIMARS', cls: 'mlrs', producers: ['USA'], inService: 2005, unitCostUsdM: 5.1, speedKph: 85, rangeKm: 480, fuelTph: 0.05, armor: 0.15, stealth: 0.3, q: 0.6, fp: { armor: 0.06, structure: 0.12 }, load: { gmlrs: 6 } },
-  { id: 'm270a2', name: 'M270A2 MLRS', cls: 'mlrs', producers: ['USA'], inService: 2023, unitCostUsdM: 7, speedKph: 55, rangeKm: 480, fuelTph: 0.13, armor: 0.2, q: 0.9, fp: { armor: 0.08, structure: 0.18 }, load: { gmlrs: 12 } },
+  { id: 'himars', name: 'M142 HIMARS', cls: 'mlrs', producers: ['USA'], inService: 2005, unitCostUsdM: 5.1, speedKph: 85, rangeKm: 480, fuelTph: 0.05, armor: 0.15, stealth: 0.3, q: 0.6, fp: { armor: 0.06, structure: 0.12 }, load: { gmlrs: 6, atacms: 1 } },
+  { id: 'm270a2', name: 'M270A2 MLRS', cls: 'mlrs', producers: ['USA'], inService: 2023, unitCostUsdM: 7, speedKph: 55, rangeKm: 480, fuelTph: 0.13, armor: 0.2, q: 0.9, fp: { armor: 0.08, structure: 0.18 }, load: { gmlrs: 12, atacms: 2 } },
   { id: 'bm21', name: 'BM-21 Grad', cls: 'mlrs', producers: ['RUS', 'SRB', 'EGY', 'IRN', 'PRK'], inService: 1963, unitCostUsdM: 0.3, speedKph: 60, rangeKm: 750, fuelTph: 0.05, armor: 0.05, q: 1.0, load: { rocket_122: 40 } },
   { id: 'tornado_g', name: '9K51M Tornado-G', cls: 'mlrs', producers: ['RUS'], inService: 2013, unitCostUsdM: 1.5, speedKph: 60, rangeKm: 900, fuelTph: 0.05, armor: 0.05, q: 1.1, load: { rocket_122: 40 } },
   { id: 'bm27', name: 'BM-27 Uragan', cls: 'mlrs', crew: 4, producers: ['RUS'], inService: 1975, unitCostUsdM: 1.5, speedKph: 60, rangeKm: 500, fuelTph: 0.08, armor: 0.05, q: 1.3, load: { rocket_220: 16 } },
