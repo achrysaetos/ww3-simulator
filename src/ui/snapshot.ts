@@ -395,6 +395,8 @@ export interface Snapshot {
   nations?: Float32Array;
   diff?: Partial<Record<Packed, PackedDiff>>;
   events: SimEvent[];
+  /** A resumed game's notable events from before the save, newest last: for the log and ticker, not replayed as news. */
+  history?: SimEvent[];
   droppedEvents: number;
   wars: [NationId, NationId][];
   /** Flat (node, nationIndex, level) triples. */
@@ -474,6 +476,19 @@ export class SnapshotEncoder {
 
   /** Buffer events from ticks that run between two snapshots. The AI's answers to its own commands never leave the worker. */
   collect(events: readonly SimEvent[]): void {
+    for (const e of this.admit(events)) {
+      if (this.events.length < EVENT_LIMIT) this.events.push(e);
+      else this.dropped++;
+    }
+  }
+
+  /** The newest of a resumed World's notable events, to send once with the first snapshot; it also restores how each war began. */
+  resumed(world: World): SimEvent[] {
+    return this.admit(world.history).slice(-EVENT_LIMIT);
+  }
+
+  private admit(events: readonly SimEvent[]): SimEvent[] {
+    const out: SimEvent[] = [];
     for (const e of events) {
       if (e.type === 'command_result' && !e.byPlayer) continue;
       if (e.type === 'war_declared') {
@@ -481,9 +496,9 @@ export class SnapshotEncoder {
         if (!this.entries.has(`${e.by}|${e.on}`)) this.entries.set(`${e.by}|${e.on}`, { nation: e.by, ...entry });
         if (!this.entries.has(`${e.on}|${e.by}`)) this.entries.set(`${e.on}|${e.by}`, { nation: e.on, ...entry, reason: `attacked by ${e.by}` });
       }
-      if (this.events.length < EVENT_LIMIT) this.events.push(e);
-      else this.dropped++;
+      out.push(e);
     }
+    return out;
   }
 
   /**
