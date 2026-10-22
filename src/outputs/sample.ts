@@ -69,16 +69,17 @@ export function sampleOutputs(world: World, catalog: Catalog, nations: readonly 
   const out: Record<NationId, NationSample> = {};
   for (const id of nations) out[id] = { stock: { ammo: world.nations[id].bulk.ammo }, produced: {}, aid: {}, aidReceived: 0, shellsFired: world.slices.land?.shellsFired[id] ?? 0, producedUsdM: 0 };
   const launchable = new Map<NationId, Set<string>>();
-  for (const f of Object.values(world.formations)) {
-    const s = out[f.nation];
-    if (!s || f.status === 'destroyed') continue;
-    for (const [m, k] of Object.entries(f.magazine)) {
-      const g = groupOf(catalog.munitions.get(m as Munition['id']));
-      if (g) s.stock[g] = (s.stock[g] ?? 0) + k;
-    }
+  const living = Object.values(world.formations).filter((f) => out[f.nation] && f.status !== 'destroyed');
+  for (const f of living) {
     const can = launchable.get(f.nation) ?? launchable.set(f.nation, new Set()).get(f.nation)!;
     for (const [pid, n] of Object.entries(f.equipment)) if (n > 0) for (const l of catalog.platform(pid as PlatformId).loadout) can.add(l.munition);
   }
+  // A magazine whose launchers were all destroyed holds rounds as dead as a warehouse nobody can load from.
+  for (const f of living)
+    for (const [m, k] of Object.entries(f.magazine)) {
+      const g = launchable.get(f.nation)?.has(m) ? groupOf(catalog.munitions.get(m as Munition['id'])) : undefined;
+      if (g) out[f.nation].stock[g] = (out[f.nation].stock[g] ?? 0) + k;
+    }
   for (const id of nations) {
     const s = out[id];
     const can = launchable.get(id);

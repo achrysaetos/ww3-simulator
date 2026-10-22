@@ -198,6 +198,19 @@ describe('reading outputs leaves the run alone', () => {
     expect(ours.rows.some((r) => r.key === 'RUS military_casualties')).toBe(true);
   }, 60_000);
 
+  it('counts no drones in magazines once every launcher that fires them is gone', () => {
+    const t = createSession('ukraine-2026', 1);
+    const drones = () => sampleOutputs(t.world, t.catalog, [UKR]).nations[UKR].stock.drones ?? 0;
+    const lyutyi = Object.values(t.world.formations).filter((f) => f.nation === UKR && (f.magazine as Record<string, number>).lyutyi > 0);
+    const loaded = lyutyi.reduce((a, f) => a + (f.magazine as Record<string, number>).lyutyi, 0);
+    expect(loaded).toBeGreaterThan(0);
+    const before = drones();
+    for (const f of Object.values(t.world.formations))
+      if (f.nation === UKR) for (const pid of Object.keys(f.equipment)) if (t.catalog.platform(pid as never).loadout.some((l) => l.munition === 'lyutyi')) (f.equipment as Record<string, number>)[pid] = 0;
+    const warehoused = (t.world.nations[UKR].stockpile as Record<string, number>).lyutyi ?? 0;
+    expect(drones()).toBe(before - loaded - warehoused);
+  });
+
   it('snapshots carry the War Cost reading once a game day', () => {
     const t = createSession('ukraine-2026', 1);
     t.world.nations[UKR].controlledBy = 'human';
