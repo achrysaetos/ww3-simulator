@@ -29,6 +29,8 @@ export interface View {
   contactsAt(node: NodeId): readonly ContactView[];
   /** Believed hostile strength near a node, for planners: platforms of contacts there (of one nation when given), weighted by confidence. */
   believedStrengthAt(node: NodeId, of?: NationId): number;
+  /** Minefields in the sea zones `friends` have charted (naval/state.ts), as they lie now. Rebuilt on each call: mines change within a tick. */
+  minefields(): Readonly<Record<number, Readonly<Record<NationId, number>>>>;
 }
 
 /** Self, everyone fighting one of its enemies and not it, and treaty allies it is not at war with. */
@@ -158,7 +160,16 @@ function assemble(world: World, nation: NationId, friends: Set<NationId>, contac
       for (const c of contactsAt(node)) if (of === undefined || c.nation === of) s += c.strength * c.confidence;
       return s;
     },
+    minefields: () => (world.slices.intel ? chartedFields(world, friends) : world.slices.naval?.mines ?? {}),
   };
+}
+
+function chartedFields(world: World, friends: ReadonlySet<NationId>): Record<number, Record<NationId, number>> {
+  const out: Record<number, Record<NationId, number>> = {};
+  const naval = world.slices.naval;
+  if (!naval) return out;
+  for (const n of friends) for (const z of naval.charted?.[n] ?? []) if (naval.mines[z]) out[z] = naval.mines[z];
+  return out;
 }
 
 const believedWorlds = new WeakMap<View, World>();

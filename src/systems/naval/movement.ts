@@ -3,7 +3,7 @@ import type { GameMap } from '../../core/map';
 import { findPath } from '../../core/path';
 import type { Formation, NationId, NodeId, World } from '../../core/types';
 import { geography, sameWaters, seaNeighbour } from './geography';
-import type { Composition } from './state';
+import type { Composition, NavalState } from './state';
 import { MINE_CLOSURE } from './tables';
 
 /**
@@ -20,9 +20,12 @@ const LOITER_BURN = 0.2;
  */
 const BERTH_REFILL_PER_DAY = 0.5;
 
+/** Minefields by sea node and layer: the true ones for physics, a nation's charted ones for its planners. */
+export type Minefields = NavalState['mines'];
+
 /** Hostile mines at a node close it to this nation. */
-export function minedClosed(world: World, node: number, nation: NationId): boolean {
-  const laid = world.slices.naval?.mines[node];
+export function minedClosed(world: World, node: number, nation: NationId, mines: Minefields | undefined = world.slices.naval?.mines): boolean {
+  const laid = mines?.[node];
   if (!laid) return false;
   let hostile = 0;
   for (const [layer, n] of Object.entries(laid)) if (atWar(world, layer as NationId, nation)) hostile += n;
@@ -41,11 +44,11 @@ export function navalDestination(world: World, map: GameMap, nation: NationId, t
 }
 
 /** Whether `f` can be sent toward `target` at all: a destination exists and open water joins it, past any hostile minefield or closed strait (orders refuse the rest). */
-export function sailable(world: World, map: GameMap, f: Formation, target: NodeId): boolean {
+export function sailable(world: World, map: GameMap, f: Formation, target: NodeId, mines: Minefields | undefined = world.slices.naval?.mines): boolean {
   const dest = navalDestination(world, map, f.nation, target);
   if (dest === undefined || !sameWaters(map, f.node, dest)) return false;
-  if (map.straits.some((s) => straitBarred(world, s, f.nation))) return seaPath(world, map, f.nation, f.node, dest) !== null;
-  for (const n in world.slices.naval?.mines) if (minedClosed(world, Number(n), f.nation)) return seaPath(world, map, f.nation, f.node, dest) !== null;
+  if (map.straits.some((s) => straitBarred(world, s, f.nation))) return seaPath(world, map, f.nation, f.node, dest, undefined, mines) !== null;
+  for (const n in mines) if (minedClosed(world, Number(n), f.nation, mines)) return seaPath(world, map, f.nation, f.node, dest, undefined, mines) !== null;
   return true;
 }
 
@@ -74,12 +77,12 @@ export function straitBarred(world: World, s: GameMap['straits'][number], nation
  * A* over sea zones, canals, and the start/end port. Hostile minefields, and any zone `avoid`
  * names, are impassable except as the destination; so is a strait whose regime bars the nation.
  */
-export function seaPath(world: World, map: GameMap, nation: NationId, from: NodeId, to: NodeId, avoid?: (zone: number) => boolean): NodeId[] | null {
+export function seaPath(world: World, map: GameMap, nation: NationId, from: NodeId, to: NodeId, avoid?: (zone: number) => boolean, mines: Minefields | undefined = world.slices.naval?.mines): NodeId[] | null {
   const geo = geography(map);
   const barred = map.straits.filter((s) => straitBarred(world, s, nation));
   return findPath(map, from, to, (a, b, km) => {
     if (barred.some((s) => (s.a === a && s.b === b) || (s.a === b && s.b === a))) return Infinity;
-    if (map.isSea(b)) return b !== to && (minedClosed(world, b, nation) || avoid?.(b)) ? Infinity : km;
+    if (map.isSea(b)) return b !== to && (minedClosed(world, b, nation, mines) || avoid?.(b)) ? Infinity : km;
     if (geo.canalNodes.has(b)) return km;
     return b === to && geo.portZone.has(b) ? km : Infinity;
   }, 50_000);

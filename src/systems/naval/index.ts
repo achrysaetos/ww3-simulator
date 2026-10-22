@@ -41,6 +41,7 @@ export const navalWar: System = {
     }
     world.slices.naval = {
       mines: {},
+      charted: {},
       oceanSurveillance: Object.fromEntries(Object.keys(world.nations).map((n) => [n, OCEAN_SURVEILLANCE[n] ?? 0])),
       tracks: {},
       lastFired: {},
