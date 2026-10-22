@@ -442,7 +442,7 @@ const STANDING_BORDERS: readonly (readonly [NationId, NationId])[] = [
   ['UKR' as NationId, 'BLR' as NationId],
 ];
 
-function fortifyStandingLines(world: World, map: GameMap): void {
+export function fortifyStandingLines(world: World, map: GameMap): void {
   const { fortified } = landSlice(world);
   const lines = new Set<string>();
   for (const [a, b] of STANDING_BORDERS) lines.add(`${a}|${b}`).add(`${b}|${a}`);

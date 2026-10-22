@@ -2,6 +2,7 @@ import type { NationId, World } from '../../core/types';
 import type { GameMap } from '../../core/map';
 import { pointInRing } from '../../data/occupation';
 import { createSession, type Session } from '../../scenarios';
+import { fortifyStandingLines } from '../../systems/land';
 
 /**
  * A scenario's world moved to the date of a historical case. Only the weather reads the date: it
@@ -26,7 +27,10 @@ export function station(world: World, map: GameMap, nation: string, name: string
   return f;
 }
 
-/** Hands `holder` the cells of `owner` whose centre lies inside `ring` ([lon, lat] points), as OCCUPATIONS does. */
+/**
+ * Hands `holder` the cells of `owner` whose centre lies inside `ring` ([lon, lat] points), as OCCUPATIONS does, and
+ * fortifies the new line of occupation as the scenario's own lines are fortified when the session starts.
+ */
 export function occupy(world: World, map: GameMap, holder: string, owner: string, ring: readonly [number, number][]): number {
   let cells = 0;
   for (let n = 0; n < map.landCount; n++) {
@@ -35,5 +39,6 @@ export function occupy(world: World, map: GameMap, holder: string, owner: string
     cells++;
   }
   if (!cells) throw new Error(`no ${owner} cell inside the ring for ${holder}`);
+  fortifyStandingLines(world, map);
   return cells;
 }
