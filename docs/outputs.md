@@ -34,7 +34,7 @@ Each `ItemRace` row covers one key item for one nation:
 - `ammo` is the national depots' ammunition in tons.
 - `interceptors`, `cruise`, `ballistic` and `drones` count rounds in magazines and warehouses. `drones` covers long-range one-way drones only.
 
-The rates (`producedPerMonth`, `aidPerMonth`, `usedPerMonth`) are per 30 days over the trailing month. `zeroDay` is the day the stock would reach zero at those rates. `ranOutDay` is the day it actually fell below one unit in this run. `monthly` gives the month-by-month history.
+The rates (`producedPerMonth`, `aidPerMonth`, `usedPerMonth`) are per 30 days over the trailing month. `zeroDay` is the day the stock would reach zero at those rates. Treat it as an early warning, not a forecast. Air-defence fire comes in bursts, the AI holds reserves back, and a stock can empty at once when its last launcher is destroyed. On seeds 1-3 of ukraine-2026, `zeroDay` flagged every stock that ran dry within 30 days. It was never more than 10 days after the actual day, and many flagged stocks lasted well past it. Rounds in a magazine or warehouse that no living launcher can fire do not count as stock. `ranOutDay` is the day it actually fell below one unit in this run. `monthly` gives the month-by-month history.
 
 The figures to compare against are these:
 

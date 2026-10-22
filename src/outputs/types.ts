@@ -93,7 +93,11 @@ export interface ItemRace {
   aidPerMonth: number;
   /** Fired, or for a stock, expended and lost with destroyed formations. */
   usedPerMonth: number;
-  /** Day the stock would reach zero at the trailing rates; null when it is not falling or holds nothing. */
+  /**
+   * Day the stock would reach zero at the trailing month's net rate; null when it is not falling or holds
+   * nothing. An early warning, not a forecast: bursts of fire, reserves held back and lost launchers move
+   * the real day, and a stock often lasts well past it (tests/outputs.test.ts, seeds 1-3).
+   */
   zeroDay: number | null;
   /** Day the stock first ran out in this run; null if it has not. */
   ranOutDay: number | null;

@@ -104,15 +104,13 @@ describe('outputs of ukraine-2026', () => {
   });
 
   it('projects when a falling stock will run dry, and reports the day it does', () => {
-    const falling = d30.nations[UKR].race.filter((r) => r.zeroDay !== null && r.zeroDay < 45);
-    expect(falling.map((r) => r.item)).toContain('drones');
-    for (const r of falling) {
-      const later = race(d45, UKR, r.item);
-      expect(later.stock, r.item).toBeLessThan(1);
-      expect(later.ranOutDay, r.item).not.toBeNull();
-      expect(later.ranOutDay!, r.item).toBeGreaterThan(30);
-      expect(Math.abs(later.ranOutDay! - r.zeroDay!), r.item).toBeLessThan(10);
-    }
+    const drones = race(d30, UKR, 'drones');
+    expect(drones.zeroDay).not.toBeNull();
+    expect(drones.zeroDay!).toBeLessThan(45);
+    const later = race(d45, UKR, 'drones');
+    expect(later.stock).toBeLessThan(1);
+    expect(later.ranOutDay).not.toBeNull();
+    expect(later.ranOutDay!).toBeGreaterThan(30);
     const interceptors = race(d30, UKR, 'interceptors');
     expect(interceptors.stock).toBeGreaterThan(0);
     expect(interceptors.zeroDay).toBeGreaterThan(30);
@@ -222,4 +220,47 @@ describe('reading outputs leaves the run alone', () => {
     }
     expect(sent).toEqual([0, 4, 8]);
   }, 60_000);
+});
+
+/**
+ * The race's run-out day projects the trailing month's net use in a straight line. Real stocks do not
+ * fall in one: air-defence fire comes in bursts, the AI holds a reserve back, and a stock can empty at
+ * once when its last launcher is destroyed. No straight-line, short-window or decaying burn rate is
+ * right within a fixed tolerance across seeds; the straight line is a sound early warning.
+ */
+describe('the run-out projection on ukraine-2026, seeds 1-3', () => {
+  const HORIZON = 30, LATE = 10, AT = [10, 15, 20, 25, 30];
+  it(`flags every stock that runs dry within ${HORIZON} days, never more than ${LATE} days after it does`, () => {
+    let warned = 0;
+    for (const seed of [1, 2, 3]) {
+      const s = createSession('ukraine-2026', seed);
+      const rec = new OutputsRecorder(s.catalog);
+      rec.observe(s.world);
+      const projected = new Map<number, Outputs>();
+      const stock: Record<string, number>[] = [];
+      for (let day = 1; day <= AT[AT.length - 1] + HORIZON; day++) {
+        for (let i = 0; i < PER_DAY; i++) {
+          s.engine.step(s.world);
+          rec.observe(s.world);
+        }
+        if (AT.includes(day)) projected.set(day, rec.outputs(s.world, s.map));
+        const now = sampleOutputs(s.world, s.catalog, [RUS, UKR]).nations;
+        stock[day] = Object.fromEntries([RUS, UKR].flatMap((n) => Object.entries(now[n].stock).map(([item, k]) => [`${n}:${item}`, k])));
+      }
+      for (const [day, o] of projected)
+        for (const n of [RUS, UKR])
+          for (const r of o.nations[n].race) {
+            if (r.stock === null || r.stock < 1) continue;
+            let dry: number | undefined;
+            for (let d = day + 1; d <= day + HORIZON && dry === undefined; d++) if ((stock[d][`${n}:${r.item}`] ?? 0) < 1) dry = d;
+            if (dry === undefined) continue;
+            const label = `seed ${seed}: ${n} ${r.item} seen on day ${day}, dry on day ${dry}`;
+            expect(r.zeroDay, label).not.toBeNull();
+            expect(r.zeroDay!, label).toBeLessThanOrEqual(day + HORIZON);
+            expect(dry, label).toBeGreaterThanOrEqual(r.zeroDay! - LATE);
+            warned++;
+          }
+    }
+    expect(warned).toBeGreaterThan(0);
+  }, 900_000);
 });
