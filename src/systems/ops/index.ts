@@ -7,7 +7,7 @@ import {
 } from '../../core/types';
 import { mayEnter, warAgainst, widen } from '../diplomacy/aims';
 import type { War } from '../diplomacy/types';
-import { allied } from '../land/state';
+import { openTo } from '../land/state';
 import { RIVER_ASSAULT_COST, TERRAIN } from '../land/tables';
 import { answerCommand, type OperationCommand, type OrderOutcome } from '../orders';
 import { executeOperation } from './execute';
@@ -101,7 +101,7 @@ function neutralObjective(world: World, op: Pick<Operation, 'nation' | 'kind' | 
   if (op.kind === 'defence') return undefined;
   for (const n of [...op.axis, ...op.objectives]) {
     const holder = world.control[n];
-    if (holder && !allied(world, op.nation, holder) && !atWar(world, op.nation, holder)) return refuse('neutral_territory', `${holder} holds part of the axis and you are not at war with it`);
+    if (holder && !openTo(world, op.nation, holder)) return refuse('neutral_territory', `${holder} holds part of the axis and you are not at war with it`);
   }
   return undefined;
 }

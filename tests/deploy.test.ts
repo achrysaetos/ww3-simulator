@@ -33,7 +33,8 @@ const natoTreaty = (extra: string[]): AllianceTreaty => ({
   members: Object.fromEntries([...NATO, ...extra].map((n) => [N(n), { role: 'mutual' as const, reliability: 1, delayDays: 1 }])),
 });
 
-function setup(systems: System[] = []) {
+/** NATO's European members, not fighting, grant the US passage (XP-1): without diplomacy no foreign port takes its troops. */
+function setup(systems: System[] = [createDiplomacy({ alliances: [natoTreaty([])] })]) {
   const t = testWorld([landMovement, navalWar, ...systems]);
   nato(t);
   t.war('USA', 'RUS');
