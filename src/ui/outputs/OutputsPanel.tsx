@@ -132,7 +132,7 @@ function HumanCost({ view, name }: { view: OutputsView; name(n: NationId): strin
       )}
       {view.hosts.length > 0 && (
         <section className="ww-cost-section">
-          <h4 className="ww-label">Where the refugees went</h4>
+          <h4 className="ww-label">Where {name(view.mine[0])}'s refugees went</h4>
           <ul className="ww-cost-hosts">
             {view.hosts.map((x) => <li key={x.nation}><span>{name(x.nation)}</span><span className="ww-mono">{num(x.refugees)}</span></li>)}
           </ul>
@@ -143,7 +143,7 @@ function HumanCost({ view, name }: { view: OutputsView; name(n: NationId): strin
   );
 }
 
-function Race({ view }: { view: OutputsView }) {
+export function Race({ view }: { view: OutputsView }) {
   const items = new Map<RaceItem, { mine: RaceView[]; enemy: RaceView[] }>();
   const collect = (side: readonly NationId[], key: 'mine' | 'enemy') => {
     for (const id of side)
@@ -161,7 +161,7 @@ function Race({ view }: { view: OutputsView }) {
   return (
     <section className="ww-cost-section">
       {shown.map((item) => <RaceCard key={item} item={item} {...items.get(item)!} you={you.find((r) => r.item === item)} day={view.day} />)}
-      <p className="ww-cost-source">Rates are the last month's, per 30 days. Enemy output is an industrial assessment (CSIS, IISS, national intelligence estimates); its stocks are not observed. Shells fired are counter-battery tallies.</p>
+      <p className="ww-cost-source">Rates are per 30 days, from the last {Math.max(1, Math.round(Math.min(30, view.day)))} days. Enemy output is an industrial assessment (CSIS, IISS, national intelligence estimates); its stocks are not observed. Shells fired are counter-battery tallies.</p>
     </section>
   );
 }
@@ -188,7 +188,7 @@ function RaceCard({ item, mine, enemy, you, day }: { item: RaceItem; mine: RaceV
         <span className="ww-bar"><i style={{ width: pct(ours / max) }} /></span>
         <span className="ww-mono">{num(ours)}{unit}<small>/mo</small></span>
       </div>
-      <div className="ww-cost-race-sub">made {num(made(mine))}{unit}{aid(mine) ? ` + aid ${num(aid(mine))}${unit}` : ''} · {item === 'shells' ? 'fired' : 'used'} {num(usedMine)}{unit}</div>
+      <div className="ww-cost-race-sub">made {num(made(mine))}{unit}{aid(mine) ? ` + aid ${num(aid(mine))}${unit}` : ''} · {item === 'shells' ? 'fired' : 'used'} {num(usedMine)}{unit}<small>/mo</small></div>
       {enemy.length > 0 && (
         <>
           <div className="ww-cost-race-row">
@@ -196,7 +196,7 @@ function RaceCard({ item, mine, enemy, you, day }: { item: RaceItem; mine: RaceV
             <span className="ww-bar red"><i style={{ width: pct(theirs / max) }} /></span>
             <span className="ww-mono">{num(theirs)}{unit}<small>/mo</small></span>
           </div>
-          <div className="ww-cost-race-sub">assessed: made {num(made(enemy))}{unit}{aid(enemy) ? ` + aid ${num(aid(enemy))}${unit}` : ''}{firedEnemy !== null ? ` · fired ${num(firedEnemy)}` : ''}</div>
+          <div className="ww-cost-race-sub">assessed: made {num(made(enemy))}{unit}{aid(enemy) ? ` + aid ${num(aid(enemy))}${unit}` : ''}{firedEnemy !== null ? ` · fired ${num(firedEnemy)}` : ''}<small>/mo</small></div>
         </>
       )}
       {you && you.stock !== null && <Runway r={you} day={day} unit={unit} />}

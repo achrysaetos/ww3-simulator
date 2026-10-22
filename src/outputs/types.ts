@@ -23,6 +23,8 @@ export interface NationOutputs {
   /** Only the workarounds the nation needs: none when nothing is cut off. */
   workarounds: Workaround[];
   edges: Edges;
+  /** Where its own refugees shelter, most first. */
+  refugeeHosts: { nation: NationId; refugees: number }[];
   /** One row per cut-off the nation is climbing the workaround ladder out of: a sanctioning or warring partner, or a blockade of its ports. */
   ladder: CutoffCoverage[];
 }
