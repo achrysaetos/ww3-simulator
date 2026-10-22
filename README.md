@@ -8,6 +8,24 @@ how a war actually goes.
 You can play any of the 193 nations in the browser, save and resume a war from the Game
 menu, or run scenarios headless and measure the outcome.
 
+[![The first days of the Russo-Ukrainian war, played as Ukraine](docs/media/demo.gif)](docs/media/demo.mp4)
+
+The clip above is the first days of `ukraine-2026` played as Ukraine. The [full video](docs/media/demo.mp4)
+runs 48 seconds.
+
+## Screenshots
+
+| | |
+| --- | --- |
+| ![Title screen: scenario, nation and role over the night globe](docs/media/01-start-screen.jpg) | ![Situation report on day one](docs/media/02-situation-report.jpg) |
+| Pick a scenario, a nation and how much you command yourself. | The general staff's situation report opens the war. |
+| ![Theatre map of Ukraine with the staff and War Room panels](docs/media/03-theatre-map.jpg) | ![The Donbas front at brigade level](docs/media/05-front-line.jpg) |
+| The theatre as your intelligence sees it: your forces in blue, the enemy where it was last fixed. | Zoom to the front and every counter is a real brigade. |
+| ![Battle plan with the staff forecast](docs/media/06-battle-plan.jpg) | ![The Daily Brief](docs/media/04-daily-brief.jpg) |
+| Plan an operation and the staff war-games it from your intelligence picture. | The Daily Brief puts each decision to you with a recommended answer. |
+| ![A crisis screen: Seoul threatened](docs/media/08-crisis.jpg) | ![War cost: human cost, production and lifelines](docs/media/07-war-cost.jpg) |
+| A crisis stops the clock until you decide. | War Cost counts the dead, the displaced and the production race. |
+
 ## Quick start
 
 ```sh
