@@ -342,6 +342,13 @@ export interface LiftOption {
   boardNow: boolean;
 }
 
+/** Typed arrays sent per tick; a tick where few entries moved sends only those (`PackedDiff`). */
+export const PACKED = ['fNode', 'fStrength', 'fPosture', 'fStatus', 'fTarget', 'cConfidence', 'cAgeHours', 'cErrorKm', 'nations'] as const;
+export type Packed = (typeof PACKED)[number];
+type PackedArray = Uint8Array | Uint16Array | Float32Array;
+/** Entries that changed: their indices, and their new values in the field's own array type. */
+export interface PackedDiff { i: Uint32Array; v: PackedArray }
+
 export interface Snapshot {
   tick: number;
   date: string;
@@ -351,25 +358,30 @@ export interface Snapshot {
   roster?: RosterEntry[];
   /** Formations new since the last snapshot, appended to the roster (formations are never removed, only added). */
   rosterAdd?: RosterEntry[];
-  fNode: Uint16Array;
+  /**
+   * The per-formation and per-nation arrays (`Packed`). Each comes whole, or as `diff` against the
+   * one the client holds when the roster kept its order and only a few entries changed.
+   */
+  fNode?: Uint16Array;
   /** Operational platforms divided by the count first seen, scaled to 0..255. */
-  fStrength: Uint8Array;
-  fPosture: Uint8Array;
-  fStatus: Uint8Array;
+  fStrength?: Uint8Array;
+  fPosture?: Uint8Array;
+  fStatus?: Uint8Array;
   /** Order target node, NO_NODE for none. */
-  fTarget: Uint16Array;
+  fTarget?: Uint16Array;
   /**
    * Intelligence on each contact, in roster order of the formations whose fPosture is NO_POSTURE
    * (the viewer's friends carry none, so a spectator's snapshot sends nothing): confidence 0..1 as
    * 0..255, hours since the last fix, and the radius in km within which the formation probably is.
    */
-  cConfidence: Uint8Array;
-  cAgeHours: Uint16Array;
-  cErrorKm: Uint16Array;
+  cConfidence?: Uint8Array;
+  cAgeHours?: Uint16Array;
+  cErrorKm?: Uint16Array;
+  /** NATION_FIELDS per nation, in meta.nationIds order. */
+  nations?: Float32Array;
+  diff?: Partial<Record<Packed, PackedDiff>>;
   events: SimEvent[];
   droppedEvents: number;
-  /** NATION_FIELDS per nation, in meta.nationIds order. */
-  nations: Float32Array;
   wars: [NationId, NationId][];
   /** Flat (node, nationIndex, level) triples. */
   air: Float32Array;
@@ -420,6 +432,7 @@ export class SnapshotEncoder {
   private outputsTick = -Infinity;
   /** First war_declared that put each nation into each war, keyed `nation|enemy`. */
   private readonly entries = new Map<string, WarEntry>();
+  private readonly lastPacked: Partial<Record<Packed, PackedArray>> = {};
 
   constructor(readonly nationIds: NationId[], private readonly catalog: Catalog, mapSize: number) {
     if (mapSize >= NO_NODE) throw new Error(`map has ${mapSize} nodes; the wire format packs nodes in 16 bits`);
@@ -427,9 +440,10 @@ export class SnapshotEncoder {
     this.outputs = new OutputsRecorder(catalog);
   }
 
-  /** Buffer events from ticks that run between two snapshots. */
+  /** Buffer events from ticks that run between two snapshots. The AI's answers to its own commands never leave the worker. */
   collect(events: readonly SimEvent[]): void {
     for (const e of events) {
+      if (e.type === 'command_result' && !e.byPlayer) continue;
       if (e.type === 'war_declared') {
         const entry = { reason: e.reason, tick: e.tick };
         if (!this.entries.has(`${e.by}|${e.on}`)) this.entries.set(`${e.by}|${e.on}`, { nation: e.by, ...entry });
@@ -451,17 +465,8 @@ export class SnapshotEncoder {
     const snap: Snapshot = {
       tick: world.tick,
       date: dateOf(world),
-      fNode: new Uint16Array(0),
-      fStrength: new Uint8Array(0),
-      fPosture: new Uint8Array(0),
-      fStatus: new Uint8Array(0),
-      fTarget: new Uint16Array(0),
-      cConfidence: new Uint8Array(0),
-      cAgeHours: new Uint16Array(0),
-      cErrorKm: new Uint16Array(0),
       events: this.events,
       droppedEvents: this.dropped,
-      nations: this.nationNumbers(world),
       wars: wars(world),
       air: this.sparseControl(world.theater.airControl),
       sea: this.sparseControl(world.theater.seaControl),
@@ -502,35 +507,33 @@ export class SnapshotEncoder {
     else if (fs.length > prevIds.length) snap.rosterAdd = fs.slice(prevIds.length).map(entry);
     if (!kept || fs.length > prevIds.length) this.lastIds = fs.map((f) => f.id);
     const n = fs.length;
-    snap.fNode = new Uint16Array(n);
-    snap.fStrength = new Uint8Array(n);
-    snap.fPosture = new Uint8Array(n);
-    snap.fStatus = new Uint8Array(n);
-    snap.fTarget = new Uint16Array(n);
     const contacts = view ? fs.filter((f) => !view.friends.has(f.nation)).length : 0;
-    snap.cConfidence = new Uint8Array(contacts);
-    snap.cAgeHours = new Uint16Array(contacts);
-    snap.cErrorKm = new Uint16Array(contacts);
+    const p = {
+      fNode: new Uint16Array(n), fStrength: new Uint8Array(n), fPosture: new Uint8Array(n), fStatus: new Uint8Array(n), fTarget: new Uint16Array(n),
+      cConfidence: new Uint8Array(contacts), cAgeHours: new Uint16Array(contacts), cErrorKm: new Uint16Array(contacts),
+      nations: this.nationNumbers(world),
+    } satisfies Record<Packed, PackedArray>;
     for (let i = 0, j = 0; i < n; i++) {
       const f = fs[i];
       const c = contactOf(f);
       if (c) {
-        snap.fNode[i] = c.node;
-        snap.fStrength[i] = Math.round(Math.min(1, c.strength / this.initial.get(f.id)!) * 255);
-        snap.fPosture[i] = NO_POSTURE;
-        snap.fStatus[i] = STATUSES.indexOf('active');
-        snap.fTarget[i] = NO_NODE;
-        snap.cConfidence[j] = Math.round(c.confidence * 255);
-        snap.cAgeHours[j] = Math.min(0xffff, Math.round(c.ageHours));
-        snap.cErrorKm[j++] = Math.min(0xffff, Math.round(c.errorKm));
+        p.fNode[i] = c.node;
+        p.fStrength[i] = Math.round(Math.min(1, c.strength / this.initial.get(f.id)!) * 255);
+        p.fPosture[i] = NO_POSTURE;
+        p.fStatus[i] = STATUSES.indexOf('active');
+        p.fTarget[i] = NO_NODE;
+        p.cConfidence[j] = Math.round(c.confidence * 255);
+        p.cAgeHours[j] = Math.min(0xffff, Math.round(c.ageHours));
+        p.cErrorKm[j++] = Math.min(0xffff, Math.round(c.errorKm));
         continue;
       }
-      snap.fNode[i] = f.node;
-      snap.fStrength[i] = Math.round(Math.min(1, platformCount(f) / this.initial.get(f.id)!) * 255);
-      snap.fPosture[i] = POSTURES.indexOf(f.order.posture);
-      snap.fStatus[i] = STATUSES.indexOf(f.status);
-      snap.fTarget[i] = f.order.target ?? NO_NODE;
+      p.fNode[i] = f.node;
+      p.fStrength[i] = Math.round(Math.min(1, platformCount(f) / this.initial.get(f.id)!) * 255);
+      p.fPosture[i] = POSTURES.indexOf(f.order.posture);
+      p.fStatus[i] = STATUSES.indexOf(f.status);
+      p.fTarget[i] = f.order.target ?? NO_NODE;
     }
+    for (const k of PACKED) this.pack(snap, k, p[k]);
 
     this.outputs.observe(world);
     if (viewer && (world.tick - this.outputsTick) * world.dtHours >= 24) {
@@ -546,6 +549,24 @@ export class SnapshotEncoder {
       else if (!view || view.friends.has(focused.nation)) snap.focusFormation = formationDetail(world, map, this.catalog, focused);
     }
     return snap;
+  }
+
+  /** Puts `next` on the snapshot whole, or as the entries that changed since the last one sent when that is smaller. */
+  private pack(snap: Snapshot, k: Packed, next: PackedArray): void {
+    const prev = this.lastPacked[k];
+    this.lastPacked[k] = next;
+    if (prev && prev.length === next.length) {
+      const at: number[] = [];
+      const limit = (next.length * next.BYTES_PER_ELEMENT) / (4 + next.BYTES_PER_ELEMENT);
+      for (let i = 0; i < next.length && at.length < limit; i++) if (prev[i] !== next[i]) at.push(i);
+      if (at.length < limit) {
+        const v = new (next.constructor as new (n: number) => PackedArray)(at.length);
+        at.forEach((i, j) => (v[j] = next[i]));
+        (snap.diff ??= {})[k] = { i: Uint32Array.from(at), v };
+        return;
+      }
+    }
+    snap[k] = next as never;
   }
 
   private nationNumbers(world: World): Float32Array {
@@ -929,6 +950,8 @@ export interface ClientState {
   outputs?: OutputsView;
   /** Events from the latest snapshot only. */
   latestEvents: SimEvent[];
+  /** The wire's arrays as last decoded, which the next snapshot's diffs apply to. */
+  packed: Record<Packed, PackedArray>;
 }
 
 export function emptyClientState(size: number): ClientState {
@@ -937,6 +960,10 @@ export function emptyClientState(size: number): ClientState {
     formations: [], rosterVersion: 0, nations: new Map(), wars: [], warsKey: '',
     air: new Float32Array(0), sea: new Float32Array(0), infra: new Float32Array(0), fallout: new Float32Array(0), contest: new Float32Array(0), weather: new Uint8Array(0),
     latestEvents: [],
+    packed: {
+      fNode: new Uint16Array(0), fStrength: new Uint8Array(0), fPosture: new Uint8Array(0), fStatus: new Uint8Array(0), fTarget: new Uint16Array(0),
+      cConfidence: new Uint8Array(0), cAgeHours: new Uint16Array(0), cErrorKm: new Uint16Array(0), nations: new Float32Array(0),
+    },
   };
 }
 
@@ -959,20 +986,27 @@ export function applySnapshot(state: ClientState, snap: Snapshot, nationIds: rea
     roster = [...roster, ...snap.rosterAdd];
     state.rosterVersion++;
   }
+  const w = state.packed;
+  for (const key of PACKED) {
+    const whole = snap[key];
+    const d = snap.diff?.[key];
+    if (whole) w[key] = whole;
+    else if (d) for (let x = 0; x < d.i.length; x++) w[key][d.i[x]] = d.v[x];
+  }
   let j = 0;
   state.formations = roster.map((entry, i) => {
-    const contact = snap.fPosture[i] === NO_POSTURE;
+    const contact = w.fPosture[i] === NO_POSTURE;
     return {
       entry,
-      node: snap.fNode[i] as NodeId,
-      strength: snap.fStrength[i] / 255,
-      posture: contact ? null : POSTURES[snap.fPosture[i]],
-      status: STATUSES[snap.fStatus[i]],
-      target: snap.fTarget[i] === NO_NODE ? null : (snap.fTarget[i] as NodeId),
-      contact: contact ? { confidence: snap.cConfidence[j] / 255, ageHours: snap.cAgeHours[j], errorKm: snap.cErrorKm[j++] } : null,
+      node: w.fNode[i] as NodeId,
+      strength: w.fStrength[i] / 255,
+      posture: contact ? null : POSTURES[w.fPosture[i]],
+      status: STATUSES[w.fStatus[i]],
+      target: w.fTarget[i] === NO_NODE ? null : (w.fTarget[i] as NodeId),
+      contact: contact ? { confidence: w.cConfidence[j] / 255, ageHours: w.cAgeHours[j], errorKm: w.cErrorKm[j++] } : null,
     };
   });
-  const k = NATION_FIELDS.length, v = snap.nations;
+  const k = NATION_FIELDS.length, v = w.nations;
   state.nations = new Map(nationIds.map((id, i) => {
     const card = cards.get(id);
     const o = i * k;
