@@ -65,11 +65,6 @@ export const gbr = [
   // Four Point-class RO-RO under the MoD's strategic sealift contract (Foreland Shipping); two sail on charter, two lie at reduced readiness.
   u('Strategic Sealift Service (Point class)', 'surface_group', 'task_group', base('Marchwood Military Port', 50.89, -1.44), { military_roro: 4 }, { readiness: 0.6, personnel: 4 * 20 }),
   u('Royal Fleet Auxiliary tankers', 'logistics', 'task_group', base('Marchwood', 50.9, -1.44), { tide_tanker: 3 }, { readiness: 0.6, personnel: 400 }),
-  // 9th Mine Countermeasures Squadron at UK Naval Support Facility Bahrain (Mina Salman), with RFA Cardigan Bay as its
-  // afloat base until 2024: HMS Middleton and HMS Chiddingfold (Hunt) and HMS Bangor (Sandown); Chiddingfold and Bangor
-  // collided alongside there in January 2024 (Royal Navy, Jan 2024). The squadron is being run down in favour of
-  // autonomous systems, so it sails at reduced readiness.
-  u('9th Mine Countermeasures Squadron', 'surface_group', 'flotilla', base('UK Naval Support Facility Bahrain', 26.2, 50.61), { hunt_mcm: 3 }, { readiness: 0.5, personnel: 3 * 45 }),
   u('Faslane Flotilla attack submarines', 'submarine', 'flotilla', faslane, { ssn_astute: 5, ssn_trafalgar: 1 }, { readiness: 0.6, personnel: 6 * 98 }),
   // Magazines count reentry vehicles, one per tube in the boat's load. The patrol boat carries 40 warheads on 8 missiles
   // (Integrated Review 2021); FAS (2025) counts 120 deployed, so two more loads sit at Faslane with the boat in refit.

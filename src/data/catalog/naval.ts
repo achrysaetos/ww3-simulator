@@ -126,8 +126,6 @@ const minorAndSupport: PlatformSpec<MunitionKey>[] = [
   { id: 'alexandrit', name: 'Alexandrit (12700) MCM', cls: 'mine_warfare', crew: 44, producers: ['RUS'], inService: 2016, unitCostUsdM: 80 },
   { id: 'type082ii', name: 'Type 082II Wozang MCM', cls: 'mine_warfare', producers: ['CHN'], inService: 2005, unitCostUsdM: 60 },
   { id: 'tripartite', name: 'Tripartite-class MCM', cls: 'mine_warfare', crew: 40, producers: [], inService: 1984, unitCostUsdM: 60 },
-  // Glass-reinforced plastic minehunters of the Royal Navy's 9th MCM Squadron in Bahrain: Hunt class (45 crew) and Sandown class (34).
-  { id: 'hunt_mcm', name: 'Hunt/Sandown-class MCMV', cls: 'mine_warfare', crew: 45, producers: [], inService: 1980, unitCostUsdM: 60 },
   // Replenishment and merchant: capacity.cargoTons is deliverable fuel/cargo.
   { id: 'john_lewis', name: 'John Lewis-class T-AO', cls: 'replenishment', crew: 125, producers: ['USA'], inService: 2022, unitCostUsdM: 640, capacity: { cargoTons: 21000 } },
   { id: 'kaiser', name: 'Henry J. Kaiser-class T-AO', cls: 'replenishment', crew: 89, producers: [], inService: 1986, unitCostUsdM: 300, capacity: { cargoTons: 24000 } },
