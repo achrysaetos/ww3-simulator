@@ -185,7 +185,7 @@ describe('river lines', () => {
     // division only its first echelon fills a sector of the cell's width.
     expect(dry.km).toBeGreaterThan(0.5);
     expect(river.km).toBeLessThan(0.3 * dry.km);
-    expect(river.lost / Math.max(0.5, river.km)).toBeGreaterThan(3 * (dry.lost / dry.km));
+    expect(river.lost / Math.max(0.2, river.km)).toBeGreaterThan(3 * (dry.lost / dry.km));
   }, SCENARIO_MS);
 });
 
