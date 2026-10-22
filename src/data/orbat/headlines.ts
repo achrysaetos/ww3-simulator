@@ -38,6 +38,7 @@ export const AUXILIARIES: Record<string, { personnel: number; what: string }> = 
   FIN: { personnel: 238_000, what: 'reservists filling the wartime brigades (IISS reserve)' },
   SWE: { personnel: 10_000, what: 'conscript reservists filling the wartime brigades (IISS reserve)' },
   AZE: { personnel: 15_000, what: 'State Border Service and internal troops (IISS paramilitary)' },
+  VEN: { personnel: 100_000, what: 'Bolivarian Militia, the part fielded as a formation (IISS lists about 220,000)' },
   LBN: { personnel: 34_500, what: 'Hezbollah fighters and reservists (IISS, CSIS est.)' },
 };
 
@@ -120,6 +121,7 @@ export const IISS_HEADLINES: Record<string, Headline> = {
   BRA: h(290, 150, 5, 6, 366_500),
   ARG: h(230, 30, 4, 2, 72_100),
   MEX: h(0, 35, 1, 0, 216_000),
+  VEN: h(173, 44, 0, 0, 123_000), // surface and subs 0: the one frigate and one submarine are not fielded
   NGA: h(150, 45, 0, 0, 143_000),
   ZAF: h(34, 50, 4, 3, 73_650),
   ETH: h(400, 19, 0, 0, 138_000), // personnel est.: the pre-2020 IISS figure; the army grew in the Tigray war

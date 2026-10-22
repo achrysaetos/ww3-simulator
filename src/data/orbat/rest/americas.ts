@@ -107,3 +107,32 @@ export const mexico = [
   mx('surface_group', 'flotilla', 'Gulf and Caribbean Naval Force', base('Veracruz', 19.2, -96.13), { reformador: 1, oaxaca_opv: 4, holzinger_opv: 4, patrol_craft: 20 }),
   mx('surface_group', 'flotilla', 'Pacific Naval Force', base('Manzanillo', 19.05, -104.32), { durango_opv: 4, oaxaca_opv: 4, patrol_craft: 20 }),
 ];
+
+// ---------------------------------------------------------------- Venezuela
+// IISS Military Balance 2025 (Venezuela): about 123,000 active (army 63,000, navy 25,500, air force
+// 11,500, National Guard 23,000) and some 220,000 in the Bolivarian Militia. 81 AMX-30V and 92 T-72B1,
+// 123 BMP-3, 114 BTR-80A, 48 2S19, Smerch and BM-21; S-300VM, Buk-M2E and Pechora-2M; Su-30MK2 (21 left
+// after losses), F-16A/B (a handful flying) and K-8W. The Mariscal Sucre frigate and the Type 209
+// submarine are left out: the catalog has neither class. Division names follow the army's
+// regional commands; equipment splits are estimates.
+const ve = nation('VEN', SRC, { readiness: 0.5, experience: 0.2 });
+const jungleVe = { infantry_squad: 250, msta_s: 12, truck: 300 };
+export const venezuela = [
+  ve('maneuver', 'brigade', '41st Armoured Brigade', base('Valencia', 10.16, -68.0), { t72: 92, bmp3: 60, msta_s: 12, infantry_squad: 60, truck: 300 }, { personnel: 4500 }),
+  ve('maneuver', 'brigade', '11th Armoured Brigade', base('Maracaibo', 10.65, -71.64), { amx30: 81, btr80: 60, infantry_squad: 60, truck: 300 }, { personnel: 4000 }),
+  ve('maneuver', 'brigade', '42nd Parachute Infantry Brigade', base('Maracay', 10.25, -67.6), { infantry_squad: 150, truck: 100 }, { personnel: 3000, readiness: 0.7 }),
+  ve('maneuver', 'division', '2nd Infantry Division', base('San Cristóbal', 7.77, -72.22), { infantry_squad: 300, bmp3: 30, btr80: 30, truck: 400 }, { personnel: 9000 }),
+  ve('maneuver', 'division', '3rd Infantry Division', base('Caracas', 10.48, -66.9), { infantry_squad: 300, bmp3: 33, btr80: 24, truck: 400 }, { personnel: 9000 }),
+  ve('maneuver', 'division', '5th Jungle Infantry Division', base('Ciudad Guayana', 8.3, -62.7), jungleVe, { personnel: 8000 }),
+  ve('maneuver', 'division', '6th Jungle Infantry Division', base('Ciudad Bolívar', 8.12, -63.55), jungleVe, { personnel: 8000 }),
+  ve('maneuver', 'division', '9th Motorised Cavalry Division', base('San Fernando de Apure', 7.89, -67.47), { infantry_squad: 200, msta_s: 12, truck: 300 }, { personnel: 6000 }),
+  ve('artillery', 'brigade', 'Rocket Artillery Group', base('Valencia', 10.18, -67.95), { smerch: 12, bm21: 24, truck: 80 }),
+  ve('maneuver', 'division', 'Naval Infantry', base('Puerto Cabello', 10.47, -68.01), { infantry_squad: 200, truck: 150 }, { personnel: 7000 }),
+  ve('maneuver', 'division', 'National Guard', base('Caracas', 10.5, -66.92), { infantry_squad: 800, truck: 500 }, { personnel: 23000, readiness: 0.45 }),
+  ve('maneuver', 'division', 'Bolivarian Militia', base('Caracas', 10.46, -66.85), { militia_squad: 2000, truck: 300 }, { personnel: 100000, readiness: 0.3, experience: 0.05, territorial: true }),
+  ve('air_defense', 'brigade', 'Aerospace Defence Command', base('Caracas', 10.5, -66.95), { s300vm_launcher: 12, buk_m2: 12, s125_pechora: 24 }),
+  ve('air_wing', 'wing', 'El Libertador AB', base('Maracay', 10.25, -67.65), { su30mk2: 11, mi17: 20, mi35: 8, c130h: 3 }),
+  ve('air_wing', 'wing', 'Gen. José Antonio Anzoátegui AB', base('Barcelona', 10.11, -64.69), { su30mk2: 10, k8: 8 }),
+  ve('air_wing', 'wing', 'Teniente Vicente Landaeta Gil AB', base('Barquisimeto', 10.07, -69.32), { f16a: 6, k8: 9 }),
+  ve('surface_group', 'flotilla', 'Venezuelan Navy', base('Puerto Cabello', 10.48, -68.01), { patrol_craft: 12 }),
+];

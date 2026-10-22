@@ -1,7 +1,7 @@
 import { loadMap } from '../../load';
 import type { OrbatEntry } from '../types';
 import { algeria, ethiopia, morocco, nigeria, southAfrica } from './africa';
-import { argentina, brazil, mexico } from './americas';
+import { argentina, brazil, mexico, venezuela } from './americas';
 import { australia } from './australia';
 import { armenia, azerbaijan, georgia, serbia } from './caucasus-balkans';
 import { india } from './india';
@@ -20,7 +20,7 @@ export const rest: OrbatEntry[] = placeOnOwnLand(loadMap(), [
   ...japan, ...southKorea, ...taiwan, ...australia, ...india, ...pakistan,
   ...philippines, ...vietnam, ...indonesia, ...singapore, ...thailand,
   ...israel, ...lebanon, ...saudiArabia, ...uae, ...egypt, ...syria, ...iraq, ...jordan, ...qatar,
-  ...brazil, ...argentina, ...mexico,
+  ...brazil, ...argentina, ...mexico, ...venezuela,
   ...algeria, ...morocco, ...nigeria, ...southAfrica, ...ethiopia,
   ...azerbaijan, ...armenia, ...georgia, ...serbia,
 ]);
