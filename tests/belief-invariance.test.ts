@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { Command, Formation, NationId, NodeId, World } from '../src/core/types';
 import { createSession } from '../src/scenarios';
@@ -34,21 +36,22 @@ function mutate(s: Session, near: NodeId[]): number {
   return unseen.size;
 }
 
-/** Ukraine's AI orders over the next four planning ticks (strategy, land and tasking all come due). Only Ukraine plans, so no other nation's draws move the shared RNG. */
-function ukrainianOrders(s: Session): Command[] {
+/** One nation's AI orders over the next four planning ticks (strategy, land and tasking all come due). Only it plans, so no other nation's draws move the shared RNG. */
+function ordersOf(s: Session, nation: NationId): Command[] {
   const ai = s.engine.systems.find((x) => x.id === 'ai')!;
-  for (const n of Object.values(s.world.nations)) if (n.id !== UKR) n.status = 'peace';
+  for (const n of Object.values(s.world.nations)) if (n.id !== nation) n.status = 'peace';
   const t0 = s.world.tick;
   const out: Command[] = [];
   for (let k = 0; k < 4; k++) {
     s.world.tick = t0 + k;
     s.world.pending = [];
     ai.step(s.world, s.engine.context(s.world));
-    out.push(...s.world.pending.filter((c) => c.nation === UKR));
+    out.push(...s.world.pending.filter((c) => c.nation === nation));
   }
   s.world.tick = t0;
   return out;
 }
+const ukrainianOrders = (s: Session) => ordersOf(s, UKR);
 
 describe('hidden truth changes nothing Ukraine decides or sees', () => {
   it('ukraine-2026 day 3: changing Russian truth no Ukrainian sensor has seen leaves its AI orders, its client snapshot and its diplomatic assessment unchanged', () => {
@@ -74,4 +77,32 @@ describe('hidden truth changes nothing Ukraine decides or sees', () => {
     expect(orders.length).toBeGreaterThan(0);
     expect(ukrainianOrders(probe)).toEqual(orders);
   }, 300_000);
+});
+
+describe('minefields a side has not charted change nothing it decides', () => {
+  it('gulf-2027 day 6: Iranian mines sown unseen around the US fleet leave US AI orders unchanged; charted ones change them', () => {
+    const USA = 'USA' as NationId, IRN = 'IRN' as NationId;
+    const s = createSession('gulf-2027', 1);
+    s.engine.run(s.world, 24);
+    const saved = saveRun('gulf-2027', s.world);
+    const control = resumeRun(saved), hidden = resumeRun(saved), charted = resumeRun(saved);
+    const fleet = Object.values(control.world.formations).filter((f) => f.nation === USA && f.status === 'active' && (f.kind === 'surface_group' || f.kind === 'submarine'));
+    expect(fleet.length, 'US naval groups').toBeGreaterThan(3);
+    const known = new Set(control.world.slices.naval.charted[USA] ?? []);
+    const sown = [...new Set(fleet.flatMap((f) => control.map.nodesWithin(f.node, 700)))].filter((z) => control.map.isSea(z) && !known.has(z));
+    expect(sown.length, 'zones sown').toBeGreaterThan(5);
+    for (const x of [hidden, charted]) for (const z of sown) (x.world.slices.naval.mines[z] ??= {})[IRN] = 200;
+    for (const z of sown) (charted.world.slices.naval.charted[USA] ??= []).push(z);
+
+    const orders = ordersOf(control, USA);
+    expect(orders.length).toBeGreaterThan(0);
+    expect(ordersOf(hidden, USA)).toEqual(orders);
+    expect(ordersOf(charted, USA)).not.toEqual(orders);
+  }, 300_000);
+
+  it('no AI planner reads the true minefields: they go through View.minefields', () => {
+    const dir = path.resolve(import.meta.dirname, '../src/systems/ai');
+    const offenders = fs.readdirSync(dir).filter((f) => /slices\.naval\??\.mines/.test(fs.readFileSync(path.join(dir, f), 'utf8')));
+    expect(offenders).toEqual([]);
+  });
 });
