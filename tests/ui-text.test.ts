@@ -3,8 +3,9 @@ import type { NationId, NodeId } from '../src/core/types';
 import { loadMap } from '../src/data/load';
 import { humanizeMessage, PlaceNamer, type Namer } from '../src/ui/events';
 import { EventFeed } from '../src/ui/feed';
+import { activity } from '../src/ui/FormationPanel';
 import { SimHost } from '../src/ui/host';
-import { nationCards, type FromWorker } from '../src/ui/snapshot';
+import { nationCards, type FormationDetail, type FromWorker } from '../src/ui/snapshot';
 import { headlines } from '../src/ui/staff/ticker';
 
 const map = loadMap();
@@ -62,4 +63,9 @@ describe('a resumed game keeps its news', () => {
     expect(headlines(feed, map).length).toBeGreaterThan(0);
     resumed.handle({ type: 'quit' });
   }, 300_000);
+
+  it('describes a strike by the target class the order carries, in the words the strike dropdown uses', () => {
+    const detail = { formation: { status: 'active', node: 0, order: { posture: 'strike', target: 0, targetClass: 'soft' } }, engaged: false, trackedBy: [] } as unknown as FormationDetail;
+    expect(activity(detail, () => 'near St. Petersburg', (id) => id)).toBe('Striking near St. Petersburg: trucks and soft vehicles.');
+  });
 });
