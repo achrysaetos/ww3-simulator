@@ -131,15 +131,33 @@ const SANCTIONED_SHARE = 0.1;
  * - foreign_arms: arms pipelines from partners (North Korean shells for Russia; Western and
  *   Czech-initiative shells for Ukraine; data/industry/aid.ts), against their planned rate.
  */
-function workarounds(world: World, map: GameMap, id: NationId, series: { tick: number; s: NationSample }[]): Workaround[] {
+/** What every nation's workarounds read from the whole world, scanned once per reading. */
+interface Trade {
+  sanctions: Map<NationId, NationId[]>;
+  worldGdp: number;
+  exports: Map<NationId, number>;
+}
+
+function tradeScan(world: World, map: GameMap): Trade {
+  const sanctions = new Map<NationId, NationId[]>();
+  for (const [k, r] of Object.entries(world.relations)) {
+    if (!r.sanctions || r.atWar) continue;
+    const [a, b] = k.split('|') as NationId[];
+    (sanctions.get(a) ?? sanctions.set(a, []).get(a)!).push(b);
+    (sanctions.get(b) ?? sanctions.set(b, []).get(b)!).push(a);
+  }
+  let worldGdp = 0;
+  for (const n of Object.values(world.nations)) worldGdp += n.stats.gdp ?? 0;
+  return { sanctions, worldGdp, exports: exportCapacity(world, map) };
+}
+
+function workarounds(world: World, trade: Trade, id: NationId, series: { tick: number; s: NationSample }[]): Workaround[] {
   const e = world.slices.economy?.nations[id];
   if (!e) return [];
   const out: Workaround[] = [];
-  const sanctioners = Object.entries(world.relations).filter(([k, r]) => r.sanctions && !r.atWar && k.split('|').includes(id)).map(([k]) => k.split('|').find((x) => x !== id) as NationId);
+  const sanctioners = trade.sanctions.get(id) ?? [];
   const gdp = (n: NationId) => world.nations[n]?.stats.gdp ?? 0;
-  let worldGdp = 0;
-  for (const n of Object.values(world.nations)) worldGdp += n.stats.gdp ?? 0;
-  const sanctioned = sanctioners.reduce((a, p) => a + gdp(p), 0) >= SANCTIONED_SHARE * (worldGdp - gdp(id));
+  const sanctioned = sanctioners.reduce((a, p) => a + gdp(p), 0) >= SANCTIONED_SHARE * (trade.worldGdp - gdp(id));
   const blocked = (world.theater.tradeBlocked[id] ?? 0) * (SEABORNE_TRADE_SHARE[id] ?? DEFAULT_SEABORNE_TRADE_SHARE);
   if (sanctioned) {
     const level = 1 - e.tradeLoss;
@@ -152,7 +170,7 @@ function workarounds(world: World, map: GameMap, id: NationId, series: { tick: n
     out.push({ id: 'dual_use_imports', status, level, detail: `${pct(level)} of chip needs met, ${months.toFixed(1)} months of stock left` });
   }
   if (sanctioned && Object.hasOwn(RESOURCE_SPECS.energy.market, id)) {
-    const level = (1 - blocked) * e.integrity * (exportCapacity(world, map).get(id) ?? 1);
+    const level = (1 - blocked) * e.integrity * (trade.exports.get(id) ?? 1);
     out.push({ id: 'shadow_fleet', status: grade(level, 0.8, 0.5), level, detail: `${pct(level)} of energy exports still moving despite sanctions` });
   }
   const flows = AID_FLOWS.filter((f) => f.recipient === id && world.nations[f.donor as NationId]);
@@ -173,13 +191,14 @@ function workarounds(world: World, map: GameMap, id: NationId, series: { tick: n
 export function outputsOf(world: World, map: GameMap, samples: readonly OutputSample[]): Outputs {
   const hosted = world.slices.civil ? hostedBy(world.slices.civil) : new Map<NationId, number>();
   const nations: Record<NationId, NationOutputs> = {};
+  const trade = tradeScan(world, map);
   for (const id of involved(world)) {
     const series = samples.flatMap((x) => (x.nations[id] ? [{ tick: x.tick, s: x.nations[id] }] : []));
     if (!series.length) continue;
     nations[id] = {
       humanitarian: humanitarian(world, map, id, hosted.get(id) ?? 0),
       race: RACE_ITEMS.flatMap((item) => race(world, series, item) ?? []),
-      workarounds: workarounds(world, map, id, series),
+      workarounds: workarounds(world, trade, id, series),
     };
   }
   const hosts = [...hosted].filter(([, n]) => n >= 1).sort((a, b) => b[1] - a[1]).slice(0, HOSTS_SHOWN).map(([nation, refugees]) => ({ nation, refugees }));
