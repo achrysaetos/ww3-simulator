@@ -115,9 +115,14 @@ describe('ukraine-2026: Russian EW against sensors', () => {
     const fixes = (run: { world: World; engine: Engine }) => {
       addFormation(run.world, s.catalog, { nation: UKR, name: 'test ISR drone squadron', kind: 'air_wing', echelon: 'squadron', node: site, equipment: { ['rq4b' as PlatformId]: 4 } });
       const targets = deep.flatMap((n) => [0, 1, 2, 3, 4, 5].map(() => addFormation(run.world, s.catalog, { nation: RUS, name: 'test battery', kind: 'artillery', echelon: 'battalion', node: n, equipment: { ['2s19m2' as PlatformId]: 18 }, home: s.world.nations[RUS].capital }).id));
-      run.engine.step(run.world);
-      const pic = run.world.slices.intel.pictures[UKR];
-      return targets.filter((id) => pic[id]?.source === 'airborne').length;
+      // A day of flying: one tick's sortie can be grounded by weather or night.
+      const fixed = new Set<FormationId>();
+      for (let t = 0; t < 4; t++) {
+        run.engine.step(run.world);
+        const pic = run.world.slices.intel.pictures[UKR];
+        for (const id of targets) if (pic[id]?.source === 'airborne' && pic[id].tick === run.world.tick - 1) fixed.add(id);
+      }
+      return fixed.size;
     };
     const jammed = fixes(fork(s.world)), clear = fixes(withoutC2(s.world));
     expect(clear).toBeGreaterThan(5);

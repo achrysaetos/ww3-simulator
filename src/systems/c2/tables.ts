@@ -263,9 +263,9 @@ export const DECEPTION = {
   /** Strength a feinting formation shows to the enemy's sensors, as a multiple of its own. */
   feintScale: defineParam({ id: 'c2.FEINT_SCALE', value: 3, range: [1.5, 5], tag: 'judgment', source: 'judgment: a battalion simulating a brigade by its radio nets and vehicle movement', affects: 'apparent strength of feinting formations' }),
   /** A dispersed formation's fire: its weapons cannot all bear on one place. */
-  dispersedFire: defineParam({ id: 'c2.DISPERSED_FIRE', value: 0.8, range: [0.6, 0.95], tag: 'judgment', source: 'judgment', affects: 'fire of dispersed formations' }),
+  dispersedFire: defineParam({ id: 'c2.DISPERSED_FIRE', value: 0.8, range: [0.6, 0.95], tag: 'judgment', source: 'judgment: dispersed batteries and companies mass fire late', affects: 'fire of dispersed formations' }),
   /** A dispersed formation's march speed: it moves by bounds between hides. */
-  dispersedMarch: defineParam({ id: 'c2.DISPERSED_MARCH', value: 0.5, range: [0.3, 0.8], tag: 'judgment', source: 'judgment', affects: 'march speed of dispersed formations' }),
+  dispersedMarch: defineParam({ id: 'c2.DISPERSED_MARCH', value: 0.5, range: [0.3, 0.8], tag: 'judgment', source: 'judgment: moving by bounds between hides', affects: 'march speed of dispersed formations' }),
 };
 
 /**
