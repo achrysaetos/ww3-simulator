@@ -59,7 +59,7 @@ export function applyNavalOrder(world: World, cmd: OrderCommand, ctx: SimContext
   if (!isNavalFormation(f)) return refuse('wrong_role', 'not a naval formation');
 
   if (f.readiness < SEAWORTHY && order.posture !== 'reserve' && f.node === f.home) return refuse('not_ready', `${f.name} is in a shipyard availability and cannot sail`);
-  if (order.posture !== 'reserve' && tickEnv(world, ctx).comp(f).crippled) return refuse('not_ready', `every ship of ${f.name} is disabled; it can only go home for repair`);
+  if (order.posture !== 'reserve' && tickEnv(world, ctx).comp(f).crippled) return refuse('not_ready', 'every ship is disabled; it can only go home for repair');
   // Strike USVs raid from where they lie: the boats themselves cross to the target and expend themselves (USV_STRIKE range).
   if (order.posture === 'attack' && order.targetFormation && launchedFromShore(ctx, f)) {
     f.order = { ...order, path: [] };
