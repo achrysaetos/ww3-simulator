@@ -11,6 +11,7 @@ import { advise, answerOf, type Card, type CommandAction, type Situation } from 
 import { advisorOf, ROLES } from '../src/ui/staff/advisors';
 import type { Sent } from '../src/ui/staff/desk';
 import { COMMAND_ROLES, delegateCommands, roleOf } from '../src/ui/staff/StaffPanel';
+import { operations } from '../src/ui/staff/operations';
 import { StaffCard } from '../src/ui/staff/WarRoom';
 import { degradeChain } from './c2.fixture';
 import { playWithStaff } from './staff-mirror';
@@ -269,5 +270,38 @@ describe('display errors (BA-14)', () => {
     const text = describeEvent({ type: 'strike', tick: 1, by: N('RUS'), munition: 'kh101' as never, fired: 2, intercepted: 1, target: map.nodeAt(50.45, 30.52), effects: [{ kind: 'infrastructure', before: 1, after: 0.996 }] }, g.namer);
     expect(text).toContain('infrastructure cut from 100.0% to 99.6%');
     expect(text).not.toContain('100% to 100%');
+  });
+
+  it('names each sector Ukraine holds after a town on its own side of the line, never a Russian city across it', () => {
+    const g = start('ukraine-2026', 'UKR');
+    g.step();
+    const { control } = g.state;
+    const mine = map.nationIds.indexOf(N('UKR'));
+    const enemyIdx = new Set(g.state.focusNation!.enemies.map((e) => map.nationIds.indexOf(e)));
+    const cityCells = new Map<string, NodeId[]>();
+    for (const c of map.cities) cityCells.set(c.name, [...(cityCells.get(c.name) ?? []), map.nodeAt(c.lat, c.lon)]);
+    const enemyCity = (name: string) => (cityCells.get(name.replace(/^near /, '')) ?? []).some((n) => enemyIdx.has(control[n]));
+    // A Ukrainian cell on the line whose nearest place is a city Russia holds, such as Bryansk across from Chernihiv and Sumy oblasts.
+    let cell: NodeId | undefined;
+    for (let n = 0 as NodeId; n < map.landCount && cell === undefined; n++)
+      if (control[n] === mine && [...map.neighbors(n)].some((m) => enemyIdx.has(control[m])) && enemyCity(g.namer.place.name(n))) cell = n;
+    expect(cell, 'a held cell the plain place name would name after an enemy city').toBeDefined();
+    // Enough brigades there that it is the biggest sector held, the one the panel always lists.
+    const moved = new Set(g.state.formations.filter((f) => f.entry.nation === 'UKR' && f.entry.kind === 'maneuver' && f.status === 'active').slice(0, 40));
+    const brigade = [...moved][0];
+    const formations = g.state.formations.map((f) => (moved.has(f) ? { ...f, node: cell!, posture: 'defend' as const, target: null } : f));
+    const ops = operations({
+      me: N('UKR'), map, nationIds: map.nationIds, control, contest: new Float32Array(0), formations,
+      enemies: g.state.focusNation!.enemies, places: g.namer.place, commandOf: () => 'delegate',
+    });
+    const there = ops.find((o) => o.formations.includes(brigade.entry.id));
+    expect(there, 'the brigade on that cell holds a sector').toBeDefined();
+    expect(enemyCity(there!.name.replace(/^Hold /, '')), there!.name).toBe(false);
+  });
+
+  it('words an escalation as what happens, not the rung id', () => {
+    const g = start('ukraine-2026', 'UKR');
+    const text = describeEvent({ type: 'escalation', tick: 1, a: N('RUS'), b: N('UKR'), level: 'strategic_conventional' }, g.namer);
+    expect(text).toBe("Russia and Ukraine begin striking deep into each other's homelands");
   });
 });
