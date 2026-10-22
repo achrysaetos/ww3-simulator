@@ -7,7 +7,7 @@
 import type { SimContext } from '../../core/engine';
 import type { Formation, Munition, MunitionId, NationId, NodeId, World } from '../../core/types';
 import { visibility } from './combat';
-import { interceptSalvo } from './intercept';
+import { interceptSalvo, type ShotDoctrine } from './intercept';
 import { takeLosses, type LossTally } from './losses';
 import { nodeDistance, type AirGroup, type AirPicture, type Defender } from './picture';
 import { AAM_VS_DRONE_FACTOR, beltKillProbability, COUNTER_AIR_POSTURES, COUNTER_DRONE, coverageShare, engages, THREAT_OF_KIND, TUNING, type ThreatCategory } from './tables';
@@ -62,8 +62,8 @@ export function hostileDefenders(world: World, ctx: SimContext, pic: AirPicture,
 }
 
 /** One defender fires `shot` at `count` threats; spends its channels and interceptors. Returns survivors. */
-function engage(ctx: SimContext, d: Defender, shot: Shot, cat: ThreatCategory, threat: { count: number; speedMach: number; interceptDifficulty: number }): number {
-  const r = interceptSalvo(threat, { channels: d.channels, interceptors: d.f.magazine[shot.m.id], pk: shot.pk, rangeKm: shot.m.rangeKm * coverageShare(shot.m.kind, cat) }, ctx.rng);
+function engage(ctx: SimContext, d: Defender, shot: Shot, cat: ThreatCategory, threat: { count: number; speedMach: number; interceptDifficulty: number }, doctrine?: ShotDoctrine): number {
+  const r = interceptSalvo(threat, { channels: d.channels, interceptors: d.f.magazine[shot.m.id], pk: shot.pk, rangeKm: shot.m.rangeKm * coverageShare(shot.m.kind, cat), doctrine }, ctx.rng);
   d.channels -= r.channelsUsed;
   d.f.magazine[shot.m.id] -= r.interceptorsUsed;
   return r.leaked;
@@ -137,13 +137,16 @@ export function defendRaid(world: World, ctx: SimContext, pic: AirPicture, node:
     if (streams[i].overflightKm > 0)
       leaked[i] -= ctx.rng.binomial(leaked[i], beltKillProbability(m.kind, streams[i].overflightKm, m.interceptDifficulty));
     if (cat === 'air_breathing' && leaked[i]) {
-      // Each air force flies its own sector, so the stream splits across the groups by intercept sorties up
-      // (13-14 Apr 2024: US, UK, French and Jordanian jets each downed drones over their own areas).
+      // Each air force flies its own sector, so the stream splits evenly across the nations defending, and within
+      // a nation by intercept sorties up (13-14 Apr 2024: US, UK, French and Jordanian jets each downed drones over
+      // their own areas, IDF and allied statements).
       const armed = fighters.flatMap((g) => {
         const aam = pic.aamOf(g.f);
         return aam && g.interceptLeft > 0 && (g.f.magazine[aam.id] ?? 0) >= 1 ? [{ g, aam }] : [];
       });
-      const shares = splitBySorties(ctx.rng, leaked[i], armed.map(({ g }) => g.interceptLeft));
+      const upByNation = new Map<NationId, number>();
+      for (const { g } of armed) upByNation.set(g.f.nation, (upByNation.get(g.f.nation) ?? 0) + g.interceptLeft);
+      const shares = splitBySorties(ctx.rng, leaked[i], armed.map(({ g }) => g.interceptLeft / upByNation.get(g.f.nation)! / upByNation.size));
       armed.forEach(({ g, aam }, k) => {
         if (!shares[k]) return;
         const r = interceptSalvo({ ...threat, count: shares[k] }, { channels: g.interceptLeft, interceptors: g.f.magazine[aam.id] ?? 0, pk: pkAgainst(aam, cat), rangeKm: aam.rangeKm }, ctx.rng);
@@ -153,17 +156,23 @@ export function defendRaid(world: World, ctx: SimContext, pic: AirPicture, node:
       });
     }
     const maxCost = Math.max(TUNING.interceptorCostFloorUsdM, TUNING.interceptorCostRatio * m.unitCostUsdM);
-    for (const { d, shot } of layers(ctx, sams, node, cat, m.interceptDifficulty, maxCost)) {
-      if (!leaked[i]) break;
-      if (d.channels > 0 && d.f.magazine[shot.m.id] >= 1) leaked[i] = engage(ctx, d, shot, cat, { ...threat, count: leaked[i] });
-    }
+    const ls = layers(ctx, sams, node, cat, m.interceptDifficulty, maxCost);
+    const ready = (k: number) => ls[k].d.channels > 0 && ls[k].d.f.magazine[ls[k].shot.m.id] >= 1;
+    ls.forEach(({ d, shot }, k) => {
+      if (!leaked[i] || !ready(k)) return;
+      // Layered missile defence shoots one round per warhead while another tier still stands behind it to take the
+      // miss (Arrow 3 then Arrow 2 or THAAD, then David's Sling: MDA and IMDO shoot-look-shoot doctrine); only the last
+      // tier ripples two.
+      const backed = cat === 'ballistic' && ls.slice(k + 1).some((_, j) => ready(k + 1 + j));
+      leaked[i] = engage(ctx, d, shot, cat, { ...threat, count: leaked[i] }, backed ? 'shoot_look_shoot' : undefined);
+    });
   }
   return leaked;
 }
 
 /**
  * Which group meets each of `n` threats: a weighted draw per threat (sequential binomials), so even a lone
- * drone can fall in a small contingent's sector, as often as its share of the sorties up says.
+ * drone can fall in a small contingent's sector, as often as its weight says.
  */
 function splitBySorties(rng: SimContext['rng'], n: number, weights: number[]): number[] {
   let left = n, rest = weights.reduce((a, w) => a + w, 0);
