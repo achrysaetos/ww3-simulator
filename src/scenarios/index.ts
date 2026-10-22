@@ -29,6 +29,8 @@ export interface Scenario {
    * Ukrainian front, by order-of-battle name: a later scenario in which that war has ended.
    */
   garrisons?: Record<string, { name: string; lat: number; lon: number }>;
+  /** Param overrides the scenario runs under (src/core/params.ts), such as the era dials (`era.*`) for a 2030s war. */
+  params?: Record<string, number>;
   /** Opening moves, queued for the first tick so the owning systems resolve them. `mobilize` is an order the economy ramps toward. */
   opening: (Command | { type: 'mobilize'; nations: string[]; level: number })[];
 }
@@ -170,6 +172,7 @@ export function createSession(scenarioId: string, seed = 1): Session {
   const catalog = loadCatalog();
   const engine = new Engine(map, catalog, SYSTEMS);
   const world = createWorld(map, { seed, startDate: scenario.startDate, profiles });
+  if (scenario.params) world.params = { ...scenario.params };
   for (let n = 0; n < map.landCount; n++)
     for (const o of OCCUPATIONS)
       if (map.owner[n] === o.owner && pointInRing(map.lon[n], map.lat[n], o.ring)) world.control[n] = o.holder as NationId;

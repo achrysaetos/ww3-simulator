@@ -1,4 +1,5 @@
 import { defineParam } from '../../core/params';
+import { eraDroneDenial } from '../adaptation/era';
 import type { Echelon, MunitionKind, NationId } from '../../core/types';
 import type { Band, HqLevel } from './state';
 
@@ -132,7 +133,8 @@ export const VULN_OVERRIDE: Readonly<Record<string, Vulnerability>> = {
  * some 10,000 drones a month, mostly to Russian EW (Watling and Reynolds, "Meatgrinder", RUSI, May
  * 2023), and both sides' operators claim 60-90% of radio FPVs fail against dense trench EW. These
  * are combatant claims. The measure-countermeasure cycle (frequency hopping, autonomous terminal
- * guidance, fibre-optic control) moves it over the war: the seam for issue #2, section 3.
+ * guidance, fibre-optic control) moves it over the war: the adaptation pairs fpv_jamming and jamming_fiber
+ * (src/systems/adaptation) scale it from this calibrated point.
  */
 export const FPV_LINK_VULN = defineParam({
   id: 'c2.FPV_LINK_VULN', value: 0.75, range: [0.3, 0.95], tag: 'contested',
@@ -153,11 +155,13 @@ export const BAND_MAX: Readonly<Record<Exclude<Band, 'drone'>, number>> = { gnss
  * The most counter-drone jamming over a position denies: some links hop past it and some drones
  * strike on their last command or with terminal autonomy. Judgment.
  */
-export const DRONE_BAND_MAX = defineParam({
+const DRONE_BAND_MAX_2025 = defineParam({
   id: 'c2.DRONE_BAND_MAX', value: 0.8, range: [0.5, 0.95], tag: 'judgment',
   source: 'judgment: frequency hopping and terminal autonomy let some drones through any jamming (RUSI 2024)',
   affects: 'the strongest counter-drone jamming over a position',
 });
+/** The strongest counter-drone jam under the run's era (era.EW); the calibrated value at the default era. */
+export const DRONE_BAND_MAX = (): number => eraDroneDenial(DRONE_BAND_MAX_2025());
 
 /** Chance a full radar-band jam denies an airborne ISR fix. Estimate. */
 export const RADAR_DENIAL = 0.6;
