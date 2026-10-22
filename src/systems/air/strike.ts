@@ -16,7 +16,7 @@ import { emitBattle, hasSupport } from './superiority';
 import { spaceSupport } from '../strategic/space';
 import { jammedHits } from '../c2';
 import { conditionsAt, pgmFactor } from '../weather/effects';
-import { AIRFRAME, ATTRITABLE_COST_USD_M, DRONE_SITE_LAUNCHES_PER_DAY, isRoundOnRail, LAUNCHER, MOBILE_TARGETS, NON_STRIKE_KINDS, STRIKE_ROLES, TARGET_OF_CLASS, TUNING } from './tables';
+import { AIR_DEFENSE_CLASSES, AIRFRAME, ATTRITABLE_COST_USD_M, DRONE_SITE_LAUNCHES_PER_DAY, isRoundOnRail, LAUNCHER, MOBILE_TARGETS, NON_STRIKE_KINDS, STRIKE_ROLES, TARGET_OF_CLASS, TERMINAL_SEEKER_KINDS, TUNING } from './tables';
 
 export interface AirSlice {
   /** Runway capacity per airbase node after cratering, 0..1; absent = intact. */
@@ -436,7 +436,7 @@ const MACH_KM_PER_MIN = 20.4;
  */
 function stillThere(m: Munition, tc: TargetClass, flightMin: number): number {
   if (!MOBILE_TARGETS.has(tc) || m.kind === 'loitering') return 1;
-  return TUNING.mobileTargetLocated * Math.exp(-flightMin / TUNING.mobileTargetDwellMin);
+  return TUNING.mobileTargetLocated * (TERMINAL_SEEKER_KINDS.has(m.kind) ? 1 : Math.exp(-flightMin / TUNING.mobileTargetDwellMin));
 }
 
 interface Victim { f: Formation; pid: PlatformId; /** Detectability relative to a vehicle in the open, 0..1. */ seen: number }
@@ -464,7 +464,8 @@ function victims(ctx: SimContext, pic: AirPicture, target: NodeId, attacker: Nat
     if (tc === 'aircraft' && f.kind !== 'air_wing' && f.kind !== 'strategic') continue;
     for (const pid of Object.keys(f.equipment) as PlatformId[]) {
       const platform = ctx.catalog.platform(pid);
-      if (f.equipment[pid] > 0 && TARGET_OF_CLASS[platform.class] === tc) out.push({ f, pid, seen: mobile ? visibility(Math.max(0, platform.protection.stealth - OPEN_STEALTH)) : 1 });
+      if (f.equipment[pid] > 0 && TARGET_OF_CLASS[platform.class] === tc)
+        out.push({ f, pid, seen: mobile ? visibility(Math.max(0, platform.protection.stealth - OPEN_STEALTH)) * (AIR_DEFENSE_CLASSES.has(platform.class) ? TUNING.airDefenseLocated : 1) : 1 });
     }
   }
   return out;

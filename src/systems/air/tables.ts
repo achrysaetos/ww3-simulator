@@ -197,6 +197,17 @@ export const NON_STRIKE_KINDS: ReadonlySet<MunitionKind> = new Set(['aam', 'sam'
 /** Target classes that move: a strike must find them, not just reach their cell. */
 export const MOBILE_TARGETS: ReadonlySet<TargetClass> = new Set(['soft', 'armor', 'infantry']);
 
+/** Platforms that hide like an air-defence battery (TUNING.airDefenseLocated). */
+export const AIR_DEFENSE_CLASSES: ReadonlySet<PlatformClass> = new Set(['sam_long', 'sam_medium', 'shorad', 'abm', 'radar']);
+
+/**
+ * Weapons that home on what they find at the aimpoint: an imaging or radar seeker (JASSM, Storm Shadow, Kh-101,
+ * anti-ship missiles), radiation homing, or a loitering search. A battery that moved a few km while the weapon flew is
+ * still in the seeker's basket, so flight time does not lose it; GNSS-only bombs, ballistic missiles and rockets go
+ * where the target was.
+ */
+export const TERMINAL_SEEKER_KINDS: ReadonlySet<MunitionKind> = new Set(['cruise', 'antiship_cruise', 'antiship_ballistic', 'arm', 'loitering']);
+
 /** The target class a platform presents to a strike. */
 export const TARGET_OF_CLASS: Record<PlatformClass, TargetClass> = {
   infantry: 'infantry', mbt: 'armor', ifv: 'armor', apc: 'armor', recon: 'armor', sp_artillery: 'armor',
@@ -269,6 +280,14 @@ export const TUNING = paramTable('air', {
    */
   mobileTargetLocated: tableParam({ value: 0.5, range: [0.3, 0.7], tag: 'judgment', source: 'Judgment fitted to Ukraine 2023-25: a few SAM launchers destroyed a month (Oryx)', affects: 'strikes on mobile units' }),
   mobileTargetDwellMin: tableParam({ value: 60, range: [30, 120], tag: 'judgment', source: 'Judgment fitted to Ukraine 2023-25 shoot-and-scoot', affects: 'strikes on mobile units' }),
+  /**
+   * How often an air-defence launcher or radar is where the attacker's picture puts it, relative to other mobile units.
+   * Batteries hide by emission control, decoys and moves after each engagement: in 2023-25 Russia's thousands of
+   * missile, drone and glide-bomb strikes destroyed a few Ukrainian SAM systems a month (Oryx lists ~150 SAM systems
+   * lost in three and a half years, a quarter of them in the first weeks of 2022), while the same strikes hit fixed
+   * targets daily (judgment fitted to those counts).
+   */
+  airDefenseLocated: tableParam({ value: 0.35, range: [0.2, 0.6], tag: 'judgment', source: 'Oryx: ~150 Ukrainian SAM systems lost Feb 2022-2025, a few a month after the first weeks', affects: 'strikes on air defences' }),
   /** Interceptor difficulty an aircraft presents (ECM, chaff, terrain masking, maneuver). */
   aircraftEvasion: tableParam({ value: 0.55, range: [0.4, 0.7], tag: 'judgment', source: 'Judgment: ECM, chaff, terrain masking and manoeuvre against interceptors', affects: 'aircraft losses to SAMs' }),
   aircraftEvasionWithEw: tableParam({ value: 0.7, range: [0.55, 0.85], tag: 'judgment', source: 'Judgment: the same with escort jamming', affects: 'aircraft losses to SAMs' }),

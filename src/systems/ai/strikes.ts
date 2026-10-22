@@ -313,7 +313,8 @@ export class FireBudget {
    * landing (CSIS 2023: Taiwan's shore-based Harpoons were among the main killers of PLA lift).
    */
   propose(f: Formation, options: Munition[], t: StrikeTarget, order: Omit<Order, 'issuedTick'>): void {
-    if (!options.length || options[0].unitCostUsdM < ATTRITABLE_COST_USD_M || this.landingOnFriends(t)) return issue(this.p, f, order);
+    // The planner names the weapon it cleared, so the package does not swap in a cheaper one it would have to fly into the defences to use.
+    if (!options.length || options[0].unitCostUsdM < ATTRITABLE_COST_USD_M || this.landingOnFriends(t)) return issue(this.p, f, options.length && !order.munition ? { ...order, munition: options[0].id } : order);
     this.proposals.push({ f, options, t, order });
   }
 

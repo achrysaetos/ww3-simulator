@@ -119,7 +119,11 @@ export function planAir(p: Plan, targets: TargetGrid): void {
     const t = pickTarget(targets.near(w.node, stock.reduce((best, m) => Math.max(best, reach(m)), radius)), (t) => (canHit(t) ? 1 : 0));
     if (!t) return false;
     const order = { posture: 'strike' as const, target: t.node, targetClass: t.cls, targetFormation: t.formation };
-    budget.propose(w, strikeOptions(stock, t).filter((m) => withinKm(map, w.node, t.at ?? t.node, reach(m))), t, order);
+    // Only weapons the package can release from outside the defences it would not fly into: a target that a
+    // Kh-29 reaches clear of a Buk is not one to fly S-8 rockets over.
+    const options = strikeOptions(stock, t).filter((m) => withinKm(map, w.node, t.at ?? t.node, reach(m)) && sams.clear(w.node, t.node, m.rangeKm, vis));
+    if (!options.length && !hasFirepower(p, w, t.cls)) return false;
+    budget.propose(w, options, t, order);
     return true;
   };
 
