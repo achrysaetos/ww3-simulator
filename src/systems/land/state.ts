@@ -1,6 +1,6 @@
 import { atWar, relation, type SimContext } from '../../core/engine';
 import type { GameMap } from '../../core/map';
-import type { Formation, FormationId, NationId, NodeId, World } from '../../core/types';
+import type { Formation, FormationId, NationId, NodeId, Order, World } from '../../core/types';
 import type { DiplomacyState } from '../diplomacy/types';
 import { sideOf } from '../diplomacy/wars';
 import { ALLIED_OPINION, LAND_KINDS } from './tables';
@@ -115,3 +115,6 @@ export function destroyFormation(world: World, ctx: SimContext, f: Formation): v
 export function hostilesAt(world: World, byNode: Map<number, Formation[]>, node: number, nation: NationId): Formation[] {
   return (byNode.get(node) ?? []).filter((g) => atWar(world, nation, g.nation));
 }
+
+/** A formation that arrives keeps the concealment it marched under; a new order states its own. */
+export const keepDeception = (o: Order): Pick<Order, 'deception'> => (o.deception ? { deception: o.deception } : {});

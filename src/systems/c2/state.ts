@@ -64,6 +64,10 @@ export interface C2State {
   emitters: FormationId[];
   /** Platforms each commanded formation had when attached: its organic EW shrinks with it. */
   size: Record<FormationId, number>;
+  /** Per nation, the last tick its intelligence warned it of each foreign build-up. */
+  warned: Record<NationId, Record<NationId, number>>;
+  /** Nations attacked without warning, by whom, and until when their forces are caught unready. */
+  surprised: Record<NationId, { by: NationId; until: number }>;
 }
 
 declare module '../../core/types' {

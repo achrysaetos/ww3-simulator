@@ -150,7 +150,21 @@ export interface Order {
   munition?: MunitionId;
   /** For an overseas 'move': how to cross. 'sea' keeps an air-portable formation off the airlift; absent picks air when it can fly. */
   lift?: 'air' | 'sea';
+  /** Deception and concealment the formation keeps while it carries out this order (c2 and intel). */
+  deception?: Deception;
   issuedTick: number;
+}
+
+/** Measures that keep a formation from being seen, or seen for what it is (see DECEPTION in c2/tables.ts). */
+export interface Deception {
+  /** Radio silence: no jamming of its own, orders by runner and line, and no emissions for the enemy to find. */
+  emcon?: true;
+  /** Spread out under camouflage: hard to find from above or across the line, slower to move and to mass fire. */
+  disperse?: true;
+  /** The radio traffic and movement of a far larger force. */
+  feint?: true;
+  /** Mock-ups standing in this cell, which overhead sensors take for the formation once it has left. */
+  decoy?: NodeId;
 }
 
 export interface Formation {

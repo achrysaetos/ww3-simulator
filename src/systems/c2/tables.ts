@@ -248,6 +248,40 @@ export const HQ_HIT_DAMAGE = 0.6;
 /** CEP, m, at or under which a weapon counts as precision against a command post. */
 export const PRECISION_CEP_M = 30;
 
+/**
+ * What each deception measure (Order.deception) costs the enemy's sensors and the formation itself.
+ * Russia's 2021-22 build-up was watched for months on commercial imagery and intercepts because it
+ * massed in the open and talked on the radio; Ukraine's Kharkiv counter-offensive (Sept 2022) and
+ * Kursk incursion (Aug 2024) achieved surprise through radio silence, dispersal and camouflage, and
+ * feints in the south (RUSI, "Preliminary Lessons", Nov 2022; ISW, Aug 2024). Values are judgment.
+ */
+export const DECEPTION = {
+  /** Multiplier on the chance overhead and across-the-line sensors fix a dispersed, camouflaged formation in a tick. */
+  dispersedSeen: defineParam({ id: 'c2.DISPERSED_SEEN', value: 0.25, range: [0.1, 0.5], tag: 'judgment', source: 'judgment: Kharkiv Sept 2022, Kursk Aug 2024 (RUSI; ISW)', affects: 'detection of dispersed formations' }),
+  /** The same for a formation under radio silence: emissions are how most units are first found. */
+  emconSeen: defineParam({ id: 'c2.EMCON_SEEN', value: 0.5, range: [0.2, 0.8], tag: 'judgment', source: 'judgment: signals intercepts located most Russian units in 2022 (RUSI)', affects: 'detection of formations under emission control' }),
+  /** Strength a feinting formation shows to the enemy's sensors, as a multiple of its own. */
+  feintScale: defineParam({ id: 'c2.FEINT_SCALE', value: 3, range: [1.5, 5], tag: 'judgment', source: 'judgment: a battalion simulating a brigade by its radio nets and vehicle movement', affects: 'apparent strength of feinting formations' }),
+  /** A dispersed formation's fire: its weapons cannot all bear on one place. */
+  dispersedFire: defineParam({ id: 'c2.DISPERSED_FIRE', value: 0.8, range: [0.6, 0.95], tag: 'judgment', source: 'judgment', affects: 'fire of dispersed formations' }),
+  /** A dispersed formation's march speed: it moves by bounds between hides. */
+  dispersedMarch: defineParam({ id: 'c2.DISPERSED_MARCH', value: 0.5, range: [0.3, 0.8], tag: 'judgment', source: 'judgment', affects: 'march speed of dispersed formations' }),
+};
+
+/**
+ * A nation attacked without warning of the attacker's build-up in the days before: its forces are
+ * caught in garrison, half-manned and without orders, as Israel's on 6 October 1973 (reserves took
+ * 48-72 hours to reach the Golan and the canal) and the Soviet Union's in June 1941. For the hours
+ * below its formations' fire and order delay suffer. Judgment.
+ */
+export const SURPRISE = {
+  hours: defineParam({ id: 'c2.SURPRISE_HOURS', value: 72, range: [24, 120], tag: 'judgment', source: 'judgment: Israeli reserve mobilisation, Oct 1973 (48-72 h)', affects: 'how long a nation attacked without warning stays unready' }),
+  fire: defineParam({ id: 'c2.SURPRISE_FIRE', value: 0.6, range: [0.4, 0.9], tag: 'judgment', source: 'judgment: units caught in garrison and under-manned', affects: 'fire of a surprised nation\'s formations' }),
+  delayH: defineParam({ id: 'c2.SURPRISE_DELAY_H', value: 12, range: [4, 24], tag: 'judgment', source: 'judgment: plans unready, commanders away', affects: 'extra order delay in a surprised nation' }),
+  /** Days a warning counts: one older than this was dismissed or forgotten by the time the blow fell. */
+  memoryDays: 14,
+};
+
 /** Side of the square, degrees, of the region one derived front HQ directs. */
 export const FRONT_CELL_DEG = 6;
 

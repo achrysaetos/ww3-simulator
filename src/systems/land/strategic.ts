@@ -4,7 +4,7 @@ import type { GameMap } from '../../core/map';
 import type { Formation, FormationId, NationId, NodeId, PlatformClass, PlatformId, World } from '../../core/types';
 import { geography } from '../naval/geography';
 import { seaPath } from '../naval/movement';
-import { allied, landSlice } from './state';
+import { allied, keepDeception, landSlice } from './state';
 
 /**
  * Strategic deployment of land formations across water: a 'move' order to a cell on
@@ -239,7 +239,7 @@ export function airlift(world: World, ctx: SimContext, route: (f: Formation, to:
       f.progressKm = 0;
       f.entrenchment = 0;
       const path = dest === target ? null : route(f, target);
-      f.order = path ? { posture: 'move', target, path, issuedTick: world.tick } : { posture: 'defend', issuedTick: world.tick };
+      f.order = { ...(path ? { posture: 'move', target, path } : { posture: 'defend' }), issuedTick: world.tick, ...keepDeception(f.order) };
       ctx.emit({ type: 'message', tick: world.tick, nation, text: `${f.name} airlifted to the theatre` });
     }
   }

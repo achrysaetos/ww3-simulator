@@ -20,7 +20,7 @@ import type { Formation, FormationId, Munition, NationId, NodeId, PlatformId, Wo
 import { assessHqs, attach, chainOf, draw, hqFunction, relocate, tallyOf } from './command';
 import { buildJam, jamAgainst } from './ew';
 import type { C2State, Jam, OrderCommand } from './state';
-import { BEARERS, COMMS_DELAY_H, COMMS_FLOOR, DEFAULT_BEARERS, DRONE_KINDS, FPV_LINK_VULN, HQ, ISR_LINK_DENIAL, RADAR_DENIAL, SAM_RADAR_DENIAL, SATCOM_PROVIDER, VULN, VULN_OVERRIDE } from './tables';
+import { BEARERS, COMMS_DELAY_H, COMMS_FLOOR, DECEPTION, DEFAULT_BEARERS, DRONE_KINDS, FPV_LINK_VULN, HQ, ISR_LINK_DENIAL, RADAR_DENIAL, SAM_RADAR_DENIAL, SATCOM_PROVIDER, SURPRISE, VULN, VULN_OVERRIDE } from './tables';
 
 export type { C2State, C2Tally, CommandNode, FormationC2, HqLevel, Jam } from './state';
 export { jamAgainst } from './ew';
@@ -87,7 +87,25 @@ function satcomUp(s: C2State, nation: NationId): number {
 }
 
 function initialState(): C2State {
-  return { hqs: {}, chain: {}, jam: {}, satcomBase: {}, satcom: {}, formations: {}, transit: {}, released: {}, tally: {}, attachedTo: -1, space: [], emitters: [], size: {} };
+  return { hqs: {}, chain: {}, jam: {}, satcomBase: {}, satcom: {}, formations: {}, transit: {}, released: {}, tally: {}, attachedTo: -1, space: [], emitters: [], size: {}, warned: {}, surprised: {} };
+}
+
+/**
+ * Records this tick's warnings, and marks a nation surprised when a war is declared on it, out of
+ * peace, by a nation it had no warning of. A scenario's opening wars come after the crisis it assumes.
+ */
+function assessSurprise(world: World, s: C2State, foes: ReadonlyMap<NationId, ReadonlySet<NationId>>): void {
+  const perDay = 24 / world.dtHours;
+  for (const [o, w] of Object.entries(world.slices.intel?.warnings ?? {})) (s.warned[o as NationId] ??= {})[w.from] = world.tick;
+  const declared = world.events.filter((e) => e.type === 'war_declared');
+  for (const e of declared) {
+    if (e.type !== 'war_declared' || world.tick === 0) continue;
+    const newFoes = new Set(declared.flatMap((d) => (d.type !== 'war_declared' ? [] : d.on === e.on ? [d.by] : d.by === e.on ? [d.on] : [])));
+    const atPeace = [...(foes.get(e.on) ?? [])].every((n) => newFoes.has(n));
+    const last = s.warned[e.on]?.[e.by];
+    if (atPeace && (last === undefined || world.tick - last > SURPRISE.memoryDays * perDay)) s.surprised[e.on] = { by: e.by, until: world.tick + Math.round((SURPRISE.hours() / 24) * perDay) };
+  }
+  for (const n of Object.keys(s.surprised) as NationId[]) if (s.surprised[n].until <= world.tick) delete s.surprised[n];
 }
 
 export const c2: System = {
@@ -99,8 +117,13 @@ export const c2: System = {
   },
   step(world, ctx) {
     const s = world.slices.c2;
+    // Saves made before these fields existed.
+    s.size ??= {};
+    s.warned ??= {};
+    s.surprised ??= {};
     const { map, catalog } = ctx;
     const foes = hostility(world).foes;
+    assessSurprise(world, s, foes);
     const belligerent = (n: NationId) => foes.has(n);
     attach(world, map, s);
     countSatcom(world, catalog, s);
@@ -117,7 +140,7 @@ export const c2: System = {
       const was = s.size[f.id];
       return was ? Math.min(1, platformCount(f) / was) : 1;
     };
-    s.jam = foes.size ? buildJam(world, map, catalog, [...live, ...ew], belligerent, Object.values(s.hqs), strength, () => false) : {};
+    s.jam = foes.size ? buildJam(world, map, catalog, [...live, ...ew], belligerent, Object.values(s.hqs), strength, (f) => !!f.order.deception?.emcon) : {};
 
     s.formations = {};
     for (const f of live) {
@@ -129,13 +152,18 @@ export const c2: System = {
       }
       const jam = jamAgainst(world, f.node, f.nation);
       const b = BEARERS[f.nation] ?? DEFAULT_BEARERS;
-      // Satellite terminals are harder to jam than line-of-sight radio, but Zhitel-class sets do reach them.
-      const comms = b.satcom * satcomUp(s, f.nation) * (1 - 0.5 * jam.comms) + b.radio * (1 - jam.comms) + b.fibre * (world.theater.infrastructure[f.node] ?? 1);
+      const d = f.order.deception;
+      // Satellite terminals are harder to jam than line-of-sight radio, but Zhitel-class sets do reach them. Under radio silence only line is left.
+      const comms = d?.emcon ? b.fibre * (world.theater.infrastructure[f.node] ?? 1) : b.satcom * satcomUp(s, f.nation) * (1 - 0.5 * jam.comms) + b.radio * (1 - jam.comms) + b.fibre * (world.theater.infrastructure[f.node] ?? 1);
       // Redundant bearers absorb a partial loss; the cost climbs as the last links go.
       const cut = (1 - comms) ** 2;
-      coordination *= 1 - (1 - COMMS_FLOOR) * cut;
+      coordination *= (1 - (1 - COMMS_FLOOR) * cut) * (d?.disperse ? DECEPTION.dispersedFire() : 1);
       delayH += COMMS_DELAY_H * cut;
-      s.formations[f.id] = { coordination, delayH, guided: jam.gnss > 0 || jam.comms > 0 ? 1 - jammedFire(catalog, f, jam) : 1 };
+      if (s.surprised[f.nation]) {
+        coordination *= SURPRISE.fire();
+        delayH += SURPRISE.delayH();
+      }
+      s.formations[f.id] = { coordination, delayH, guided: jam.gnss > 0 || jam.drone > 0 ? 1 - jammedFire(catalog, f, jam) : 1 };
     }
 
     for (const fid in s.transit) {

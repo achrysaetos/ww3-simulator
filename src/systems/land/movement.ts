@@ -4,10 +4,11 @@ import type { GameMap } from '../../core/map';
 import { findPath } from '../../core/path';
 import type { Formation, NationId, NodeId, Order, PlatformId, World } from '../../core/types';
 import type { OrderCommand, OrderOutcome } from '../orders';
-import { allied, canEnter, hostilesAt, indexByNode, isLandFormation, landSlice } from './state';
+import { allied, canEnter, hostilesAt, indexByNode, isLandFormation, keepDeception, landSlice } from './state';
 import { cannotDrop, insert, supplyAirheads } from './airborne';
 import { airlift, embarkation, liftMode, overseas } from './strategic';
 import { exposureLosses, groundFactorAt } from '../weather/effects';
+import { DECEPTION } from '../c2/tables';
 import {
   AIR_INTERDICTION, BREAK_CONTACT_PACE, DISMOUNTS, ENTRENCH_PER_DAY, FATIGUE_MARCH_PER_DAY, FATIGUE_RECOVERY_PER_DAY, HOSTILE_GROUND_COST,
   MARCH_HOURS_PER_DAY, MARCH_SPEED_FACTOR, MORALE_RECOVERY_PER_DAY, NO_FUEL_SPEED, RAIL_BOOST_MAX, RAIL_KM_FULL, RALLY_MORALE, RIVER_ASSAULT_COST, RIVER_BRIDGE_COST, TERRAIN,
@@ -136,6 +137,7 @@ export function marchKmPerDay(world: World, catalog: Catalog, f: Formation): num
   }
   const air = world.theater.airControl[f.node];
   if (air && atWar(world, f.nation, air.nation)) speed *= 1 - AIR_INTERDICTION() * air.level;
+  if (f.order.deception?.disperse) speed *= DECEPTION.dispersedMarch();
   return speed * MARCH_HOURS_PER_DAY;
 }
 
@@ -161,7 +163,7 @@ function march(world: World, ctx: SimContext, f: Formation, byNode: Map<number, 
     const next = path[0];
     const cost = edgeKm(world, map, f, f.node, next, map.distanceKm(f.node, next));
     if (!Number.isFinite(cost)) {
-      f.order = { posture: 'defend', issuedTick: world.tick };
+      f.order = { posture: 'defend', issuedTick: world.tick, ...keepDeception(f.order) };
       f.progressKm = 0;
       return;
     }
@@ -183,7 +185,7 @@ function march(world: World, ctx: SimContext, f: Formation, byNode: Map<number, 
   if (f.order.posture === 'move' && f.order.target !== undefined && overseas(map, f.node, f.order.target)) return;
   const holder = world.control[f.node];
   const contesting = f.order.posture === 'attack' && holder && atWar(world, f.nation, holder);
-  if (!contesting && f.order.posture !== 'reserve') f.order = { posture: 'defend', issuedTick: world.tick };
+  if (!contesting && f.order.posture !== 'reserve') f.order = { posture: 'defend', issuedTick: world.tick, ...keepDeception(f.order) };
   delete f.order.path;
 }
 

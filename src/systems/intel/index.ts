@@ -18,6 +18,7 @@ import { atWar, hostility, type SimContext, type System } from '../../core/engin
 import type { GameMap } from '../../core/map';
 import type { Formation, FormationId, FormationKind, NationId, NodeId, PlatformClass, PlatformId, World } from '../../core/types';
 import { isrJammed } from '../c2';
+import { DECEPTION } from '../c2/tables';
 import { conditionsAt, sortieFactorAt } from '../weather/effects';
 import { COMMERCIAL_IMAGERY, LIAISON_SOURCES, SUPPORT_SHARE, supportSources } from './sharing';
 import { seaNeighbour } from '../naval/geography';
@@ -42,6 +43,8 @@ export interface Contact {
   inshore?: NodeId;
   /** A ship seen under way, though still in its home port. */
   underway?: true;
+  /** Share of its true size the formation showed when fixed, when concealment or a feint skewed it. */
+  apparent?: number;
 }
 
 /** A build-up on a nation's border that its intelligence has read as warning. */
@@ -261,6 +264,7 @@ export const intel: System = {
 
     const watchers = new Map<number, Set<NationId>>();
     const watch = (node: number, n: NationId) => (watchers.get(node) ?? watchers.set(node, new Set()).get(node)!).add(n);
+    const present = new Map<number, Set<NationId>>();
     const isr: { node: NodeId; nation: NationId; ground: boolean; sea: boolean; reachKm: number }[] = [];
     for (const f of formations) {
       if (f.status !== 'active') continue;
@@ -271,6 +275,7 @@ export const intel: System = {
       }
       if (map.isSea(f.node) || f.kind === 'space') continue;
       watch(f.node, f.nation);
+      (present.get(f.node) ?? present.set(f.node, new Set()).get(f.node)!).add(f.nation);
       for (let k = map.adjStart[f.node]; k < map.adjStart[f.node + 1]; k++) watch(map.adj[k], f.nation);
     }
     const sats = new Map<NationId, number>();
@@ -290,15 +295,15 @@ export const intel: System = {
       return v;
     };
     const tracks = world.slices.naval?.tracks ?? {};
-    const fix = (o: NationId, f: Formation, source: IntelSource) => {
+    const fix = (o: NationId, f: Formation, source: IntelSource, node = f.node, apparent = 1) => {
       const known = pictures[o]?.[f.id];
       // The same sensor seeing it in the same place again only refreshes the fix.
-      if (known && known.node === f.node && known.source === source && known.embarkedOn === f.embarkedOn) {
+      if (known && known.node === node && known.source === source && known.embarkedOn === f.embarkedOn && (known.apparent ?? 1) === apparent) {
         known.tick = world.tick;
         if (f.kind === 'surface_group') observeShip(known, f);
         return;
       }
-      const scale = 1 + SOURCE_ERROR[source].strength * (2 * draw(f.id, world.tick, o) - 1);
+      const scale = apparent * (1 + SOURCE_ERROR[source].strength * (2 * draw(f.id, world.tick, o) - 1));
       let count = 0;
       const equipment: Record<PlatformId, number> = {};
       for (const [pid, k] of Object.entries(f.equipment) as [PlatformId, number][]) {
@@ -306,7 +311,8 @@ export const intel: System = {
         if (k > 0) equipment[pid] = Math.round(k * scale);
       }
       const strength = Math.max(0, Math.round(count * scale));
-      const c: Contact = { node: f.node, tick: world.tick, kind: f.kind, strength, equipment, source };
+      const c: Contact = { node, tick: world.tick, kind: f.kind, strength, equipment, source };
+      if (apparent !== 1) c.apparent = apparent;
       if (f.embarkedOn) c.embarkedOn = f.embarkedOn;
       if (f.kind === 'surface_group') observeShip(c, f);
       (pictures[o] ??= {})[f.id] = c;
@@ -330,9 +336,18 @@ export const intel: System = {
       if (f.status !== 'active' && f.status !== 'routed') continue;
       const observers = observersOf(f);
       if (!observers.size) continue;
+      const d = f.order.deception;
+      // Share of a concealed formation that sensors outside its cell see, and the chance a tick that they see any of it.
+      const exposed = (d?.disperse ? DECEPTION.dispersedSeen() : 1) * (d?.emcon ? DECEPTION.emconSeen() : 1);
+      const spotted = (src: IntelSource) => exposed >= 1 || draw(f.id, world.tick, `~${src}`) < exposed;
+      // Overhead sensors find mock-ups where the formation laid them; troops across the line are not fooled.
+      const overhead = d?.decoy !== undefined && d.decoy !== f.node ? d.decoy : f.node;
       const fixWith = (o: NationId, source: IntelSource) => {
-        fix(o, f, source);
-        for (const g of aboard.get(f.id) ?? []) fix(o, g, source);
+        const at = source === 'satellite' || source === 'airborne' ? overhead : f.node;
+        const close = source === 'territory' || source === 'base' || present.get(f.node)?.has(o);
+        const apparent = close ? 1 : exposed * (d?.feint ? DECEPTION.feintScale() : 1);
+        fix(o, f, source, at, apparent);
+        for (const g of aboard.get(f.id) ?? []) fix(o, g, source, at, apparent);
       };
       if (atBase(map, f)) {
         for (const o of observers) fixWith(o, 'base');
@@ -352,13 +367,13 @@ export const intel: System = {
       if (!map.isSea(f.node)) {
         const holder = world.control[f.node];
         if (holder) see(holder, 'territory');
-        for (const n of watchers.get(f.node) ?? []) see(n, 'contact');
+        for (const n of watchers.get(f.node) ?? []) if (present.get(f.node)?.has(n) || spotted('contact')) see(n, 'contact');
       }
       if (f.kind !== 'submarine') {
         const sea = f.kind === 'surface_group';
-        for (const w of isr) if (!seen.has(w.nation) && sensors.has(w.nation) && (sea ? w.sea : w.ground) && map.distanceKm(w.node, f.node) <= w.reachKm && !isrJammed(world, f.node, w.nation, f.id)) see(w.nation, 'airborne');
+        for (const w of isr) if (!seen.has(w.nation) && sensors.has(w.nation) && (sea ? w.sea : w.ground) && map.distanceKm(w.node, overhead) <= w.reachKm && spotted('airborne') && !isrJammed(world, overhead, w.nation, f.id)) see(w.nation, 'airborne');
       }
-      const vis = (garrisoned ? SAT_VISIBILITY_MISSILE_BASE : (SAT_VISIBILITY[f.kind] ?? 0)) * (map.isSea(f.node) ? 1 : imagingAt(f.node));
+      const vis = (garrisoned ? SAT_VISIBILITY_MISSILE_BASE : (SAT_VISIBILITY[f.kind] ?? 0)) * exposed * (map.isSea(overhead) ? 1 : imagingAt(overhead));
       if (vis > 0) for (const [n, p] of sats) if (sensors.has(n) && !seen.has(n) && draw(f.id, world.tick, n) < p * vis) see(n, 'satellite');
       for (const n of tracks[f.id] ?? []) see(n, 'naval');
       if (!seen.size) continue;
