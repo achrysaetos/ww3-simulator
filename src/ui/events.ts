@@ -83,8 +83,13 @@ const FRONT_PLACES: readonly Place[] = [
   { name: 'Kinmen', lat: 24.44, lon: 118.38 }, { name: 'Matsu', lat: 26.16, lon: 119.95 }, { name: 'Penghu', lat: 23.57, lon: 119.58 },
   { name: 'Tainan', lat: 22.99, lon: 120.21 }, { name: 'Taoyuan', lat: 24.99, lon: 121.3 }, { name: 'Keelung', lat: 25.13, lon: 121.74 },
   { name: 'Hualien', lat: 23.99, lon: 121.6 }, { name: 'Naha', lat: 26.21, lon: 127.68 }, { name: 'Guam', lat: 13.44, lon: 144.79 },
-  { name: 'Tokmak', lat: 47.26, lon: 35.71 }, { name: 'Orikhiv', lat: 47.57, lon: 35.79 },
+  { name: 'Tokmak', lat: 47.26, lon: 35.71 }, { name: 'Orikhiv', lat: 47.57, lon: 35.79 }, { name: 'Chernihiv', lat: 51.49, lon: 31.29 },
+  { name: 'Sumy', lat: 50.91, lon: 34.8 }, { name: 'Shostka', lat: 51.87, lon: 33.48 },
 ];
+
+/** A place this close names a cell "near" it; out to FAR_KM a cell is a distance and bearing from it. */
+const NEAR_KM = 250, FAR_KM = 1500;
+const COMPASS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'] as const;
 
 /** The ports a sea zone serves, so a ship off Busan is named for Busan and not only for the nearest big city. */
 const portZones = new WeakMap<GameMap, Map<number, NodeId[]>>();
@@ -118,7 +123,7 @@ export class PlaceNamer {
     const { map } = this;
     const ports = map.isSea(node) ? portsOf(map, node) : [];
     if (ports.length) {
-      const names = [...new Set(ports.map((p) => this.name(p)).filter((n) => !/°/.test(n)).sort((a, b) => (this.pop.get(b) ?? 0) - (this.pop.get(a) ?? 0)).map((n) => n.replace(/^near /, '')))].slice(0, 2);
+      const names = [...new Set(ports.map((p) => this.name(p)).filter((n) => !/°|^\d+ km /.test(n)).sort((a, b) => (this.pop.get(b) ?? 0) - (this.pop.get(a) ?? 0)).map((n) => n.replace(/^near /, '')))].slice(0, 2);
       if (names.length) {
         s = `off ${names.join(' and ')}`;
         this.cache.set(node, s);
@@ -137,22 +142,31 @@ export class PlaceNamer {
     return this.nearest(node, (c) => holds(c.node));
   }
   /** A cell is named for a place inside it, else for its biggest city, else "near" the nearest place outside it, so two cells never share a bare name. */
+  /**
+   * A cell is named for a place inside it, else for its biggest city, else "near" the nearest place outside it, so
+   * two cells never share a bare name. Far from any place it is a distance and bearing from the nearest: "300 km E of Naha".
+   */
   private nearest(node: NodeId, ok: (c: Place & { node: NodeId }) => boolean): string {
     const { map } = this;
-    let best: Place | null = null, bestD = 250, inside: Place | null = null, insideD = Infinity;
+    let best: Place | null = null, bestD = FAR_KM, inside: Place | null = null, insideD = Infinity;
     for (const c of this.places) {
       const d = Math.hypot(c.lat - map.lat[node], (c.lon - map.lon[node]) * Math.cos((c.lat * Math.PI) / 180)) * 111;
       if (d < bestD && ok(c)) { bestD = d; best = c; }
-      if (d < insideD && d < 250 && c.node === node && ok(c)) { insideD = d; inside = c; }
+      if (d < insideD && d < NEAR_KM && c.node === node && ok(c)) { insideD = d; inside = c; }
     }
+    if (inside) return inside.name;
+    const city = this.cityAt.get(node);
+    if (city) return city;
+    if (best && bestD < NEAR_KM) return `near ${best.name}`;
     const lat = map.lat[node], lon = map.lon[node];
-    const coord = `${Math.abs(lat).toFixed(0)}°${lat >= 0 ? 'N' : 'S'} ${Math.abs(lon).toFixed(0)}°${lon >= 0 ? 'E' : 'W'}`;
-    return inside?.name ?? this.cityAt.get(node) ?? (best ? `near ${best.name}` : map.isSea(node) ? `sea zone ${coord}` : coord);
+    if (!best) return `${Math.abs(lat).toFixed(0)}°${lat >= 0 ? 'N' : 'S'} ${Math.abs(lon).toFixed(0)}°${lon >= 0 ? 'E' : 'W'}`;
+    const deg = (Math.atan2((lon - best.lon) * Math.cos((lat * Math.PI) / 180), lat - best.lat) * 180) / Math.PI;
+    return `${Math.round(bestD / 50) * 50} km ${COMPASS[Math.round(((deg + 360) % 360) / 45) % 8]} of ${best.name}`;
   }
-  /** "at Kiev", "near Kiev", "in sea zone 20°N 120°E". */
+  /** "at Kyiv", "near Kyiv", "off Busan", "300 km E of Naha". */
   at(node: NodeId): string {
     const s = this.name(node);
-    return s.startsWith('near ') || s.startsWith('off ') ? s : s.startsWith('sea zone') ? `in ${s}` : `at ${s}`;
+    return /^(near|off) |^\d+ km /.test(s) ? s : `at ${s}`;
   }
 }
 
@@ -228,6 +242,7 @@ const REASONS: Rule[] = [
 ];
 
 const MESSAGES: Rule[] = [
+  [/^([A-Z]{3}) warns (its enemies|[A-Z]{3}(?:, [A-Z]{3})*) that (.+)$/, (m, n) => `${nation(m[1], n)} warns ${m[2] === 'its enemies' ? m[2] : m[2].split(', ').map((x) => nation(x, n)).join(', ')} that ${m[3]}`],
   [/^(.+) landed at node (\d+), losing (\d+)% in the assault$/, (m, n) => `${m[1]} landed ${n.place.at(+m[2] as NodeId)}, losing ${m[3]}% in the assault`],
   [/^([A-Z]{3}) offers peace to ([A-Z]{3})$/, (m, n) => `${nation(m[1], n)} offers peace to ${nation(m[2], n)}, which has not accepted`],
   [/^([A-Z]{3}) declines to honour (\S+) for ([A-Z]{3})$/, (m, n) => `${nation(m[1], n)} declines to honour the ${treatyName(m[2])} for ${nation(m[3], n)}`],

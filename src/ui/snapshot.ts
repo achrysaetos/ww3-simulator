@@ -31,6 +31,7 @@ import { conditionsAt, type Conditions, packWeather } from '../systems/weather/e
 import type { IntelSource } from '../systems/intel';
 import { believedWorld, viewOf, type View } from '../systems/intel/view';
 import { OutputsRecorder } from '../outputs';
+import { nationName } from './placeNames';
 import { outputsView, type OutputsView } from './outputs/view';
 import type { OperationForecastInput, OperationPlan } from '../forecast/operation';
 import type { OptionsResult } from './orders/options';
@@ -942,7 +943,7 @@ export function nationCards(map: GameMap, profiles: Readonly<Record<string, { bl
   return map.data.nations.map((raw, i) => {
     const id = map.nationIds[i];
     const p = profiles[id] ?? {};
-    return { id, name: raw.name, blocs: p.blocs ?? [], doctrine: p.nuclear?.doctrine ?? 'none', gdpUsdB: ((raw.stats as { gdp?: number }).gdp ?? 0) / 1e9 };
+    return { id, name: nationName(id, raw.name), blocs: p.blocs ?? [], doctrine: p.nuclear?.doctrine ?? 'none', gdpUsdB: ((raw.stats as { gdp?: number }).gdp ?? 0) / 1e9 };
   });
 }
 

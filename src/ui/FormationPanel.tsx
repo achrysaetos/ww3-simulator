@@ -59,7 +59,7 @@ export function FormationPanel({ client, palette, places, routes, playAs, comman
         <span className="swatch" style={{ background: palette.of(f.nation).css }} />
         <div style={{ flex: 1 }}>
           <div className="nation-name" data-testid="formation-name">{f.name}</div>
-          <div className="nation-sub">{nation?.name ?? f.nation} · {f.kind.replace(/_/g, ' ')} {f.echelon.replace(/_/g, ' ')} · <span className={`status ${f.status}`}>{f.status}</span></div>
+          <div className="nation-sub">{nation?.name ?? f.nation} · {f.kind.replace(/_/g, ' ')}{f.kind.endsWith(f.echelon) ? '' : ` ${f.echelon.replace(/_/g, ' ')}`} · <span className={`status ${f.status}`}>{f.status}</span></div>
         </div>
         <button className="ghost" onClick={onClose} title="Deselect">✕</button>
       </div>

@@ -298,7 +298,7 @@ export function MapView(props: MapViewProps) {
       <div className="map-tooltip ww-glass" style={{ left: hover.x + 16, top: hover.y + 16 }}>
         <div className="tt-title">{places.name(hover.node)}</div>
         <div className="tt-sub">{sea ? 'Sea zone' : `${map.terrain[hover.node]} · ${holder?.name ?? 'unclaimed'}`}</div>
-        {!sea && map.owner[hover.node] !== (holder?.id ?? '') && <div className="tt-warn">Occupied (pre-war: {map.owner[hover.node]})</div>}
+        {!sea && map.owner[hover.node] !== (holder?.id ?? '') && <div className="tt-warn">Occupied (pre-war: {client.namer.nation(map.owner[hover.node] as NationId)})</div>}
         {contestAt(hover.node)}
         {here.length > 0 && (
           <ul className="tt-list">

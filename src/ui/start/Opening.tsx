@@ -96,7 +96,7 @@ export function SituationCard(p: SituationProps) {
         <header className="ww-brief-head">
           <Flag id={p.me} name={p.nation} width={54} className="op-flag" />
           <div className="ww-brief-title">
-            <span className="ww-label">For the {p.role?.name ?? 'Supreme Commander'}</span>
+            <span className="ww-label">For the {!p.role || p.role.id === 'brigade' ? 'Supreme Commander' : p.role.name}</span>
             <span className="ww-title">Situation</span>
           </div>
           <div className="ww-brief-asof">
