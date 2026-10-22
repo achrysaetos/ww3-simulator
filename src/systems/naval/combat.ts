@@ -162,7 +162,10 @@ function usvAttack(env: TickEnv, tracks: Tracks, f: Formation, queue: Queue): vo
   const boats = env.comp(f).hulls.filter((h) => h.platform.class === 'usv' && (h.platform.firepower.ship ?? 0) > 0);
   if (!boats.length) return;
   const { lastFired } = env.world.slices.naval;
-  if ((env.world.tick - (lastFired[f.id] ?? -Infinity)) * env.world.dtHours < USV_RAID_HOURS) return;
+  // The pace is the nation's: raids wait on one intelligence and planning cell, located targets and weather.
+  const raiders = env.naval.filter((g) => g.nation === f.nation && g.id in lastFired && env.comp(g).hulls.some((h) => h.platform.class === 'usv'));
+  const raided = Math.max(-Infinity, ...raiders.map((g) => lastFired[g.id]));
+  if ((env.world.tick - raided) * env.world.dtHours < USV_RAID_HOURS) return;
   // A raid ordered on one target waits for that target to be located rather than spending the wave on another.
   const ordered = f.order.targetFormation ? env.world.formations[f.order.targetFormation] : undefined;
   const among = ordered?.status === 'active' && atWar(env.world, f.nation, ordered.nation) ? [ordered] : env.naval;

@@ -118,7 +118,7 @@ export const USV_STRIKE: Munition = {
 /** Strike USVs a group launches at one target in a raid: one wave (2024 attacks used 5-10 boats). */
 export const USV_WAVE = 8;
 /**
- * Hours between raids by one USV group. A raid waits on a located target, weather and a night
+ * Hours between a nation's USV raids. A raid waits on a located target, weather and a night
  * approach: GUR's Group 13 struck Ivanovets on 1 Feb, Tsezar Kunikov on 14 Feb and Sergei Kotov
  * on 5 Mar 2024, two to three weeks apart.
  */

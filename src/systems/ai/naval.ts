@@ -508,8 +508,9 @@ export function planNaval(p: Plan): void {
         break;
       case 'submarine': {
         // With no enemy fleet at sea to fight, an attack submarine hunts an enemy boat known to be working a zone
-        // within reach, one hunter to a zone; while there is one, the boats stay on the fleet (judgment).
-        if (hunt(g, blockaders, reachKm(p, g)) || (!enemyFleet && hunt(g, enemySubZones, reachKm(p, g)))) break;
+        // within reach, blockaders of its own lanes first, one hunter to a zone; while there is one, the boats stay on
+        // the fleet and the escorts hunt the blockaders (judgment).
+        if (!enemyFleet && (hunt(g, blockaders, reachKm(p, g)) || hunt(g, enemySubZones, reachKm(p, g)))) break;
         if (km(g.node, focus) <= FOCUS_SUB_KM) patrol(g, subStation);
         else if (!blockade(g)) patrol(g, subStation);
         break;
