@@ -50,9 +50,16 @@ export interface RenderInput {
   dtHours: number;
 }
 
+/** A place a staff card points at: where something landed, from where it came, or a site to look at. */
+export interface Mark {
+  to: NodeId;
+  from?: NodeId;
+}
+
 interface Flash {
   node: NodeId;
-  kind: 'battle' | 'strike' | 'nuclear' | 'capture';
+  /** track: an enemy round's flight and impact replayed for "Show me"; site: a place to look at, pulsing. */
+  kind: 'battle' | 'strike' | 'nuclear' | 'capture' | 'track' | 'site';
   t0: number;
   /** Where a friendly strike was fired from, to draw its flight. */
   from?: NodeId[];
@@ -62,7 +69,7 @@ interface Flash {
 const MARK_TICKS = 2;
 const LIVE_PHASES: ReadonlySet<Operation['phase']> = new Set(['draft', 'launched', 'stalled']);
 
-const FLASH_MS: Record<Flash['kind'], number> = { battle: 1100, strike: 1300, capture: 900, nuclear: 4500 };
+const FLASH_MS: Record<Flash['kind'], number> = { battle: 1100, strike: 1300, capture: 900, nuclear: 4500, track: 4200, site: 4200 };
 /** Target on-screen size of a stacking cell, per band. */
 const CELL_PX: Record<ZoomBand, number> = { world: 72, theatre: 92, front: 34 };
 /** On-screen width of one map node at which its stack fans out into individual counters. */
@@ -249,6 +256,11 @@ export class MapRenderer {
       if (kind === 'battle' && !this.marks.some((m) => m.node === node && m.tick === e.tick)) this.marks.push({ node, tick: e.tick });
     }
     if (this.flashes.length > 300) this.flashes.splice(0, this.flashes.length - 300);
+  }
+
+  /** Replay what a staff card points at: each enemy round's track from where it came, its impact, and sites to look at. */
+  spotlight(marks: readonly Mark[], now: number) {
+    for (const m of marks) this.flashes.push(m.from !== undefined ? { node: m.to, kind: 'track', t0: now, from: [m.from] } : { node: m.to, kind: 'site', t0: now });
   }
 
   get animating() {
@@ -810,7 +822,7 @@ export class MapRenderer {
   }
 
   /** A friendly round in flight from its battery to the target: an arc drawn out over the first half of the flash. */
-  private strikeFlight(from: NodeId, x: number, y: number, u: number) {
+  private strikeFlight(from: NodeId, x: number, y: number, u: number, rgb = '255,181,71') {
     const p = this.screenOf(from);
     if (!p) return;
     const ctx = this.ctx, [x0, y0] = p, len = Math.hypot(x - x0, y - y0);
@@ -819,7 +831,7 @@ export class MapRenderer {
     const k = Math.min(1, u * 2);
     const at = (t: number): [number, number] => [(1 - t) ** 2 * x0 + 2 * (1 - t) * t * mx + t * t * x, (1 - t) ** 2 * y0 + 2 * (1 - t) * t * my + t * t * y];
     ctx.save();
-    ctx.strokeStyle = `rgba(255,181,71,${0.75 * (1 - u)})`;
+    ctx.strokeStyle = `rgba(${rgb},${0.75 * (1 - u)})`;
     ctx.lineWidth = 1.4;
     ctx.setLineDash([3, 4]);
     ctx.beginPath();
@@ -1085,6 +1097,35 @@ export class MapRenderer {
           ctx.arc(x, y, 3 * (1 - u) + 1, 0, Math.PI * 2);
           ctx.fill();
           break;
+        case 'track': {
+          for (const n of f.from ?? []) this.strikeFlight(n, x, y, Math.min(1, u * 1.6) * 0.5, '255,90,80');
+          const hit = Math.max(0, (u - 0.32) / 0.68);
+          if (hit > 0) {
+            ctx.strokeStyle = `rgba(255,77,79,${1 - hit})`;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(x, y, 5 + 22 * (1 - (1 - hit) ** 3), 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.fillStyle = `rgba(255,230,200,${0.9 * (1 - hit)})`;
+            ctx.beginPath();
+            ctx.arc(x, y, 3.5 * (1 - hit) + 1.5, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          break;
+        }
+        case 'site': {
+          const pulse = (u * 3) % 1;
+          ctx.strokeStyle = `rgba(255,77,79,${0.9 * (1 - pulse) * (1 - u * 0.5)})`;
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(x, y, 6 + 18 * pulse, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.fillStyle = 'rgba(255,77,79,0.9)';
+          ctx.beginPath();
+          ctx.arc(x, y, 3, 0, Math.PI * 2);
+          ctx.fill();
+          break;
+        }
         case 'capture':
           ctx.strokeStyle = `rgba(232,238,246,${0.7 * (1 - u)})`;
           ctx.lineWidth = 1.2;

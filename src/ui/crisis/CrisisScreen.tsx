@@ -32,17 +32,17 @@ interface Props {
 function Countdown({ c }: { c: Crisis }) {
   if (c.hoursLeft === null) {
     return (
-      <div className="cr-clock">
-        <span className="cr-clock-l">The clock</span>
-        <span className="cr-clock-v ww-mono">Stopped</span>
+      <div className="cr-clock" data-testid="crisis-clock">
+        <span className="cr-clock-l">{c.clock === 'Answered' ? 'Decision' : c.clock}</span>
+        <span className="cr-clock-v ww-mono cr-clock-word">{c.clock === 'Answered' ? 'Answered' : 'Stopped'}</span>
       </div>
     );
   }
   const days = Math.floor(c.hoursLeft / 24), hours = Math.round(c.hoursLeft % 24);
   const lit = Math.max(1, Math.round((c.hoursLeft / (c.windowHours ?? c.hoursLeft)) * SEGMENTS));
   return (
-    <div className="cr-clock">
-      <span className="cr-clock-l">Answer due in</span>
+    <div className="cr-clock" data-testid="crisis-clock">
+      <span className="cr-clock-l">{c.clock}</span>
       <span className="cr-clock-v ww-mono">{pad(days)}<small>d</small> {pad(hours)}<small>h</small></span>
       <span className="cr-clock-bar" aria-hidden="true">{Array.from({ length: SEGMENTS }, (_, i) => <i key={i} className={i < lit ? 'on' : ''} />)}</span>
     </div>

@@ -7,7 +7,7 @@ import type { PlaceNamer } from './events';
 import type { Manifest } from './map/tiles';
 import { ZoomControl } from './map/ZoomControl';
 import { fixAge } from './map/contacts';
-import { MapRenderer, type Overlays } from './renderer';
+import { MapRenderer, type Mark, type Overlays } from './renderer';
 import type { OrdersOverlay } from './orders/useOrders';
 import { NO_NATION, type ScenarioCard } from './snapshot';
 import { BAND_PRESET, pinTo, unproject, zoomForPxPerDeg, type ZoomBand } from './view';
@@ -32,7 +32,7 @@ export interface MapViewProps {
    * Filled by the map so panels can fly to a node. 'close' zooms in to at least the theatre;
    * 'wide' zooms out to it if closer, so a target far from the unit stays on screen.
    */
-  focusHandle: { current: ((node: NodeId, frame?: 'close' | 'wide') => void) | null };
+  focusHandle: { current: ((node: NodeId, frame?: 'close' | 'wide', marks?: readonly Mark[]) => void) | null };
 }
 
 const TILES = `${import.meta.env.BASE_URL}tiles/`;
@@ -92,9 +92,11 @@ export function MapView(props: MapViewProps) {
       dirty.current = true;
     };
     fit();
-    propsRef.current.focusHandle.current = (node, frame = 'close') => {
+    propsRef.current.focusHandle.current = (node, frame = 'close', marks) => {
       const theatre = zoomForPxPerDeg(BAND_PRESET.theatre);
       r.flyTo({ lon: client.map.lon[node], lat: client.map.lat[node], zoom: frame === 'wide' ? Math.min(r.cam.zoom, theatre) : Math.max(r.cam.zoom, theatre) });
+      if (marks?.length) r.spotlight(marks, performance.now() + 500);
+      dirty.current = true;
     };
     const ro = new ResizeObserver(fit);
     ro.observe(canvas);

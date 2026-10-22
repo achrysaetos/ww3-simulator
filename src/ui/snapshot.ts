@@ -275,6 +275,10 @@ export interface NationDetail {
   homeFront: HomeFrontView;
   munitions: MunitionStock[];
   wars: WarView[];
+  /** The nation's own covert campaigns (nonkinetic); empty for any nation but the viewer. */
+  covert: CovertView;
+  /** Its own missile formations with conventional rounds aboard, and how far they reach; empty for any nation but the viewer. */
+  strikers: { id: FormationId; node: NodeId; reachKm: number; rounds: number }[];
   nuclear: {
     posture: string | null;
     /** Launchers in strategic formations and their loaded nuclear rounds. */
@@ -287,6 +291,13 @@ export interface NationDetail {
     weapons: NuclearWeapon[];
     alert: NuclearAlertView;
   };
+}
+
+export interface CovertView {
+  /** Targets of its running sabotage campaigns. */
+  sabotage: NationId[];
+  /** Its intrusions into other nations' networks: how deep, and whether still working toward the next stage. */
+  cyber: { on: NationId; sector: 'grid' | 'telecom'; stage: 'none' | 'foothold' | 'persistent'; building: boolean }[];
 }
 
 /** Stored warheads are not on launchers until the leadership orders an alert; mating then follows the state's timeline. */
@@ -645,6 +656,23 @@ export class SnapshotEncoder {
     return out;
   }
 
+  private strikers(world: World, id: NationId): NationDetail['strikers'] {
+    const out: NationDetail['strikers'] = [];
+    for (const f of Object.values(world.formations)) {
+      if (f.nation !== id || f.kind !== 'missile' || f.status !== 'active') continue;
+      let reachKm = 0, rounds = 0;
+      for (const [mid, count] of Object.entries(f.magazine) as [MunitionId, number][]) {
+        const m = this.catalog.munitions.get(mid);
+        const g = m && !m.yieldKt ? GROUP_OF_KIND[m.kind] : null;
+        if (!m || count < 1 || (g !== 'ballistic' && g !== 'cruise')) continue;
+        reachKm = Math.max(reachKm, m.rangeKm);
+        rounds += count;
+      }
+      if (rounds) out.push({ id: f.id, node: f.node, reachKm, rounds: Math.floor(rounds) });
+    }
+    return out.sort((a, b) => (a.id < b.id ? -1 : 1));
+  }
+
   /** A foreign nation's forces are counted as the viewer believes them (believedWorld): contacts only, magazines by doctrine. */
   private nationDetail(world: World, map: GameMap, id: NationId, view: View | undefined): NationDetail {
     const n = world.nations[id];
@@ -731,6 +759,8 @@ export class SnapshotEncoder {
       homeFront: homeFront(world, id),
       munitions: [...groups.values()].filter((g) => g.warehoused || g.loaded || g.perMonth),
       wars: this.warViews(world, id),
+      covert: covertView(world, id, view),
+      strikers: view && view.nation !== id ? [] : this.strikers(world, id),
       nuclear: {
         posture: strategic?.posture[id] ?? null,
         launchers,
@@ -777,6 +807,15 @@ export class SnapshotEncoder {
         };
       });
   }
+}
+
+function covertView(world: World, id: NationId, view: View | undefined): CovertView {
+  const s = world.slices.nonKinetic;
+  if (!s || (view && view.nation !== id)) return { sabotage: [], cyber: [] };
+  return {
+    sabotage: Object.values(s.sabotage).filter((c) => c.by === id).map((c) => c.on).sort(),
+    cyber: Object.values(s.access).filter((a) => a.by === id).map((a) => ({ on: a.on, sector: a.sector, stage: a.stage, building: a.building })),
+  };
 }
 
 function nuclearAlert(n: Nation, id: NationId, alert: { orderedTick: number; stored: number; mated: number; reason: string } | undefined): NuclearAlertView {
