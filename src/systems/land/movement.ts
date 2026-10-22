@@ -101,7 +101,8 @@ export function applyLandOrder(world: World, cmd: OrderCommand, ctx: SimContext)
 }
 
 /** Shortest move that counts as a deployment between theatres rather than a march blocked at the front (judgement call: Vicenza to Korea, not Kharkiv to Izium). */
-const THEATRE_KM = 1500; // param:
+// param: tag=judgment range=[1000,2500] source=judgment: Vicenza to Korea, not Kharkiv to Izium
+const THEATRE_KM = 1500;
 
 /** A move with no land route that lift can make instead: far off, into ground the formation may enter and its side holds. */
 function betweenTheatres(world: World, map: GameMap, f: Formation, target: NodeId): boolean {

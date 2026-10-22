@@ -220,13 +220,17 @@ export function debarkation(world: World, map: GameMap, nation: NationId, target
  * Drop loss (base loss included) over a field above which no transport stream flies into it: in practice any enemy SAM
  * battery that reaches the field closes it (estimate: transports do not fly a daily stream through an engagement zone).
  */
-const AIRLIFT_MAX_LOSS = 0.05; // param:
+// param: tag=judgment range=[0.02,0.1] source=judgment: no daily transport stream through an engagement zone
+const AIRLIFT_MAX_LOSS = 0.05;
 /** Runway capacity below which a field takes no strategic airlift (estimate: a C-17 needs a 1,060 m minimum operating strip; USAF RADR restores one in ~8 h). */
-const MIN_RUNWAY = 0.5; // param:
+// param: tag=estimated range=[0.3,0.7] source=C-17 1,060 m minimum operating strip; USAF RADR
+const MIN_RUNWAY = 0.5;
 /** Block speed of a strategic transport, km/h (C-17 cruise ~830 km/h, less climb, descent and routing; AMC planning factor ~750). */
-const BLOCK_KMH = 750; // param:
+// param: tag=estimated range=[650,830] source=AMC planning factors; C-17 cruise ~830 km/h
+const BLOCK_KMH = 750;
 /** Hours on the ground per round trip: onload, offload, refuel and crew rest (estimate fitted so SORTIES_PER_DAY holds on the ~7,000 km CONUS-Germany route). */
-const GROUND_HOURS = 30; // param:
+// param: tag=judgment range=[20,40] source=judgment, fitted to SORTIES_PER_DAY on CONUS-Germany
+const GROUND_HOURS = 30;
 const REFERENCE_KM = 7000;
 /**
  * Aircraft-days a ton costs on a route, relative to the reference route SORTIES_PER_DAY describes. AMC planning factors

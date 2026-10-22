@@ -39,7 +39,8 @@ const LIFTS = 2;
  * battalions with its support (Kolwezi 1978 was the 2e REP of the 11e DP; 16 Air Assault's high-readiness echelon
  * is one battlegroup).
  */
-const MIN_ASSAULT_ECHELON = 0.15; // param:
+// param: tag=judgment range=[0.1,0.33] source=Kolwezi 1978 (2e REP of the 11e DP); 16 Air Assault high-readiness battlegroup
+const MIN_ASSAULT_ECHELON = 0.15;
 /** Furthest a formation moves by road or rail to its departure airfield while the operation is mounted (estimate: one day's move). */
 const MARSHAL_KM = 400;
 /** Days of fuel, ammunition and food a dropped formation carries, as a share of its capacity (estimate: two to three days' combat load). */
@@ -113,7 +114,8 @@ export function friendlyAir(world: World, map: GameMap, catalog: Catalog, nation
 }
 
 /** Radius around a field its transports descend and line up through, km (estimate: a C-17 starts its descent ~150 km out). */
-const APPROACH_KM = 150; // param:
+// param: tag=estimated range=[100,250] source=C-17 descent profile, judgment
+const APPROACH_KM = 150;
 
 /**
  * Whether a transport stream can fly into a field day after day: its side won the air there this tick, the enemy

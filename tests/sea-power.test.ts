@@ -6,10 +6,10 @@ import { computeTradeBlocked } from '../src/systems/naval/blockade';
 import { applyHits } from '../src/systems/naval/combat';
 import { tickEnv } from '../src/systems/naval/env';
 import { geography, nearestSea } from '../src/systems/naval/geography';
-import { mineWarfare } from '../src/systems/naval/mines';
 import { minedClosed } from '../src/systems/naval/movement';
 import { isSealift } from '../src/systems/naval/sealift';
 import { compose } from '../src/systems/naval/state';
+import { economy } from '../src/systems/economy';
 
 const nation = (n: string) => n as NationId;
 const USA = nation('USA'), CHN = nation('CHN'), IRN = nation('IRN'), UKR = nation('UKR');
@@ -114,7 +114,14 @@ describe('escorts and convoys (NV-4)', () => {
     des.node = iranAt!;
     des.order = { posture: 'patrol', target: iranAt!, path: [], issuedTick: world.tick };
     computeTradeBlocked(env());
-    expect(world.theater.tradeBlocked[qat]).toBeLessThan(unescorted - 0.01);
+    const escorted = world.theater.tradeBlocked[qat];
+    // An escort stops ships, not mines (Bridgeton, 1987), so measure it against what Iran's warships add to its field.
+    for (const f of Object.values(world.formations)) if (f.nation === IRN && naval(f)) f.order = { posture: 'reserve', issuedTick: world.tick };
+    computeTradeBlocked(env());
+    const minesOnly = world.theater.tradeBlocked[qat];
+    expect(unescorted - minesOnly, "Iran's warships stop Qatari shipping").toBeGreaterThan(0.02);
+    expect(escorted, 'the escort does not sweep').toBeGreaterThanOrEqual(minesOnly);
+    expect((unescorted - escorted) / (unescorted - minesOnly), 'share of the warships\' toll the escort lifts').toBeGreaterThan(0.05);
   }, 300_000);
 
   // On main the AI never escorted sealift: five US cargo ships were sunk crossing to Europe in baltic-2027.
@@ -135,26 +142,25 @@ describe('escorts and convoys (NV-4)', () => {
 });
 
 describe('mine countermeasures (NV-3)', () => {
-  // On main all four US minehunters were mined within two days of entering Iran's Hormuz field, having swept half a mine.
-  it('gulf-2027: minehunters working the Hormuz field survive it and clear mines', () => {
+  // On main all four US minehunters were lost within two days of going into Iran's Hormuz field, having swept half a mine.
+  it('gulf-2027: once Iran has lost its navy the US sends its minehunters into the Hormuz field, and they clear it', () => {
     const s = createSession('gulf-2027', 1);
     runDays(s, 10);
     const { world } = s;
     const field = Number(Object.keys(world.slices.naval.mines)[0]) as NodeId;
+    const laid = () => Object.values(world.slices.naval.mines[field] ?? {}).reduce((a, n) => a + n, 0);
+    const before = laid();
+    expect(before).toBeGreaterThan(100);
+    // Sea control won: the sweepers go in once the enemy's warships are gone (Gulf 1991).
+    for (const f of Object.values(world.formations)) if (f.nation === IRN && naval(f)) f.status = 'destroyed';
     const mcm = named(s, 'Commander Task Force 55');
     const hulls = () => Object.values(mcm.equipment).reduce((a, n) => a + n, 0);
     const start = hulls();
-    const laid = Object.values(world.slices.naval.mines[field]).reduce((a, n) => a + n, 0);
-    expect(laid).toBeGreaterThan(100);
-    mcm.node = field;
-    mcm.order = { posture: 'patrol', target: field, path: [], issuedTick: world.tick };
-    // Mine warfare alone, so that only the mines can touch the sweepers.
-    for (let i = 0; i < 30 * 4; i++) {
-      world.tick++;
-      mineWarfare(tickEnv(world, s.engine.context(world), true));
-    }
+    let worked = 0;
+    runDays(s, 30, () => { if (mcm.node === field) worked++; });
+    expect(worked, 'ticks spent working the field').toBeGreaterThan(30);
     expect(hulls(), 'hulls still sweeping').toBeGreaterThanOrEqual(start - 1);
-    expect(world.slices.naval.ledger[USA].minesSwept).toBeGreaterThan(40);
+    expect(before - laid(), 'mines cleared').toBeGreaterThan(30);
   }, 300_000);
 });
 
@@ -243,5 +249,19 @@ describe('shipping fear and blockade are counted once', () => {
     world.slices.naval.mines = {};
     expect(blocked(0), 'Iran stood down').toBe(0);
     expect(both, 'fear above the blockade sets the loss alone').toBeCloseTo(blocked(1), 9);
+  }, 300_000);
+
+  it('gulf-2027: the economy takes seaborne trade loss from tradeBlocked, not from fear again', () => {
+    const s = createSession('gulf-2027', 1);
+    runDays(s, 10);
+    const qat = nation('QAT');
+    const hormuz = geography(s.map).chokepoints.find((c) => c.def.name === 'Strait of Hormuz')!.nodes;
+    const gdp = (refusing: number) => {
+      const world = structuredClone(s.world);
+      for (const n of hormuz) (world.slices.nonKinetic!.maritime[n] ??= { risk: 0, premiumPct: 0, refusing: 0, attackHeat: 0 }).refusing = refusing;
+      economy.step(world, s.engine.context(world));
+      return world.slices.economy.nations[qat].gdpIndex;
+    };
+    expect(gdp(1)).toBe(gdp(0));
   }, 300_000);
 });
