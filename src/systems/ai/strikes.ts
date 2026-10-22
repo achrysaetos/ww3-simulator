@@ -5,6 +5,7 @@ import { isOverseas } from '../../data/territories';
 import { HOSTILE_OPINION } from '../diplomacy/escalation';
 import { delegated } from '../orders';
 import { rung, sideOf } from '../diplomacy/wars';
+import { warAgainst } from '../diplomacy/aims';
 import { aimKey, ATTRITABLE_COST_USD_M, dailyRounds, effectPk, futileAim, PENETRATOR_VISIBILITY } from '../air';
 import { ANTISHIP_KINDS } from '../naval';
 import type { HqLevel } from '../c2/state';
@@ -125,9 +126,20 @@ function cargoUsdM(p: Plan): Map<FormationId, number> {
  */
 function deepStrikeAllowed(p: Plan, owner: NationId): boolean {
   if (!p.enemies.has(owner)) return delegated(p.world, p.nation, 'strategic') && relation(p.world, p.nation, owner).opinion <= HOSTILE_OPINION;
-  if (p.world.nations[owner].nuclear.warheads <= 0) return true;
+  if (p.world.nations[owner].nuclear.warheads <= 0 || punitive(p, owner)) return true;
   if (p.world.nations[p.nation].nuclear.warheads <= 0 || p.profile.riskTolerance >= DEEP_STRIKE_RISK) return true;
   return rung(relation(p.world, p.nation, owner).escalation) >= rung('strategic_conventional');
+}
+
+/**
+ * A punitive war is a strike campaign on the enemy's homeland and nothing else: the decision to strike deep is the
+ * decision to go to war, bounded by its short length (aims PUNITIVE_DAYS), not by an escalation rung. India's
+ * Operation Sindoor (7-10 May 2025) struck nine sites from Muzaffarabad to Bahawalpur on night one and eleven Pakistani
+ * air bases, Nur Khan by Rawalpindi among them, on the last; Pakistan struck back at Indian bases (Indian MoD; ISPR).
+ */
+function punitive(p: Plan, owner: NationId): boolean {
+  const s = p.world.slices.diplomacy;
+  return !!s && warAgainst(s, p.nation, owner)?.own.aim.kind === 'punitive';
 }
 
 /**
@@ -308,7 +320,8 @@ function launchable(p: Plan, f: Formation, m: MunitionId): boolean {
  * monthly launch tallies imply roughly a year held back). Against an enemy with no
  * shared front the war is a stand-off exchange decided by stocks and launcher attrition, and stocks
  * go fast: Iran fired ~550 ballistic missiles, a quarter or more of its force, in
- * the 12 days of June 2025. Both are judgments, not doctrine figures.
+ * the 12 days of June 2025. A punitive war across a land front is the second kind: no ground war is fought, so
+ * nothing is held back for one. Both are judgments, not doctrine figures.
  */
 const ATTRITION_HORIZON_DAYS = 365;
 const STANDOFF_HORIZON_DAYS = 30;
@@ -363,8 +376,9 @@ export class FireBudget {
       return Math.min(1, (salvoDay ? cycle : Math.max(0, cycle - cap) / (SALVO_EVERY_DAYS - 1)) / cap);
     };
     for (const x of this.proposals) {
-      const horizon = front.has(world.control[x.t.node]) ? ATTRITION_HORIZON_DAYS : STANDOFF_HORIZON_DAYS;
-      const m = x.options.find((m) => ctx.rng.chance(share(m.id, horizon)));
+      const owner = world.control[x.t.node];
+      const horizon = front.has(owner) && !punitive(this.p, owner) ? ATTRITION_HORIZON_DAYS : STANDOFF_HORIZON_DAYS;
+          const m = x.options.find((m) => ctx.rng.chance(share(m.id, horizon)));
       if (m) issue(this.p, x.f, { ...x.order, munition: m.id });
       else {
         x.t.assigned--;
