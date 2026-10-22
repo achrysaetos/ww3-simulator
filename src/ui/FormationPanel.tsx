@@ -122,7 +122,7 @@ export function FormationPanel({ client, palette, places, routes, playAs, comman
         <Section title="Amphibious lift">
           <p className="muted small">To land under fire, or where no friendly port is open, board an amphibious group in a port, then order the group to Attack a coast or Move to a friendly port to unload.</p>
           {detail.portZone === null && (port !== null
-            ? <p className="small">Not in a port. Nearest port: <a onClick={() => onFocus(port)}>{places.name(port)}</a> <button data-testid="move-to-port" onClick={() => onOrder(f.id, { posture: 'move', target: port }, `${f.name} marching to ${places.name(port)} to embark`)}>March there</button></p>
+            ? <p className="small">Not in a port. Nearest port: <a onClick={() => onFocus(port)}>{places.name(port)}</a> <button data-testid="move-to-port" onClick={() => onOrder(f.id, { posture: 'move', target: port }, `${f.name} marching to ${places.to(port)} to embark`)}>March there</button></p>
             : <p className="small tt-warn">No friendly port on this land mass.</p>)}
           {detail.lifts.length ? (
             <ul className="lift-list" data-testid="lifts">
@@ -131,7 +131,7 @@ export function FormationPanel({ client, palette, places, routes, playAs, comman
                   <span><b>{l.name}</b> <span className="muted">{places.name(l.node)} · carries {l.share >= 1 ? 'all' : `${Math.round(l.share * 100)}%`} of this unit</span></span>
                   {l.boardNow
                     ? <button data-testid="embark-on" onClick={() => onOrder(f.id, { posture: 'embark', targetFormation: l.id }, `${f.name} embarking on ${l.name}`)}>Embark</button>
-                    : detail.portZone !== null && <button data-testid="call-lift" onClick={() => onOrder(l.id, { posture: 'move', target: detail.portZone! }, `${l.name} sailing to ${places.name(f.node)} to load ${f.name}`)}>Sail here</button>}
+                    : detail.portZone !== null && <button data-testid="call-lift" onClick={() => onOrder(l.id, { posture: 'move', target: detail.portZone! }, `${l.name} sailing to ${places.to(f.node)} to load ${f.name}`)}>Sail here</button>}
                 </li>
               ))}
             </ul>

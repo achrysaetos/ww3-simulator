@@ -359,7 +359,7 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
     }
     if (across && pending.posture === 'move') {
       const how = pending.lift === 'sea' ? 'by sealift' : pending.lift === 'air' ? 'by airlift' : 'by air if it can fly, otherwise by sea';
-      sendOrder(selected, { posture: 'move', target: node, ...(pending.lift ? { lift: pending.lift } : {}) }, `Deploying ${f!.entry.name} to ${places.name(node)} ${how}`);
+      sendOrder(selected, { posture: 'move', target: node, ...(pending.lift ? { lift: pending.lift } : {}) }, `Deploying ${f!.entry.name} to ${places.to(node)} ${how}`);
       setPending(null);
       return;
     }
