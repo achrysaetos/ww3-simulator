@@ -45,7 +45,6 @@ export interface OrdersOverlay {
   focusOp: string | null;
 }
 
-const bare = (s: string) => s.replace(/^(near|off|at) /, '');
 const hours = (h: number) => (h < 1 ? 'within the hour' : h < 48 ? `${Math.round(h)} h` : `${Math.round(h / 24)} days`);
 const isForm = (t: EventTarget | null) => t instanceof HTMLElement && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA');
 
@@ -60,7 +59,7 @@ export function useOrders(h: OrdersHost) {
 
   const view = (id: FormationId) => client.state.formations.find((f) => f.entry.id === id);
   const kindsOf = (ids: readonly FormationId[]) => ids.map((id) => view(id)?.entry.kind).filter((k): k is FormationKind => !!k);
-  const placeOf = (n: NodeId) => bare(places.name(n));
+  const placeOf = (n: NodeId) => places.name(n);
 
   const openRadial = useCallback((node: NodeId, hit: readonly FormationId[], x: number, y: number) => {
     const { selected, select } = hostRef.current;

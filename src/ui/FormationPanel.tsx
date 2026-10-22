@@ -115,7 +115,7 @@ export function FormationPanel({ client, palette, places, routes, playAs, comman
       )}
 
       {own && detail.deploy && f.status === 'active' && (
-        <Deploy d={detail.deploy} name={f.name} place={(n) => places.name(n)} pendingLift={pending === 'move' ? pendingLift : null} onPick={(lift) => onPickPosture(pending === 'move' && pendingLift === lift ? null : 'move', undefined, lift)} />
+        <Deploy d={detail.deploy} name={f.name} amphibious={detail.lifts.length} place={(n) => places.name(n)} pendingLift={pending === 'move' ? pendingLift : null} onPick={(lift) => onPickPosture(pending === 'move' && pendingLift === lift ? null : 'move', undefined, lift)} />
       )}
 
       {own && detail.deploy && f.status === 'active' && (
@@ -237,7 +237,7 @@ function Escort({ client, f, place, onOrder }: { client: SimClient; f: Formation
 const days = (d: number) => (d < 1 ? `${Math.max(1, Math.round(d * 24))} hours` : `${d.toFixed(d < 10 ? 1 : 0)} days`);
 
 /** Strategic deployment overseas: by the nation's airlift or by its cargo ships, to a friendly port or airfield on the far shore. */
-function Deploy({ d, name, place, pendingLift, onPick }: { d: DeployView; name: string; place(n: NodeId): string; pendingLift: 'air' | 'sea' | null; onPick(lift: 'air' | 'sea'): void }) {
+export function Deploy({ d, name, amphibious, place, pendingLift, onPick }: { d: DeployView; name: string; amphibious: number; place(n: NodeId): string; pendingLift: 'air' | 'sea' | null; onPick(lift: 'air' | 'sea'): void }) {
   const canFly = d.airPortable && d.airliftTonsPerDay > 0;
   const flyDays = d.airliftTonsPerDay > 0 ? d.airTons / d.airliftTonsPerDay : Infinity;
   const job = d.deploying;
@@ -260,7 +260,7 @@ function Deploy({ d, name, place, pendingLift, onPick }: { d: DeployView; name: 
           </tr>
           <tr>
             <td><b>Sealift</b></td>
-            <td className="small">{d.sealiftGroups === 0 ? 'Your nation has no cargo-ship groups.' : `${fmtNum(d.deckSlots)} deck slots to load; ${d.sealiftGroups} cargo-ship group${d.sealiftGroups > 1 ? 's' : ''} with ${fmtNum(d.sealiftSlots)} slots.${d.atWar ? '' : ' Ships sail once your nation is at war.'}`}</td>
+            <td className="small">{d.sealiftGroups === 0 ? (amphibious ? 'No cargo ships for an unopposed crossing. It can still cross on the amphibious lift below.' : 'Your nation has no cargo-ship groups.') : `${fmtNum(d.deckSlots)} deck slots to load; ${d.sealiftGroups} cargo-ship group${d.sealiftGroups > 1 ? 's' : ''} with ${fmtNum(d.sealiftSlots)} slots.${d.atWar ? '' : ' Ships sail once your nation is at war.'}`}</td>
             <td><button disabled={d.sealiftGroups === 0} className={pendingLift === 'sea' ? 'active' : ''} onClick={() => onPick('sea')} data-testid="deploy-sea">By sea…</button></td>
           </tr>
         </tbody>

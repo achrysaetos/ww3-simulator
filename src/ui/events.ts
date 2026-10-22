@@ -83,6 +83,7 @@ const FRONT_PLACES: readonly Place[] = [
   { name: 'Kinmen', lat: 24.44, lon: 118.38 }, { name: 'Matsu', lat: 26.16, lon: 119.95 }, { name: 'Penghu', lat: 23.57, lon: 119.58 },
   { name: 'Tainan', lat: 22.99, lon: 120.21 }, { name: 'Taoyuan', lat: 24.99, lon: 121.3 }, { name: 'Keelung', lat: 25.13, lon: 121.74 },
   { name: 'Hualien', lat: 23.99, lon: 121.6 }, { name: 'Naha', lat: 26.21, lon: 127.68 }, { name: 'Guam', lat: 13.44, lon: 144.79 },
+  { name: 'Tokmak', lat: 47.26, lon: 35.71 }, { name: 'Orikhiv', lat: 47.57, lon: 35.79 },
 ];
 
 /** The ports a sea zone serves, so a ship off Busan is named for Busan and not only for the nearest big city. */
@@ -100,7 +101,7 @@ function portsOf(map: GameMap, zone: NodeId): NodeId[] {
 /** Nearest notable city or front-line town within ~250 km, else coordinates; a port's sea zone is named "off" the port. Cached per node. */
 export class PlaceNamer {
   private readonly cache = new Map<number, string>();
-  private readonly places: readonly Place[];
+  private readonly places: readonly (Place & { node: NodeId })[];
   /** The biggest city in each cell that has one, and each city name's population. */
   private readonly cityAt = new Map<number, string>();
   private readonly pop = new Map<string, number>();
@@ -109,7 +110,7 @@ export class PlaceNamer {
       this.cityAt.set(c.node, cityName(c.name));
       this.pop.set(cityName(c.name), c.pop);
     }
-    this.places = [...map.cities.map((c) => ({ name: cityName(c.name), lat: c.lat, lon: c.lon })), ...FRONT_PLACES];
+    this.places = [...map.cities.map((c) => ({ name: cityName(c.name), lat: c.lat, lon: c.lon, node: c.node })), ...FRONT_PLACES.map((c) => ({ ...c, node: map.nodeAt(c.lat, c.lon) }))];
   }
   name(node: NodeId): string {
     let s = this.cache.get(node);
@@ -133,25 +134,20 @@ export class PlaceNamer {
    * holds is named for a town on its own side of the line, never for an enemy city across it.
    */
   heldName(node: NodeId, holds: (cell: NodeId) => boolean): string {
-    return this.nearest(node, (c) => holds(this.cellOf(c)));
+    return this.nearest(node, (c) => holds(c.node));
   }
-  private readonly cells = new Map<Place, NodeId>();
-  private cellOf(c: Place): NodeId {
-    let n = this.cells.get(c);
-    if (n === undefined) this.cells.set(c, (n = this.map.nodeAt(c.lat, c.lon)));
-    return n;
-  }
-  private nearest(node: NodeId, ok: (c: Place) => boolean): string {
+  /** A cell is named for a place inside it, else for its biggest city, else "near" the nearest place outside it, so two cells never share a bare name. */
+  private nearest(node: NodeId, ok: (c: Place & { node: NodeId }) => boolean): string {
     const { map } = this;
-    let best: Place | null = null, bestD = 250;
+    let best: Place | null = null, bestD = 250, inside: Place | null = null, insideD = Infinity;
     for (const c of this.places) {
       const d = Math.hypot(c.lat - map.lat[node], (c.lon - map.lon[node]) * Math.cos((c.lat * Math.PI) / 180)) * 111;
       if (d < bestD && ok(c)) { bestD = d; best = c; }
+      if (d < insideD && d < 250 && c.node === node && ok(c)) { insideD = d; inside = c; }
     }
     const lat = map.lat[node], lon = map.lon[node];
     const coord = `${Math.abs(lat).toFixed(0)}°${lat >= 0 ? 'N' : 'S'} ${Math.abs(lon).toFixed(0)}°${lon >= 0 ? 'E' : 'W'}`;
-    // A cell holding a city is named for it, even when the city sits off the cell's centre.
-    return best && bestD < 60 ? best.name : this.cityAt.get(node) ?? (best ? `near ${best.name}` : map.isSea(node) ? `sea zone ${coord}` : coord);
+    return inside?.name ?? this.cityAt.get(node) ?? (best ? `near ${best.name}` : map.isSea(node) ? `sea zone ${coord}` : coord);
   }
   /** "at Kiev", "near Kiev", "in sea zone 20°N 120°E". */
   at(node: NodeId): string {
@@ -220,7 +216,10 @@ const nation = (s: string, n: Namer) => n.nation(s as NationId);
 /** Plain-words versions of the engine's refusal reasons. */
 const REASONS: Rule[] = [
   [/^no sea route to node (\d+)$/, (m, n) => `no sea route to ${node(m[1], n)}`],
-  [/^no land route to node (\d+)(;.*)?$/, (m, n) => `no land route to ${node(m[1], n)}. It lies across the sea or past territory closed to you; ground units cross water by embarking at a port or with a Move order`],
+  [/^no land route to node (\d+)(;.*)?$/, (m, n) => `no land route to ${node(m[1], n)}. It lies across the sea or past territory closed to you. To cross the sea, embark on amphibious lift at a port from the unit panel, or Move to a friendly port or airfield on the far shore`],
+  [/^no friendly (port|airfield) to embark at$/, (m) => m[1] === 'port'
+    ? 'no friendly port on the far shore to sail into, or no sea lane to one. To land on a hostile coast, march to a port and embark on amphibious lift from the unit panel'
+    : 'no friendly airfield on the far shore to fly into'],
   [/^embark needs an own active surface group as targetFormation$/, () => 'pick one of your own lift groups to embark on'],
   [/^must stand in a port with the lift group in port or offshore$/, () => 'the unit must be in a port, with the lift group in that port or just offshore'],
   [/^embarked formations land by ordering their lift group to attack or move to a coast$/, () => 'it is at sea. Send its lift group to a friendly port to unload, or attack a coast to land under fire'],
