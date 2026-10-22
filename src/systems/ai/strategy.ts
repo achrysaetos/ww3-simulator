@@ -211,6 +211,21 @@ function strategicForcesHit(p: Plan, rec: WarRecord | undefined): boolean {
   return base > 0 && base - now >= STRATEGIC_LOSS_SHARE * base;
 }
 
+/**
+ * Conventional strikes on dual-use systems (nuclear-capable launchers, SSBNs, early-warning radars) press a state
+ * that treats attacks on its strategic forces as a threshold toward its signalling rungs, a warning after five and an
+ * alert after ten, but never by themselves to first use (Acton, "Escalation through Entanglement", 2018). Estimates.
+ */
+const DUAL_USE = { perStrike: 0.05, cap: 0.75 } as const;
+
+/** Strikes the nation's enemies have landed on its dual-use systems, as diplomacy tracked them. */
+function dualUseStrikes(p: Plan): number {
+  const outward = p.world.slices.diplomacy?.outward;
+  let n = 0;
+  if (outward) for (const e of p.enemies) n += outward[`${e}>${p.nation}`]?.dual_use?.count ?? 0;
+  return n;
+}
+
 /** Distance from the capital to the nearest homeland cell an enemy holds; Infinity when it holds none. */
 function enemyDepthKm(p: Plan, a: Assessment): number {
   if (a.areaLost <= 0) return Infinity;
@@ -241,7 +256,7 @@ function nuclearPressure(p: Plan, t: NuclearThreshold, a: Assessment | undefined
   if (a.areaLost > 0) pressure = Math.max(pressure, SIGNAL.warn);
   if (t.onStrategicAttack && pressure < 1) {
     if (strategicForcesHit(p, rec)) pressure = 1;
-    else pressure = Math.max(pressure, Math.min(1, CAPITAL_DANGER_KM / enemyDepthKm(p, a)));
+    else pressure = Math.max(pressure, Math.min(1, CAPITAL_DANGER_KM / enemyDepthKm(p, a)), Math.min(DUAL_USE.cap, DUAL_USE.perStrike * dualUseStrikes(p)));
   }
   return pressure;
 }

@@ -1,7 +1,8 @@
 import { atWar, relation, relationKey, relationMut, type SimContext } from '../../core/engine';
-import type { EscalationLevel, NationId, NodeId, World } from '../../core/types';
+import { defineParam } from '../../core/params';
+import type { EscalationLevel, NationId, NodeId, PlatformId, World } from '../../core/types';
 import { isOverseas } from '../../data/territories';
-import type { DiplomacyState, WarRecord } from './types';
+import type { DiplomacyState, OutwardStep, WarRecord } from './types';
 import { declareWar, raiseEscalation, sideOf } from './wars';
 
 /**
@@ -20,8 +21,38 @@ const PRESSURE = {
   ssbnLost: 6,
   /** Per unit of homeland population share occupied by the other party. */
   territoryLost: 10,
+  /**
+   * A conventional strike that destroys nuclear-capable launchers, SSBNs or early-warning assets: the entanglement
+   * of Acton, "Escalation through Entanglement" (International Security 2018), and Russia's 2020 Basic Principles
+   * para. 19(d) on attacks undermining the nuclear response. Four homeland strikes' worth, an estimate.
+   */
+  dualUseStrike: 2,
+  /** A satellite shot down: space is a step outward few states have taken in war. Estimate. */
+  spaceStrike: 2,
 } as const;
 const STRATEGIC_CONVENTIONAL_AT = 6;
+/**
+ * Pressure fades when the strikes behind it stop, and a dyad at the strategic conventional rung steps back down to
+ * conventional once it falls below half the threshold, while the war goes on: Russia and Ukraine's strikes on each
+ * other's energy systems paused and resumed over 2022-25. The half-life is a judgment.
+ */
+const PRESSURE_HALF_LIFE_DAYS = defineParam({
+  id: 'diplomacy.PRESSURE_HALF_LIFE_DAYS', value: 21, range: [7, 60], tag: 'judgment',
+  source: 'judgment: lulls in the 2022-25 Russia-Ukraine strike campaigns lasted weeks', affects: 'how fast a dyad steps back down from strategic conventional war',
+});
+const STEP_DOWN_SHARE = 0.5;
+
+/** Platforms whose loss to a conventional strike touches the nuclear forces or their warning: nuclear-capable launchers, SSBNs and radars. */
+function dualUse(catalog: SimContext['catalog'], pid: PlatformId): boolean {
+  const p = catalog.platforms.get(pid);
+  return !!p && (p.nuclearCapable === true || p.class === 'ssbn' || p.class === 'radar');
+}
+
+function stepOutward(world: World, s: DiplomacyState, by: NationId, on: NationId, step: OutwardStep): void {
+  const steps = ((s.outward ??= {})[`${by}>${on}`] ??= {});
+  const r = (steps[step] ??= { first: world.tick, count: 0 });
+  r.count++;
+}
 
 /**
  * A detonation is strategic when it is large or lands on a population centre.
@@ -129,18 +160,36 @@ export function processEvents(world: World, ctx: SimContext, s: DiplomacyState, 
   for (const e of world.events) {
     switch (e.type) {
       case 'strike': {
-        // An ASAT round kills satellites in orbit; nothing lands on the operations centre the constellation is placed at.
-        if (map.isSea(e.target) || e.effects.some((x) => x.kind === 'satellites_destroyed')) break;
+        if (map.isSea(e.target)) break;
         const victim = map.owner[e.target];
+        // An ASAT round kills satellites in orbit; nothing lands on the operations centre the constellation is placed at.
+        if (e.effects.some((x) => x.kind === 'satellites_destroyed')) {
+          if (victim && victim !== e.by && atWar(world, e.by, victim)) {
+            stepOutward(world, s, e.by, victim, 'space');
+            addPressure(s, e.by, victim, PRESSURE.spaceStrike);
+          }
+          break;
+        }
         if (!atWar(world, e.by, victim)) {
           const bystander = victim !== e.by && world.control[e.target] === victim && e.fired > e.intercepted
             && relation(world, victim, e.by).opinion <= HOSTILE_OPINION;
-          if (bystander && !s.wars.some((w) => sideOf(w, e.by) !== -1 && sideOf(w, e.by) === sideOf(w, victim))) attacks.push([e.by, victim]);
+          if (bystander && !fightsBeside(s, e.by, victim)) {
+            attacks.push([e.by, victim]);
+            stepOutward(world, s, e.by, victim, 'third_country');
+          }
           break;
         }
         // Bases in an overseas territory (Guam) are part of the theatre; striking them does not threaten the state itself.
         if (isOverseas(map, e.target)) break;
-        addPressure(s, e.by, victim, e.target === world.nations[victim].capital ? PRESSURE.capitalStrike : PRESSURE.homelandStrike);
+        const capital = e.target === world.nations[victim].capital;
+        addPressure(s, e.by, victim, capital ? PRESSURE.capitalStrike : PRESSURE.homelandStrike);
+        stepOutward(world, s, e.by, victim, capital ? 'capital' : 'homeland');
+        if (world.nations[victim].nuclear.warheads > 0) stepOutward(world, s, e.by, victim, 'nuclear_homeland');
+        if (e.effects.some((x) => x.kind === 'grid' || x.kind === 'infrastructure')) stepOutward(world, s, e.by, victim, 'civilian');
+        if (e.effects.some((x) => x.kind === 'losses' && (Object.keys(x.platforms) as PlatformId[]).some((pid) => dualUse(ctx.catalog, pid)))) {
+          stepOutward(world, s, e.by, victim, 'dual_use');
+          addPressure(s, e.by, victim, PRESSURE.dualUseStrike);
+        }
         break;
       }
       case 'battle':
@@ -191,13 +240,17 @@ export function processEvents(world: World, ctx: SimContext, s: DiplomacyState, 
     for (const foe of enemies.get(n) ?? []) addPressure(s, n, foe, PRESSURE.capitalThreatened);
   }
 
+  const fade = 0.5 ** (world.dtHours / (24 * PRESSURE_HALF_LIFE_DAYS()));
   for (const [k, r] of Object.entries(world.relations)) {
     if (!r.atWar) continue;
     const effective = (s.pressure[k] ?? 0) + PRESSURE.territoryLost * (lostTo.get(k) ?? 0);
-    if (effective >= STRATEGIC_CONVENTIONAL_AT) {
-      const [a, b] = k.split('|') as NationId[];
-      raiseEscalation(world, ctx, a, b, 'strategic_conventional');
+    const [a, b] = k.split('|') as NationId[];
+    if (effective >= STRATEGIC_CONVENTIONAL_AT) raiseEscalation(world, ctx, a, b, 'strategic_conventional');
+    else if (r.escalation === 'strategic_conventional' && effective < STEP_DOWN_SHARE * STRATEGIC_CONVENTIONAL_AT) {
+      relationMut(world, a, b).escalation = 'conventional';
+      ctx.emit({ type: 'message', tick: world.tick, nation: a, text: `${a} and ${b} step back down from strategic to conventional war` });
     }
+    if (s.pressure[k]) s.pressure[k] *= fade;
   }
   return attacks;
 }
