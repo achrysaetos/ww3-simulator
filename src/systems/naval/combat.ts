@@ -1,11 +1,14 @@
 import { atWar } from '../../core/engine';
 import type { Formation, FormationId, Munition, MunitionId, NationId, PlatformId, TargetClass } from '../../core/types';
 import { measureEffect } from '../adaptation';
+import { coverageShare } from '../air/tables';
 import { estimate } from '../intel';
 import { CURRENT_CONFIDENCE } from '../intel/view';
+import { allied } from '../land/state';
 import { smallCraftFactorAt } from '../weather/effects';
 import { tracked } from './detection';
 import type { TickEnv } from './env';
+import { overrule } from './orders';
 import { resolveSalvo, type SalvoDefense, type SalvoOutcome } from './salvo';
 import { type Composition, effectiveHitsToKill, type HullStack, ledger, recordFleetLoss } from './state';
 import { ANTISHIP_KINDS, CREW_LOSS_SUNK, INTERCEPTOR_KINDS, LAUNCHES_PER_HULL, SORTIES_PER_HOUR, TORPEDO_SPREAD, USV_RAID_HOURS, USV_STRIKE, USV_WAVE } from './tables';
@@ -313,17 +316,23 @@ function launchCapacity(env: TickEnv, f: Formation, m: Munition): number {
 /**
  * The target's whole task force at its node defends it: area-defense channels, interceptors
  * and CAP are pooled across same-nation surface groups; point defense is the target's own.
+ * A group in port is also covered by its side's land air-defence batteries whose engagement
+ * zone holds the port (shoreCover).
  */
 export function poolDefense(env: TickEnv, target: Formation): SalvoDefense & { holders: Formation[] } {
   const { catalog } = env.ctx;
   const holders = (env.byNode.get(target.node) ?? []).filter((g) => g.nation === target.nation && g.node === target.node && !env.comp(g).submerged);
   if (!holders.includes(target)) holders.push(target);
+  const shore = shoreCover(env, target);
   let channels = 0, capShots = 0;
   const stock = new Map<MunitionId, number>();
   for (const g of holders) {
     const c = env.comp(g);
     channels += c.channels;
     capShots += c.capShots;
+  }
+  for (const d of shore) channels += landChannels(env, d);
+  for (const g of [...holders, ...shore]) {
     for (const [id, n] of Object.entries(g.magazine) as [MunitionId, number][]) {
       if (n < 1) continue;
       const m = catalog.munition(id);
@@ -331,7 +340,34 @@ export function poolDefense(env: TickEnv, target: Formation): SalvoDefense & { h
     }
   }
   const interceptors = [...stock].map(([id, available]) => ({ munition: catalog.munition(id), available })).sort((a, b) => (b.munition.pk.missile ?? 0) - (a.munition.pk.missile ?? 0));
-  return { channels, capShots, interceptors, pointDefense: env.comp(target).pointDefense, holders };
+  return { channels, capShots, interceptors, pointDefense: env.comp(target).pointDefense, holders: [...holders, ...shore] };
+}
+
+/**
+ * Land air-defence batteries of the target's side that reach the port it lies in. Against a sea-skimming
+ * missile a SAM engages out to the share of its published range its radar horizon allows (air/tables
+ * coverageShare), the rule the air war applies to a strike on any land target. Ships at sea are beyond them.
+ */
+function shoreCover(env: TickEnv, target: Formation): Formation[] {
+  const { world, ctx } = env;
+  if (ctx.map.isSea(target.node)) return [];
+  return env.airDefense.filter((d) => allied(world, target.nation, d.nation) && ctx.map.distanceKm(d.node, target.node) <= shoreReachKm(env, d));
+}
+
+function shoreReachKm(env: TickEnv, d: Formation): number {
+  let km = 0;
+  for (const [id, n] of Object.entries(d.magazine) as [MunitionId, number][]) {
+    const m = env.ctx.catalog.munition(id);
+    if (n >= 1 && INTERCEPTOR_KINDS.has(m.kind) && (m.pk.missile ?? 0) > 0) km = Math.max(km, m.rangeKm * coverageShare(m.kind, 'air_breathing'));
+  }
+  return km;
+}
+
+/** Fire-control channels of a land battery: its launchers' engagement channels at its readiness, as air/picture counts them. */
+function landChannels(env: TickEnv, d: Formation): number {
+  let ch = 0;
+  for (const [pid, n] of Object.entries(d.equipment) as [PlatformId, number][]) if (n > 0) ch += (env.ctx.catalog.platform(pid).engagementChannels ?? 0) * n;
+  return ch * d.readiness;
 }
 
 /** Fire `n` of munition `m` from shooter (or `by` for outside strikers) at target, spend magazines, record the ledger and a strike event. */
@@ -430,7 +466,12 @@ export function applyHits(env: TickEnv, target: Formation, hits: number[], by: N
   env.invalidate(target);
   ctx.emit({ type: 'battle', tick: world.tick, node: target.node, attacker: by, defender: target.nation, losses: { [target.nation]: { ...losses.sunk } }, casualties: { [target.nation]: Math.round(losses.casualties) }, domain: 'sea' });
   const after = env.comp(target);
-  if (after.crippled && target.order.posture !== 'reserve') target.order = { posture: 'reserve', issuedTick: world.tick };
+  if (after.crippled && target.order.posture !== 'reserve') {
+    const troops = (env.embarked.get(target.id) ?? []).some((e) => e.status === 'embarked' && e.kind !== 'air_wing');
+    const aboard = !troops ? '' : ctx.map.isSea(target.node) ? ', with the troops aboard' : '; the troops aboard go ashore';
+    const yard = target.node === target.home ? 'the damaged hulls go to the yard' : `the damaged hulls limp back to node ${target.home} for repair`;
+    overrule(world, ctx, target, { posture: 'reserve', issuedTick: world.tick }, `every ship sunk or disabled at node ${target.node}; ${yard}${aboard}`);
+  }
   else if (!after.hullCount && !after.crippled) destroy(env, target, c.troopLift === 0);
   return losses;
 }

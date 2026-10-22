@@ -82,7 +82,7 @@ export class SimHost {
         }
         const human = Object.values(session.world.nations).find((n) => n.controlledBy === 'human')?.id ?? (session.scenario.suggestedNation as NationId);
         setPlayer(session.world, human);
-        return this.open(session, human);
+        return this.open(session, human, true);
       }
       case 'save':
         if (!this.session) return;
@@ -167,7 +167,7 @@ export class SimHost {
     return e.type !== 'command_result' || (e.nation === this.player && !!e.byPlayer);
   }
 
-  private open(session: ResumedSession, nation: NationId): void {
+  private open(session: ResumedSession, nation: NationId, resumed = false): void {
     this.pacer.setSpeed(0);
     this.session = session;
     this.player = nation;
@@ -176,7 +176,10 @@ export class SimHost {
     this.focus = { nation };
     this.pacer.sent();
     const card = SCENARIO_CARDS.find((c) => c.id === scenario.id)!;
-    this.post({ type: 'ready', meta: sessionMeta(card, world, engine.map, engine.catalog), playing: nation, snapshot: this.encoder.encode(world, engine.map, this.focus) });
+    const history = resumed ? this.encoder.resumed(world) : [];
+    const snapshot = this.encoder.encode(world, engine.map, this.focus);
+    if (history.length) snapshot.history = history;
+    this.post({ type: 'ready', meta: sessionMeta(card, world, engine.map, engine.catalog), playing: nation, snapshot });
   }
 
   private send(): void {

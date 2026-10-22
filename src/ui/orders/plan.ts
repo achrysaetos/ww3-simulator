@@ -5,6 +5,7 @@
  */
 import type { Command, FormationId, NationId, NodeId, Operation, OperationId } from '../../core/types';
 import type { OperationForecast, OperationPlan } from '../../forecast/operation';
+import { CODE_NAMES } from '../../systems/ops';
 
 export interface PlanDraft {
   /** The operation this re-plans (Adjust), or none for a new plan. */
@@ -31,7 +32,17 @@ export interface Planning {
   forecast: ForecastState;
 }
 
-export const newDraft = (formations: FormationId[], objective: NodeId | null = null): PlanDraft => ({ operation: null, name: null, formations, waypoints: [], objective });
+export const newDraft = (formations: FormationId[], objective: NodeId | null = null, name: string | null = null): PlanDraft => ({ operation: null, name, formations, waypoints: [], objective });
+
+/** The staff's first code name not already on one of the nation's operations, so a plan has its name from the first click. */
+export function freshName(ops: readonly Pick<Operation, 'name'>[]): string {
+  const taken = new Set(ops.map((o) => o.name));
+  for (let round = 1; ; round++)
+    for (const w of CODE_NAMES) {
+      const name = `Operation ${w}${round > 1 ? ` ${round}` : ''}`;
+      if (!taken.has(name)) return name;
+    }
+}
 
 /** The draft of an operation already on the books, to adjust it. */
 export const draftOf = (op: Operation): PlanDraft => ({

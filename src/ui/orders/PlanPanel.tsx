@@ -36,9 +36,9 @@ export function ForecastView({ forecast: f, objective, dayOf }: { forecast: Oper
       <ul className="ww-forecast-lines">
         <li><i className="dot blue" />{likely ? <>{objective} likely by <b className="ww-mono">{dayOf(likely)}</b></> : <>{objective} not taken in most runs within {f.days} days</>}</li>
         <li data-testid="forecast-losses"><i className="dot gold" />Losses <b className="ww-mono">{n0(f.losses.p10)}–{n0(f.losses.p90)}</b> platforms, likely <b className="ww-mono">{n0(f.losses.p50)}</b>; about <b className="ww-mono">{n0(f.casualties.p50)}</b> casualties</li>
-        <li><i className="dot gold" />Ground <b className="ww-mono">{f.advance.p50.toFixed(1)}</b> of {Math.max(0, f.axis.length - 1)} cells on the axis (p10 {f.advance.p10.toFixed(1)}, p90 {f.advance.p90.toFixed(1)})</li>
+        <li><i className="dot gold" />Ground <b className="ww-mono">{f.advance.p50.toFixed(1)}</b> of {Math.max(0, f.axis.length - 1)} {f.axis.length === 2 ? 'cell' : 'cells'} on the axis (p10 {f.advance.p10.toFixed(1)}, p90 {f.advance.p90.toFixed(1)})</li>
         {drivers.length > 0 && <li><i className="dot muted" />Hinges on {drivers.map((d, i) => <span key={d.param}>{i ? ', ' : ''}<span title={`${d.param} (${d.tag}), r = ${d.r.toFixed(2)} with ${d.metric}`}>{d.what}</span></span>)}</li>}
-        <li data-testid="forecast-intel"><i className="dot muted" />{f.intelAgeHours ? <>Intel <b className="ww-mono">{hours(f.intelAgeHours.min)}–{hours(f.intelAgeHours.max)}</b> old</> : 'No fix on the enemy here'} · {f.enemyContacts} enemy {f.enemyContacts === 1 ? 'contact' : 'contacts'} known</li>
+        <li data-testid="forecast-intel"><i className="dot muted" />{f.intelAgeHours ? <>Intel <b className="ww-mono">{hours(f.intelAgeHours.min) === hours(f.intelAgeHours.max) ? hours(f.intelAgeHours.max) : `${hours(f.intelAgeHours.min)}–${hours(f.intelAgeHours.max)}`}</b> old</> : 'No fix on the enemy here'} · {f.enemyContacts} enemy {f.enemyContacts === 1 ? 'contact' : 'contacts'} known</li>
         {f.beyondWarAims && <li className="ww-forecast-warn" data-testid="forecast-aims"><i className="dot red" />Past the war aims: {f.beyondWarAims.why}. Launching it makes the war total.</li>}
       </ul>
       <p className="ww-forecast-foot">{f.runs} war-games from your intelligence picture, not the truth. Forces you have not found are not in it.</p>
@@ -72,6 +72,8 @@ export function PlanPanel({ planning, op, units, from, objective, via, dayOf, on
   const running = op && (op.phase === 'launched' || op.phase === 'stalled');
   const ready = draft.objective !== null && draft.formations.length > 0;
   const status = op ? PHASE_LABEL[op.phase] : 'Draft';
+  const odds = forecast.status === 'done' ? forecast.forecast.pObjectiveByDay[forecast.forecast.days - 1] ?? 0 : null;
+  const strength = units.length ? units.reduce((t, u) => t + u.strength, 0) / units.length : 0;
   return (
     <section className="ww-glass ww-corners ww-plan" aria-label="Battle plan" data-testid="plan-panel">
       <div className="ww-plan-col ww-plan-what">
@@ -81,6 +83,14 @@ export function PlanPanel({ planning, op, units, from, objective, via, dayOf, on
           {objective ? <>{from} → {via.length ? `${via.join(' → ')} → ` : ''}<b>{objective}</b></> : <>From {from}. Click the objective on the map.</>}
         </p>
         {op?.progress.note && <p className={`ww-plan-note ${op.phase === 'stalled' ? 'red' : ''}`} data-testid="plan-note">{op.progress.note}</p>}
+        {units.length > 0 && (
+          <div className="ww-plan-force" data-testid="plan-force">
+            <span className="ww-label">Force</span>
+            <span className="ww-mono">{units.length} {units.length === 1 ? 'formation' : 'formations'} · {pct(strength)} strength</span>
+            <span className="ww-bar"><i style={{ width: pct(strength) }} /></span>
+            <ul>{units.slice(0, 3).map((u) => <li key={u.entry.id}>{u.entry.name}</li>)}{units.length > 3 && <li className="ww-muted">and {units.length - 3} more</li>}</ul>
+          </div>
+        )}
         <div className="ww-plan-units" data-testid="plan-units">
           {units.slice(0, KIND_SHOWN).map((u) => (
             <button key={u.entry.id} type="button" className="ww-plan-unit" title={`${u.entry.name}. Click to take it out of the plan.`} onClick={() => onRemove(u.entry.id)} disabled={!!running}>
@@ -112,7 +122,8 @@ export function PlanPanel({ planning, op, units, from, objective, via, dayOf, on
           </>
         ) : (
           <>
-            <button type="button" className="ww-btn gold ww-plan-launch" disabled={!ready} onClick={onLaunch} data-testid="plan-launch">Launch <span className="ww-kbd" aria-label="Enter">↵</span></button>
+            <button type="button" className={`ww-btn ${odds !== null && odds < 0.25 ? 'ww-plan-risky' : 'gold'} ww-plan-launch`} disabled={!ready} onClick={onLaunch} data-testid="plan-launch">Launch <span className="ww-kbd" aria-label="Enter">↵</span></button>
+            {odds !== null && odds < 0.25 && <p className="ww-plan-advice" data-testid="plan-advice">Staff advise against: {pct(odds)} odds in {forecast.status === 'done' ? forecast.forecast.days : 0} days. Add force or pick a nearer objective.</p>}
             <button type="button" className="ww-btn" onClick={onRedraw} data-testid="plan-adjust">Redraw <span className="ww-kbd">R</span></button>
             {!op && <button type="button" className="ww-btn ghost" disabled={!ready} onClick={onSave} data-testid="plan-save">Save draft</button>}
             {op?.phase === 'draft' && <button type="button" className="ww-btn ghost" onClick={onCancelOperation} data-testid="plan-cancel-op">Scrap it</button>}

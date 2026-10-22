@@ -216,10 +216,17 @@ export function outputsOf(world: World, map: GameMap, samples: readonly OutputSa
       workarounds: workarounds(world, trade, id, series),
       edges: edges(world, id, samples),
       ladder: ladderOf(world, map, id).map((c) => ({ ...c, cutoff: c.cutoff as NationId | 'sea' })),
+      refugeeHosts: topHosts(Object.entries(world.slices.civil?.hosted ?? {}).flatMap(([k, n]) => {
+        const [origin, host] = k.split('>') as [NationId, NationId];
+        return origin === id ? [[host, n] as const] : [];
+      })),
     };
   }
-  const hosts = [...hosted].filter(([, n]) => n >= 1).sort((a, b) => b[1] - a[1]).slice(0, HOSTS_SHOWN).map(([nation, refugees]) => ({ nation, refugees }));
-  return { tick: world.tick, day: dayOf(world, world.tick), nations, hosts };
+  return { tick: world.tick, day: dayOf(world, world.tick), nations, hosts: topHosts([...hosted]) };
+}
+
+function topHosts(rows: Iterable<readonly [NationId, number]>): { nation: NationId; refugees: number }[] {
+  return [...rows].filter(([, n]) => n >= 1).sort((a, b) => b[1] - a[1]).slice(0, HOSTS_SHOWN).map(([nation, refugees]) => ({ nation, refugees }));
 }
 
 /**

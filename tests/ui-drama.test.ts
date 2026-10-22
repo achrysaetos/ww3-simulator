@@ -1,9 +1,9 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { NationId, NodeId } from '../src/core/types';
+import type { FormationId, NationId, NodeId, SimEvent } from '../src/core/types';
 import { loadMap } from '../src/data/load';
-import { profiles } from '../src/data/nations';
+import { NUCLEAR_ALERT, profiles } from '../src/data/nations';
 import { authority } from '../src/systems/orders';
 import { coachDue, markCoachDone, resetCoach } from '../src/ui/coach/coach';
 import { SCENARIO_CARDS, SimHost } from '../src/ui/host';
@@ -12,7 +12,7 @@ import { nationCards, type FromWorker } from '../src/ui/snapshot';
 import { featuredNations, scenarioInfo, threatOf } from '../src/ui/start/scenarioInfo';
 import { COMMAND_ROLES } from '../src/ui/staff/roles';
 import { CrisisScreen } from '../src/ui/crisis/CrisisScreen';
-import { crisisOf, nextCrisis, type CrisisContext } from '../src/ui/crisis/crisis';
+import { answered, crisisOf, nextCrisis, type CrisisContext } from '../src/ui/crisis/crisis';
 import type { Card } from '../src/ui/staff/advice';
 import { momentsOf } from '../src/ui/moments/moments';
 import { playWithStaff } from './staff-mirror';
@@ -135,7 +135,7 @@ function choose(g: Game, card: Card, i: number, c = crisisOf(card, contextOf(g))
   return { crisis: c, option: o };
 }
 
-const shown = (g: Game, c: NonNullable<ReturnType<typeof crisisOf>>, chosen: number) =>
+const shown = (g: Game, c: NonNullable<ReturnType<typeof crisisOf>>, chosen: number | null) =>
   renderToStaticMarkup(createElement(CrisisScreen, {
     crisis: c, me: g.desk.me, nation: 'Test', scenario: 'Test', date: new Date(g.state.date), defcon: 3, chosen,
     sent: g.desk.answered.find((s) => s.card.key === c.key), paused: true, onChoose: () => {}, onClose: () => {},
@@ -221,7 +221,14 @@ describe('moments land only when the player would know them', () => {
   const ctx = {
     me: N('UKR'), enemies: new Set([N('RUS')]), capitals: new Map([[capital, N('UKR')]]), isSea: (n: NodeId) => map.isSea(n),
     platformClass: (id: string) => (id === 'cvn' ? 'carrier' : 'destroyer'), place: () => 'Kyiv', at: () => 'at Kyiv', name: (id: NationId) => id as string,
+    formation: (id: FormationId) => fleet.get(id), opening: new Set(['RUS>UKR']), capitalOf: (id: NationId) => (id === N('RUS') ? (5 as NodeId) : undefined),
   };
+  const sea = [...Array(map.size).keys()].find((n) => map.isSea(n as NodeId)) as NodeId;
+  const fleet = new Map<FormationId, { name: string; nation: NationId; kind: string; strength: number; node: NodeId }>([
+    ['ukr-boats' as FormationId, { name: 'Odesa patrol group', nation: N('UKR'), kind: 'surface_group', strength: 0, node: sea }],
+    ['rus-bsf' as FormationId, { name: 'Black Sea Fleet', nation: N('RUS'), kind: 'surface_group', strength: 0.6, node: sea }],
+    ['tur-fleet' as FormationId, { name: 'Turkish fleet', nation: N('TUR'), kind: 'surface_group', strength: 0, node: sea }],
+  ]);
   const land = (k: number) => [...Array(map.landCount).keys()].filter((n) => !map.isSea(n as NodeId)).slice(1000, 1000 + k) as NodeId[];
 
   it('a nuclear detonation anywhere, the fall of a capital we fight over, and a breakthrough', () => {
@@ -232,6 +239,20 @@ describe('moments land only when the player would know them', () => {
     expect(momentsOf(taken.slice(0, 2), ctx), 'two cells in a turn is not a breakthrough').toEqual([]);
   });
 
+  it('a war declared on us lands (P1 H5), the opening war does not, and a war between others is not ours', () => {
+    expect(momentsOf([{ type: 'war_declared', tick: 9, by: N('RUS'), on: N('UKR'), reason: 'x' }], ctx), 'the opening war has its cinematic').toEqual([]);
+    expect(momentsOf([{ type: 'war_declared', tick: 9, by: N('RUS'), on: N('UKR'), reason: 'x' }], { ...ctx, opening: new Set() })).toMatchObject([{ kind: 'war', tone: 'dread', title: 'RUS declares war on us', node: 5 }]);
+    expect(momentsOf([{ type: 'war_declared', tick: 9, by: N('USA'), on: N('CHN'), reason: 'x' }], ctx)).toEqual([]);
+  });
+
+  it('a naval group of ours sunk in port by a strike (P1 H5, the ferry group at Xiamen) is a moment, an enemy one a triumph, a neutral one nothing', () => {
+    const hit = (formation: string, hits: number) => ({ type: 'strike' as const, tick: 7, by: N('RUS'), munition: 'kalibr' as never, fired: hits, intercepted: 0, target: 3 as NodeId, effects: [{ kind: 'ship_hits' as const, formation: formation as FormationId, hits }] });
+    expect(momentsOf([hit('ukr-boats', 24)], ctx)).toMatchObject([{ kind: 'fleet', tone: 'dread', title: 'We have lost the Odesa patrol group' }]);
+    expect(momentsOf([hit('rus-bsf', 3)], ctx), 'a group still afloat is a card, not a moment').toEqual([]);
+    expect(momentsOf([{ type: 'formation_destroyed', tick: 7, formation: 'rus-bsf' as FormationId, nation: N('RUS') }], ctx)).toMatchObject([{ kind: 'fleet', tone: 'triumph' }]);
+    expect(momentsOf([hit('tur-fleet', 9)], ctx)).toEqual([]);
+  });
+
   it('a capital changing hands in a war we are not in, and a carrier lost in a battle we did not fight, are not ours to see', () => {
     expect(momentsOf([{ type: 'node_captured', tick: 5, node: capital, from: N('PER'), to: N('BOL') }], { ...ctx, capitals: new Map([[capital, N('PER')]]) })).toEqual([]);
     const battle = (attacker: string, defender: string, loser: string) => ({ type: 'battle' as const, tick: 5, node: 3 as NodeId, attacker: N(attacker), defender: N(defender), domain: 'sea' as const, losses: { [loser]: { cvn: 1 } }, casualties: {} });
@@ -239,4 +260,102 @@ describe('moments land only when the player would know them', () => {
     expect(momentsOf([battle('RUS', 'UKR', 'RUS')], ctx)).toMatchObject([{ kind: 'carrier', tone: 'triumph', title: 'Enemy carrier sunk' }]);
     expect(momentsOf([battle('RUS', 'UKR', 'UKR')], ctx)).toMatchObject([{ kind: 'carrier', tone: 'dread' }]);
   });
+});
+
+describe('the biggest events reach the War Room (P1 H5)', () => {
+  it('gulf-2027 as Iran: the United States entering the war is a live War Room card and a moment, not a line in the ticker only', () => {
+    const g = play('gulf-2027', 'IRN');
+    let card: Card | undefined;
+    const events: SimEvent[] = [];
+    for (let i = 0; i < 28 && !card; i++) {
+      g.step();
+      events.push(...g.state.latestEvents);
+      card = g.desk.cards.find((c) => c.key.startsWith('wire|war|') && c.title.includes('United States'));
+    }
+    expect(card, 'a war card for the United States entering').toMatchObject({ tone: 'live', topic: 'threat' });
+    const opening = new Set(SCENARIO_CARDS.find((s) => s.id === 'gulf-2027')!.wars.map(([a, b]) => `${a}>${b}`));
+    const capitalOf = (id: NationId) => map.data.nations[map.nationIds.indexOf(id)]?.capital?.cell as NodeId | undefined;
+    const found = momentsOf(events, {
+      me: N('IRN'), enemies: new Set(g.state.focusNation!.enemies), capitals: new Map(), isSea: (n) => map.isSea(n), platformClass: () => undefined,
+      place: () => '', at: () => '', name: (id) => g.namer.nation(id), formation: () => undefined, opening, capitalOf,
+    });
+    expect(found.filter((m) => m.kind === 'war').map((m) => m.title)).toContain('United States declares war on us');
+  }, 240_000);
+
+  it('ww3-2027 as the United States: a naval group hit in port is a live card that opens the unit', () => {
+    const g = play('ww3-2027', 'USA');
+    let card: Card | undefined;
+    for (let i = 0; i < 24 && !card; i++) {
+      g.step();
+      for (const c of g.state.focusNation?.treatyCalls ?? []) g.send({ type: 'answer_treaty', nation: N('USA'), war: c.war, treaty: c.treaty, join: true });
+      card = g.desk.cards.find((c) => c.key.startsWith('shiphit|'));
+    }
+    expect(card).toMatchObject({ tone: 'live', primary: { kind: 'unit' } });
+    const id = card!.key.split('|')[1] as FormationId;
+    expect(g.world.formations[id].nation).toBe('USA');
+    expect(['surface_group', 'submarine']).toContain(g.world.formations[id].kind);
+  }, 300_000);
+});
+
+describe('a crisis tells the player what they hold and what they face (P1 H2, M4, M8, M9)', () => {
+  it('ww3-2027 as the United States, Russia readies nuclear weapons: our deployed deterrent is the answer, the clock counts down to Russia fully armed, and Look first marks launchers', () => {
+    const g = play('ww3-2027', 'USA');
+    for (let i = 0; i < 8 && !g.state.focusNation?.enemies.includes(N('RUS')); i++) {
+      g.step();
+      for (const c of g.state.focusNation?.treatyCalls ?? []) g.send({ type: 'answer_treaty', nation: N('USA'), war: c.war, treaty: c.treaty, join: true });
+    }
+    g.world.pending.push({ type: 'nuclear_alert', nation: N('RUS'), reason: 'test: Russia readies its forces' });
+    g.step();
+    const card = g.desk.cards.find((c) => c.key.startsWith('nalert|RUS|'))!;
+    expect(card.text).not.toMatch(/no nuclear answer/i);
+    expect(card.text).toMatch(/warheads on launchers already answer/);
+    const c = crisisOf(card, contextOf(g))!;
+    expect(c.options.map((o) => o.title)).toEqual(['Stand firm', 'Look first']);
+    expect(c.options[0].recommended).toBe(true);
+    const look = c.options[1].action;
+    expect(look.kind === 'show' && look.marks?.length, 'Look first marks the launchers on the map').toBeGreaterThan(0);
+    const spec = NUCLEAR_ALERT.RUS!;
+    expect(c.windowHours).toBe(spec.fullHours);
+    expect(c.hoursLeft).toBe(spec.fullHours - (g.state.tick - card.tick) * 6);
+    expect(c.hoursLeft).toBeGreaterThan(0);
+    const html = shown(g, c, null);
+    expect(html).toContain('Russia fully armed in');
+    expect(html).not.toContain('Stopped');
+    expect(c.facts.find((f) => f.label === 'Our posture')?.value).toBe('Deployed on launchers');
+  }, 300_000);
+
+  it('ww3-2027 as the United States: after Go to war the crisis reads as answered, with the war we joined', () => {
+    const g = play('ww3-2027', 'USA');
+    g.step();
+    const c = nextCrisis(g.desk.cards, new Set(), contextOf(g))!;
+    expect(c.kind).toBe('treaty');
+    choose(g, c.card, 0, c);
+    g.step(4);
+    const now = answered(c, contextOf(g));
+    expect(now.hoursLeft).toBeNull();
+    expect(now.facts.find((f) => f.label === 'Our wars now')?.value).toMatch(/^At war with/);
+    const html = shown(g, now, 0);
+    expect(html).toContain('Answered');
+    expect(html).not.toContain('Answer due');
+    expect(html).not.toContain('At peace');
+  }, 300_000);
+
+  it('ukraine-2026 as Ukraine: Show me on a raid draws each track from the attacker\'s ground to where it landed', () => {
+    const g = play('ukraine-2026', 'UKR');
+    let card: Card | undefined;
+    for (let i = 0; i < 16 && !card; i++) {
+      g.step();
+      card = g.desk.cards.find((c) => c.key.startsWith('raid|'));
+    }
+    expect(card?.text).toMatch(/in the last 6 hours/);
+    const show = card!.primary!;
+    expect(show.kind).toBe('show');
+    const marks = show.kind === 'show' ? show.marks ?? [] : [];
+    expect(marks.length).toBeGreaterThan(0);
+    const rus = map.nationIds.indexOf(N('RUS')), ukr = map.nationIds.indexOf(N('UKR'));
+    for (const m of marks) {
+      expect(g.state.control[m.from!], 'the track starts on Russian-held ground').toBe(rus);
+      expect(g.state.control[m.to], 'and lands on ours').toBe(ukr);
+    }
+  }, 300_000);
 });

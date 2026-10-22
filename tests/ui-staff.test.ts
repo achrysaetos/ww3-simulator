@@ -12,7 +12,7 @@ import { advisorOf, ROLES } from '../src/ui/staff/advisors';
 import type { Sent } from '../src/ui/staff/desk';
 import { COMMAND_ROLES, delegateCommands, roleOf } from '../src/ui/staff/roles';
 import { operations } from '../src/ui/staff/operations';
-import { StaffCard } from '../src/ui/staff/WarRoom';
+import { StaffCard, WarRoom } from '../src/ui/staff/WarRoom';
 import { degradeChain } from './c2.fixture';
 import { playWithStaff } from './staff-mirror';
 
@@ -57,7 +57,7 @@ function situation(g: Game, over: Partial<Situation> = {}): Situation {
   const d = g.state.focusNation!;
   return {
     me: g.desk.me, tick: g.state.tick, dtHours: 6, map, nationIds: map.nationIds, control: g.state.control, formations: g.state.formations,
-    nations: g.state.nations, d, recent: g.desk.recent, namer: g.namer, ammoPerDay: null,
+    nations: g.state.nations, d, recent: g.desk.recent, namer: g.namer, ammoPerDay: null, burnPerDay: {}, ops: g.state.ops, contest: g.state.contest, known: () => undefined,
     munitionKind: () => undefined, unitCostUsdM: () => 10, ...over,
   };
 }
@@ -275,9 +275,12 @@ describe('display errors (BA-14)', () => {
   it('names each sector Ukraine holds after a town on its own side of the line, never a Russian city across it', () => {
     const g = start('ukraine-2026', 'UKR');
     g.step();
-    const { control } = g.state;
     const mine = map.nationIds.indexOf(N('UKR'));
     const enemyIdx = new Set(g.state.focusNation!.enemies.map((e) => map.nationIds.indexOf(e)));
+    // Kharkiv taken, so the cells around it hold the line facing a city the enemy holds.
+    const control = Uint16Array.from(g.state.control);
+    const kharkiv = map.cities.find((c) => c.name === 'Kharkiv')!;
+    control[map.nodeAt(kharkiv.lat, kharkiv.lon)] = map.nationIds.indexOf(N('RUS'));
     const cityCells = new Map<string, NodeId[]>();
     for (const c of map.cities) cityCells.set(c.name, [...(cityCells.get(c.name) ?? []), map.nodeAt(c.lat, c.lon)]);
     const enemyCity = (name: string) => (cityCells.get(name.replace(/^near /, '')) ?? []).some((n) => enemyIdx.has(control[n]));
@@ -303,5 +306,27 @@ describe('display errors (BA-14)', () => {
     const g = start('ukraine-2026', 'UKR');
     const text = describeEvent({ type: 'escalation', tick: 1, a: N('RUS'), b: N('UKR'), level: 'strategic_conventional' }, g.namer);
     expect(text).toBe("Russia and Ukraine begin striking deep into each other's homelands");
+  });
+});
+
+describe('the War Room after the player answers (P1 M7)', () => {
+  const treaty = (i: number): Card => ({
+    key: `treaty|${i}|nato`, topic: 'diplomacy', role: 'foreign', tone: 'advice', tick: 0, urgent: true, title: `Call ${i}`, text: '',
+    chip: 'Answer within 3 days', primary: { kind: 'command', label: 'Go to war', command: { type: 'answer_treaty', nation: 'USA' as NationId, war: String(i), treaty: 'nato', join: true } },
+  });
+  const answeredCall = (i: number): Sent => ({ card: treaty(i), action: treaty(i).primary as CommandAction, tick: 1, answer: { ok: true, text: 'will honour the treaty', final: true }, silent: false });
+  const fresh: Card = { key: 'reserve|1', topic: 'command', role: 'chief', tone: 'advice', tick: 2, title: 'Commit the reserve', text: '', primary: { kind: 'later', label: 'Later' } };
+  const room = (cards: Card[], answered: Sent[]) => renderToStaticMarkup(createElement(WarRoom, { cards, answered, me: 'USA' as NationId, paused: false, onAct: () => {}, onDismiss: () => {} }));
+
+  it('an answered card drops its deadline badge, so the dismiss mark has the corner to itself', () => {
+    const html = room([], [answeredCall(1)]);
+    expect(html).not.toContain('Answer within');
+    expect(html).toContain('aria-label="Dismiss"');
+  });
+
+  it('a new decision is shown ahead of a full record of answered calls', () => {
+    const html = room([fresh], [1, 2, 3, 4, 5, 6, 7].map(answeredCall));
+    expect(html).toContain('Commit the reserve');
+    expect(html.indexOf('Commit the reserve')).toBeLessThan(html.indexOf('Call 1'));
   });
 });

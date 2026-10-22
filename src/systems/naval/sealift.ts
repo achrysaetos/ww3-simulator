@@ -8,7 +8,7 @@ import { awaitingLift, debarkation, deckSlots, landMass, lifted, liftMode } from
 import type { TickEnv } from './env';
 import { geography } from './geography';
 import { navalDestination, seaPath, shoreThreat } from './movement';
-import { boardable, detach } from './orders';
+import { boardable, detach, playerHolds } from './orders';
 import type { Composition } from './state';
 
 /**
@@ -78,7 +78,8 @@ export function sealift(env: TickEnv): void {
   const { world, ctx } = env;
   const { map, catalog } = ctx;
   const geo = geography(map);
-  const groups = env.naval.filter((g) => g.kind === 'surface_group' && isSealift(env.comp(g)));
+  // A cargo group the player took under their own command sails where the player sends it.
+  const groups = env.naval.filter((g) => g.kind === 'surface_group' && isSealift(env.comp(g)) && !playerHolds(world, g));
   if (!groups.length) return;
   const { voyages } = sealiftSlice(env);
   const nations = new Set(groups.map((g) => g.nation));

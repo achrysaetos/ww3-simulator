@@ -143,6 +143,13 @@ function parse(world: World, map: GameMap, catalog: Catalog, player: NationId, r
     }
     case 'cancel_operation':
       return { type: 'cancel_operation', nation, operation: operation(raw.operation) };
+    case 'sabotage':
+      return { type: 'sabotage', nation, target: other(raw.target), on: bool(raw.on, 'on') };
+    case 'cyber_op': {
+      const sector = raw.sector === 'grid' || raw.sector === 'telecom' ? raw.sector : fail('sector must be grid or telecom');
+      const action = raw.action === 'build' || raw.action === 'attack' || raw.action === 'stop' ? raw.action : fail('action must be build, attack or stop');
+      return { type: 'cyber_op', nation, target: other(raw.target), sector, action };
+    }
     case 'adjust_operation': {
       const cmd: Extract<Command, { type: 'adjust_operation' }> = { type: 'adjust_operation', nation, operation: operation(raw.operation) };
       if (raw.objectives !== undefined) cmd.objectives = nodes(raw.objectives, 'objectives', MAX_OBJECTIVES);

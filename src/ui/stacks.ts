@@ -6,6 +6,7 @@
  * only crossing a zoom level does. Zoomed in far enough, a cell holds one map
  * node, and further in a node's stack fans out into individual counters.
  */
+import type { GameMap } from '../core/map';
 import type { Echelon, NationId, NodeId } from '../core/types';
 import type { FormationView } from './snapshot';
 
@@ -67,4 +68,34 @@ export function clusterStacks(byNode: ReadonlyMap<NodeId, readonly FormationView
     c.members.sort((a, b) => weight(b) - weight(a));
     return { nation: c.nation, node: c.members[0].node, members: c.members, nodes: c.nodes.size };
   });
+}
+
+/**
+ * The first row, in slots from the node's centre, of each fan drawn at a node, given each fan's row count.
+ * Fans sharing a node are stacked north to south in the order their own ground lies around it, so an enemy
+ * attacking a cell from the south is drawn south of its defenders, never behind their line.
+ */
+export function fanRows(fans: readonly Stack[], map: GameMap, control: ArrayLike<number>, nationIds: readonly string[], rows: (s: Stack) => number): Map<Stack, number> {
+  const byNode = new Map<NodeId, Stack[]>();
+  for (const s of fans) byNode.set(s.node, [...(byNode.get(s.node) ?? []), s]);
+  const out = new Map<Stack, number>();
+  for (const [node, list] of byNode) {
+    const north = new Map(list.map((s) => {
+      const own = nationIds.indexOf(s.nation);
+      let sum = 0, n = 0;
+      for (const m of map.neighbors(node)) {
+        if (m >= map.landCount || control[m] !== own) continue;
+        sum += map.lat[m] - map.lat[node];
+        n++;
+      }
+      return [s, n ? sum / n : 0];
+    }));
+    list.sort((a, b) => north.get(b)! - north.get(a)! || (a.nation < b.nation ? -1 : 1));
+    let row = -(list.reduce((t, s) => t + rows(s), 0) - 1) / 2;
+    for (const s of list) {
+      out.set(s, row);
+      row += rows(s);
+    }
+  }
+  return out;
 }

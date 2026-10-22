@@ -38,9 +38,9 @@ export interface OperationRun {
   objectiveDay: number;
   /** Platforms the committed force lost. */
   losses: number;
-  /** The nation's personnel casualties in land battles. */
+  /** Personnel the committed force lost: killed, wounded and captured. */
   casualties: number;
-  /** Axis cells gone through, fractional. */
+  /** Axis cells taken past the line of departure (the axis's first cell), fractional: 0 to axis length - 1. */
   advance: number;
   /** The operation's phase at the end. */
   phase: string;
@@ -127,25 +127,27 @@ export function runOperation(input: OperationForecastInput, spec: RunSpec): Oper
   return withParams(world.params, () => {
     world.pending.push({ type: 'plan_operation', ...structuredClone(input.plan), launch: true });
     const perDay = Math.round(24 / world.dtHours);
-    const base = new Map<FormationId, number>();
-    for (const id of input.plan.formations) if (world.formations[id]) base.set(id, platforms(world.formations[id]));
-    let casualties = 0, objectiveDay = 0;
+    const base = new Map<FormationId, { platforms: number; personnel: number }>();
+    for (const id of input.plan.formations) {
+      const f = world.formations[id];
+      if (f) base.set(id, { platforms: platforms(f), personnel: f.personnel });
+    }
+    let objectiveDay = 0;
     let op: OperationId | undefined;
     for (let d = 1; d <= input.days; d++) {
       for (let k = 0; k < perDay; k++)
-        for (const e of eng.step(world)) {
-          if (e.type === 'battle' && e.node < eng.map.landCount) casualties += e.casualties[nation] ?? 0;
-          if (e.type === 'command_result' && e.command === 'plan_operation' && e.operation) op = e.operation;
-        }
+        for (const e of eng.step(world)) if (e.type === 'command_result' && e.command === 'plan_operation' && e.operation) op = e.operation;
       if (!objectiveDay && input.plan.objectives.every((n) => holds(world, nation, n))) objectiveDay = d;
     }
-    let losses = 0;
-    for (const [id, n] of base) {
+    let losses = 0, casualties = 0;
+    for (const [id, was] of base) {
       const f = world.formations[id];
-      losses += n - (f && f.status !== 'destroyed' ? platforms(f) : 0);
+      const alive = f && f.status !== 'destroyed';
+      losses += was.platforms - (alive ? platforms(f) : 0);
+      casualties += Math.max(0, was.personnel - (alive ? f.personnel : 0));
     }
     const o = op ? world.slices.ops.byId[op] : undefined;
-    return { spec, objectiveDay, losses, casualties, advance: o?.progress.advance ?? 0, phase: o?.phase ?? 'refused' };
+    return { spec, objectiveDay, losses, casualties, advance: Math.max(0, (o?.progress.advance ?? 1) - 1), phase: o?.phase ?? 'refused' };
   });
 }
 

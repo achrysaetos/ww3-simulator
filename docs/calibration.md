@@ -105,6 +105,44 @@ The remaining Ukraine gap is in `holdTheLine` (`src/systems/ai/land.ts`). It sto
 
 BB-8 (Russia at or next to Tallinn by day 18) fails on every seed 1-6, on 2216910 as well as on this branch. The forces near Narva sit where the scenario places them: the 69th Motor Rifle Division 156 km away and the 25th Motor Rifle Brigade 110 km away. The AI builds its main effort from Kola, Moscow and the Ukraine front instead, and those formations arrive on about days 7-8. The near units hold the quiet border. Once moving, the lead crosses a ~40 km cell in 4-5 days, about 9-11 km a day. That pace matches Kharkiv in September 2022 (about 12 km a day) and Kursk in August 2024 (about 8 km a day). Reaching Tallinn by day 18 needs about 15 km a day through six cells. Neither the placement nor the front law disagrees with the record. The bound and the AI's choice of formations for the main effort are the follow-ups.
 
+## L2: what holds the ground war at its current pace
+
+Measured on integration 6f449c3 with `npm run validate`, 8 runs, seeds 1-4, tagged params by Latin hypercube. ukraine-2026 runs at 4,680 / 11,010 / 23,880 km2 a year (p10 / p50 / p90), against 3,500-5,000.
+
+**Ukraine: a quarter of the army waits in reserve.** On seed 1 at day 30, Russia's assault groups stand inside cell 6995 (1,657 exposed platforms against Ukraine's 53) and cell 6737 (984 against 67). Those two cells give nearly all the area. Meanwhile 21 Ukrainian brigades, about a quarter of the manoeuvre force, sit in reserve at 6991, 145 km behind them. `holdTheLine` stops feeding a sector once its total requirement is met, and the line's thick stretches meet it. `meetMainEffort` commits only the small reserve `keepReserve` set aside, and `holdReserve` parks everything else.
+
+A second pass after every sector has its share fixes the mechanism. It sends formations from behind the line, never units already on it, to any line cell where the enemy stands at more than 3:1. It feeds each such cell until it holds the 1:3 a prepared defence needs (FM 6-0, historical minimum planning ratios). Because line units are never moved, the line cannot shuttle units between cells. Results:
+
+| Variant | km2/yr p10 / p50 / p90 | Russian casualties/day p50 | Kept? |
+| --- | --- | --- | --- |
+| 6f449c3 | 4,680 / 11,010 / 23,880 | 1,811 | base |
+| Feed to 1:3 against the enemy in the cell | 332 / 2,394 / 7,268 | 2,005 | no: fails the 500-2,000 band |
+| Feed to the sector's pressure/3 (counts adjacent enemies) | 664 / 1,180 / 9,795 | 1,949 | no: overshoots |
+| Same, only cells pressed 2x the line mean | 821 / 1,220 / 19,608 | 1,952 | no: same median, worse tail |
+| Same, plus 1.5x hysteresis before a line cell gives units up | seed 2: 32,000 | | no: starves the screens of empty cells; two cells fell |
+
+The 1:3 feed removes the idle reserve. A full-scenario test shows it: on 6f449c3, 24% of Ukraine's force sits in reserve while three cells are outnumbered 3:1; with the feed it is under 5%. It has no collapse runs, and the tank bands hold. But it puts the Russian casualty median 5 a day over the tuned 2,000 ceiling. The fed brigades kill more of the assault groups. The casualty band was tuned while those brigades sat idle, and its knobs (`KILL_ZONE_COMMIT`, `ASSAULT_EXPOSURE`) are tagged and sampled across their whole range in the ensemble, so moving their defaults does not move the ensemble. The change and its test are kept as `reports/L2-feed-pass.patch` in the orchestration folder, for a unit that can recalibrate the assault-casualty knobs together with it.
+
+**Baltic: the near divisions garrison the border, and a battalion holds an army.** On seed 1 Operation Zenith forms on day 2 from formations 678-1,169 km away (Moscow, Kola and the Ukraine front). The 69th Motor Rifle Division and 25th Motor Rifle Brigade, 110-156 km from Narva, are posted to Russia's own quiet line. The aggressor runs `holdTheLine` before `mainEffort`, and both take the nearest units first. Mounting the aggressor's main effort first puts the near divisions at its head; they reach 80 km past Narva by day 6. Then they stall:
+
+- From day 6 to day 14, 15 Russian formations (2,826 exposed) push 31 km into cell 4388 against one Estonian unit of 52.
+- With a dug-in defender, `committed` falls to the kill-zone share, so the penetration term runs at the covered pace. `HASTY_BARRIER` (its source: "tuned to a thin dug-in NATO line in baltic-2027") closes most of the gaps.
+- BB-8 stayed 0 of 6 either way. The same reordering sends Russia's main efforts through the Ukrainian line: ukraine-2026 went to 110,503 km2 a year at the median.
+
+So the reordering was not kept. The stall is in the kill-zone call site (`combat.ts`, `committed`), which this unit may not change.
+
+**BB-8's day-18 bound holds.** Touching Tallinn means taking the shortest chain of Estonian cells from the border to a neighbour of Tallinn: five quarter-degree cells, 148 km, 1.25 one-degree units. That is well inside the 1-6 cells in three weeks the same test file asserts, so BB-8 does not contradict that file's "ground taken but no collapse" premise. Recorded paces through a defended but unbroken line run about 8-12 km a day:
+
+- Kursk, August 2024: about 8 km a day in the first week.
+- Kharkiv, September 2022: about 12-17 km a day against a hollowing line.
+- RAND's 36-60 hours (Shlapak and Johnson 2016) was against a 2016 posture with nothing in the way.
+
+After about 3 days of assembly, 148 km at 8-12 km a day puts Tallinn's neighbour at day 15-22. Day 18 is the middle of that range, so the bound is unchanged.
+
+**Karabakh: Armenia has no anti-tank missiles.** On seed 1, Azerbaijan brings 437 MBTs into the contested cells and loses 8 to Oryx's 62. Armenian fire on armour is 11 against 37 on infantry. That is because the corps carry no ATGM teams: their infantry squad does 0.003 against armour. The catalog has Konkurs, Metis and Kornet teams, and the 2020 Artsakh defence used them heavily. But no source found gives a count: Wikipedia's "Artsakh Defence Army" lists the Konkurs from IISS without a number, and Oryx excludes ATGMs. So no kit was added. A sourced count of Armenian or Artsakh ATGM launchers is the next step.
+
+**Forecast `ground_km2`** now nets ground pushed back, through the same `progress` function the validation measure uses (`tests/forecast-ground.test.ts`).
+
 ## Long horizons are out of reach today
 
 The bands and cases run 4 to 90 days. Questions about production races need runs of three to five years, since warships and new production lines take years. Nothing in the repository runs or checks that long, and a year of ukraine-2026 is about 1,460 ticks, five to ten minutes a run on a four-core machine. Treat any output past 90 days as unvalidated.

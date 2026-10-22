@@ -1,12 +1,13 @@
 /**
- * Moments of dread and triumph: a nuclear detonation, a capital changing hands, a carrier sunk,
- * a breakthrough. Each is read from one turn's events and only when the player would know it:
- * a detonation is seen by the whole world, the rest only where the player or its enemies are
- * party to it. Pure; the overlay decides when to show them.
+ * Moments of dread and triumph: a nuclear detonation, a capital changing hands, a new war on us
+ * or by us, a carrier or a whole naval group lost, a breakthrough. Each is read from one turn's
+ * events and only when the player would know it: a detonation is seen by the whole world, the
+ * rest only where the player or its enemies are party to it. Pure; the overlay decides when to
+ * show them.
  */
-import type { NationId, NodeId, SimEvent } from '../../core/types';
+import type { FormationId, NationId, NodeId, SimEvent } from '../../core/types';
 
-export type MomentKind = 'nuclear' | 'capital' | 'carrier' | 'breakthrough';
+export type MomentKind = 'nuclear' | 'capital' | 'war' | 'carrier' | 'fleet' | 'breakthrough';
 
 export interface Moment {
   key: string;
@@ -32,11 +33,21 @@ export interface MomentContext {
   /** A place as a phrase: "at Kyiv", "near Pokrovsk", "off Sevastopol". */
   at(node: NodeId): string;
   name(id: NationId): string;
+  /** A formation as the player sees it now, if the player knows of it. */
+  formation(id: FormationId): { name: string; nation: NationId; kind: string; strength: number; node: NodeId } | undefined;
+  /** The scenario's opening wars as "BY>ON": the opening cinematic covers them. */
+  opening: ReadonlySet<string>;
+  /** A nation's capital cell, to frame a declaration of war on the map. */
+  capitalOf(id: NationId): NodeId | undefined;
 }
+
+/** A naval group whose strength falls this low is sunk as a fighting force, whether or not the engine has struck it off. */
+export const SUNK_STRENGTH = 0.05;
+const NAVAL: ReadonlySet<string> = new Set(['surface_group', 'submarine']);
 
 /** Land cells taken in one turn that make a breakthrough. */
 export const BREAKTHROUGH_CELLS = 3;
-const RANK: Record<MomentKind, number> = { nuclear: 0, capital: 1, carrier: 2, breakthrough: 3 };
+const RANK: Record<MomentKind, number> = { nuclear: 0, capital: 1, war: 2, carrier: 3, fleet: 4, breakthrough: 5 };
 const kt = (y: number) => (y >= 1000 ? `${(y / 1000).toFixed(1)} Mt` : `${Math.round(y)} kt`);
 
 export function momentsOf(events: readonly SimEvent[], c: MomentContext): Moment[] {
@@ -44,6 +55,20 @@ export function momentsOf(events: readonly SimEvent[], c: MomentContext): Moment
   const mine = (n: NationId) => n === c.me;
   const party = (n: NationId) => mine(n) || c.enemies.has(n);
   const gained: NodeId[] = [], lost: NodeId[] = [];
+  const sunk = new Set<FormationId>();
+  const fleetLost = (id: FormationId, tick: number, fallback: NodeId) => {
+    const f = c.formation(id);
+    if (!f || !NAVAL.has(f.kind) || sunk.has(id) || (!mine(f.nation) && !c.enemies.has(f.nation))) return;
+    sunk.add(id);
+    const ours = mine(f.nation);
+    const node = c.isSea(f.node) || !c.isSea(fallback) ? f.node : fallback;
+    out.push({
+      key: `fleet|${id}`, kind: 'fleet', tone: ours ? 'dread' : 'triumph', node, tick,
+      title: ours ? `We have lost the ${f.name}` : `The ${f.name} is sunk`,
+      sub: `${c.name(f.nation)} · ${f.name} lost ${c.at(node)}`,
+      headline: `${ours ? 'FLEET LOST' : 'ENEMY FLEET SUNK'}: ${c.name(f.nation)} loses the ${f.name} ${c.at(node)}`,
+    });
+  };
   for (const e of events) {
     if (e.type === 'nuclear_detonation') {
       out.push({
@@ -68,6 +93,19 @@ export function momentsOf(events: readonly SimEvent[], c: MomentContext): Moment
         if (mine(e.to) && c.enemies.has(e.from)) gained.push(e.node);
         else if (mine(e.from)) lost.push(e.node);
       }
+    } else if (e.type === 'war_declared' && (mine(e.by) || mine(e.on)) && !c.opening.has(`${e.by}>${e.on}`)) {
+      const node = c.capitalOf(mine(e.on) ? e.by : e.on);
+      if (node === undefined) continue;
+      out.push({
+        key: `war|${e.by}|${e.on}`, kind: 'war', tone: 'dread', node, tick: e.tick,
+        title: mine(e.on) ? `${c.name(e.by)} declares war on us` : `We are at war with ${c.name(e.on)}`,
+        sub: `${c.name(e.by)} declares war on ${c.name(e.on)}`,
+        headline: `WAR: ${c.name(e.by)} declares war on ${c.name(e.on)}`,
+      });
+    } else if (e.type === 'formation_destroyed') {
+      fleetLost(e.formation, e.tick, 0 as NodeId);
+    } else if (e.type === 'strike') {
+      for (const x of e.effects) if (x.kind === 'ship_hits' && (c.formation(x.formation)?.strength ?? 1) <= SUNK_STRENGTH) fleetLost(x.formation, e.tick, e.target);
     } else if (e.type === 'battle' && e.domain === 'sea' && (party(e.attacker) || party(e.defender)) && (mine(e.attacker) || mine(e.defender))) {
       for (const [nation, losses] of Object.entries(e.losses) as [NationId, Record<string, number>][]) {
         const sunk = Object.entries(losses).filter(([p, k]) => k >= 1 && c.platformClass(p) === 'carrier').reduce((a, [, k]) => a + Math.floor(k), 0);

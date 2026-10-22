@@ -18,7 +18,7 @@ const namer: Namer = {
   known: (i) => (i === 'f16v' ? 'F-16V' : undefined),
   place: new PlaceNamer(t.map),
 };
-const kyiv = t.nodeAt(50.45, 30.52), warsaw = t.nodeAt(52.2, 21), elPaso = t.nodeAt(31.8, -106.4);
+const kyiv = t.nodeAt(50.45, 30.52), warsaw = t.map.cities.find((c) => c.name === 'Warsaw')!.node, besideWarsaw = t.nodeAt(52.2, 21), elPaso = t.nodeAt(31.8, -106.4);
 const battle = (over: Partial<Extract<SimEvent, { type: 'battle' }>>): SimEvent => ({
   type: 'battle', tick: 4, node: kyiv, attacker: N('RUS'), defender: N('UKR'), losses: {}, casualties: {}, ...over,
 });
@@ -50,12 +50,13 @@ describe('event wording', () => {
     const text = describeEvent(refusal(3, 'no_route', `no sea route to node ${warsaw}`), namer);
     expect(text).toBe('1st Armored Brigade Combat Team: order refused, no sea route to Warsaw');
     const land = describeEvent(refusal(3, 'no_route', `no land route to node ${warsaw}`), namer);
-    expect(land).toMatch(/^1st Armored Brigade Combat Team: order refused, no land route to Warsaw\. .*embarking at a port/);
+    expect(land).toMatch(/^1st Armored Brigade Combat Team: order refused, no land route to Warsaw\. .*embark on amphibious lift at a port/);
     const accepted: SimEvent = { type: 'command_result', tick: 3, nation: N('USA'), command: 'order', formation: 'f264' as FormationId, byPlayer: true, ok: true, code: 'accepted', reason: 'order accepted', etaHours: 60 };
     expect(describeEvent(accepted, namer)).toBe('1st Armored Brigade Combat Team: order accepted, there in about 3 days');
     expect(describeEvent({ ...accepted, code: 'relayed', etaHours: 12 }, namer)).toBe('1st Armored Brigade Combat Team: order relayed down a degraded chain of command, arrives in about 12 h');
     expect(humanizeMessage('USA offers peace to CHN', namer)).toBe('United States offers peace to China, which has not accepted');
     expect(humanizeMessage('USA declines to honour US-TWN-TRA for TWN', namer)).toBe('United States declines to honour the Taiwan Relations Act for Taiwan');
+    expect(describeEvent(refusal(3, 'no_route', `no sea route to node ${besideWarsaw}`), namer)).toBe('1st Armored Brigade Combat Team: order refused, no sea route to the area near Warsaw');
     for (const s of [text, land]) expect(s).not.toMatch(/\bf\d+\b|node \d+/);
   });
 

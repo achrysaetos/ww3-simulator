@@ -31,6 +31,7 @@ import { conditionsAt, type Conditions, packWeather } from '../systems/weather/e
 import type { IntelSource } from '../systems/intel';
 import { believedWorld, viewOf, type View } from '../systems/intel/view';
 import { OutputsRecorder } from '../outputs';
+import { nationName } from './placeNames';
 import { outputsView, type OutputsView } from './outputs/view';
 import type { OperationForecastInput, OperationPlan } from '../forecast/operation';
 import type { OptionsResult } from './orders/options';
@@ -275,6 +276,10 @@ export interface NationDetail {
   homeFront: HomeFrontView;
   munitions: MunitionStock[];
   wars: WarView[];
+  /** The nation's own covert campaigns (nonkinetic); empty for any nation but the viewer. */
+  covert: CovertView;
+  /** Its own missile formations with conventional rounds aboard, and how far they reach; empty for any nation but the viewer. */
+  strikers: { id: FormationId; node: NodeId; reachKm: number; rounds: number }[];
   nuclear: {
     posture: string | null;
     /** Launchers in strategic formations and their loaded nuclear rounds. */
@@ -287,6 +292,13 @@ export interface NationDetail {
     weapons: NuclearWeapon[];
     alert: NuclearAlertView;
   };
+}
+
+export interface CovertView {
+  /** Targets of its running sabotage campaigns. */
+  sabotage: NationId[];
+  /** Its intrusions into other nations' networks: how deep, and whether still working toward the next stage. */
+  cyber: { on: NationId; sector: 'grid' | 'telecom'; stage: 'none' | 'foothold' | 'persistent'; building: boolean }[];
 }
 
 /** Stored warheads are not on launchers until the leadership orders an alert; mating then follows the state's timeline. */
@@ -394,6 +406,8 @@ export interface Snapshot {
   nations?: Float32Array;
   diff?: Partial<Record<Packed, PackedDiff>>;
   events: SimEvent[];
+  /** A resumed game's notable events from before the save, newest last: for the log and ticker, not replayed as news. */
+  history?: SimEvent[];
   droppedEvents: number;
   wars: [NationId, NationId][];
   /** Flat (node, nationIndex, level) triples. */
@@ -435,10 +449,25 @@ export interface ContactDetail {
 
 // ---------------------------------------------------------------- encoder (worker side)
 
+/**
+ * Platforms a formation fields at full strength: its establishment as logistics recorded it, so a
+ * resumed game and a first sighting read the same strength as a session that watched all along.
+ * A world without logistics (a test) counts the damaged kit as the missing share.
+ */
+function establishedPlatforms(world: World, f: Formation): number {
+  const est = world.slices.logistics?.establishment[f.id]?.equipment;
+  let n = 0;
+  if (est) for (const v of Object.values(est)) n += v;
+  else {
+    n = platformCount(f);
+    for (const v of Object.values(f.damaged)) n += v;
+  }
+  return Math.max(1, n);
+}
+
 export class SnapshotEncoder {
   private lastControl: Uint16Array | null = null;
   private lastIds: FormationId[] = [];
-  private readonly initial = new Map<FormationId, number>();
   private readonly nationIndex: Map<NationId, number>;
   private events: SimEvent[] = [];
   private dropped = 0;
@@ -458,6 +487,19 @@ export class SnapshotEncoder {
 
   /** Buffer events from ticks that run between two snapshots. The AI's answers to its own commands never leave the worker. */
   collect(events: readonly SimEvent[]): void {
+    for (const e of this.admit(events)) {
+      if (this.events.length < EVENT_LIMIT) this.events.push(e);
+      else this.dropped++;
+    }
+  }
+
+  /** The newest of a resumed World's notable events, to send once with the first snapshot; it also restores how each war began. */
+  resumed(world: World): SimEvent[] {
+    return this.admit(world.history).slice(-EVENT_LIMIT);
+  }
+
+  private admit(events: readonly SimEvent[]): SimEvent[] {
+    const out: SimEvent[] = [];
     for (const e of events) {
       if (e.type === 'command_result' && !e.byPlayer) continue;
       if (e.type === 'war_declared') {
@@ -465,9 +507,9 @@ export class SnapshotEncoder {
         if (!this.entries.has(`${e.by}|${e.on}`)) this.entries.set(`${e.by}|${e.on}`, { nation: e.by, ...entry });
         if (!this.entries.has(`${e.on}|${e.by}`)) this.entries.set(`${e.on}|${e.by}`, { nation: e.on, ...entry, reason: `attacked by ${e.by}` });
       }
-      if (this.events.length < EVENT_LIMIT) this.events.push(e);
-      else this.dropped++;
+      out.push(e);
     }
+    return out;
   }
 
   /**
@@ -515,8 +557,8 @@ export class SnapshotEncoder {
       return !!c && !c.embarkedOn;
     };
     const fs = Object.values(world.formations).filter(shown);
-    for (const f of fs) if (!this.initial.has(f.id)) this.initial.set(f.id, Math.max(1, contactOf(f)?.strength ?? platformCount(f)));
-    const entry = (f: Formation): RosterEntry => ({ id: f.id, name: f.name, nation: f.nation, kind: f.kind, echelon: f.echelon, platforms: this.initial.get(f.id)! });
+    const full = new Map(fs.map((f) => [f.id, establishedPlatforms(world, f)]));
+    const entry = (f: Formation): RosterEntry => ({ id: f.id, name: f.name, nation: f.nation, kind: f.kind, echelon: f.echelon, platforms: full.get(f.id)! });
     const prevIds = this.lastIds;
     const kept = fs.length >= prevIds.length && prevIds.every((id, i) => fs[i].id === id);
     if (!kept) snap.roster = fs.map(entry);
@@ -534,7 +576,7 @@ export class SnapshotEncoder {
       const c = contactOf(f);
       if (c) {
         p.fNode[i] = c.node;
-        p.fStrength[i] = Math.round(Math.min(1, c.strength / this.initial.get(f.id)!) * 255);
+        p.fStrength[i] = Math.round(Math.min(1, c.strength / full.get(f.id)!) * 255);
         p.fPosture[i] = NO_POSTURE;
         p.fStatus[i] = STATUSES.indexOf('active');
         p.fTarget[i] = NO_NODE;
@@ -544,7 +586,7 @@ export class SnapshotEncoder {
         continue;
       }
       p.fNode[i] = f.node;
-      p.fStrength[i] = Math.round(Math.min(1, platformCount(f) / this.initial.get(f.id)!) * 255);
+      p.fStrength[i] = Math.round(Math.min(1, platformCount(f) / full.get(f.id)!) * 255);
       p.fPosture[i] = POSTURES.indexOf(f.order.posture);
       p.fStatus[i] = STATUSES.indexOf(f.status);
       p.fTarget[i] = f.order.target ?? NO_NODE;
@@ -645,6 +687,23 @@ export class SnapshotEncoder {
     return out;
   }
 
+  private strikers(world: World, id: NationId): NationDetail['strikers'] {
+    const out: NationDetail['strikers'] = [];
+    for (const f of Object.values(world.formations)) {
+      if (f.nation !== id || f.kind !== 'missile' || f.status !== 'active') continue;
+      let reachKm = 0, rounds = 0;
+      for (const [mid, count] of Object.entries(f.magazine) as [MunitionId, number][]) {
+        const m = this.catalog.munitions.get(mid);
+        const g = m && !m.yieldKt ? GROUP_OF_KIND[m.kind] : null;
+        if (!m || count < 1 || (g !== 'ballistic' && g !== 'cruise')) continue;
+        reachKm = Math.max(reachKm, m.rangeKm);
+        rounds += count;
+      }
+      if (rounds) out.push({ id: f.id, node: f.node, reachKm, rounds: Math.floor(rounds) });
+    }
+    return out.sort((a, b) => (a.id < b.id ? -1 : 1));
+  }
+
   /** A foreign nation's forces are counted as the viewer believes them (believedWorld): contacts only, magazines by doctrine. */
   private nationDetail(world: World, map: GameMap, id: NationId, view: View | undefined): NationDetail {
     const n = world.nations[id];
@@ -731,6 +790,8 @@ export class SnapshotEncoder {
       homeFront: homeFront(world, id),
       munitions: [...groups.values()].filter((g) => g.warehoused || g.loaded || g.perMonth),
       wars: this.warViews(world, id),
+      covert: covertView(world, id, view),
+      strikers: view && view.nation !== id ? [] : this.strikers(world, id),
       nuclear: {
         posture: strategic?.posture[id] ?? null,
         launchers,
@@ -777,6 +838,15 @@ export class SnapshotEncoder {
         };
       });
   }
+}
+
+function covertView(world: World, id: NationId, view: View | undefined): CovertView {
+  const s = world.slices.nonKinetic;
+  if (!s || (view && view.nation !== id)) return { sabotage: [], cyber: [] };
+  return {
+    sabotage: Object.values(s.sabotage).filter((c) => c.by === id).map((c) => c.on).sort(),
+    cyber: Object.values(s.access).filter((a) => a.by === id).map((a) => ({ on: a.on, sector: a.sector, stage: a.stage, building: a.building })),
+  };
 }
 
 function nuclearAlert(n: Nation, id: NationId, alert: { orderedTick: number; stored: number; mated: number; reason: string } | undefined): NuclearAlertView {
@@ -927,7 +997,7 @@ export function nationCards(map: GameMap, profiles: Readonly<Record<string, { bl
   return map.data.nations.map((raw, i) => {
     const id = map.nationIds[i];
     const p = profiles[id] ?? {};
-    return { id, name: raw.name, blocs: p.blocs ?? [], doctrine: p.nuclear?.doctrine ?? 'none', gdpUsdB: ((raw.stats as { gdp?: number }).gdp ?? 0) / 1e9 };
+    return { id, name: nationName(id, raw.name), blocs: p.blocs ?? [], doctrine: p.nuclear?.doctrine ?? 'none', gdpUsdB: ((raw.stats as { gdp?: number }).gdp ?? 0) / 1e9 };
   });
 }
 

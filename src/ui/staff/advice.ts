@@ -5,17 +5,24 @@
  * Pure and deterministic: the same situation always gives the same cards in the same order.
  */
 import type { GameMap } from '../../core/map';
-import type { Command, FormationId, MunitionKind, NationId, NodeId, SimEvent } from '../../core/types';
+import type { Command, FormationId, MunitionKind, NationId, NodeId, Operation, SimEvent } from '../../core/types';
 import { ITEMS } from '../../data/industry/items';
 import { describeResult, treatyName, type Namer } from '../events';
-import type { FormationView, NationDetail, NationSummary } from '../snapshot';
+import type { FormationView, MunitionGroup, NationDetail, NationSummary } from '../snapshot';
+import { capitalOf, INITIATIVE, nearestFree } from './initiative';
 import type { Role } from './advisors';
 
 export type Drawer = 'forces' | 'nation' | 'log' | 'cost';
 
+/** A place "Show me" draws on the map: an impact, with the direction it came from, or a site to look at. */
+export interface Mark {
+  to: NodeId;
+  from?: NodeId;
+}
+
 export type Action =
   | { kind: 'command'; label: string; command: Command }
-  | { kind: 'show'; label: string; node: NodeId }
+  | { kind: 'show'; label: string; node: NodeId; marks?: Mark[] }
   | { kind: 'unit'; label: string; formation: FormationId; node: NodeId }
   | { kind: 'open'; label: string; drawer: Drawer }
   | { kind: 'later'; label: string };
@@ -66,6 +73,18 @@ export interface Situation {
   unitCostUsdM(id: string): number;
   /** Net tons of national ammunition used per day over the last days; null until two days are on record. */
   ammoPerDay: number | null;
+  /** Rounds of each munition family used per day over the last days, net of production; empty until two days are on record. */
+  burnPerDay: Partial<Record<MunitionGroup, number>>;
+  /** The player's operations as the engine runs them. */
+  ops: readonly Operation[];
+  /** Land cells being fought over: node, attacking nation index, share pushed through, repeated. */
+  contest: Float32Array;
+  /**
+   * What became of a card key: on the table now, or done with (acted on or waved away). A source
+   * keeps offering what is on the table rather than flicker between near-equals, and moves on
+   * from what is done.
+   */
+  known(key: string): 'table' | 'done' | undefined;
   namer: Namer;
 }
 
@@ -126,13 +145,35 @@ function raids(s: Situation): Card[] {
   const what = [missiles.missile && plural(missiles.missile, 'missile'), missiles.drone && plural(missiles.drone, 'drone')].filter(Boolean).join(' and ');
   const others = places.length - 1;
   const also = others ? ` Also hit: ${places.slice(1, 1 + RAID_PLACES).map(([p]) => p).join(', ')}${others > RAID_PLACES ? ` and ${others - RAID_PLACES} more` : ''}.` : '';
+  const marks = places.slice(0, 1 + RAID_PLACES).map(([, p]) => ({ to: p.node, from: launchSide(s, p.by, p.node) }));
   return [{
     key: `raid|${last}`, topic: 'threat', role: null, tone: 'live', tick: last, node: head.node,
     title: `${missiles.missile ? 'Missile' : 'Drone'} raid on ${target}`,
-    text: `${what} from ${s.namer.nation(head.by)}. ${plural(intercepted, 'shot down', 'shot down')}.${also}`,
+    text: `${what} from ${s.namer.nation(head.by)} in the last ${s.dtHours} hours. ${plural(intercepted, 'shot down', 'shot down')}.${also}`,
     meter: { value: intercepted / fired, tone: 'red' },
-    primary: { kind: 'show', label: 'Show me', node: head.node },
+    primary: { kind: 'show', label: 'Show me', node: head.node, marks },
   }];
+}
+
+/**
+ * Where a raid came from, as the player can know it: the attacker's ground nearest the target.
+ * The launchers themselves are rarely seen, so the map draws the track from that side.
+ */
+function launchSide(s: Situation, by: NationId, target: NodeId): NodeId | undefined {
+  const i = s.nationIds.indexOf(by);
+  let best: NodeId | undefined, km = Infinity;
+  for (let n = 0 as NodeId; n < s.map.landCount; n++) {
+    if (s.control[n] !== i) continue;
+    const d = s.map.distanceKm(n, target);
+    if (d < km) [best, km] = [n, d];
+  }
+  return best;
+}
+
+/** The enemy's nuclear-capable launchers the player's intelligence holds: strategic forces and missile brigades. */
+function launchSites(s: Situation, by: NationId): Mark[] {
+  return s.formations.filter((f) => f.entry.nation === by && f.contact && (f.entry.kind === 'strategic' || f.entry.kind === 'missile'))
+    .map((f) => ({ to: f.node })).slice(0, 12);
 }
 
 function nuclear(s: Situation): Card[] {
@@ -153,14 +194,19 @@ function nuclear(s: Situation): Card[] {
       const answer: Action | undefined = alert.canOrder
         ? { kind: 'command', label: 'Raise our alert', command: { type: 'nuclear_alert', nation: s.me, reason: `answering the alert ordered by ${name}` } }
         : undefined;
+      const sites = launchSites(s, e.nation);
+      const at = sites[0]?.to ?? capitalOf(s, e.nation);
+      const ours = answer
+        ? ` We hold ${plural(alert.stored, 'warhead')} in storage.`
+        : alert.mated ? ` Our ${plural(alert.mated, 'warhead')} on launchers already answer any strike on us.` : ' We have no nuclear weapons of our own; our allies hold the deterrent.';
       out.push({
-        key: `nalert|${e.nation}|${e.tick}`, topic: 'nuclear', role: 'security', tone: 'advice', tick: e.tick, urgent: true,
+        key: `nalert|${e.nation}|${e.tick}`, topic: 'nuclear', role: 'security', tone: 'advice', tick: e.tick, urgent: true, node: at,
         title: `${name} readies nuclear weapons`,
-        text: `${name} has ordered warheads mated to its launchers (${e.reason}).${answer ? ` We hold ${plural(alert.stored, 'warhead')} in storage.` : ' We have no nuclear answer of our own.'}`,
-        ask: answer ? 'Mate our own warheads, so a strike on us can be answered.' : undefined,
+        text: `${name} has ordered warheads mated to its launchers (${e.reason}).${ours}`,
+        ask: answer ? 'Mate our own warheads, so a strike on us can be answered.' : alert.mated ? 'Stand firm: change nothing they could read as a threat.' : undefined,
         cost: answer ? { label: 'Risk', text: `${name} may read it as preparation to strike first` } : undefined,
         figure: { value: alert.mated.toLocaleString('en-US'), caption: 'of our warheads ready now' },
-        primary: answer, secondary: { kind: 'later', label: 'Hold' },
+        primary: answer, secondary: at !== undefined ? { kind: 'show', label: 'Show their launchers', node: at, marks: sites.length ? sites : [{ to: at }] } : { kind: 'later', label: 'Hold' },
       });
     }
   }
@@ -265,7 +311,7 @@ function shells(s: Situation): Card[] {
   const extra = best ? rate - best[1].perMonth : 0;
   const w = Math.max(1, Math.round(weeks));
   return [{
-    key: `shells|${w}`, topic: 'supply', role: 'economy', tone: 'advice', tick: s.tick,
+    key: `shells|${w}`, topic: 'supply', role: 'economy', tone: 'advice', tick: s.tick, node: capitalOf(s, s.me),
     title: `Artillery shells run out in ${plural(w, 'week')}`,
     text: `At this rate of fire our guns run dry in about ${plural(w, 'week')}. ${act ? `The ${s.namer.item(best![0])} line can still surge to ${rate.toLocaleString('en-US')} a month.` : 'Every shell line is already at its limit.'}`,
     ask: act ? `Order ${s.namer.item(best![0])} at the line's full surge rate.` : undefined,
@@ -300,15 +346,6 @@ function shortages(s: Situation): Card[] {
     });
   }
   return out;
-}
-
-/** The nearest own manoeuvre formation free to send to `node`: one in reserve, else (in peacetime) one off the threatened border. */
-function nearestFree(s: Situation, node: NodeId, free: (f: FormationView) => boolean): { f: FormationView; km: number } | undefined {
-  const { map } = s;
-  return s.formations
-    .filter((f) => f.entry.nation === s.me && f.entry.kind === MANEUVER && f.status === 'active' && !map.isSea(f.node) && free(f))
-    .map((f) => ({ f, km: map.distanceKm(f.node, node) }))
-    .sort((a, b) => a.km - b.km || a.f.entry.id.localeCompare(b.f.entry.id))[0];
 }
 
 interface BuildUp {
@@ -470,10 +507,8 @@ export const CAPITAL_THREAT_KM = 120;
  */
 function capitalThreat(s: Situation): Card[] {
   if (!s.d.enemies.length) return [];
-  const i = s.nationIds.indexOf(s.me);
-  const cell = i < 0 ? undefined : s.map.data.nations[i].capital?.cell;
-  if (cell === undefined) return [];
-  const cap = cell as NodeId;
+  const cap = capitalOf(s, s.me);
+  if (cap === undefined) return [];
   const enemies = new Set(s.d.enemies);
   const near = s.formations
     .filter((f) => enemies.has(f.entry.nation) && f.entry.kind === MANEUVER && f.status === 'active' && !s.map.isSea(f.node))
@@ -508,7 +543,7 @@ function reserves(s: Situation): Card[] {
   if (n.reserves >= 0.15 * s.d.personnel) return [];
   const level = Math.round(Math.min(tolerance, n.mobilization + 0.1) * 100) / 100;
   return [{
-    key: `mobilise|${level}`, topic: 'supply', role: 'chief', tone: 'advice', tick: s.tick,
+    key: `mobilise|${level}`, topic: 'supply', role: 'chief', tone: 'advice', tick: s.tick, node: capitalOf(s, s.me),
     title: 'Reserves will not refill the front',
     text: `Trained reserves are down to ${Math.round(n.reserves / 1000).toLocaleString('en-US')}k, against ${Math.round(s.d.personnel / 1000).toLocaleString('en-US')}k in the field. The public would accept mobilisation up to ${pct(tolerance)}.`,
     ask: `Raise mobilisation from ${pct(n.mobilization)} to ${pct(level)}.`,
@@ -517,6 +552,51 @@ function reserves(s: Situation): Card[] {
     primary: { kind: 'command', label: `Mobilise to ${pct(level)}`, command: { type: 'set_mobilization', nation: s.me, level } },
     secondary: { kind: 'later', label: 'Not now' },
   }];
+}
+
+/**
+ * Blows to the player's own formations that the map alone would not show: a naval group hit
+ * (a carrier in port, a lift group at the quay), and any formation struck off.
+ */
+function losses(s: Situation): Card[] {
+  const out: Card[] = [];
+  const own = new Map(s.formations.filter((f) => f.entry.nation === s.me).map((f) => [f.entry.id, f]));
+  const hits = new Map<FormationId, { hits: number; tick: number; by: NationId; munition: string; target: NodeId }>();
+  for (const e of s.recent) {
+    if (e.tick < s.tick - 4) continue;
+    if (e.type === 'strike' && e.by !== s.me) {
+      for (const x of e.effects) {
+        if (x.kind !== 'ship_hits' || x.hits <= 0 || !own.has(x.formation)) continue;
+        const h = hits.get(x.formation) ?? { hits: 0, tick: e.tick, by: e.by, munition: e.munition, target: e.target };
+        h.hits += x.hits;
+        h.tick = Math.max(h.tick, e.tick);
+        hits.set(x.formation, h);
+      }
+    } else if (e.type === 'formation_destroyed' && e.nation === s.me) {
+      const f = own.get(e.formation);
+      const name = s.namer.formation(e.formation) ?? 'A formation';
+      out.push({
+        key: `lost|${e.formation}`, topic: 'threat', role: null, tone: 'live', tick: e.tick, node: f?.node,
+        title: `${name} destroyed`, text: `${name} no longer exists as a fighting force.`,
+        ...(f ? { primary: { kind: 'show', label: 'Show me', node: f.node } as Action } : {}),
+      });
+    }
+  }
+  const gone = new Set(s.recent.filter((e) => e.type === 'formation_destroyed').map((e) => (e as { formation: FormationId }).formation));
+  for (const [id, h] of hits) {
+    if (gone.has(id)) continue;
+    const f = own.get(id)!;
+    const name = s.namer.formation(id) ?? f.entry.name;
+    const sunk = f.strength <= 0.05;
+    out.push({
+      key: `shiphit|${id}|${Math.floor((h.tick * s.dtHours) / 24)}`, topic: 'threat', role: null, tone: 'live', tick: h.tick, node: f.node,
+      title: sunk ? `${name} sunk ${s.namer.place.at(h.target)}` : `${name} hit ${plural(h.hits, 'time')}`,
+      text: `Struck by ${s.namer.nation(h.by)} ${s.namer.item(h.munition)} ${s.namer.place.at(h.target)}. ${sunk ? 'Nothing of the group is left afloat.' : `The group keeps ${pct(f.strength)} of its strength.`}`,
+      meter: { value: f.strength, tone: 'red' },
+      primary: { kind: 'unit', label: 'Open unit', formation: id, node: f.node },
+    });
+  }
+  return out;
 }
 
 /** Wars and peace that change the player's war, as one-line wire reports; one day's declarations against one nation fold into one line. */
@@ -543,12 +623,16 @@ function wire(s: Situation): Card[] {
     const title = names.length === 1
       ? `${names[0]} declares war on ${on}.`
       : `${names.length} nations declare war on ${on}: ${names.slice(0, 3).join(', ')}${names.length > 3 ? ` and ${names.length - 3} more` : ''}.`;
-    out.push({ key: `wire|war|${key}|${names.length}`, topic: 'news', role: null, tone: 'report', tick: day.tick, title, text: '' });
+    const onUs = day.on === s.me;
+    const cap = onUs ? capitalOf(s, day.by[0]) : undefined;
+    out.push(onUs
+      ? { key: `wire|war|${key}|${names.length}`, topic: 'threat', role: null, tone: 'live', tick: day.tick, title: `War: ${title.replace(/\.$/, '')}`, text: `We are now at war with ${names.join(', ')}.`, ...(cap !== undefined ? { node: cap, primary: { kind: 'show', label: 'Show me', node: cap } as Action } : {}) }
+      : { key: `wire|war|${key}|${names.length}`, topic: 'news', role: null, tone: 'report', tick: day.tick, title, text: '' });
   }
   return out;
 }
 
-const SOURCES: readonly ((s: Situation) => Card[])[] = [raids, nuclear, cities, treatyCalls, peaceOffers, capitalThreat, massing, shells, reserves, orderAnswers, shortages, wire];
+const SOURCES: readonly ((s: Situation) => Card[])[] = [raids, nuclear, cities, treatyCalls, peaceOffers, capitalThreat, massing, shells, reserves, ...INITIATIVE, losses, orderAnswers, shortages, wire];
 
 export interface Answer {
   ok: boolean;

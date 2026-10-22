@@ -146,7 +146,7 @@ export function DailyBrief(p: BriefProps) {
           </ol>
 
           <aside className="ww-brief-overnight">
-            <div className="ww-brief-oh"><span className="ww-title">Overnight</span><span className="ww-mono ww-muted">{pad((d.getUTCHours() + 12) % 24)}:00 → {pad(d.getUTCHours())}:00</span></div>
+            <div className="ww-brief-oh"><span className="ww-title">{recent.length > 1 ? 'Since yesterday' : 'Today'}</span><span className="ww-mono ww-muted" data-testid="brief-window">{recent.length ? `Day ${recent[0].day + 1} → ${pad(d.getUTCHours())}:00 today` : ''}</span></div>
             <div className="ww-brief-sec">
               <span className="ww-label">Front</span>
               {gained.length > 0 && <div className="ww-brief-row"><span><span className="ww-up">▲</span> Gained {gained.length} {gained.length === 1 ? 'cell' : 'cells'}{names(gained) && ` at ${names(gained)}`}</span><b className="ww-up">+{gained.length}</b></div>}
@@ -199,10 +199,12 @@ export function DailyBrief(p: BriefProps) {
           </div>
           <span className="ww-grow" />
           <button type="button" className="ww-btn" onClick={p.onClose} data-testid="brief-close">Go to the map <span className="ww-kbd">Esc</span></button>
-          <button type="button" className="ww-btn gold ww-brief-all" disabled={!approvable.length} onClick={approveAll} data-testid="brief-approve-all">
-            <span><span className="ww-brief-all-t">Approve {approvable.length === 1 ? 'the recommendation' : `all ${approvable.length} recommendations`}</span><small>{approvable.map((c) => c.primary.label).join(' · ') || 'Nothing to approve'}</small></span>
-            <span className="ww-kbd">A</span>
-          </button>
+          {approvable.length > 0 && (
+            <button type="button" className="ww-btn gold ww-brief-all" onClick={approveAll} data-testid="brief-approve-all">
+              <span><span className="ww-brief-all-t">Approve {approvable.length === 1 ? 'the recommendation' : `all ${approvable.length} recommendations`}</span><small>{approvable.map((c) => c.primary.label).join(' · ')}</small></span>
+              <span className="ww-kbd">A</span>
+            </button>
+          )}
         </footer>
       </div>
     </div>

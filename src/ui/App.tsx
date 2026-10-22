@@ -9,7 +9,7 @@ import { MomentOverlay } from './moments/MomentOverlay';
 import { momentsOf, type Moment } from './moments/moments';
 import { CoachMarks } from './coach/CoachMarks';
 import { CrisisScreen } from './crisis/CrisisScreen';
-import { nextCrisis, type Crisis, type CrisisContext } from './crisis/crisis';
+import { answered, nextCrisis, type Crisis, type CrisisContext } from './crisis/crisis';
 import { ConfirmDialog, EndDialog, GameMenu, type Confirmation } from './GameFlow';
 import { crisesOn } from './prefs';
 import { EventLog } from './EventLog';
@@ -19,7 +19,7 @@ import { GROUND_KINDS, postureLabel } from './orders/postures';
 import { useOrders } from './orders/useOrders';
 import './orders/orders.css';
 import { MapView, openingFocus } from './MapView';
-import { TopBar, type TopBarStat } from './map/TopBar';
+import { frontStat, TopBar, type TopBarStat } from './map/TopBar';
 import { ContactPanel } from './map/ContactPanel';
 import { DOMAIN_LABEL, NationPanel } from './NationPanel';
 import { NuclearDialog } from './NuclearDialog';
@@ -31,7 +31,7 @@ import { openingFacts } from './start/opening';
 import { StartScreen } from './start/StartScreen';
 import { shortName } from './start/scenarioInfo';
 import type { Overlays } from './renderer';
-import type { Action, Card, Drawer } from './staff/advice';
+import type { Action, Card, Drawer, Mark } from './staff/advice';
 import { DailyBrief } from './staff/DailyBrief';
 import { BRIEF_CADENCES, type BriefCadence } from './staff/desk';
 import { operations } from './staff/operations';
@@ -82,7 +82,7 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
   const places = client.places;
   const desk = client.desk!;
   const routes = useMemo(() => new Routes(client.map), [client]);
-  const focusHandle = useRef<((n: NodeId, frame?: 'close' | 'wide') => void) | null>(null);
+  const focusHandle = useRef<((n: NodeId, frame?: 'close' | 'wide', marks?: readonly Mark[]) => void) | null>(null);
 
   const [selected, setSelected] = useState<FormationId | null>(null);
   const [pending, setPending] = useState<{ posture: Posture; targetClass?: TargetClass; lift?: 'air' | 'sea' } | null>(null);
@@ -164,6 +164,8 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
   const nationIds = client.meta?.nationIds ?? [];
   const briefing = useMemo(() => briefingFor(client.map, client.meta?.scenario.id ?? '', playAs), [client, playAs]);
   const everEnemies = useRef(new Set<NationId>());
+  /** The player's formations destroyed so far, as of each game day seen, for the week's front figure. */
+  const lostByDay = useRef(new Map<number, number>());
   for (const e of d?.enemies ?? []) everEnemies.current.add(e);
   const objectives = objectivesOf(client.state, nationIds, briefing, playAs, d?.enemies ?? [], everEnemies.current);
   const ending = d ? outcomeOf(client.state, playAs, d.enemies, everEnemies.current, objectives) : null;
@@ -221,7 +223,7 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
     if (o.defer) return closeCrisis();
     if (o.action.kind === 'show') {
       setCrisis(null);
-      focusNode(o.action.node);
+      focusHandle.current?.(o.action.node, 'wide', o.action.marks);
       return;
     }
     client.act(crisis.c.card, o.action);
@@ -244,6 +246,12 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
       platformClass: (id) => client.meta?.platforms[id]?.class,
       place: (node) => places.name(node).replace(/^(near|off) /, ''), at: (node) => places.at(node),
       name: (id) => client.namer.nation(id),
+      formation: (id) => {
+        const f = client.state.formations.find((x) => x.entry.id === id);
+        return f && { name: f.entry.name, nation: f.entry.nation, kind: f.entry.kind, strength: f.status === 'destroyed' ? 0 : f.strength, node: f.node };
+      },
+      opening: new Set((client.meta?.scenario.wars ?? []).map(([a, b]) => `${a}>${b}`)),
+      capitalOf: (id) => [...capitals].find(([, n]) => n === id)?.[0],
     });
     moments.current.push(...found.filter((m) => !seen.has(m.key)).slice(0, 2));
   }, [client.state.latestEvents]);
@@ -357,7 +365,7 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
     }
     if (across && pending.posture === 'move') {
       const how = pending.lift === 'sea' ? 'by sealift' : pending.lift === 'air' ? 'by airlift' : 'by air if it can fly, otherwise by sea';
-      sendOrder(selected, { posture: 'move', target: node, ...(pending.lift ? { lift: pending.lift } : {}) }, `Deploying ${f!.entry.name} to ${places.name(node)} ${how}`);
+      sendOrder(selected, { posture: 'move', target: node, ...(pending.lift ? { lift: pending.lift } : {}) }, `Deploying ${f!.entry.name} to ${places.to(node)} ${how}`);
       setPending(null);
       return;
     }
@@ -384,7 +392,7 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
   };
 
   const act = (card: Card, action: Action) => {
-    if (action.kind === 'show') { focusNode(action.node); closeBrief(); }
+    if (action.kind === 'show') { focusHandle.current?.(action.node, action.marks ? 'wide' : 'close', action.marks); closeBrief(); }
     else if (action.kind === 'unit') { selectFormation(action.formation); focusHandle.current?.(action.node, 'wide'); }
     else if (action.kind === 'open') setDrawer(action.drawer);
     client.act(card, action);
@@ -407,17 +415,17 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
   const news = useMemo(() => headlines(client.feed, client.map), [client.feed.version]);
   const pinned = lastMoment && lastMoment.tick >= client.state.tick - 8 ? lastMoment : null;
   const front = desk.frontChange(7);
+  const lostNow = client.state.formations.filter((f) => f.entry.nation === playAs && f.status === 'destroyed').length;
+  if (!lostByDay.current.has(day) || lostByDay.current.get(day)! < lostNow) lostByDay.current.set(day, lostNow);
+  const weekAgo = [...lostByDay.current].filter(([d]) => d >= day - 7).sort((a, b) => a[0] - b[0])[0]?.[1] ?? lostNow;
   const atWar = (d?.enemies.length ?? 0) > 0;
   const defcon = desk.nuclearStep === 2 ? 1 : desk.nuclearStep === 1 ? 2 : atWar ? 3 : 5;
   const role = roleOf(want);
   const stats: TopBarStat[] = n ? [
-    ...(atWar ? [{ label: 'Front · 7d', value: !front ? 'Holding' : `${front > 0 ? '+' : ''}${front} cells`, tone: !front ? undefined : front > 0 ? 'good' as const : 'bad' as const }] : []),
+    ...(atWar ? [frontStat(front, lostNow - weekAgo)] : []),
     { label: 'War support', value: `${Math.round(n.warSupport * 100)}%`, tone: n.warSupport < 0.4 ? 'bad' : undefined },
     { label: 'Economy', value: d?.economy ? `${Math.round(d.economy.gdpIndex * 100)}%` : '—', tone: d?.economy && d.economy.gdpIndex < 0.85 ? 'warn' : undefined },
-    // A nation with every trained reservist already called up has no reserve to show; how far it has mobilised says more.
-    n.reserves >= 1000
-      ? { label: 'Reserves', value: n.reserves >= 1e6 ? `${(n.reserves / 1e6).toFixed(1)}M` : `${Math.round(n.reserves / 1e3)}k` }
-      : { label: 'Mobilised', value: `${Math.round(n.mobilization * 100)}%`, tone: 'warn' },
+    { label: 'Mobilised', value: `${Math.round(n.mobilization * 100)}%` },
   ] : [];
   const reportsSince = useMemo(() => client.feed.newest(new Set(), playAs, 400).filter((r) => r.event.tick >= client.state.tick - 24 / (client.meta?.dtHours ?? 6)).length, [brief]);
 
@@ -648,7 +656,7 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
       {coach && <CoachMarks onDone={() => { markCoachDone(); setCoach(false); }} />}
       {crisis && date && (
         <CrisisScreen
-          crisis={crisis.c}
+          crisis={crisis.chosen !== null && crisisContext() ? answered(crisis.c, crisisContext()!) : crisis.c}
           me={playAs}
           nation={client.namer.nation(playAs)}
           scenario={client.meta?.scenario.name ?? ''}

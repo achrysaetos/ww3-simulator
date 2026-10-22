@@ -12,7 +12,7 @@ import { NO_NATION } from '../snapshot';
 import { FORECAST_DAYS, FORECAST_RUNS } from './forecaster';
 import { NEEDS_TARGET } from './postures';
 import type { OrderOption, OptionsResult } from './options';
-import { draftOf, newDraft, planCommand, planKey, planOf, type Planning } from './plan';
+import { draftOf, freshName, newDraft, planCommand, planKey, planOf, type Planning } from './plan';
 import { PlanPanel } from './PlanPanel';
 import { optionLabel, Radial } from './Radial';
 
@@ -45,7 +45,6 @@ export interface OrdersOverlay {
   focusOp: string | null;
 }
 
-const bare = (s: string) => s.replace(/^(near|off|at) /, '');
 const hours = (h: number) => (h < 1 ? 'within the hour' : h < 48 ? `${Math.round(h)} h` : `${Math.round(h / 24)} days`);
 const isForm = (t: EventTarget | null) => t instanceof HTMLElement && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA');
 
@@ -60,7 +59,7 @@ export function useOrders(h: OrdersHost) {
 
   const view = (id: FormationId) => client.state.formations.find((f) => f.entry.id === id);
   const kindsOf = (ids: readonly FormationId[]) => ids.map((id) => view(id)?.entry.kind).filter((k): k is FormationKind => !!k);
-  const placeOf = (n: NodeId) => bare(places.name(n));
+  const placeOf = (n: NodeId) => places.name(n);
 
   const openRadial = useCallback((node: NodeId, hit: readonly FormationId[], x: number, y: number) => {
     const { selected, select } = hostRef.current;
@@ -74,8 +73,8 @@ export function useOrders(h: OrdersHost) {
 
   const startPlan = useCallback((formations: FormationId[], objective: NodeId | null) => {
     setRadial(null);
-    setPlanning({ stage: objective === null ? 'drawing' : 'review', draft: newDraft(formations, objective), forecast: { status: 'idle' } });
-  }, []);
+    setPlanning({ stage: objective === null ? 'drawing' : 'review', draft: newDraft(formations, objective, freshName(client.state.ops)), forecast: { status: 'idle' } });
+  }, [client]);
 
   const openOperation = useCallback((op: Operation) => {
     setRadial(null);

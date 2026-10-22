@@ -17,6 +17,8 @@ export interface TickEnv {
   /** Formations embarked on each lift group. */
   embarked: Map<FormationId, Formation[]>;
   naval: Formation[];
+  /** Active land air-defence formations, which cover ships lying in a port within their reach. */
+  airDefense: Formation[];
 }
 
 const cache = new WeakMap<World, { tick: number; env: TickEnv }>();
@@ -33,7 +35,7 @@ export function tickEnv(world: World, ctx: SimContext, fresh = false): TickEnv {
       return c;
     },
     invalidate: (f) => comps.delete(f.id),
-    byNode: new Map(), maritimeAir: new Map(), embarked: new Map(), naval: [],
+    byNode: new Map(), maritimeAir: new Map(), embarked: new Map(), naval: [], airDefense: [],
   };
   for (const f of Object.values(world.formations)) {
     if (f.status === 'embarked' && f.embarkedOn) push(env.embarked, f.embarkedOn, f);
@@ -41,7 +43,8 @@ export function tickEnv(world: World, ctx: SimContext, fresh = false): TickEnv {
     if (isNavalFormation(f)) {
       env.naval.push(f);
       push(env.byNode, f.node, f);
-    } else if (f.kind === 'air_wing') {
+    } else if (f.kind === 'air_defense') env.airDefense.push(f);
+    else if (f.kind === 'air_wing') {
       const over = f.order.posture === 'patrol' && f.order.target !== undefined ? f.order.target : f.node;
       if (ctx.map.isSea(over) && Object.keys(f.equipment).some((p) => AIR_ROLES[ctx.catalog.platform(p as PlatformId).class]))
         push(env.maritimeAir, over, f);

@@ -1,7 +1,7 @@
 import { atWar, enemiesOf } from '../../core/engine';
 import type { NationId, World } from '../../core/types';
 import { friendsOf } from '../../systems/intel/view';
-import type { Humanitarian, ItemRace, Outputs, Workaround } from '../../outputs';
+import type { Humanitarian, ItemRace, NationOutputs, Outputs, Workaround } from '../../outputs';
 
 /**
  * The War Cost drawer's slice of Outputs for one viewer. Its own side is shown in full. For an
@@ -16,7 +16,8 @@ export interface OutputsView {
   mine: NationId[];
   enemies: NationId[];
   nations: Record<NationId, NationOutputsView>;
-  hosts: Outputs['hosts'];
+  /** Where the viewer's own refugees shelter, most first. */
+  hosts: NationOutputs['refugeeHosts'];
 }
 
 export interface NationOutputsView {
@@ -45,5 +46,5 @@ export function outputsView(world: World, outputs: Outputs, viewer: NationId): O
   const nations: Record<NationId, NationOutputsView> = {};
   for (const id of mine) if (outputs.nations[id]) nations[id] = nationView(outputs.nations[id], true);
   for (const id of enemies) if (outputs.nations[id]) nations[id] = nationView(outputs.nations[id], false);
-  return { day: outputs.day, mine: mine.filter((n) => nations[n]), enemies: enemies.filter((n) => nations[n]), nations, hosts: outputs.hosts };
+  return { day: outputs.day, mine: mine.filter((n) => nations[n]), enemies: enemies.filter((n) => nations[n]), nations, hosts: outputs.nations[viewer]?.refugeeHosts ?? [] };
 }

@@ -26,6 +26,16 @@ export interface TopBarProps {
   defcon: number | null;
 }
 
+/**
+ * The week on the ground in one figure: cells gained or lost, and the player's formations destroyed
+ * (surrendered encircled, overrun). Ground taken while whole formations are lost is not a good week.
+ */
+export function frontStat(cells: number | null, lost: number): TopBarStat {
+  const ground = !cells ? 'Holding' : `${cells > 0 ? '+' : ''}${cells} cells`;
+  const tone = (cells ?? 0) < 0 || lost > 2 ? 'bad' : lost > 0 ? 'warn' : (cells ?? 0) > 0 ? 'good' : undefined;
+  return { label: 'Front · 7d', value: lost ? `${ground} · ${lost} lost` : ground, ...(tone ? { tone } : {}) };
+}
+
 const MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
 
 function SpeedIcon({ n }: { n: number }) {

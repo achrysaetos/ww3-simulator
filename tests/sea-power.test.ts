@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import type { Formation, NationId, NodeId, PlatformClass, PlatformId } from '../src/core/types';
+import type { Formation, MunitionId, NationId, NodeId, PlatformClass, PlatformId } from '../src/core/types';
 import { createSession, type Session } from '../src/scenarios';
 import { allied } from '../src/systems/land/state';
+import { ANTISHIP_KINDS } from '../src/systems/naval';
 import { computeTradeBlocked } from '../src/systems/naval/blockade';
 import { applyHits } from '../src/systems/naval/combat';
 import { tickEnv } from '../src/systems/naval/env';
@@ -26,6 +27,12 @@ function runDays(s: Session, days: number, on?: (events: ReturnType<Session['eng
 const named = (s: Session, prefix: string) => Object.values(s.world.formations).find((f) => f.name.startsWith(prefix))!;
 const naval = (f: Formation) => f.kind === 'surface_group' || f.kind === 'submarine';
 const classOf = (s: Session, pid: string) => s.catalog.platform(pid as PlatformId).class;
+/** A shore battery whose anti-ship rounds reach `node`. */
+const reachesWithAntiship = (s: Session, f: Formation, node: NodeId) =>
+  !s.map.isSea(f.node) && Object.entries(f.magazine).some(([id, n]) => {
+    const m = s.catalog.munition(id as MunitionId);
+    return n >= 1 && ANTISHIP_KINDS.has(m.kind) && s.map.distanceKm(f.node, node) <= m.rangeKm;
+  });
 
 /** A human nation that leaves every domain to its AI delegate, so that single formations can be held and ordered. */
 function delegateAll(s: Session, n: NationId): void {
@@ -143,7 +150,11 @@ describe('escorts and convoys (NV-4)', () => {
 
 describe('mine countermeasures (NV-3)', () => {
   // On main all four US minehunters were lost within two days of going into Iran's Hormuz field, having swept half a mine.
-  it('gulf-2027: once Iran has lost its navy the US sends its minehunters into the Hormuz field, and they clear it', () => {
+  // Sea control here is the navy sunk and the shore batteries that reach the field silenced, the order the US would
+  // reopen the strait in: suppress the coastal anti-ship missiles, then sweep (Talmadge, "Closing Time", International
+  // Security 33:1, 2008). Killing dispersed launchers is slow (the 1991 Scud hunt, GWAPS), so the test takes that
+  // campaign as done rather than waiting on it.
+  it('gulf-2027: once Iran has lost its navy and its shore batteries the US sends its minehunters into the Hormuz field, and they clear it', () => {
     const s = createSession('gulf-2027', 1);
     runDays(s, 10);
     const { world } = s;
@@ -152,7 +163,7 @@ describe('mine countermeasures (NV-3)', () => {
     const before = laid();
     expect(before).toBeGreaterThan(100);
     // Sea control won: the sweepers go in once the enemy's warships are gone (Gulf 1991).
-    for (const f of Object.values(world.formations)) if (f.nation === IRN && naval(f)) f.status = 'destroyed';
+    for (const f of Object.values(world.formations)) if (f.nation === IRN && (naval(f) || reachesWithAntiship(s, f, field))) f.status = 'destroyed';
     const mcm = named(s, 'Commander Task Force 55');
     const hulls = () => Object.values(mcm.equipment).reduce((a, n) => a + n, 0);
     const start = hulls();
