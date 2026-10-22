@@ -1,4 +1,4 @@
-import type { FormationId, NationId, NodeId } from '../../core/types';
+import type { FormationId, NationId, NodeId, WarAim } from '../../core/types';
 import type { AirDefencePledge, PeaceTreaty, TreatyArea } from '../../data/nations/types';
 
 export type { AirDefencePledge, GeoBox, PeaceTreaty, TreatyArea } from '../../data/nations/types';
@@ -43,6 +43,8 @@ export interface AllianceTreaty {
   area?: TreatyArea;
   /** Nuclear guarantors: their credibility across every alliance rides on honouring this one. */
   guarantors?: readonly NationId[];
+  /** ISO date the treaty holds from; a run dated earlier does not have it. */
+  inForce?: string;
 }
 
 /** Strategic personality of a nation's leadership. All fields 0..1. */
@@ -77,10 +79,13 @@ export interface SideMember {
   defends?: NationId;
 }
 
-/** One side of a war. Its leader makes peace for every member. */
+/** One side of a war. Its leader makes peace for every member, and its aim binds every member. */
 export interface Side {
   leader: NationId;
   members: Record<NationId, SideMember>;
+  aim: WarAim;
+  /** Tick it last took a cell of its claim, or the war began; a limited offensive that stops gaining is stalled. */
+  gained: number;
 }
 
 /**
@@ -94,6 +99,8 @@ export interface War {
   since: number;
   /** The capital first attacked; members that joined the war fight each other only near it (see ai/strikes.ts). */
   theatre: NodeId;
+  /** Land cells that changed hands between the sides during the war, each once; the terms may hand them back. */
+  taken?: NodeId[];
 }
 
 export interface PendingJoin {
@@ -174,7 +181,44 @@ export interface OutwardRecord {
   count: number;
 }
 
+/**
+ * How a war, or one member's part in it, ended and on what terms. `line` is what each party holds of the other
+ * side's homeland once the terms take effect, the ceasefire line; `returned` is ground handed back to its owner
+ * under them; `dmz` is the cells on either side of the line where the fighting stopped. The terms are recorded;
+ * nothing yet polices the demilitarised zone.
+ */
+export interface Settlement {
+  war: string;
+  name: string;
+  tick: number;
+  kind: 'ceasefire' | 'armistice' | 'capitulation' | 'separate_peace';
+  parties: [NationId[], NationId[]];
+  line: Partial<Record<NationId, NodeId[]>>;
+  returned: NodeId[];
+  dmz: NodeId[];
+  text: string;
+}
+
+/**
+ * A government at peace pressing a claim on another short of war: an ultimatum stands and it mobilises; on `due`
+ * it goes to war if its beliefs still say it should, and otherwise backs down.
+ */
+export interface Crisis {
+  by: NationId;
+  on: NationId;
+  since: number;
+  due: number;
+  /** The objective it presses (data/nations strategic objectives). */
+  objective: string;
+}
+
 export interface DiplomacyState {
+  /** Wars that ended, or members that left one, with their terms; oldest first. */
+  settlements?: Settlement[];
+  /** Open pre-war crises. */
+  crises?: Crisis[];
+  /** Leaders that have fallen: tick of the latest change per nation. */
+  leaders?: Record<NationId, number>;
   /** Outward steps taken, keyed `${by}>${against}`; created by the first strike that takes one. */
   outward?: Record<string, Partial<Record<OutwardStep, OutwardRecord>>>;
   wars: War[];
