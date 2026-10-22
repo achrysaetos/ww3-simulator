@@ -40,21 +40,45 @@ export function navalDestination(world: World, map: GameMap, nation: NationId, t
   return seaNeighbour(map, target);
 }
 
-/** Whether `f` can be sent toward `target` at all: a destination exists and open water joins it, past any hostile minefield (orders refuse the rest). */
+/** Whether `f` can be sent toward `target` at all: a destination exists and open water joins it, past any hostile minefield or closed strait (orders refuse the rest). */
 export function sailable(world: World, map: GameMap, f: Formation, target: NodeId): boolean {
   const dest = navalDestination(world, map, f.nation, target);
   if (dest === undefined || !sameWaters(map, f.node, dest)) return false;
+  if (map.straits.some((s) => straitBarred(world, s, f.nation))) return seaPath(world, map, f.nation, f.node, dest) !== null;
   for (const n in world.slices.naval?.mines) if (minedClosed(world, Number(n), f.nation)) return seaPath(world, map, f.nation, f.node, dest) !== null;
   return true;
 }
 
 /**
+ * Whether a strait's regime bars this nation's ships. Under Montreux a belligerent passes the Turkish
+ * Straits only when the holder is itself or fights the same enemy; the holder's enemies never pass.
+ */
+export function straitBarred(world: World, s: GameMap['straits'][number], nation: NationId): boolean {
+  if (s.regime !== 'montreux' || s.holder === undefined) return false;
+  const holder = world.control[s.holder];
+  if (!holder || holder === nation) return false;
+  if (atWar(world, holder, nation)) return true;
+  let belligerent = false;
+  for (const [k, r] of Object.entries(world.relations)) {
+    if (!r.atWar) continue;
+    const [a, b] = k.split('|') as NationId[];
+    const enemy = a === nation ? b : b === nation ? a : undefined;
+    if (!enemy) continue;
+    belligerent = true;
+    if (atWar(world, holder, enemy)) return false;
+  }
+  return belligerent;
+}
+
+/**
  * A* over sea zones, canals, and the start/end port. Hostile minefields, and any zone `avoid`
- * names, are impassable except as the destination.
+ * names, are impassable except as the destination; so is a strait whose regime bars the nation.
  */
 export function seaPath(world: World, map: GameMap, nation: NationId, from: NodeId, to: NodeId, avoid?: (zone: number) => boolean): NodeId[] | null {
   const geo = geography(map);
-  return findPath(map, from, to, (_a, b, km) => {
+  const barred = map.straits.filter((s) => straitBarred(world, s, nation));
+  return findPath(map, from, to, (a, b, km) => {
+    if (barred.some((s) => (s.a === a && s.b === b) || (s.a === b && s.b === a))) return Infinity;
     if (map.isSea(b)) return b !== to && (minedClosed(world, b, nation) || avoid?.(b)) ? Infinity : km;
     if (geo.canalNodes.has(b)) return km;
     return b === to && geo.portZone.has(b) ? km : Infinity;
@@ -77,10 +101,11 @@ export function advance(world: World, map: GameMap, f: Formation, comp: Composit
   const hours = world.dtHours;
   const burnPerKm = Number.isFinite(comp.rangeKm) && comp.rangeKm > 0 ? f.supplyCapacity.fuel / comp.rangeKm : 0;
   const path = f.order.path;
-  f.supply.food = Math.max(0, f.supply.food - (f.supplyCapacity.food / comp.enduranceDays) * (hours / 24));
   if (!path?.length) {
     f.supply.fuel = Math.max(0, f.supply.fuel - burnPerKm * comp.speedKph * hours * LOITER_BURN);
-    if (f.node === f.home) victual(world, f, hours);
+    // Groups working the waters their base opens onto put in to it between patrols, as the IRGC's boats do from
+    // the Hormuz islands and any fleet on local exercises does.
+    if (f.node === f.home || f.node === geography(map).portZone.get(f.home)) victual(world, f, hours);
     return;
   }
   let budget = comp.speedKph * hours;
