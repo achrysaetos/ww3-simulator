@@ -133,6 +133,7 @@ export const WEST_PLATFORMS = {
 
   // air defense and missile defense
   patriot_pac3: 'sam_long',
+  patriot_pac2: 'sam_long',
   thaad_launcher: 'abm',
   nasams: 'sam_medium',
   samp_t: 'sam_long',
