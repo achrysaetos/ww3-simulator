@@ -10,10 +10,11 @@ import { estimate } from '../src/systems/intel';
 import { PlaceNamer } from '../src/ui/events';
 import { SimHost } from '../src/ui/host';
 import { Forecaster, type DrawReply, type DrawRequest, type DrawWorker } from '../src/ui/orders/forecaster';
-import { ForecastView } from '../src/ui/orders/PlanPanel';
+import { ForecastView, PlanPanel } from '../src/ui/orders/PlanPanel';
+import { freshName, newDraft, planCommand } from '../src/ui/orders/plan';
 import { orderOptions, type OrderOption } from '../src/ui/orders/options';
 import { posturesOf } from '../src/ui/orders/postures';
-import type { FromWorker } from '../src/ui/snapshot';
+import type { FormationView, FromWorker } from '../src/ui/snapshot';
 
 const power = (f: Formation) => Object.values(f.equipment).reduce((t, n) => t + n, 0);
 
@@ -191,6 +192,23 @@ describe('the plan for Tokmak at D+10 of ukraine-2026', () => {
     expect(f.casualties.p90).toBeLessThanOrEqual(committed);
     const html = renderToStaticMarkup(createElement(ForecastView, { forecast: f, objective: 'Tokmak', dayOf: (d: number) => `D+${d}` }));
     expect(html).not.toMatch(/(\d+ h)–\1 old/);
+  });
+
+  it('names the plan from the first click, shows its force, and warns before launching a losing plan', () => {
+    expect(f.pObjectiveByDay[f.days - 1]).toBeLessThan(0.25);
+    const name = freshName([{ name: 'Operation Zenith' }]);
+    expect(name).toBe('Operation Anvil');
+    const draft = newDraft(plan.formations, plan.objectives[0], name);
+    expect(planCommand(draft, UKR, true)).toMatchObject({ type: 'plan_operation', name: 'Operation Anvil' });
+    const units = plan.formations.map((id) => ({ entry: { id, name: s.world.formations[id].name, kind: 'maneuver', nation: UKR }, strength: 0.8 }) as unknown as FormationView);
+    const html = renderToStaticMarkup(createElement(PlanPanel, {
+      planning: { stage: 'review', draft, forecast: { status: 'done', key: '', forecast: f } }, op: undefined, units, from: 'Orikhiv', objective: 'Tokmak', via: [],
+      dayOf: (d: number) => `D+${d}`, onLaunch() {}, onSave() {}, onRedraw() {}, onCancelOperation() {}, onClose() {}, onRemove() {},
+    }));
+    expect(html).toContain('Operation Anvil');
+    expect(html).toContain('3 formations · 80% strength');
+    expect(html).toContain('Staff advise against');
+    expect(html).not.toMatch(/ww-btn gold ww-plan-launch/);
   });
 });
 
