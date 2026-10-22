@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { atWar, relationMut, type System } from '../src/core/engine';
+import { atWar, relation, relationMut, type System } from '../src/core/engine';
 import type { Command, MunitionId, NationId, NodeId, SimEvent } from '../src/core/types';
 import { createSession } from '../src/scenarios';
 import { createAi } from '../src/systems/ai';
@@ -574,5 +574,23 @@ describe('mobilization and the home front', () => {
     };
     expect(Math.max(...levels(undefined))).toBeGreaterThan(0.1);
     expect(Math.max(0, ...levels(0.1))).toBeLessThanOrEqual(0.1);
+  });
+
+  it('a distant member that strikes the enemy homeland stays partially mobilized; one whose own homeland is struck goes to the frontline level', () => {
+    const peak = (by: string, at: { lat: number; lon: number }) => {
+      let node = 0 as NodeId;
+      const strikes: System = {
+        id: 'strikes',
+        step: (world, ctx) => ctx.emit({ type: 'strike', tick: world.tick, by: N(by), munition: id.munition('t_cruise'), fired: 4, intercepted: 0, target: node, effects: [] }),
+      };
+      const t = testWorld([strikes, createDiplomacy(), createAi()]);
+      node = t.nodeAt(at.lat, at.lon);
+      t.war('ESP', 'RUS');
+      const levels = commandsOver(t, 4 * 30).filter((c): c is Extract<Command, { type: 'set_mobilization' }> => c.type === 'set_mobilization' && c.nation === N('ESP')).map((c) => c.level);
+      expect(relation(t.world, N('ESP'), N('RUS')).escalation).toBe('strategic_conventional');
+      return Math.max(0, ...levels);
+    };
+    expect(peak('ESP', { lat: 54.7, lon: 20.5 })).toBeLessThan(0.3);
+    expect(peak('RUS', { lat: 40.4, lon: -3.7 })).toBeGreaterThan(0.3);
   });
 });

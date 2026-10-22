@@ -85,7 +85,9 @@ export function warAims(p: Plan): Objective[] {
  * - existential: an enemy holds 2% of the homeland's people or threatens the capital.
  *   0.8 gives ~33% of GDP; Ukraine spent 34% in 2024 (SIPRI 2025). Its draft pool, not the
  *   level, holds its call-up to the ~25-35k a month the Ukrainian MoD reports.
- * - frontline: an enemy across a land border, or homeland struck at the strategic rung.
+ * - frontline: an enemy across a land border, or an enemy that strikes the homeland at the strategic rung. The rung
+ *   belongs to the pair, so a state that climbs it by striking the enemy's homeland alone (Spanish aircraft over
+ *   Kaliningrad) faces no new threat at home and stays distant.
  *   0.33 gives ~7.2% of GDP; Russia spent 7.1% in 2024 (SIPRI 2025) while recruiting
  *   ~30k contract soldiers a month, with no general call-up since September 2022.
  * - distant: a war fought abroad. 0.25 gives 5% of GDP, near the US in 1991 and 2003-10
@@ -533,7 +535,10 @@ export function planStrategy(p: Plan): void {
   p.ai.aims[p.nation] = warAims(p);
 
   let peak = 0;
-  for (const e of p.enemies) peak = Math.max(peak, rung(relation(p.world, p.nation, e).escalation));
+  for (const e of p.enemies) {
+    const struck = d?.outward?.[`${e}>${p.nation}`];
+    if (struck?.homeland || struck?.capital || d?.records[p.nation]?.nuclearStruckBy.includes(e)) peak = Math.max(peak, rung(relation(p.world, p.nation, e).escalation));
+  }
   const near = neighbours(p.ctx.map, p.nation);
   const standing = Math.max(nation.mobilization, p.world.slices.economy?.nations[p.nation]?.mobilizationTarget ?? 0);
   const wanted = mobilizationTarget(d?.assessment[p.nation], [...p.enemies].some((e) => near.has(e)), peak);
