@@ -14,11 +14,18 @@ function runDays(s: ReturnType<typeof createSession>, days: number, on?: (events
   }
 }
 
+/** south-asia-2027 fought as a full war: its opening punitive aim would end it in a ceasefire within days, and these tests measure a war's fuel. */
+function fullWar(id: string): ReturnType<typeof createSession> {
+  const s = createSession(id, 1);
+  for (const c of s.world.pending) if (c.type === 'declare_war') c.aim = { kind: 'total' };
+  return s;
+}
+
 describe('peacetime fuel (LE-7)', () => {
   // Peacetime militaries are funded for the fuel they train on. On main 40-odd armies at peace ran their
   // depots dry within 30 days of south-asia-2027, and Pakistan ran short on day 5 of its war.
   it('no army runs out of fuel in the first 30 days of south-asia-2027', () => {
-    const s = createSession('south-asia-2027', 1);
+    const s = fullWar('south-asia-2027');
     const short: string[] = [];
     runDays(s, 30, (events, day) => {
       for (const e of events) if (e.type === 'shortage' && e.what === 'fuel') short.push(`${e.nation} (${s.world.nations[e.nation].status}) day ${day.toFixed(1)}`);
@@ -190,7 +197,7 @@ describe('oil blockade (LE-5)', () => {
       for (const f of Object.values(s.world.formations)) if (f.nation === pak && f.status !== 'destroyed') tons += f.supply.fuel;
       return tons;
     };
-    const open = createSession('south-asia-2027', 1), blockaded = createSession('south-asia-2027', 1);
+    const open = fullWar('south-asia-2027'), blockaded = fullWar('south-asia-2027');
     runDays(open, 1);
     runDays(blockaded, 1);
     const { world, map } = blockaded;

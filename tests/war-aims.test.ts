@@ -88,13 +88,13 @@ describe('war aims bound what the AI may order', () => {
 
     const brigade = Object.values(world.formations).find((f) => f.nation === 'IND' && f.kind === 'maneuver' && f.status === 'active')!;
     world.pending.push({ type: 'order', nation: N('IND'), formation: brigade.id, order: { posture: 'attack', target: lahore } });
-    const refused = s.engine.step(world).findLast((e) => e.type === 'command_result' && e.formation === brigade.id);
+    const refused = s.engine.step(world).reverse().find((e) => e.type === 'command_result' && e.formation === brigade.id);
     expect(refused, JSON.stringify(refused)).toMatchObject({ ok: false, code: 'beyond_war_aims' });
 
     const fleet = Object.values(world.formations).find((f) => f.nation === 'IND' && f.kind === 'surface_group' && f.status === 'active')!;
     const karachiSea = [...map.neighbors(map.nodeAt(24.85, 67.0))].find((n) => map.isSea(n))!;
     world.pending.push({ type: 'order', nation: N('IND'), formation: fleet.id, order: { posture: 'blockade', target: karachiSea as NodeId } });
-    const naval = s.engine.step(world).findLast((e) => e.type === 'command_result' && e.formation === fleet.id);
+    const naval = s.engine.step(world).reverse().find((e) => e.type === 'command_result' && e.formation === fleet.id);
     expect(naval, JSON.stringify(naval)).toMatchObject({ ok: false, code: 'beyond_war_aims' });
 
     world.nations[N('IND')].controlledBy = 'human';

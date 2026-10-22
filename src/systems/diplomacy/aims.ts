@@ -48,7 +48,7 @@ export const unbounded = (aim: WarAim) => aim.kind === 'total' || aim.kind === '
  * case, so the Sindoor land-casualty question is tuned on, not held out.
  */
 export const PUNITIVE_CONTACT_SHARE = defineParam({
-  id: 'diplomacy.PUNITIVE_CONTACT_SHARE', value: 0.005, range: [0, 0.05], tag: 'judgment',
+  id: 'diplomacy.PUNITIVE_CONTACT_SHARE', value: 0.002, range: [0.0005, 0.005], tag: 'judgment',
   source: 'judgment: Sindoor 2025, 21 military dead on the Line of Control in four days (Wikipedia, 2025 India-Pakistan conflict)',
   affects: 'ground casualties in a punitive war',
 });
