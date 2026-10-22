@@ -9,7 +9,7 @@ import { MomentOverlay } from './moments/MomentOverlay';
 import { momentsOf, type Moment } from './moments/moments';
 import { CoachMarks } from './coach/CoachMarks';
 import { CrisisScreen } from './crisis/CrisisScreen';
-import { nextCrisis, type Crisis, type CrisisContext } from './crisis/crisis';
+import { answered, nextCrisis, type Crisis, type CrisisContext } from './crisis/crisis';
 import { ConfirmDialog, EndDialog, GameMenu, type Confirmation } from './GameFlow';
 import { crisesOn } from './prefs';
 import { EventLog } from './EventLog';
@@ -31,7 +31,7 @@ import { openingFacts } from './start/opening';
 import { StartScreen } from './start/StartScreen';
 import { shortName } from './start/scenarioInfo';
 import type { Overlays } from './renderer';
-import type { Action, Card, Drawer } from './staff/advice';
+import type { Action, Card, Drawer, Mark } from './staff/advice';
 import { DailyBrief } from './staff/DailyBrief';
 import { BRIEF_CADENCES, type BriefCadence } from './staff/desk';
 import { operations } from './staff/operations';
@@ -82,7 +82,7 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
   const places = client.places;
   const desk = client.desk!;
   const routes = useMemo(() => new Routes(client.map), [client]);
-  const focusHandle = useRef<((n: NodeId, frame?: 'close' | 'wide') => void) | null>(null);
+  const focusHandle = useRef<((n: NodeId, frame?: 'close' | 'wide', marks?: readonly Mark[]) => void) | null>(null);
 
   const [selected, setSelected] = useState<FormationId | null>(null);
   const [pending, setPending] = useState<{ posture: Posture; targetClass?: TargetClass; lift?: 'air' | 'sea' } | null>(null);
@@ -221,7 +221,7 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
     if (o.defer) return closeCrisis();
     if (o.action.kind === 'show') {
       setCrisis(null);
-      focusNode(o.action.node);
+      focusHandle.current?.(o.action.node, 'wide', o.action.marks);
       return;
     }
     client.act(crisis.c.card, o.action);
@@ -244,6 +244,12 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
       platformClass: (id) => client.meta?.platforms[id]?.class,
       place: (node) => places.name(node).replace(/^(near|off) /, ''), at: (node) => places.at(node),
       name: (id) => client.namer.nation(id),
+      formation: (id) => {
+        const f = client.state.formations.find((x) => x.entry.id === id);
+        return f && { name: f.entry.name, nation: f.entry.nation, kind: f.entry.kind, strength: f.status === 'destroyed' ? 0 : f.strength, node: f.node };
+      },
+      opening: new Set((client.meta?.scenario.wars ?? []).map(([a, b]) => `${a}>${b}`)),
+      capitalOf: (id) => [...capitals].find(([, n]) => n === id)?.[0],
     });
     moments.current.push(...found.filter((m) => !seen.has(m.key)).slice(0, 2));
   }, [client.state.latestEvents]);
@@ -384,7 +390,7 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
   };
 
   const act = (card: Card, action: Action) => {
-    if (action.kind === 'show') { focusNode(action.node); closeBrief(); }
+    if (action.kind === 'show') { focusHandle.current?.(action.node, action.marks ? 'wide' : 'close', action.marks); closeBrief(); }
     else if (action.kind === 'unit') { selectFormation(action.formation); focusHandle.current?.(action.node, 'wide'); }
     else if (action.kind === 'open') setDrawer(action.drawer);
     client.act(card, action);
@@ -648,7 +654,7 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
       {coach && <CoachMarks onDone={() => { markCoachDone(); setCoach(false); }} />}
       {crisis && date && (
         <CrisisScreen
-          crisis={crisis.c}
+          crisis={crisis.chosen !== null && crisisContext() ? answered(crisis.c, crisisContext()!) : crisis.c}
           me={playAs}
           nation={client.namer.nation(playAs)}
           scenario={client.meta?.scenario.name ?? ''}

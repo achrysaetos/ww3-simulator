@@ -42,6 +42,7 @@
 .cr-clock { position: absolute; left: 50%; top: calc(58px + clamp(56px, 7.6vw, 110px) + 46px); transform: translateX(-50%); display: grid; grid-template-columns: auto auto; align-items: end; column-gap: 22px; row-gap: 8px; }
 .cr-clock-l { font-family: var(--ww-title); font-weight: 600; font-size: 22px; letter-spacing: 0.24em; text-transform: uppercase; color: var(--cr-soft); padding-bottom: 12px; }
 .cr-clock-v { font-size: 64px; font-weight: 600; line-height: 1; color: #fff; text-shadow: 0 0 20px rgba(var(--cr-rgb), 0.5); }
+.cr-clock-word { text-transform: uppercase; letter-spacing: 0.12em; font-size: 52px; }
 .cr-clock-v small { font-size: 26px; color: var(--cr-soft); margin-left: 2px; }
 .cr-clock-bar { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(10, 1fr); gap: 3px; width: 100%; }
 .cr-clock-bar i { height: 6px; background: rgba(var(--cr-rgb), 0.2); }

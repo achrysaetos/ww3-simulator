@@ -6,6 +6,7 @@
  * and the Daily Brief would. Pure: reads the card and the player's own view.
  */
 import type { NationId, NodeId } from '../../core/types';
+import { NUCLEAR_ALERT } from '../../data/nations';
 import { treatyName } from '../events';
 import type { NationDetail, NationSummary } from '../snapshot';
 import type { Action, Card } from '../staff/advice';
@@ -39,12 +40,16 @@ export interface Crisis {
   source: string;
   headline: string;
   sub: string;
-  /** Hours left to answer; null when the decision has no deadline. */
+  /** Hours left on the clock; null when the decision has no deadline. */
   hoursLeft: number | null;
-  /** The whole answer window, for the deadline bar. */
+  /** The whole window, for the deadline bar. */
   windowHours: number | null;
+  /** What the clock counts down to, e.g. "Answer due in". */
+  clock: string;
   node?: NodeId;
   facts: CrisisFact[];
+  /** The facts as they stand now, read again once the player has answered. */
+  factsNow(c: CrisisContext): CrisisFact[];
   options: CrisisOption[];
   /** One line on how the staff stands: agreed, or split. */
   verdict: string;
@@ -95,19 +100,20 @@ function treaty(card: Card, c: CrisisContext): Crisis | null {
       action: stay, recommended: !joinFirst,
     },
   ];
+  const factsNow = (x: CrisisContext): CrisisFact[] => [
+    { label: 'Aggressor', value: aggressor, tone: 'red' },
+    { label: 'Under attack', value: victim, tone: 'blue' },
+    { label: `${aggressor} warheads`, value: theirWarheads ? n(theirWarheads) : 'None', tone: theirWarheads ? 'red' : undefined },
+    { label: 'Our warheads', value: ours ? n(ours) : 'None' },
+    { label: 'Our wars now', value: x.d.enemies.length ? `At war with ${x.d.enemies.slice(0, 2).map(x.name).join(', ')}${x.d.enemies.length > 2 ? ` and ${x.d.enemies.length - 2} more` : ''}` : 'At peace', tone: x.d.enemies.includes(call.aggressor) ? 'red' : undefined },
+  ];
   return {
     key: card.key, kind: 'treaty', card, node: c.capital(call.victim),
     source: 'Foreign ministry · Treaty desk',
     headline: 'Treaty invoked',
     sub: `${victim} calls on the ${name}${call.reconsidered ? ' again' : ''} · ${aggressor} has attacked`,
-    hoursLeft, windowHours: Math.max(hoursLeft, 7 * 24),
-    facts: [
-      { label: 'Aggressor', value: aggressor, tone: 'red' },
-      { label: 'Under attack', value: victim, tone: 'blue' },
-      { label: `${aggressor} warheads`, value: theirWarheads ? n(theirWarheads) : 'None', tone: theirWarheads ? 'red' : undefined },
-      { label: 'Our warheads', value: ours ? n(ours) : 'None' },
-      { label: 'Our wars now', value: c.d.enemies.length ? `${c.d.enemies.length} at war` : 'At peace' },
-    ],
+    hoursLeft, windowHours: Math.max(hoursLeft, 7 * 24), clock: 'Answer due in',
+    facts: factsNow(c), factsNow,
     options,
     verdict: joinFirst ? 'Your advisers lean to war, 2 to 1' : 'Your advisers lean to staying out, 2 to 1',
   };
@@ -119,7 +125,9 @@ function nuclear(card: Card, c: CrisisContext): Crisis | null {
   const alert = c.d.nuclear.alert;
   const theirs = c.nations.get(by)?.warheads ?? 0;
   const raise = card.primary?.kind === 'command' ? card.primary : undefined;
-  const at = c.capital(by);
+  const look = card.secondary?.kind === 'show' ? card.secondary : undefined;
+  const at = look?.node ?? c.capital(by);
+  const deployed = alert.mated > 0;
   const options: CrisisOption[] = [];
   if (raise) {
     options.push({
@@ -127,29 +135,42 @@ function nuclear(card: Card, c: CrisisContext): Crisis | null {
       quote: 'If they can strike and we cannot answer, deterrence is gone.', action: raise, recommended: true,
     });
   }
-  options.push({
-    title: 'Hold readiness', text: raise ? `We match nothing. ${them} sees no escalation from us.` : 'We have no nuclear answer of our own. We hold and watch.',
-    button: 'Hold', tone: 'gold', advisor: 'foreign', quote: raise ? 'Matching them tells them we expect a strike. Give the hotline a day.' : 'Our allies hold the deterrent. Let them speak first.',
-    action: later('Hold'), recommended: !raise,
+  options.push(raise ? {
+    title: 'Hold readiness', text: `We match nothing. ${them} sees no escalation from us.`, button: 'Hold', tone: 'gold', advisor: 'foreign',
+    quote: 'Matching them tells them we expect a strike. Give the hotline a day.', action: later('Hold'), recommended: false,
+  } : deployed ? {
+    title: 'Stand firm', text: `Our ${n(alert.mated)} warheads on launchers already answer any strike. We change nothing ${them} could read as a threat.`, button: 'Stand firm', tone: 'gold', advisor: 'security',
+    quote: 'Our deterrent is on alert every day. That is what it is for.', action: later('Stand firm'), recommended: true,
+  } : {
+    title: 'Hold and watch', text: 'We have no nuclear weapons of our own. Our allies hold the deterrent.', button: 'Hold', tone: 'gold', advisor: 'foreign',
+    quote: 'Let the nuclear powers beside us speak first.', action: later('Hold'), recommended: true,
   });
   if (at !== undefined) {
     options.push({
-      title: 'Look first', text: 'Return to the map with the clock stopped, and decide from the Daily Brief.', button: 'Show the map', tone: 'blue', advisor: 'intel',
-      quote: 'One report is not a satellite fix. Look before you answer.', action: { kind: 'show', label: 'Show me', node: at }, recommended: false,
+      title: 'Look first', text: look ? `See where ${them}'s launchers we know of stand, with the clock stopped, and decide from the Daily Brief.` : 'Return to the map with the clock stopped, and decide from the Daily Brief.',
+      button: 'Show the launchers', tone: 'blue', advisor: 'intel',
+      quote: 'One report is not a satellite fix. Look before you answer.', action: look ?? { kind: 'show', label: 'Show me', node: at }, recommended: false,
     });
   }
+  const spec = NUCLEAR_ALERT[by];
+  const elapsed = (c.tick - card.tick) * c.dtHours;
+  const hoursLeft = spec ? Math.max(0, spec.fullHours - elapsed) : null;
+  const factsNow = (x: CrisisContext): CrisisFact[] => {
+    const a = x.d.nuclear.alert;
+    return [
+      { label: `${them} warheads`, value: theirs ? n(theirs) : 'Unknown', tone: 'red' },
+      { label: 'Ours ready now', value: n(a.mated), tone: a.mated ? 'blue' : undefined },
+      { label: 'Ours in storage', value: n(a.stored) },
+      { label: 'Our posture', value: a.ordered ? 'Alert ordered' : a.mated ? 'Deployed on launchers' : 'Peacetime' },
+    ];
+  };
   return {
     key: card.key, kind: 'nuclear', card, node: at,
     source: 'Strategic command · Early warning',
     headline: 'Nuclear alert',
     sub: `${them} is mating warheads to its launchers`,
-    hoursLeft: null, windowHours: null,
-    facts: [
-      { label: `${them} warheads`, value: theirs ? n(theirs) : 'Unknown', tone: 'red' },
-      { label: 'Ours ready now', value: n(alert.mated), tone: alert.mated ? 'blue' : undefined },
-      { label: 'Ours in storage', value: n(alert.stored) },
-      { label: 'Our posture', value: alert.ordered ? 'Alert ordered' : 'Peacetime' },
-    ],
+    hoursLeft, windowHours: spec ? spec.fullHours : null, clock: `${them} fully armed in`,
+    facts: factsNow(c), factsNow,
     options,
     verdict: raise ? 'Your advisers disagree, 2 to 1' : 'Your advisers agree: hold',
   };
@@ -162,18 +183,23 @@ function peace(card: Card, c: CrisisContext): Crisis | null {
   const take = same(card.primary, accept);
   const held = c.d.nodesHome ? c.d.nodesHeld / c.d.nodesHome : 1;
   const me = c.nations.get(c.me);
+  const factsNow = (x: CrisisContext): CrisisFact[] => {
+    const h = x.d.nodesHome ? x.d.nodesHeld / x.d.nodesHome : 1;
+    const m = x.nations.get(x.me);
+    return [
+      { label: 'Our land held', value: pct(h), tone: h < 0.97 ? 'red' : 'blue' },
+      { label: 'War support', value: pct(m?.warSupport ?? 0), tone: (m?.warSupport ?? 1) < 0.4 ? 'red' : undefined },
+      { label: 'Mobilised', value: pct(m?.mobilization ?? 0) },
+      { label: 'Other wars', value: String(Math.max(0, x.d.enemies.filter((e) => e !== from).length)) },
+    ];
+  };
   return {
     key: card.key, kind: 'peace', card, node: c.capital(from),
     source: 'Foreign ministry · Back channel',
     headline: 'Armistice offered',
     sub: `${them} proposes a ceasefire on today's lines`,
-    hoursLeft: null, windowHours: null,
-    facts: [
-      { label: 'Our land held', value: pct(held), tone: held < 0.97 ? 'red' : 'blue' },
-      { label: 'War support', value: pct(me?.warSupport ?? 0), tone: (me?.warSupport ?? 1) < 0.4 ? 'red' : undefined },
-      { label: 'Mobilised', value: pct(me?.mobilization ?? 0) },
-      { label: 'Other wars', value: String(Math.max(0, c.d.enemies.length - 1)) },
-    ],
+    hoursLeft: null, windowHours: null, clock: 'The clock',
+    facts: factsNow(c), factsNow,
     options: [
       {
         title: 'Sign the armistice', text: `The guns stop on today's lines. Ground ${them} holds stays in its hands.`, button: 'Accept peace', tone: 'blue', advisor: 'foreign',
@@ -201,17 +227,18 @@ function capital(card: Card, c: CrisisContext): Crisis | null {
   }
   options.push({ title: 'Look first', text: 'Return to the map with the clock stopped.', button: 'Show me', tone: 'blue', advisor: 'intel', quote: 'Our fixes on them are hours old. See where they are.', action: show, recommended: !send });
   options.push({ title: 'Hold the line', text: `${city} holds with what is there.`, button: 'Hold', tone: 'red', advisor: 'security', quote: 'Pull from the front and the front breaks.', action: later('Hold'), recommended: false });
+  const factsNow = (x: CrisisContext): CrisisFact[] => [
+    { label: 'Nearest enemy', value: card.figure ? `${card.figure.value} km` : '—', tone: 'red' },
+    { label: 'War support', value: pct(x.nations.get(x.me)?.warSupport ?? 0) },
+    { label: 'Wars', value: `At war with ${x.d.enemies.length}`, tone: 'red' },
+  ];
   return {
     key: card.key, kind: 'capital', card, node: card.node,
     source: 'Military intelligence · Flash',
     headline: 'Capital threatened',
     sub: card.text,
-    hoursLeft: null, windowHours: null,
-    facts: [
-      { label: 'Nearest enemy', value: card.figure ? `${card.figure.value} km` : '—', tone: 'red' },
-      { label: 'War support', value: pct(c.nations.get(c.me)?.warSupport ?? 0) },
-      { label: 'Wars', value: `${c.d.enemies.length} at war`, tone: 'red' },
-    ],
+    hoursLeft: null, windowHours: null, clock: 'The clock',
+    facts: factsNow(c), factsNow,
     options,
     verdict: send ? 'Your advisers want the reserve in the city' : 'Your staff has no reserve to send',
   };
@@ -222,6 +249,11 @@ const BUILD: Record<CrisisKind, (card: Card, c: CrisisContext) => Crisis | null>
 export function crisisOf(card: Card, c: CrisisContext): Crisis | null {
   const kind = crisisKind(card);
   return kind ? BUILD[kind](card, c) : null;
+}
+
+/** The crisis once the player has answered it: the deadline is met, and the facts read as they stand now. */
+export function answered(crisis: Crisis, c: CrisisContext): Crisis {
+  return { ...crisis, hoursLeft: null, windowHours: null, clock: 'Answered', facts: crisis.factsNow(c) };
 }
 
 /** The first card on the table that should stop the clock, if any, skipping those already shown. */

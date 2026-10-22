@@ -89,7 +89,7 @@ export function StaffCard({ card, me, sent, paused, onAct, onDismiss }: CardProp
           <span className="ww-card-name">{who.name}</span>
           <span className="ww-label">{who.title}</span>
         </div>
-        {card.chip && <span className={`ww-chip ${card.urgent ? 'red' : 'gold'} ww-card-chip`}>{card.chip}</span>}
+        {card.chip && !sent && <span className={`ww-chip ${card.urgent ? 'red' : 'gold'} ww-card-chip`}>{card.chip}</span>}
       </div>
       <span className="ww-card-title">{card.title}</span>
       <p>{card.text}</p>
@@ -110,15 +110,14 @@ interface Props {
 
 const SHOWN = 6;
 
-/** The right-hand feed: live alerts, then advice with one recommended button each, then the record. */
+/** The right-hand feed: live alerts, then decisions still open, then the record of what the player answered. */
 export function WarRoom({ cards, answered, me, paused, onAct, onDismiss }: Props) {
   const advice = cards.filter((c) => c.tone === 'advice').length;
   const alerts = cards.filter((c) => c.tone === 'live').length;
-  const shown = [...answered.map((s) => ({ card: s.card, sent: s })), ...cards.map((card) => ({ card, sent: undefined }))];
-  const live = shown.filter((x) => x.card.tone === 'live' && !x.sent);
-  const rest = shown.filter((x) => x.card.tone !== 'live' || x.sent);
-  const ordered = [...live, ...rest].slice(0, SHOWN);
-  const more = live.length + rest.length - ordered.length;
+  const open = cards.map((card) => ({ card, sent: undefined as Sent | undefined }));
+  const all = [...open.filter((x) => x.card.tone === 'live'), ...open.filter((x) => x.card.tone !== 'live'), ...answered.map((s) => ({ card: s.card, sent: s }))];
+  const ordered = all.slice(0, SHOWN);
+  const more = all.length - ordered.length;
   return (
     <section className="ww-warroom" aria-label="War room" data-testid="war-room">
       <div className="ww-warroom-head"><span className="ww-label">War room</span><span className="ww-muted">{advice ? `${advice} for you` : alerts ? `${alerts} live` : 'All quiet'}</span></div>

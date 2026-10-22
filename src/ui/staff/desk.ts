@@ -6,7 +6,7 @@
 import type { GameMap } from '../../core/map';
 import type { FormationId, MunitionKind, NationId, NodeId, SimEvent } from '../../core/types';
 import type { Namer } from '../events';
-import type { ClientState, NationDetail, SessionMeta } from '../snapshot';
+import type { ClientState, MunitionGroup, NationDetail, SessionMeta } from '../snapshot';
 import { advise, answerOf, isDecision, RAID_KINDS, RECENT_TICKS, type Action, type Answer, type Card, type CommandAction, type Situation } from './advice';
 
 /** One game day, as the staff saw it. */
@@ -16,6 +16,8 @@ export interface Day {
   held: number;
   warSupport: number;
   ammo: number;
+  /** Rounds held per munition family (warehoused and loaded) at the latest tick of the day. */
+  stock: Partial<Record<MunitionGroup, number>>;
   raids: { fired: number; intercepted: number };
   gained: NodeId[];
   lost: NodeId[];
@@ -40,8 +42,15 @@ const ANSWER_TICKS = 3;
 /** Ticks an answered card stays on the table before it folds away. */
 const SHOW_ANSWER_TICKS = 4;
 const BRIEF_HOUR = 6;
+/** New decisions put in front of the player per game day, at most; the rest wait their turn. Urgent ones never wait. */
+export const NEW_DECISIONS_PER_DAY = 2;
+/** Days before the staff raises the same subject again (the key's first two parts: "opstall|op12"). */
+export const SUBJECT_REST_DAYS = 3;
+const subjectOf = (key: string) => key.split('|').slice(0, 2).join('|');
+/** Which waiting decisions take the day's allowance first: a threat before a chance. Stable sort keeps the staff's order within a topic. */
+const FIRST: Record<Card['topic'], number> = { nuclear: 0, threat: 1, diplomacy: 2, command: 3, supply: 4, opportunity: 5, news: 6 };
 
-const KEPT: ReadonlySet<SimEvent['type']> = new Set(['strike', 'nuclear_detonation', 'nuclear_alert', 'node_captured', 'command_result', 'war_declared', 'peace', 'capitulation', 'message', 'shortage']);
+const KEPT: ReadonlySet<SimEvent['type']> = new Set(['strike', 'nuclear_detonation', 'nuclear_alert', 'node_captured', 'command_result', 'war_declared', 'peace', 'capitulation', 'message', 'shortage', 'formation_destroyed']);
 
 export class StaffDesk {
   recent: SimEvent[] = [];
@@ -50,10 +59,16 @@ export class StaffDesk {
   version = 0;
   private pool: Card[] = [];
   private readonly dismissed = new Set<string>();
+  /** Cards the player acted on whose answer has been shown and folded away: the decision is taken. */
+  private readonly done = new Set<string>();
   private readonly sent = new Map<string, Sent>();
   /** Decisions already put in front of the player in a brief. */
   private readonly briefed = new Set<string>();
   private lastBriefDay = -1;
+  /** When each decision was first put on the table, for the daily allowance. */
+  private readonly debut = new Map<string, number>();
+  /** When each subject last had a new decision put on the table. */
+  private readonly raised = new Map<string, number>();
   private tick = 0;
   /** The highest nuclear step any war the player is in has reached: 0 none, 1 an alert, 2 a detonation. */
   nuclearStep = 0;
@@ -77,11 +92,12 @@ export class StaffDesk {
     this.record(state, events, d);
     const situation: Situation = {
       me: this.me, tick: state.tick, dtHours: this.meta.dtHours, map: this.map, nationIds: this.meta.nationIds, control: state.control,
-      formations: state.formations, nations: state.nations, d, recent: this.recent, namer: this.namer, ammoPerDay: this.ammoPerDay(),
+      formations: state.formations, nations: state.nations, d, recent: this.recent, namer: this.namer, ammoPerDay: this.ammoPerDay(), burnPerDay: this.burnPerDay(),
+      ops: state.ops, contest: state.contest, known: this.known(),
       munitionKind: (id) => this.meta.munitions[id]?.kind as MunitionKind | undefined,
       unitCostUsdM: (id) => this.meta.munitions[id]?.costUsdM ?? this.meta.platforms[id]?.costUsdM ?? 0,
     };
-    this.pool = advise(situation);
+    this.pool = this.allow(advise(situation), state.tick);
     this.inTransit = new Map();
     for (const e of this.recent) {
       if (e.type !== 'command_result' || e.nation !== this.me || e.command !== 'order' || !e.formation) continue;
@@ -96,27 +112,32 @@ export class StaffDesk {
         else if (!s.answer && state.tick - s.tick > ANSWER_TICKS) s.silent = true;
       }
       const settled = s.answer?.final || s.silent;
-      if (settled && state.tick - s.tick > SHOW_ANSWER_TICKS + ANSWER_TICKS) this.sent.delete(key);
+      if (settled && state.tick - s.tick > SHOW_ANSWER_TICKS + ANSWER_TICKS) {
+        this.sent.delete(key);
+        this.done.add(key);
+      }
     }
     this.version++;
   }
 
   private involvesMe(e: Extract<SimEvent, { type: 'strike' }>, state: ClientState): boolean {
     const i = this.meta.nationIds.indexOf(this.me);
-    return e.by === this.me || state.control[e.target] === i;
+    return e.by === this.me || state.control[e.target] === i
+      || e.effects.some((x) => x.kind === 'ship_hits' && state.formations.some((f) => f.entry.id === x.formation && f.entry.nation === this.me));
   }
 
   private record(state: ClientState, events: readonly SimEvent[], d: NationDetail): void {
     const day = Math.floor((state.tick * this.meta.dtHours) / 24);
     let rec = this.days[this.days.length - 1];
     if (!rec || rec.day !== day) {
-      rec = { day, held: d.nodesHeld, warSupport: 0, ammo: 0, raids: { fired: 0, intercepted: 0 }, gained: [], lost: [] };
+      rec = { day, held: d.nodesHeld, warSupport: 0, ammo: 0, stock: {}, raids: { fired: 0, intercepted: 0 }, gained: [], lost: [] };
       this.days.push(rec);
       if (this.days.length > DAYS_KEPT) this.days.shift();
     }
     rec.held = d.nodesHeld;
     rec.warSupport = state.nations.get(this.me)?.warSupport ?? 0;
     rec.ammo = d.bulk.ammo;
+    rec.stock = Object.fromEntries(d.munitions.map((m) => [m.group, m.warehoused + m.loaded]));
     const mine = this.meta.nationIds.indexOf(this.me);
     for (const e of events) {
       if (e.type === 'strike' && e.by !== this.me && state.control[e.target] === mine && RAID_KINDS[this.meta.munitions[e.munition]?.kind as MunitionKind]) {
@@ -136,6 +157,42 @@ export class StaffDesk {
     return (full[0].ammo - full[full.length - 1].ammo) / (full.length - 1);
   }
 
+  /** Rounds of each munition family used per day over the last full days on record, net of what was made. */
+  private burnPerDay(): Partial<Record<MunitionGroup, number>> {
+    const full = this.days.slice(0, -1).slice(-4);
+    if (full.length < 2) return {};
+    const [first, last] = [full[0], full[full.length - 1]];
+    const out: Partial<Record<MunitionGroup, number>> = {};
+    for (const g of Object.keys(first.stock) as MunitionGroup[]) out[g] = ((first.stock[g] ?? 0) - (last.stock[g] ?? 0)) / (full.length - 1);
+    return out;
+  }
+
+  /**
+   * Hold back new decisions beyond the day's allowance, so a quiet week and a busy hour both
+   * read as a staff bringing a few things at a time. A held card keeps its place in the queue.
+   */
+  private allow(cards: Card[], tick: number): Card[] {
+    const ticksPerDay = Math.max(1, Math.round(24 / this.meta.dtHours));
+    let today = 0;
+    for (const [key, t] of this.debut) {
+      if (Math.floor(t / ticksPerDay) === Math.floor(tick / ticksPerDay)) today++;
+      else if (tick - t > 7 * ticksPerDay && !cards.some((c) => c.key === key)) this.debut.delete(key);
+    }
+    const waiting = cards.filter((c) => isDecision(c) && !c.urgent && !this.debut.has(c.key) && !this.dismissed.has(c.key) && !this.sent.has(c.key) && !this.done.has(c.key));
+    const held = new Set<string>();
+    for (const c of waiting.sort((a, b) => FIRST[a.topic] - FIRST[b.topic])) {
+      const subject = subjectOf(c.key);
+      if (today >= NEW_DECISIONS_PER_DAY || tick - (this.raised.get(subject) ?? -Infinity) < SUBJECT_REST_DAYS * ticksPerDay) {
+        held.add(c.key);
+        continue;
+      }
+      this.debut.set(c.key, tick);
+      this.raised.set(subject, tick);
+      today++;
+    }
+    return cards.filter((c) => !held.has(c.key));
+  }
+
   /** Land cells gained (positive) or lost over the last `n` days. */
   frontChange(n: number): number | null {
     if (this.days.length < 2) return null;
@@ -146,7 +203,12 @@ export class StaffDesk {
 
   /** Cards on the table: fresh ones the player has not dismissed or acted on. */
   get cards(): Card[] {
-    return this.pool.filter((c) => !this.dismissed.has(c.key) && !this.sent.has(c.key));
+    return this.pool.filter((c) => !this.dismissed.has(c.key) && !this.sent.has(c.key) && !this.done.has(c.key));
+  }
+
+  private known(): Situation['known'] {
+    const table = new Set(this.pool.map((c) => c.key));
+    return (key) => (this.dismissed.has(key) || this.sent.has(key) || this.done.has(key) ? 'done' : table.has(key) ? 'table' : undefined);
   }
 
   /** Cards the player acted on, newest first, with the engine's answer once it comes. */

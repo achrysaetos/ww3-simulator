@@ -5,6 +5,7 @@ import { PlaceNamer, type Namer } from '../src/ui/events';
 import { SimHost } from '../src/ui/host';
 import { applySnapshot, emptyClientState, nationCards, type FromWorker, type SessionMeta } from '../src/ui/snapshot';
 import { StaffDesk } from '../src/ui/staff/desk';
+import type { RoleId } from '../src/ui/staff/roles';
 
 const map = loadMap();
 const places = new PlaceNamer(map);
@@ -14,7 +15,7 @@ const cards = new Map(nationCards(map, profiles).map((c) => [c.id, c]));
  * A real scenario driven through the worker host, mirrored the way the page's SimClient mirrors
  * it, with the player's staff desk fed from every snapshot.
  */
-export function playWithStaff(scenario: string, nation: string, seed = 1) {
+export function playWithStaff(scenario: string, nation: string, seed = 1, role?: RoleId) {
   const host = new SimHost((m) => receive(m));
   const state = emptyClientState(map.size);
   let meta: SessionMeta | null = null;
@@ -37,7 +38,7 @@ export function playWithStaff(scenario: string, nation: string, seed = 1) {
     for (const f of state.formations) names.set(f.entry.id, f.entry.name);
     desk!.observe(state, m.snapshot.events, state.focusNation);
   }
-  host.handle({ type: 'start', scenario, nation: nation as NationId, seed });
+  host.handle({ type: 'start', scenario, nation: nation as NationId, seed, role });
   return {
     host,
     state,
