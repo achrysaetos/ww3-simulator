@@ -77,9 +77,14 @@ describe.each(SEEDS)('ukraine-2026 war economy, seed %i', (seed) => {
     expect(shells).toBeLessThanOrEqual(20_000);
   });
 
-  it('Russia out-supplies Ukraine in shells 2.5-7 to 1 (RUSI/ISW 2024: 3-5 to 1, worse at the 2023-24 low point)', () => {
+  // The ratio narrowed as Western and Czech-bought rounds arrived. 2024: 5:1 in March (NATO estimate via CNN, 10k against
+  // 2k a day), 3:1 by October (Ukrainian MoD); 2025: about 2:1 in February (Syrskyi) and 1.8:1 in July (UAF communications
+  // department to LIGA.net, 23 Jul 2025). ukraine-2026 opens after that, so the floor sits under the 2025 claims: they are a
+  // combatant's, and the Czech initiative, about half of Ukraine's large-calibre rounds in 2025, lost Czech state funding in
+  // January 2026 (PM Babiš). The 2.5 floor this replaces was a 2024 figure applied to a 2026 start.
+  it('Russia out-supplies Ukraine in shells 1.5-7 to 1 (2024: 3-5 to 1, 8 to 1 at the low point; 2025: ~2 to 1, Ukrainian claims)', () => {
     const ratio = shellSupplyTonsPerDay(eco(seed, 'RUS')) / shellSupplyTonsPerDay(eco(seed, 'UKR'));
-    expect(ratio).toBeGreaterThanOrEqual(2.5);
+    expect(ratio).toBeGreaterThanOrEqual(1.5);
     expect(ratio).toBeLessThanOrEqual(7);
   });
 
