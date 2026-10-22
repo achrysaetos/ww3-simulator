@@ -1,6 +1,6 @@
 import { newId, type SimContext } from '../../core/engine';
-import type { Command, Formation, NodeId, PlatformId, RefusalCode, World } from '../../core/types';
-import type { OrderOutcome } from '../orders';
+import type { Command, Formation, NodeId, Order, PlatformId, RefusalCode, World } from '../../core/types';
+import { authority, delegated, DOMAIN_OF_KIND, type OrderOutcome } from '../orders';
 import { engages } from '../air/tables';
 import { canBoard, liftShare, liftUsed } from './amphibious';
 import { tickEnv } from './env';
@@ -161,12 +161,44 @@ export function refreshOrders(world: World, ctx: SimContext, f: Formation, track
     const t = world.formations[o.targetFormation];
     if (t?.status === 'active' && t.node !== o.target && (o.posture === 'escort' || tracked) && !launchedFromShore(ctx, f)) repath(world, ctx, f, t.node);
   }
+  if (f.node === f.home || o.posture === 'reserve') return;
+  const why = homeward(ctx, f);
+  if (!why) return;
+  overrule(world, ctx, f, { ...o, posture: 'reserve' }, `${why}; it returns to node ${f.home}`);
+  repath(world, ctx, f, f.home);
+}
+
+/** Why a group at sea must head home now, if it must. */
+function homeward(ctx: SimContext, f: Formation): string | undefined {
   // Crewless groups (strike USVs) carry no stores: no food, nothing to run out of.
-  const spent = (f.supplyCapacity.food > 0 && f.supply.food <= 0) || f.supply.fuel < BINGO_FUEL * f.supplyCapacity.fuel || mostlyDamaged(f);
-  if (f.node !== f.home && o.posture !== 'reserve' && (spent || (ON_STATION.has(o.posture) && outOfWeapons(ctx, f)))) {
-    o.posture = 'reserve';
-    repath(world, ctx, f, f.home);
-  }
+  if (f.supplyCapacity.food > 0 && f.supply.food <= 0) return 'out of stores';
+  if (f.supply.fuel < BINGO_FUEL * f.supplyCapacity.fuel) return 'down to the fuel it needs to get home';
+  if (mostlyDamaged(f)) return 'most of its ships are damaged and need a yard';
+  if (ON_STATION.has(f.order.posture) && outOfWeapons(ctx, f)) return f.kind === 'submarine' ? 'out of anti-ship weapons' : 'its area air-defence missiles are spent';
+  return undefined;
+}
+
+/**
+ * Whether the human player commands `f`: its nation's player took it under their own command, or did not delegate its
+ * domain to the AI.
+ */
+function playerCommands(world: World, f: Formation): boolean {
+  return playerHolds(world, f) || !delegated(world, f.nation, DOMAIN_OF_KIND[f.kind]);
+}
+
+/**
+ * The naval system replaces a group's order on its own: crippled, or out of fuel, stores or weapons. A player commanding
+ * the group hears why, as a refusal of the order it overrode.
+ */
+export function overrule(world: World, ctx: SimContext, f: Formation, order: Order, why: string): void {
+  f.order = order;
+  if (playerCommands(world, f))
+    ctx.emit({ type: 'command_result', tick: world.tick, nation: f.nation, command: 'order', formation: f.id, byPlayer: true, ok: false, code: 'not_ready', reason: why });
+}
+
+/** Whether the human player took `f` under their own command, so the naval system's own routines leave its orders alone. */
+export function playerHolds(world: World, f: Formation): boolean {
+  return world.nations[f.nation]?.controlledBy === 'human' && !!authority(world, f.nation).held[f.id];
 }
 
 function mostlyDamaged(f: Formation): boolean {

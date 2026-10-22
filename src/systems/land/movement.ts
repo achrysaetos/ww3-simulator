@@ -6,7 +6,7 @@ import type { Formation, NationId, NodeId, Order, PlatformId, World } from '../.
 import type { OrderCommand, OrderOutcome } from '../orders';
 import { allied, canEnter, hostilesAt, indexByNode, isLandFormation, keepDeception, landSlice } from './state';
 import { cannotDrop, insert, supplyAirheads } from './airborne';
-import { airlift, embarkation, lifted, liftMode, overseas } from './strategic';
+import { airlift, debarkation, embarkation, lifted, liftMode, overseas } from './strategic';
 import { exposureLosses, groundFactorAt } from '../weather/effects';
 import { DECEPTION } from '../c2/tables';
 import {
@@ -88,10 +88,15 @@ export function applyLandOrder(world: World, cmd: OrderCommand, ctx: SimContext)
   let path = overseas(ctx.map, f.node, target) ? null : route(world, ctx.map, f, target, seize);
   if (path) delete order.lift;
   else if (overseas(ctx.map, f.node, target) || betweenTheatres(world, ctx.map, f, target)) {
+    // Lift puts troops down only where their own side holds a port or airfield; a hostile shore takes an amphibious assault.
+    const assault = `node ${target} lies across the sea with no friendly port or airfield to land at; embark on an amphibious group at a port and order the group to attack the coast`;
     const mode = posture === 'move' ? liftMode(world, ctx.catalog, f, cmd.order.lift) : undefined;
-    if (!mode) return { ok: false, code: 'no_route', reason: `no land route to node ${target}; order a move to deploy overseas` };
+    if (!mode) return { ok: false, code: 'no_route', reason: reachable(world, ctx.map, f.nation, target) ? `no land route to node ${target}; order a move to deploy overseas` : assault };
     const gate = embarkation(world, ctx.map, f, target, mode);
-    if (gate === undefined) return { ok: false, code: 'no_lift', reason: `no friendly ${mode === 'air' ? 'airfield' : 'port'} to embark at` };
+    if (gate === undefined) {
+      if (debarkation(world, ctx.map, f.nation, target, mode) !== undefined) return { ok: false, code: 'no_lift', reason: `no friendly ${mode === 'air' ? 'airfield' : 'port'} on this shore to embark at` };
+      return { ok: false, code: 'no_lift', reason: reachable(world, ctx.map, f.nation, target) ? `no friendly ${mode === 'air' ? 'airfield' : 'port'} near node ${target} to land at` : assault };
+    }
     order.lift = mode;
     if (gate === f.node) return commit(f, { ...order, path: [] });
     path = route(world, ctx.map, f, gate, seize, true);
@@ -100,6 +105,11 @@ export function applyLandOrder(world: World, cmd: OrderCommand, ctx: SimContext)
   const km = path.reduce((sum, n, i) => sum + edgeKm(world, ctx.map, f, i ? path[i - 1] : f.node, n, ctx.map.distanceKm(i ? path[i - 1] : f.node, n), seize, order.lift !== undefined), 0);
   const kmPerDay = marchKmPerDay(world, ctx.catalog, f);
   return commit(f, { ...order, path }, kmPerDay > 0 ? (km / kmPerDay) * 24 : undefined);
+}
+
+/** Whether lift of either kind could put a formation down near `target`: its side holds a port or airfield there. */
+function reachable(world: World, map: GameMap, nation: NationId, target: NodeId): boolean {
+  return debarkation(world, map, nation, target, 'sea') !== undefined || debarkation(world, map, nation, target, 'air') !== undefined;
 }
 
 /** Shortest move that counts as a deployment between theatres rather than a march blocked at the front (judgement call: Vicenza to Korea, not Kharkiv to Izium). */
