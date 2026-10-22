@@ -3,6 +3,7 @@
  * the clock and speed, and a few headline figures with a DEFCON-style chip.
  * Presentational only; the caller supplies the numbers.
  */
+import { Flag } from '../flags';
 import './TopBar.css';
 
 export interface TopBarStat {
@@ -23,24 +24,6 @@ export interface TopBarProps {
   stats: TopBarStat[];
   /** 5 calm .. 1 nuclear use; null hides the chip. */
   defcon: number | null;
-}
-
-/** Horizontal bands top to bottom, for the flags a war in this game most often needs; others get a code badge. */
-const FLAGS: Record<string, string[]> = {
-  UKR: ['#0057b7', '#ffd700'], RUS: ['#ffffff', '#0039a6', '#d52b1e'], POL: ['#ffffff', '#dc143c'], DEU: ['#000000', '#dd0000', '#ffce00'],
-  EST: ['#0072ce', '#000000', '#ffffff'], LTU: ['#fdb913', '#006a44', '#c1272d'], LVA: ['#9e3039', '#ffffff', '#9e3039'], NLD: ['#ae1c28', '#ffffff', '#21468b'],
-  HUN: ['#ce2939', '#ffffff', '#477050'], BGR: ['#ffffff', '#00966e', '#d62612'], AUT: ['#ed2939', '#ffffff', '#ed2939'], YEM: ['#ce1126', '#ffffff', '#000000'],
-};
-
-function Flag({ id, name }: { id: string; name: string }) {
-  const bands = FLAGS[id];
-  return (
-    <svg width="38" height="26" viewBox="0 0 38 26" role="img" aria-label={`Flag of ${name}`}>
-      {bands ? bands.map((c, i) => <rect key={i} x="0.5" y={0.5 + (25 * i) / bands.length} width="37" height={25 / bands.length + 0.2} fill={c} />)
-        : <><rect x="0.5" y="0.5" width="37" height="25" fill="#14263c" /><text x="19" y="17.5" textAnchor="middle" fontFamily="IBM Plex Mono, monospace" fontSize="11" fill="#cfe6ff">{id}</text></>}
-      <rect x="0.5" y="0.5" width="37" height="25" fill="none" stroke="rgba(255,255,255,0.35)" />
-    </svg>
-  );
 }
 
 const MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];

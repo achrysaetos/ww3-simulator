@@ -72,7 +72,8 @@ export interface NationCard {
 }
 
 export type ToWorker =
-  | { type: 'start'; scenario: string; nation: NationId; seed: number }
+  /** role: the command role picked on the start screen; its delegation is queued before the first tick. */
+  | { type: 'start'; scenario: string; nation: NationId; seed: number; role?: string }
   /** Resume a save file's text (the CLI's --save format). */
   | { type: 'load'; text: string }
   | { type: 'save' }

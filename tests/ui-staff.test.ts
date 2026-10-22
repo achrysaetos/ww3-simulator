@@ -10,7 +10,7 @@ import { describeEvent } from '../src/ui/events';
 import { advise, answerOf, type Card, type CommandAction, type Situation } from '../src/ui/staff/advice';
 import { advisorOf, ROLES } from '../src/ui/staff/advisors';
 import type { Sent } from '../src/ui/staff/desk';
-import { COMMAND_ROLES, delegateCommands, roleOf } from '../src/ui/staff/StaffPanel';
+import { COMMAND_ROLES, delegateCommands, roleOf } from '../src/ui/staff/roles';
 import { operations } from '../src/ui/staff/operations';
 import { StaffCard } from '../src/ui/staff/WarRoom';
 import { degradeChain } from './c2.fixture';

@@ -194,21 +194,6 @@ input[type='range'] { flex: 1; accent-color: var(--accent); }
 .perf .lagging { color: var(--amber); }
 button.primary { background: #0f3a52; border-color: var(--accent); color: #fff; font-weight: 600; padding: 8px 18px; text-transform: none; }
 
-.start { height: 100vh; overflow-y: auto; padding: 28px max(24px, calc(50vw - 560px)); }
-.start-head { margin-bottom: 18px; }
-.start-head .brand { font-size: 20px; }
-.start-h { font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent); margin: 22px 0 10px; }
-.scenario-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; }
-.scenario-card { display: flex; flex-direction: column; gap: 4px; text-align: left; text-transform: none; padding: 12px 14px; min-height: 140px; }
-.sc-name { font-size: 15px; font-weight: 700; }
-.sc-date { color: var(--amber); font-size: 11px; }
-.sc-summary { color: var(--text); opacity: 0.85; flex: 1; }
-.start .featured { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 6px; }
-.start .featured button { display: grid; grid-template-columns: 10px 1fr; grid-template-rows: auto auto; column-gap: 8px; text-align: left; padding: 8px; text-transform: none; }
-.start .featured .swatch { grid-row: 1 / 3; width: 8px; height: 100%; }
-.start-go { margin-top: 14px; flex-wrap: wrap; }
-.start-go select { min-width: 220px; }
-.start-go .primary { margin-left: auto; }
 .pre { white-space: pre-wrap; }
 
 .activity { margin: 0 0 8px; color: var(--amber); }
@@ -320,11 +305,6 @@ button.primary { background: #0f3a52; border-color: var(--accent); color: #fff; 
   .overlay-ctl { top: 8px; left: 8px; }
   .war-cols { grid-template-columns: 1fr; }
 }
-@media (max-width: 760px) {
-  .start { padding: 20px 16px; }
-  .start-go select { min-width: 0; width: 100%; }
-  .start-go .primary { margin-left: 0; width: 100%; }
-}
 
 /* game menu, briefing, objectives, end screen */
 .game-menu { position: relative; }
@@ -342,7 +322,6 @@ button.primary { background: #0f3a52; border-color: var(--accent); color: #fff; 
 .modal.end h2 { font-size: 26px; }
 .modal.end.victory h2 { color: var(--green); }
 .modal.end.defeat h2 { color: var(--red); }
-.start-load { margin-top: 14px; align-items: center; flex-wrap: wrap; }
 .deploy-tbl td { vertical-align: middle; }
 .deploy-tbl button.active { outline: 2px solid var(--accent); }
 .legend .lg-contest { background: repeating-linear-gradient(90deg, rgba(220,90,70,0.8) 0 6px, transparent 6px 8px); border: 1px dashed #dc5a46; }
