@@ -11,7 +11,7 @@ import { describeResult, treatyName, type Namer } from '../events';
 import type { FormationView, NationDetail, NationSummary } from '../snapshot';
 import type { Role } from './advisors';
 
-export type Drawer = 'forces' | 'nation' | 'log';
+export type Drawer = 'forces' | 'nation' | 'log' | 'cost';
 
 export type Action =
   | { kind: 'command'; label: string; command: Command }

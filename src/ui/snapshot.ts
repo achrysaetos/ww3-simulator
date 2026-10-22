@@ -30,6 +30,8 @@ import { ELECTIONS } from '../data/politics/elections';
 import { conditionsAt, type Conditions, packWeather } from '../systems/weather/effects';
 import type { IntelSource } from '../systems/intel';
 import { believedWorld, viewOf, type View } from '../systems/intel/view';
+import { OutputsRecorder } from '../outputs';
+import { outputsView, type OutputsView } from './outputs/view';
 import type {
   Command, CommandDomain, Echelon, Formation, FormationId, FormationKind, ItemId, MunitionId, MunitionKind, Nation, NationId, NodeId, PlatformId, Posture, SimEvent, World,
 } from '../core/types';
@@ -382,6 +384,8 @@ export interface Snapshot {
   /** The focused formation when it is the viewer's or a friend's; a contact comes as focusContact. */
   focusFormation?: FormationDetail;
   focusContact?: ContactDetail;
+  /** War cost and production race, sent once a day of game time: it moves slowly and costs a few KB. */
+  outputs?: OutputsView;
 }
 
 /** What the viewer's intelligence holds on a foreign formation: never its orders, supply or magazines. */
@@ -411,12 +415,15 @@ export class SnapshotEncoder {
   private events: SimEvent[] = [];
   private dropped = 0;
   private weatherDay?: number;
+  private readonly outputs: OutputsRecorder;
+  private outputsTick = -Infinity;
   /** First war_declared that put each nation into each war, keyed `nation|enemy`. */
   private readonly entries = new Map<string, WarEntry>();
 
   constructor(readonly nationIds: NationId[], private readonly catalog: Catalog, mapSize: number) {
     if (mapSize >= NO_NODE) throw new Error(`map has ${mapSize} nodes; the wire format packs nodes in 16 bits`);
     this.nationIndex = new Map(nationIds.map((n, i) => [n, i]));
+    this.outputs = new OutputsRecorder(catalog);
   }
 
   /** Buffer events from ticks that run between two snapshots. */
@@ -522,6 +529,12 @@ export class SnapshotEncoder {
       snap.fPosture[i] = POSTURES.indexOf(f.order.posture);
       snap.fStatus[i] = STATUSES.indexOf(f.status);
       snap.fTarget[i] = f.order.target ?? NO_NODE;
+    }
+
+    this.outputs.observe(world);
+    if (viewer && (world.tick - this.outputsTick) * world.dtHours >= 24) {
+      this.outputsTick = world.tick;
+      snap.outputs = outputsView(world, this.outputs.outputs(world, map), viewer);
     }
 
     if (focus.nation && world.nations[focus.nation]) snap.focusNation = this.nationDetail(world, map, focus.nation, view);
@@ -911,6 +924,8 @@ export interface ClientState {
   focusNation?: NationDetail;
   focusFormation?: FormationDetail;
   focusContact?: ContactDetail;
+  /** The latest War Cost reading; it arrives once a day. */
+  outputs?: OutputsView;
   /** Events from the latest snapshot only. */
   latestEvents: SimEvent[];
 }
@@ -980,5 +995,6 @@ export function applySnapshot(state: ClientState, snap: Snapshot, nationIds: rea
   state.focusNation = snap.focusNation;
   state.focusFormation = snap.focusFormation;
   state.focusContact = snap.focusContact;
+  if (snap.outputs) state.outputs = snap.outputs;
   state.latestEvents = snap.events;
 }
