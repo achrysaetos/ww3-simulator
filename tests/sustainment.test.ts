@@ -214,12 +214,17 @@ describe('oil blockade (LE-5)', () => {
     runDays(open, 30);
     runDays(blockaded, 30);
     const [open30, blockaded30] = [fuel(open), fuel(blockaded)];
+    const delivered = (s: ReturnType<typeof createSession>) => s.world.slices.economy.nations[pak].fuelDelivered;
+    const [openIn30, blockadedIn30] = [delivered(open), delivered(blockaded)];
     runDays(open, 30);
     runDays(blockaded, 30);
     expect(world.theater.tradeBlocked[pak]).toBeGreaterThan(0.9);
-    // Stocks carry the first three weeks; after that the forces burn their depots down with little coming in.
+    // Stocks carry the first three weeks; after that the forces burn their depots down with little coming in. The
+    // inflow is compared, not the open run's depot drop: that drop is wartime burn less refills, two near-equal flows
+    // (~240 kt and ~187 kt on seed 1), plus the fuel of formations destroyed, so how hard Pakistan fights swings it.
     expect(blockaded30).toBeGreaterThan(0.9 * open30);
-    expect(blockaded30 - fuel(blockaded)).toBeGreaterThan(3 * (open30 - fuel(open)));
+    expect(delivered(blockaded) - blockadedIn30).toBeLessThan(0.05 * (delivered(open) - openIn30));
+    expect(fuel(blockaded)).toBeLessThan(0.5 * blockaded30);
     expect(fuel(blockaded)).toBeLessThan(0.6 * fuel(open));
     // LE-15: the economy reports it can no longer keep its forces fighting.
     expect(economicMeans(world, pak)).toBeLessThan(0.2);
