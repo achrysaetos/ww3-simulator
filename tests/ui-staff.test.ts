@@ -11,6 +11,7 @@ import { advisorOf, ROLES } from '../src/ui/staff/advisors';
 import type { Sent } from '../src/ui/staff/desk';
 import { COMMAND_ROLES, delegateCommands, roleOf } from '../src/ui/staff/StaffPanel';
 import { StaffCard } from '../src/ui/staff/WarRoom';
+import { degradeChain } from './c2.fixture';
 import { playWithStaff } from './staff-mirror';
 
 const N = (s: string) => s as NationId;
@@ -195,21 +196,22 @@ describe('"Your staff runs" (ukraine-2026 as Ukraine)', () => {
 describe('the staff reads only what the player is told', () => {
   it('never sees the enemy\'s command answers (BA-12), and says when an order is in transit (CE-9)', () => {
     const g = start('ukraine-2026', 'UKR');
-    let slow: FormationId | undefined;
     const seen: SimEvent[] = [];
-    for (let i = 0; i < 40 && !slow; i++) {
+    for (let i = 0; i < 8; i++) {
       g.step();
       seen.push(...g.desk.recent);
-      slow = Object.values(g.world.formations).find((f) => f.nation === 'UKR' && f.kind === 'maneuver' && f.status === 'active' && orderDelayHours(g.world, f.id) >= 2 * g.world.dtHours)?.id;
     }
-    expect(slow).toBeDefined();
-    g.send({ type: 'order', nation: N('UKR'), formation: slow!, order: { posture: 'defend' } });
+    const slow = degradeChain(g.world, N('UKR')).id;
+    g.step();
+    seen.push(...g.desk.recent);
+    expect(orderDelayHours(g.world, slow)).toBeGreaterThanOrEqual(2 * g.world.dtHours);
+    g.send({ type: 'order', nation: N('UKR'), formation: slow, order: { posture: 'defend' } });
     g.step();
     seen.push(...g.desk.recent);
     const results = seen.filter((e) => e.type === 'command_result');
     expect(results.length).toBeGreaterThan(0);
     expect(results.every((e) => e.type === 'command_result' && e.nation === 'UKR' && e.byPlayer)).toBe(true);
-    expect(g.desk.inTransit.get(slow!)).toBeGreaterThan(0);
+    expect(g.desk.inTransit.get(slow)).toBeGreaterThan(0);
     const card = g.desk.cards.find((c) => c.key.startsWith(`relayed|${slow}`));
     expect(card?.text).toMatch(/reaches .+ in about \d+ h/);
   }, 300_000);
