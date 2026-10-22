@@ -101,7 +101,9 @@ describe('concentration of force', () => {
         f.node = target;
       }
     }
-    const def = held().reduce((a, f) => a + platformCount(f), 0);
+    // The guns next door fire for the garrison (combat.ts artillerySupport), so they count in the ratio too.
+    const guns = [...s.map.neighbors(target)].flatMap((n) => landForces(s, 'UKR', ['artillery']).filter((f) => f.node === n));
+    const def = [...held(), ...guns].reduce((a, f) => a + platformCount(f), 0);
     const force: Formation[] = [];
     for (const f of landForces(s, 'RUS').filter((g) => !g.territorial).sort((a, b) => platformCount(b) - platformCount(a)))
       if (force.reduce((a, g) => a + platformCount(g), 0) < ratio * def) force.push(f);

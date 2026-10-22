@@ -71,8 +71,9 @@ const BORDER_BASE_KM = 50;
  * cannot be hosting it moves to the nearest adjacent cell its own nation holds,
  * within BORDER_BASE_KM of the base. On a hostile state's soil, where no one bases
  * troops, an ally's cell will do (Pabrade, Lithuania, shares a cell with Belarus).
- * Hosts are allies; a formation on its own soil held by the enemy, or next to the
- * enemy's soil it holds, is deliberately placed across a live front and stays.
+ * Hosts are allies; a formation next to the enemy's soil it holds is deliberately placed
+ * across a live front and stays. One based on its own soil that a hostile state holds
+ * stands on the near side of the line instead (nearSideOfLine).
  * A land-based formation whose base point falls just offshore of the cells' coastline
  * (Schofield Barracks, Camp Schwab) starts in the land cell nearest it.
  */
@@ -80,8 +81,10 @@ function baseCell(world: World, map: GameMap, nation: NationId, lat: number, lon
   const node = map.nodeAt(lat, lon);
   if (map.isSea(node)) return landBased ? (shoreCell(world, map, nation, lat, lon) ?? node) : node;
   const holder = world.control[node];
-  if (!holder || map.owner[node] === nation || allied(world, nation, holder)) return node;
+  if (!holder || holder === nation) return node;
   const hostile = relation(world, nation, holder).opinion <= HOSTILE_OPINION;
+  if (hostile && map.owner[node] === nation) return nearSideOfLine(world, map, nation, node, lat, lon);
+  if (map.owner[node] === nation || allied(world, nation, holder)) return node;
   let best = node, bestKm = BORDER_BASE_KM, bestOwn = false;
   for (const m of map.neighbors(node)) {
     if (map.isSea(m)) continue;
@@ -91,6 +94,23 @@ function baseCell(world: World, map: GameMap, nation: NationId, lat: number, lon
     if (!own && !(hostile && h && allied(world, nation, h))) continue;
     const km = kmToCell(map, m, lat, lon);
     if (km < BORDER_BASE_KM && ((own && !bestOwn) || ((own || !bestOwn) && km < bestKm))) [best, bestKm, bestOwn] = [m, km, own];
+  }
+  return best;
+}
+
+/**
+ * The cell a formation starts in when its base lies in a cell of its own soil that a hostile state holds: the
+ * adjacent cell its nation holds nearest the base. Ukraine's 2025 sector bases (Pokrovsk, Kupiansk, Siversk, Velyka
+ * Novosilka) lie in half-degree cells whose centres the late-2025 occupation line puts on the Russian side. Left there,
+ * 41 Ukrainian formations, over a third of the front's manoeuvre force, stood in Russian-held cells with nothing to
+ * fight and nothing to hold for the whole of ukraine-2026, while the cells next to them were held by a few platforms.
+ */
+function nearSideOfLine(world: World, map: GameMap, nation: NationId, node: NodeId, lat: number, lon: number): NodeId {
+  let best = node, bestKm = Infinity;
+  for (const m of map.neighbors(node)) {
+    if (map.isSea(m) || world.control[m] !== nation) continue;
+    const km = kmToCell(map, m, lat, lon);
+    if (km < bestKm) [best, bestKm] = [m, km];
   }
   return best;
 }
