@@ -52,13 +52,17 @@ export function groundKm2On(run: CaseRun, nation: string, owner: string): number
   return km2;
 }
 
-/** Land cells (of any size) `by` took from any of `from`, net of cells it lost back to them. */
-export function netCellsTaken(run: CaseRun, by: string, from: readonly string[]): number {
+/**
+ * Land cells `by` took from any of `from`, net of cells it lost back to them. Counted per cell
+ * whatever its size, or with `oneDegree` by its share of a 1-degree square, as the realism bands count.
+ */
+export function netCellsTaken(run: CaseRun, by: string, from: readonly string[], oneDegree = false): number {
   let n = 0;
   for (let i = 0; i < run.map.landCount; i++) {
     const was = run.start.control[i], is = run.end.control[i];
-    if (from.includes(was) && is === by) n++;
-    if (was === by && from.includes(is)) n--;
+    const cell = oneDegree ? (2 * run.map.halfDeg[i]) ** 2 : 1;
+    if (from.includes(was) && is === by) n += cell;
+    if (was === by && from.includes(is)) n -= cell;
   }
   return n;
 }

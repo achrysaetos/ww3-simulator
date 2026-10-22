@@ -1,4 +1,4 @@
-import { CASES } from '../validation/cases';
+import { BANDS, CASES } from '../validation/cases';
 import { CliError } from './args';
 
 export interface ValidateArgs {
@@ -35,8 +35,9 @@ export function parseValidateArgs(argv: string[]): ValidateArgs {
     } else throw new CliError(`unexpected argument "${argv[i]}"; flags are ${[...VALUE_FLAGS, ...BOOL_FLAGS].map((f) => `--${f}`).join(' ')}`);
   }
   const cases = raw.has('cases') ? list(raw.get('cases')!) : CASES.map((c) => c.id);
-  const unknown = cases.filter((id) => !CASES.some((c) => c.id === id));
-  if (unknown.length) throw new CliError(`unknown case ${unknown.join(', ')}; try ${CASES.map((c) => c.id).join(', ')}`);
+  const known = [...CASES, ...BANDS].map((c) => c.id);
+  const unknown = cases.filter((id) => !known.includes(id));
+  if (unknown.length) throw new CliError(`unknown case ${unknown.join(', ')}; try ${known.join(', ')}`);
   const sweep = raw.get('sweep') ?? 'tagged';
   if (sweep !== 'tagged' && sweep !== 'none') throw new CliError(`--sweep is tagged or none, got "${sweep}"`);
   return {

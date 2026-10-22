@@ -1,6 +1,6 @@
 import type { NationId } from '../../core/types';
-import type { ValidationCase } from '../types';
-import { battleLosses, holderAt, joiners, netCellsTaken, ratio } from './measure';
+import type { CaseRun, ValidationCase } from '../types';
+import { battleLosses, holderAt, joiners, ratio } from './measure';
 import { formationNamed, occupy, sessionOn, station } from './setup';
 
 const WIKI = 'Wikipedia, "Second Nagorno-Karabakh War" (accessed 2026-10-21)';
@@ -25,6 +25,9 @@ const DEFENDERS: [name: string, lat: number, lon: number][] = [
 
 const ARM = 'ARM' as NationId, AZE = 'AZE' as NationId;
 
+/** Land cells a nation owns on the map, whoever holds them. */
+const cellsOf = (r: CaseRun, owner: NationId) => Array.from({ length: r.map.landCount }, (_, n) => n).filter((n) => r.map.owner[n] === owner);
+
 /** The 44-day war over Nagorno-Karabakh, 27 September to 10 November 2020. */
 export const karabakh2020: ValidationCase = {
   id: 'karabakh-2020',
@@ -44,12 +47,10 @@ export const karabakh2020: ValidationCase = {
     const s = sessionOn('peace-2027', seed, '2020-09-27T00:00:00Z');
     const { world, map } = s;
     occupy(world, map, ARM, AZE, HELD_1994);
-    for (const [name, lat, lon] of DEFENDERS) {
-      station(world, map, ARM, name, lat, lon).entrenchment = 1;
-    }
+    for (const [name, lat, lon] of DEFENDERS) station(world, map, ARM, name, lat, lon).entrenchment = 1;
     // Azerbaijan's present-day Shusha garrison stands on the 2020 eastern front instead, at Barda.
     formationNamed(world, AZE, 'Karabakh Garrison (Shusha, Khankendi)').node = map.nodeAt(40.37, 47.13);
-    // Martial law and general mobilisation in Armenia, 27 Sep; partial mobilisation in Azerbaijan, 28 Sep (Wikipedia, as above).
+    // Armenia under martial law from the first day, its reservists barred from leaving on 28 Sep; Azerbaijan's partial mobilisation decree, 28 Sep (the Wikipedia article above).
     world.pending.push(
       { type: 'set_mobilization', nation: ARM, level: 0.8 },
       { type: 'set_mobilization', nation: AZE, level: 0.5 },
@@ -60,7 +61,7 @@ export const karabakh2020: ValidationCase = {
   questions: [
     {
       id: 'cells_taken',
-      label: 'half-degree cells of the 1994 line Azerbaijan took',
+      label: 'half-degree cells of the 1994 line Azerbaijan holds at the end',
       unit: 'cells',
       observed: {
         lo: 1,
@@ -68,7 +69,22 @@ export const karabakh2020: ValidationCase = {
         sources: [{ cite: `${WIKI}: by the ceasefire Azerbaijan had taken Jabrayil (9 Oct), Fuzuli (17 Oct), Agbend (22 Oct) and Shusha (8 Nov), about a third of Nagorno-Karabakh, mostly in the south; Kalbajar, Aghdam and Lachin were handed over afterwards. At this grid that is the southern cell only`, tag: 'independent' }],
       },
       baseline: { value: 0, label: 'persistence: the 1994 line holds' },
-      measure: (r) => netCellsTaken(r, AZE, [ARM]),
+      measure: (r) => cellsOf(r, AZE).filter((n) => r.start.control[n] === ARM && r.end.control[n] === AZE).length,
+    },
+    {
+      id: 'armenia_taken',
+      label: 'cells of Armenia proper in foreign hands at the end',
+      unit: 'cells',
+      observed: {
+        lo: 0,
+        hi: 0,
+        sources: [
+          { cite: `${WIKI}: the fighting was over Nagorno-Karabakh and the districts around it, inside Azerbaijan's recognised borders`, tag: 'independent' },
+          { cite: "Armenian government statements on the later incursions: ~40 km2 of Syunik (May 2021) and ~50 km2 in all by September 2022, far under one cell", tag: 'official' },
+        ],
+      },
+      baseline: { value: 0, label: 'persistence' },
+      measure: (r) => cellsOf(r, ARM).filter((n) => r.end.control[n] !== ARM).length,
     },
     {
       id: 'south_taken',

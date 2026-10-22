@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CaseResult } from '../../src/validation/run';
+import { bandProblem, spread } from '../../src/validation/ensemble';
 import { scoreQuestion } from '../../src/validation/score';
 import type { Question, ValidationCase } from '../../src/validation/types';
 
@@ -55,5 +56,17 @@ describe('scoreQuestion', () => {
     const s = scoreQuestion(kase(q), q, runs(1));
     expect(s.combatantOnly).toBe(true);
     expect(s.provenance).toBe('tuned-on');
+  });
+});
+
+describe('bandProblem', () => {
+  it('holds when the median run is inside the band, whatever the tails do', () => {
+    expect(bandProblem(spread(runs(0, 2, 3, 4, 50), 'q'), 1, 6)).toBeUndefined();
+  });
+
+  it('fails when the median run is outside, and lists every run', () => {
+    const problem = bandProblem(spread(runs(0, 0.5, 0.5, 2), 'q'), 1, 6);
+    expect(problem).toMatch(/p50 0\.50 outside 1-6/);
+    expect(problem).toMatch(/runs 0\.00, 0\.50, 0\.50, 2\.00/);
   });
 });

@@ -3,6 +3,7 @@
  *   [--sweep tagged|none] [--workers N] [--json]
  * Runs every case's ensemble (seeds crossed with a Latin hypercube over the tagged params) and scores
  * each question against what happened and against the naive baseline. Prints scores; never fails on them.
+ * --cases also takes the tuned-on band cases, ukraine-2026-60d and baltic-2027-21d.
  */
 import { sampleRuns } from '../forecast';
 import { caseById } from '../validation/cases';
