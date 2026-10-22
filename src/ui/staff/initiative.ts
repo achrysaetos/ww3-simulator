@@ -434,7 +434,7 @@ function munitionStocks(s: Situation): Card[] {
   for (const m of s.d.munitions) {
     const burn = s.burnPerDay[m.group];
     if (!GROUP_WORD[m.group] || !burn || burn <= 0) continue;
-    const stock = m.warehoused + m.loaded;
+    const stock = (m.warehoused ?? 0) + m.loaded;
     const weeks = stock / burn / 7;
     if (weeks < STOCK_WEEKS && (!worst || weeks < worst.weeks)) worst = { group: m.group, weeks, stock, burn };
   }

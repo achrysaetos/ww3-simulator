@@ -1,12 +1,13 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { MunitionId, NationId, PlatformId, SimEvent } from '../src/core/types';
 import { nuclearThreshold, strategicProfile } from '../src/data/nations';
 import { nuclearForces } from '../src/data/nations/nuclear';
 import { createSession } from '../src/scenarios';
 import { atWar, relation } from '../src/core/engine';
 import { detonate, targetList } from '../src/systems/strategic';
+import { Rng } from '../src/core/rng';
 
 const N = (s: string) => s as NationId;
 const NINE = ['USA', 'RUS', 'CHN', 'FRA', 'GBR', 'IND', 'PAK', 'ISR', 'PRK'];
@@ -111,6 +112,29 @@ describe('a nuclear attack is answered, declared or not', () => {
     expect(atWar(w, N('PRK'), N('RUS'))).toBe(true);
     let answered = 0;
     for (let t = 0; t < 4; t++) for (const e of s.engine.step(w)) if (e.type === 'nuclear_detonation' && e.by === 'RUS' && s.map.owner[e.node] === 'PRK') answered++;
+    expect(answered).toBeGreaterThan(0);
+  });
+
+  it('a leadership that holds its answer once weighs it again as its alert mates warheads (NE-1 caveat)', () => {
+    const s = createSession('korea-2027', 1);
+    const w = s.world;
+    const prk = w.nations[N('PRK')];
+    prk.controlledBy = 'human';
+    prk.nuclear.deployed = prk.nuclear.warheads;
+    const vladivostok = s.map.cities.find((c) => c.name === 'Vladivostok')!.node;
+    w.pending.push({ type: 'nuclear_release', nation: N('PRK'), target: vladivostok, warheads: 1, munition: 'hwasong12' as MunitionId });
+    s.engine.step(w);
+    const chance = Rng.prototype.chance;
+    const abstain = vi.spyOn(Rng.prototype, 'chance').mockImplementation(function (this: Rng, p: number) {
+      return p === 0.9 ? false : chance.call(this, p);
+    });
+    const onPrk = (events: SimEvent[]) => events.filter((e) => e.type === 'nuclear_detonation' && e.by === 'RUS' && s.map.owner[e.node] === 'PRK').length;
+    let held = 0;
+    for (let t = 0; t < 4; t++) held += onPrk(s.engine.step(w));
+    abstain.mockRestore();
+    expect(held).toBe(0);
+    let answered = 0;
+    for (let t = 0; t < 40 && !answered; t++) answered += onPrk(s.engine.step(w));
     expect(answered).toBeGreaterThan(0);
   });
 

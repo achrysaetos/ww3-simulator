@@ -313,7 +313,7 @@ function orderAnswers(s: Situation): Card[] {
 /** Shells run short at the current rate of fire, and the shell line that can still surge. */
 function shells(s: Situation): Card[] {
   const eco = s.d.economy;
-  if (!s.ammoPerDay || s.ammoPerDay <= 0 || !eco) return [];
+  if (!s.ammoPerDay || s.ammoPerDay <= 0 || !eco || !s.d.bulk) return [];
   const weeks = s.d.bulk.ammo / s.ammoPerDay / 7;
   if (weeks >= 8) return [];
   const best = Object.entries(eco.capacity)

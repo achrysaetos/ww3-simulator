@@ -3,7 +3,7 @@ import type { GameMap } from '../../core/map';
 import { findPath } from '../../core/path';
 import type { Formation, FormationId, NationId, NodeId, World } from '../../core/types';
 import { applyLandOrder } from '../land/movement';
-import { allied } from '../land/state';
+import { openTo } from '../land/state';
 import { awaitingLift, debarkation, deckSlots, landMass, lifted, liftMode } from '../land/strategic';
 import type { TickEnv } from './env';
 import { geography } from './geography';
@@ -106,7 +106,7 @@ export function sealift(env: TickEnv): void {
   const threatOf = (nation: NationId) => shoreThreat(world, map, nation);
   const debark = (nation: NationId, target: NodeId, from: NodeId) => {
     const k = `${nation}|${target}|${from}`;
-    if (!ports.has(k)) ports.set(k, safeDebarkation(world, map, nation, target, from, threatOf(nation)) ?? debarkation(world, map, nation, target, 'sea'));
+    if (!ports.has(k)) ports.set(k, safeDebarkation(world, map, nation, target, from, threatOf(nation)) ?? exposedDebarkation(world, map, nation, target, from));
     return ports.get(k);
   };
   const atPort = (g: Formation, port: number) => g.node === port || g.node === geo.portZone.get(port);
@@ -196,6 +196,15 @@ function marchOn(world: World, ctx: SimContext, v: SealiftState['voyages'][Forma
 }
 
 /**
+ * Whether ground `holder` controls takes `nation`'s troops ashore: its own, a co-belligerent's, or a host's that granted
+ * passage (land/state.ts openTo), never an enemy's. A bloc partner sitting the war out lets no belligerent land troops
+ * (Hague Convention V, 1907, Arts. 2 and 5).
+ */
+export function hostsTroops(world: World, nation: NationId, holder: NationId | undefined): boolean {
+  return !!holder && !atWar(world, nation, holder) && openTo(world, nation, holder);
+}
+
+/**
  * The friendly port on the destination's land mass nearest the destination that a sea route
  * from `from` clear of the enemy's shore threat reaches, its own approaches clear too.
  */
@@ -204,7 +213,7 @@ function safeDebarkation(world: World, map: GameMap, nation: NationId, target: N
   const geo = geography(map);
   const fromZone = geo.portZone.get(from) ?? from;
   const candidates = geo.ports
-    .filter((p) => mass[p.node] === mass[target] && world.control[p.node] && allied(world, nation, world.control[p.node]) && !threat(p.zone))
+    .filter((p) => mass[p.node] === mass[target] && hostsTroops(world, nation, world.control[p.node]) && !threat(p.zone))
     .sort((a, b) => map.distanceKm(a.node, target) - map.distanceKm(b.node, target) || a.node - b.node)
     .slice(0, DEBARK_SHORTLIST);
   for (const p of candidates) {
@@ -214,12 +223,20 @@ function safeDebarkation(world: World, map: GameMap, nation: NationId, target: N
   return undefined;
 }
 
-/** Road-march km from a port to the destination over land not held by the enemy; Infinity without such a road. */
+/** Failing a safe port, the nearest port that takes the troops ashore and that some sea route reaches, threatened or not. */
+function exposedDebarkation(world: World, map: GameMap, nation: NationId, target: NodeId, from: NodeId): NodeId | undefined {
+  const port = debarkation(world, map, nation, target, 'sea', (n) => hostsTroops(world, nation, world.control[n]));
+  if (port === undefined) return undefined;
+  const geo = geography(map);
+  return seaPath(world, map, nation, geo.portZone.get(from) ?? from, geo.portZone.get(port) ?? port) ? port : undefined;
+}
+
+/** Road-march km from a port to the destination over land the nation's troops may cross, the enemy's excepted; Infinity without such a road. */
 function marchKm(world: World, map: GameMap, nation: NationId, from: NodeId, to: NodeId): number {
   const path = findPath(map, from, to, (_a, b, km) => {
     if (b >= map.landCount) return Infinity;
     const c = world.control[b];
-    return b !== to && c && atWar(world, nation, c) ? Infinity : km;
+    return b !== to && c && !hostsTroops(world, nation, c) ? Infinity : km;
   }, 20_000);
   if (!path) return Infinity;
   let km = 0;
