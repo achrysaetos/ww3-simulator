@@ -1,6 +1,7 @@
 import type { SimContext, System } from '../core/engine';
-import type { Command, CommandDomain, CommandResult, FormationId, FormationKind, NationId, RefusalCode, World } from '../core/types';
+import type { Command, CommandDomain, CommandResult, FormationId, FormationKind, NationId, OperationId, RefusalCode, World } from '../core/types';
 import { holdOrder, orderDelayHours } from './c2';
+import { operationOf } from './ops/state';
 
 export type OrderCommand = Extract<Command, { type: 'order' }>;
 /** A domain's answer to an order it took. A refused order leaves the formation as it was. */
@@ -76,13 +77,27 @@ export function clearTreatyAnswer(world: World, n: NationId, war: string, treaty
 
 const STRATEGIC: ReadonlySet<Command['type']> = new Set(['declare_war', 'offer_peace', 'nuclear_release', 'nuclear_alert', 'sanction']);
 const HOME_FRONT: ReadonlySet<Command['type']> = new Set(['set_mobilization', 'produce', 'raise_formation']);
+export type OperationCommand = Extract<Command, { type: 'plan_operation' | 'launch_operation' | 'cancel_operation' | 'adjust_operation' }>;
+const OPERATION_COMMANDS: ReadonlySet<Command['type']> = new Set<OperationCommand['type']>(['plan_operation', 'launch_operation', 'cancel_operation', 'adjust_operation']);
+export const isOperationCommand = (cmd: Command): cmd is OperationCommand => OPERATION_COMMANDS.has(cmd.type);
 
-/** Whether the AI may issue `cmd` on behalf of its nation. */
+/**
+ * Whether the AI may issue `cmd` on behalf of its nation. A formation committed to a running operation takes its orders
+ * from the operation's staff, so no AI planner orders it; a human nation's delegate plans and runs operations only with
+ * land delegated, on formations the player does not hold, and never touches the player's own operations.
+ */
 export function aiMayIssue(world: World, cmd: Command): boolean {
+  if (cmd.type === 'order' && operationOf(world, cmd.formation)) return false;
   if (world.nations[cmd.nation]?.controlledBy !== 'human') return true;
   if (cmd.type === 'order') {
     const f = world.formations[cmd.formation];
     return !!f && delegated(world, cmd.nation, DOMAIN_OF_KIND[f.kind]) && !authority(world, cmd.nation).held[cmd.formation];
+  }
+  if (isOperationCommand(cmd)) {
+    if (!delegated(world, cmd.nation, 'land')) return false;
+    if (cmd.type === 'plan_operation') return cmd.formations.every((id) => !authority(world, cmd.nation).held[id]);
+    if (cmd.type === 'adjust_operation' && cmd.formations?.some((id) => authority(world, cmd.nation).held[id])) return false;
+    return world.slices.ops?.byId[cmd.operation]?.planner === 'ai';
   }
   if (STRATEGIC.has(cmd.type)) return delegated(world, cmd.nation, 'strategic');
   if (HOME_FRONT.has(cmd.type)) return delegated(world, cmd.nation, 'homefront');
@@ -160,15 +175,21 @@ function applyOrder(world: World, cmd: OrderCommand, ctx: SimContext, handlers: 
   return answer(world, cmd, outcome);
 }
 
-function answer(world: World, cmd: Command, o: OrderOutcome, accepted = 'order accepted', formation?: FormationId, relayedEta?: number): CommandResult {
+/** The answer to any command, for whichever system applied it. */
+export function answerCommand(world: World, cmd: Command, o: OrderOutcome, accepted: string, about: { formation?: FormationId; operation?: OperationId } = {}): CommandResult {
+  return answer(world, cmd, o, accepted, about.formation, undefined, about.operation);
+}
+
+function answer(world: World, cmd: Command, o: OrderOutcome, accepted = 'order accepted', formation?: FormationId, relayedEta?: number, operation?: OperationId): CommandResult {
   const base = {
     type: 'command_result' as const,
     tick: world.tick,
     nation: cmd.nation,
     command: cmd.type,
     ...(cmd.type === 'order' ? { formation: cmd.formation } : formation ? { formation } : {}),
-    // Only the player issues anything but orders; an order says whether the player gave it.
-    ...(cmd.type !== 'order' || cmd.byPlayer ? { byPlayer: true as const } : {}),
+    ...(operation ? { operation } : {}),
+    // Only the player issues anything but orders and operations; those say whether the player gave them.
+    ...((cmd.type === 'order' || isOperationCommand(cmd) ? cmd.byPlayer : true) ? { byPlayer: true as const } : {}),
   };
   if (!o.ok) return { ...base, ok: false, code: o.code, reason: o.reason };
   if (relayedEta !== undefined) return { ...base, ok: true, code: 'relayed', reason: accepted, etaHours: relayedEta };

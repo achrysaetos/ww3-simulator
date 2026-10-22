@@ -452,7 +452,8 @@ export function answerOf(cmd: Command, sentTick: number, s: Pick<Situation, 'me'
   const after = s.recent.filter((e) => e.tick >= sentTick);
   const name = (n: NationId) => s.namer.nation(n);
   switch (cmd.type) {
-    case 'order': case 'delegate': case 'hold': case 'answer_treaty': {
+    case 'order': case 'delegate': case 'hold': case 'answer_treaty':
+    case 'plan_operation': case 'launch_operation': case 'cancel_operation': case 'adjust_operation': {
       const r = [...after].reverse().find((e) => e.type === 'command_result' && e.nation === s.me && e.command === cmd.type && (cmd.type !== 'order' || e.formation === cmd.formation));
       if (!r || r.type !== 'command_result') return null;
       return { ok: r.ok, text: describeResult(r, s.namer), final: !(r.ok && r.code === 'relayed') };

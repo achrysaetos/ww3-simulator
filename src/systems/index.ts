@@ -16,6 +16,7 @@ import { applyLandOrder, landCombat, landMovement } from './land';
 import { logistics } from './logistics';
 import { applyNavalOrder, isNavalOrder, navalWar } from './naval';
 import { createOrderRouter } from './orders';
+import { operations } from './ops';
 import { strategic } from './strategic';
 import { weather } from './weather';
 import { defineParam } from '../core/params';
@@ -96,8 +97,8 @@ const orders = createOrderRouter([
  * then every system steps in this order: today's weather first, since everything else reads it;
  * the air picture is settled before ground and sea combat read it, combat before logistics refills, economy before
  * diplomacy reads economic stress, intelligence after every sensor has moved, command and
- * control once the tick's strikes and captures have hit its HQs, and AI last so its orders
- * queue for next tick.
+ * control once the tick's strikes and captures have hit its HQs, operations once the tick's
+ * ground is settled, and AI last so its orders queue for next tick around the operations' forces.
  */
 export const SYSTEMS: System[] = [
   weather,
@@ -114,6 +115,7 @@ export const SYSTEMS: System[] = [
   createDiplomacy({ alliances: warTreaties(alliances, strategicProfile), profiles: decision, peace: peaceTreaties, aid: airDefencePledges }),
   intel,
   c2,
+  operations,
   createAi(decision),
 ];
 
