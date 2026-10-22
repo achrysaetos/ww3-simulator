@@ -6,6 +6,7 @@
  */
 import type { Catalog } from '../../core/catalog';
 import type { SimContext } from '../../core/engine';
+import type { GameMap } from '../../core/map';
 import type { Formation, FormationId, Munition, MunitionId, NationId, NodeId, Platform, PlatformId, StrikeEffect, TargetClass, World } from '../../core/types';
 import { ANTISHIP_KINDS, navalPosition, shipValue, strikeNavalGroup } from '../naval';
 import { defendRaid, envelopeExposure, hostileDefenders, overflightKm, samVsAircraft, type RaidStream } from './iads';
@@ -219,7 +220,21 @@ function chooseMunition(f: Formation, carriers: Carrier[], tc: TargetClass, dist
 const REAR_TOLERANCE_KM = 15;
 /** The line between two 1-degree cells in contact runs about half a cell (~55 km) from each side's cell centres. */
 const LINE_OFFSET_KM = 55;
-const frontMemo = new WeakMap<World, { tick: number; cells: Map<string, NodeId[]> }>();
+const frontMemo = new WeakMap<World, { tick: number; border?: NodeId[]; cells: Map<string, NodeId[]>; behind: Map<string, number> }>();
+
+/** Land cells with a land neighbour held by someone else: every front is drawn from these. */
+function borderCells(world: World, map: GameMap): NodeId[] {
+  const out: NodeId[] = [];
+  for (let n = 0; n < map.landCount; n++) {
+    const c = world.control[n];
+    if (!c) continue;
+    for (let i = map.adjStart[n]; i < map.adjStart[n + 1]; i++) {
+      const o = map.adj[i] < map.landCount ? world.control[map.adj[i]] : undefined;
+      if (o && o !== c) { out.push(n as NodeId); break; }
+    }
+  }
+  return out;
+}
 
 /**
  * How far past the land front between `nation`'s side and the holder of `target` the target lies, km; 0 when the
@@ -230,23 +245,27 @@ function behindLineKm(world: World, ctx: SimContext, pic: AirPicture, target: No
   const holder = world.control[target];
   if (map.isSea(target) || !holder || !pic.atWar(holder, nation) || world.theater.airControl[target]?.nation === nation) return 0;
   let memo = frontMemo.get(world);
-  if (memo?.tick !== world.tick) frontMemo.set(world, (memo = { tick: world.tick, cells: new Map() }));
+  if (memo?.tick !== world.tick) frontMemo.set(world, (memo = { tick: world.tick, cells: new Map(), behind: new Map() }));
   const key = `${nation}|${holder}`;
+  const aim = `${key}|${target}`;
+  const known = memo.behind.get(aim);
+  if (known !== undefined) return known;
   let front = memo.cells.get(key);
   if (!front) {
     front = [];
-    for (let n = 0; n < map.landCount; n++) {
+    for (const n of (memo.border ??= borderCells(world, map))) {
       const c = world.control[n];
-      if (!c || pic.atWar(c, nation) || !pic.atWar(c, holder)) continue;
+      if (pic.atWar(c, nation) || !pic.atWar(c, holder)) continue;
       for (let i = map.adjStart[n]; i < map.adjStart[n + 1]; i++)
-        if (map.adj[i] < map.landCount && world.control[map.adj[i]] === holder) { front.push(n as NodeId); break; }
+        if (map.adj[i] < map.landCount && world.control[map.adj[i]] === holder) { front.push(n); break; }
     }
     memo.cells.set(key, front);
   }
-  if (!front.length) return 0;
   let km = Infinity;
   for (const n of front) km = Math.min(km, nodeDistance(ctx, n, target));
-  return Math.max(0, km - LINE_OFFSET_KM);
+  const behind = front.length ? Math.max(0, km - LINE_OFFSET_KM) : 0;
+  memo.behind.set(aim, behind);
+  return behind;
 }
 
 function threatRingKm(world: World, ctx: SimContext, pic: AirPicture, from: NodeId, target: NodeId, nation: NationId): number {
