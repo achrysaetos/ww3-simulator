@@ -64,6 +64,47 @@ The ukraine-2026 median is still about three times the record. The causes found 
 
 Kursk moved further from the record. Before the change, Ukraine took two or three cells in a week and Russia's full-width counterattack took them back by day 21 in some runs, so the median was right for the wrong reason. Now the counterattack is as narrow as any other assault, which matches the months Russia needed to retake Kursk, and the overshoot that remains comes from Ukraine's exploitation through the border cells the case setup empties of Russian troops.
 
+## L1: the ground war starts on the right side of the line
+
+This section covers the L1 land calibration on integration 2216910. The three tuning levers tried first (breach mass, a penetration floor and AI reinforcement rules) each moved the ukraine-2026 median, and each either broke `tests/land-maneuver.test.ts` or left collapse runs in the tail. So the premise came first: is Russia advancing against the line the scenario describes?
+
+It was not. `baseCell` in `src/scenarios/build.ts` placed each formation at its cited base point. Where Russia had since taken that point (Pokrovsk, Kupiansk, Siversk and Velyka Novosilka), the formation started inside a Russian-held cell. On seed 1, 41 Ukrainian formations started on Russian-held ground. They held 36% of Ukraine's exposed front force (about 3,850 platforms) in four cells for 60 days. The Ukrainian cells they should have manned held token garrisons. For example, cell 6995 held 55 Ukrainian platforms against 1,675 Russian, a whole-force ratio of 18.9:1, and penetration ran at the best-massed drive pace on every such cell. `nearSideOfLine` now starts a formation whose base point lies across a hostile line in the adjacent cell its own side holds, nearest the base point. `tests/ukraine-start-line.test.ts` fails on main@4058e6e (41 formations) and passes now.
+
+Two measurement and case fixes followed:
+
+- `groundKm2On` in `src/validation/cases/measure.ts` counted a cell the attacker owned at full area even after the defender had pushed most of the way back across it. It now counts a held cell as 1 minus the enemy's contest share (`tests/validation/measure.test.ts`).
+- `karabakh-2020` gave the four Armenian corps no armour of the Artsakh Defence Army's own. They now share 186 T-72s, 68 BMP-1s and 98 D-30s (DeRouen and Heo 2007; Schmidt 2009; through Wikipedia, "Artsakh Defence Army").
+- `kursk-2024`: the placement fix freed Ukrainian formations along the border. Ukraine's land AI then attacked across it, and the day-21 p90 rose to 10,300 km2. Ukraine widened the incursion nowhere else in those three weeks (ISW, August 2024), so the case now hands Ukraine's land domain to the player and only the Kursk grouping attacks.
+
+Measured with `npm run validate`, 8 runs, seeds 1-4, tagged params by Latin hypercube, on 2216910 and on the L1 branch:
+
+| Case | Question | Observed | 2216910 p10 / p50 / p90 | L1 p10 / p50 / p90 |
+| --- | --- | --- | --- | --- |
+| `ukraine-2026-60d` | `rus_km2_per_year` | 3,500-5,000 | 8,119 / 21,035 / 31,446 | 7,549 / 13,173 / 18,146 |
+| `ukraine-2026-60d` | `rus_tanks_per_day` | 2-8 | 3.8 / 4.8 / 13.2 | 3.1 / 4.7 / 6.7 |
+| `ukraine-2026-60d` | `ukr_minus_rus_tanks` | below 0 | -8.3 / -0.52 / 0.72 | -1.1 / -0.14 / 0.97 |
+| `kursk-2024` | `ukr_ground_km2` | 800-1,300 | 983 / 1,920 / 3,674 | 1,153 / 1,779 / 2,364 |
+| `karabakh-2020` | `cells_taken` | 1 | 0 / 2.5 / 4.3 | 0 / 2.5 / 5 |
+| `karabakh-2020` | `casualty_ratio` | 1.3-1.7 | 0.63 / 1.1 / 1.8 | 0.62 / 1.3 / 1.7 |
+| `karabakh-2020` | `tank_ratio` | 3.3-4.9 | 3.8 / 6.7 / 11.8 | 11 / 16 / 42 |
+| `baltic-2027-21d` | `baltic_cells` | 1-6 | 0.18 / 1.4 / 2.1 | 0.18 / 1.4 / 2.1 |
+
+On the held-out questions of these two cases the model beats the baseline on 2 of 8, against 3 of 8 on 2216910. Kursk area and the tank ratio stopped beating it, and the casualty ratio started. The tank ratio on 2216910 was right for the wrong reason. In seed 1 Armenia lost 62 tanks to Azerbaijan's 12, because it had few to lose. With the Artsakh armour it loses 149 to 8, where Oryx counts 255 to 62. Armenian losses moved toward the record. Azerbaijani losses are five to eight times too low on both branches, and that is the remaining defect.
+
+Levers tried and reverted:
+
+| Lever | ukraine p50 km2/yr | Why reverted |
+| --- | --- | --- |
+| Count the defender's cover in the breach mass ratio | 13,200 | Fails the `land-maneuver` fortified 9:1 floor (0.3 km against 0.5) even at a quarter weight |
+| A 0.5 km/day floor on drive penetration | 13,300 | Pins fortified assaults at 0.5 km or more, also failing the floor |
+| Scale `holdTheLine` per cell and keep sending newcomers | 12,500 | Two runs of eight collapse at 82,000-88,000 |
+| Release units idle in enemy-held cells | about -20,000 | Ukraine counterattacks into emptied Russian cells |
+| Form the main effort before manning the line (Baltic) | no change | BB-8 still 0 of 6 seeds |
+
+The remaining Ukraine gap is in `holdTheLine` (`src/systems/ai/land.ts`). It stops sending newcomers once a sector's total requirement is met (481 required, 568 sent on seed 1), even when single cells in that sector hold a tenth of what they need. A per-cell allocation with hysteresis is the next lever. It is a change to the AI, not to the front law.
+
+BB-8 (Russia at or next to Tallinn by day 18) fails on every seed 1-6, on 2216910 as well as on this branch. The forces near Narva sit where the scenario places them: the 69th Motor Rifle Division 156 km away and the 25th Motor Rifle Brigade 110 km away. The AI builds its main effort from Kola, Moscow and the Ukraine front instead, and those formations arrive on about days 7-8. The near units hold the quiet border. Once moving, the lead crosses a ~40 km cell in 4-5 days, about 9-11 km a day. That pace matches Kharkiv in September 2022 (about 12 km a day) and Kursk in August 2024 (about 8 km a day). Reaching Tallinn by day 18 needs about 15 km a day through six cells. Neither the placement nor the front law disagrees with the record. The bound and the AI's choice of formations for the main effort are the follow-ups.
+
 ## Long horizons are out of reach today
 
 The bands and cases run 4 to 90 days. Questions about production races need runs of three to five years, since warships and new production lines take years. Nothing in the repository runs or checks that long, and a year of ukraine-2026 is about 1,460 ticks, five to ten minutes a run on a four-core machine. Treat any output past 90 days as unvalidated.
