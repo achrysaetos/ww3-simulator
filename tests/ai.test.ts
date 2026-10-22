@@ -556,7 +556,8 @@ describe('strike target value', () => {
     const hq = t.node(50.6, 36.6);
     (t.world.slices as unknown as Record<string, unknown>).c2 = { hqs: { a: { id: 'a', nation: N('RUS'), level: 'army', name: '20th Army HQ', node: hq, integrity: 1 } } };
     for (let i = 0; i < 6; i++) t.add({ nation: N('UKR'), name: `cruise missile brigade ${i}`, kind: 'missile', echelon: 'brigade', node: t.node(50.45, 30.52), equipment: { [id.platform('x_cruise_tel')]: 12 } });
-    t.world.nations[N('UKR')].stockpile[id.munition('t_cruise')] = 10_000;
+    // Enough that the fire budget, a year's stock spread over salvo days, lets every brigade fire.
+    t.world.nations[N('UKR')].stockpile[id.munition('t_cruise')] = 50_000;
     const aimed = commandsOver(t, 8).flatMap((c) => (c.type === 'order' && c.nation === 'UKR' && c.order.posture === 'strike' ? [`${c.order.target}|${c.order.targetClass}`] : []));
     expect(aimed).toContain(`${hq}|hardened`);
   });

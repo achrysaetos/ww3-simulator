@@ -137,15 +137,17 @@ export function defendRaid(world: World, ctx: SimContext, pic: AirPicture, node:
     if (streams[i].overflightKm > 0)
       leaked[i] -= ctx.rng.binomial(leaked[i], beltKillProbability(m.kind, streams[i].overflightKm, m.interceptDifficulty));
     if (cat === 'air_breathing' && leaked[i]) {
-      // Each air force flies its own sector, so the stream splits evenly across the nations defending, and within
-      // a nation by intercept sorties up (13-14 Apr 2024: US, UK, French and Jordanian jets each downed drones over
-      // their own areas, IDF and allied statements).
-      const armed = fighters.flatMap((g) => {
-        const aam = pic.aamOf(g.f);
-        return aam && g.interceptLeft > 0 && (g.f.magazine[aam.id] ?? 0) >= 1 ? [{ g, aam }] : [];
-      });
+      // Each group flies its own sector, so a threat meets one group, not every fighter up in turn: the stream splits
+      // evenly across the nations defending, and within a nation by intercept sorties up (13-14 Apr 2024: US, UK,
+      // French and Jordanian jets each downed drones over their own areas, IDF and allied statements).
+      const armed: { g: AirGroup; aam: Munition }[] = [];
       const upByNation = new Map<NationId, number>();
-      for (const { g } of armed) upByNation.set(g.f.nation, (upByNation.get(g.f.nation) ?? 0) + g.interceptLeft);
+      for (const g of fighters) {
+        const aam = pic.aamOf(g.f);
+        if (!aam || g.interceptLeft <= 0 || (g.f.magazine[aam.id] ?? 0) < 1) continue;
+        armed.push({ g, aam });
+        upByNation.set(g.f.nation, (upByNation.get(g.f.nation) ?? 0) + g.interceptLeft);
+      }
       const shares = splitBySorties(ctx.rng, leaked[i], armed.map(({ g }) => g.interceptLeft / upByNation.get(g.f.nation)! / upByNation.size));
       armed.forEach(({ g, aam }, k) => {
         if (!shares[k]) return;
@@ -158,14 +160,15 @@ export function defendRaid(world: World, ctx: SimContext, pic: AirPicture, node:
     const maxCost = Math.max(TUNING.interceptorCostFloorUsdM, TUNING.interceptorCostRatio * m.unitCostUsdM);
     const ls = layers(ctx, sams, node, cat, m.interceptDifficulty, maxCost);
     const ready = (k: number) => ls[k].d.channels > 0 && ls[k].d.f.magazine[ls[k].shot.m.id] >= 1;
-    ls.forEach(({ d, shot }, k) => {
-      if (!leaked[i] || !ready(k)) return;
+    for (let k = 0; k < ls.length && leaked[i]; k++) {
+      if (!ready(k)) continue;
       // Layered missile defence shoots one round per warhead while another tier still stands behind it to take the
       // miss (Arrow 3 then Arrow 2 or THAAD, then David's Sling: MDA and IMDO shoot-look-shoot doctrine); only the last
       // tier ripples two.
-      const backed = cat === 'ballistic' && ls.slice(k + 1).some((_, j) => ready(k + 1 + j));
-      leaked[i] = engage(ctx, d, shot, cat, { ...threat, count: leaked[i] }, backed ? 'shoot_look_shoot' : undefined);
-    });
+      let backed = false;
+      for (let j = k + 1; cat === 'ballistic' && !backed && j < ls.length; j++) backed = ready(j);
+      leaked[i] = engage(ctx, ls[k].d, ls[k].shot, cat, { ...threat, count: leaked[i] }, backed ? 'shoot_look_shoot' : undefined);
+    }
   }
   return leaked;
 }
