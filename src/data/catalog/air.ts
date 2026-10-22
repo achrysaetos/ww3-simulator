@@ -176,7 +176,9 @@ const drones: PlatformSpec<MunitionKey>[] = [
   { id: 'lancet_team', name: 'Lancet launch team', cls: 'loitering_munition_launcher', producers: ['RUS'], inService: 2022, unitCostUsdM: 0.05, speedKph: 40, fp: { armor: 0.015, soft: 0.06, infantry: 0.01 }, load: { lancet3: 4 } },
   { id: 'switchblade_team', name: 'Switchblade 600 team', cls: 'loitering_munition_launcher', producers: ['USA'], inService: 2021, unitCostUsdM: 0.05, speedKph: 40, fp: { armor: 0.02, soft: 0.03, infantry: 0.02 }, load: { switchblade600: 2, switchblade300: 2 } },
   { id: 'harop_launcher', name: 'Harop launcher (12 canisters)', cls: 'loitering_munition_launcher', producers: ['ISR', 'IND'], inService: 2009, unitCostUsdM: 5, load: { harop: 12 } },
-  { id: 'fpv_team', name: 'FPV drone team', cls: 'loitering_munition_launcher', producers: ['UKR', 'RUS', 'CHN', 'USA', 'POL', 'TUR', 'IRN'], inService: 2023, unitCostUsdM: 0.02, speedKph: 30, stealth: 0.6, detectionKm: 10, fp: { infantry: 0.2, soft: 0.12, armor: 0.008 }, load: { fpv: 30, fpv_fiber: 5 } },
+  // Armour fire is low because a tank takes several FPV hits to kill (judgment; set so a stacked
+  // drone-heavy defence does not out-kill the ukraine-2026 2-8 Russian tanks a day band).
+  { id: 'fpv_team', name: 'FPV drone team', cls: 'loitering_munition_launcher', producers: ['UKR', 'RUS', 'CHN', 'USA', 'POL', 'TUR', 'IRN'], inService: 2023, unitCostUsdM: 0.02, speedKph: 30, stealth: 0.6, detectionKm: 10, fp: { infantry: 0.2, soft: 0.12, armor: 0.004 }, load: { fpv: 30, fpv_fiber: 5 } },
   { id: 'bober_launcher', name: 'Long-range strike drone launch site (UJ-26 Bober)', cls: 'loitering_munition_launcher', producers: ['UKR'], inService: 2023, unitCostUsdM: 0.1, load: { bober: 4 } },
   { id: 'lyutyi_launcher', name: 'Long-range strike drone launch site (FP-1 / Lyutyi)', cls: 'loitering_munition_launcher', producers: ['UKR'], inService: 2023, unitCostUsdM: 0.2, load: { lyutyi: 4 } },
   { id: 'kargu_team', name: 'Kargu-2 team', cls: 'loitering_munition_launcher', producers: ['TUR'], inService: 2020, unitCostUsdM: 0.05, speedKph: 40, fp: { infantry: 0.02, soft: 0.03, armor: 0.01 }, load: { kargu2: 4 } },

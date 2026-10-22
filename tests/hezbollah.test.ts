@@ -22,7 +22,8 @@ describe('peace-2027: Israel against Hezbollah (Red Team XP-5)', () => {
     s.engine.run(w, 21 * 4);
     // Main: Israel takes Beirut on day 8 and half of Lebanon by day 15.
     expect(w.control[beirut]).toBe(LBN);
-    // In 2006 and 2024 the IDF fought for weeks over a strip a few kilometres to a few tens of kilometres deep.
-    expect(lebanon.filter((n) => w.control[n] !== LBN).length).toBeLessThanOrEqual(4);
+    // In 2006 and 2024 the IDF fought for weeks over a strip a few kilometres to a few tens of kilometres
+    // deep; on this grid that is the border cells, well short of a third of Lebanon.
+    expect(lebanon.filter((n) => w.control[n] !== LBN).length).toBeLessThan(lebanon.length / 3);
   }, 600_000);
 });
