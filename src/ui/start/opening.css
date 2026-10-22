@@ -1,10 +1,16 @@
 .op-title { position: absolute; inset: 0; z-index: 12; cursor: pointer; pointer-events: auto; }
-.op-bar { position: absolute; left: 0; right: 0; height: 11vh; background: #000; animation: op-bar 3.6s cubic-bezier(0.5, 0, 0.2, 1) both; }
-.op-bar.top { top: 0; transform-origin: top; }
-.op-bar.bottom { bottom: 0; transform-origin: bottom; }
-@keyframes op-bar { 0% { transform: scaleY(0); } 12%, 82% { transform: scaleY(1); } 100% { transform: scaleY(0); } }
-.op-words { position: absolute; left: 0; right: 0; top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; animation: op-words 3.6s ease-out both; text-shadow: 0 2px 20px rgba(0, 0, 0, 0.9); }
-@keyframes op-words { 0% { opacity: 0; letter-spacing: 0.2em; } 18% { opacity: 1; } 78% { opacity: 1; } 100% { opacity: 0; } }
+.op-title::before { content: ''; position: absolute; inset: 0; background: radial-gradient(ellipse at 50% 50%, rgba(2, 4, 8, 0.55), rgba(2, 4, 8, 0.25) 70%); opacity: 0; transition: opacity 0.6s; }
+.op-title.go::before { opacity: 1; }
+.op-title.out::before { opacity: 0; }
+.op-bar { position: absolute; left: 0; right: 0; height: 11vh; background: #000; transform: scaleY(0); transition: transform 0.6s cubic-bezier(0.5, 0, 0.2, 1); }
+.op-title.go .op-bar { transform: scaleY(1); }
+.op-title.out .op-bar { transform: scaleY(0); }
+.op-bar-top { top: 0; transform-origin: top; }
+.op-bar-bottom { bottom: 0; transform-origin: bottom; }
+.op-words { position: absolute; left: 0; right: 0; top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; opacity: 0; text-shadow: 0 2px 20px rgba(0, 0, 0, 0.9); }
+.op-title.go .op-words { animation: op-words 0.9s ease-out 0.2s both; }
+@keyframes op-words { from { opacity: 0; letter-spacing: 0.2em; } to { opacity: 1; } }
+.op-title.out .op-words { opacity: 0; transition: opacity 0.5s; animation: none; }
 .op-kicker { font-size: 14px; letter-spacing: 0.3em; color: var(--ww-gold); }
 .op-name { font-size: 64px; letter-spacing: 0.1em; color: #fff; }
 .op-place { font-size: 15px; letter-spacing: 0.4em; color: #b9d4f2; }

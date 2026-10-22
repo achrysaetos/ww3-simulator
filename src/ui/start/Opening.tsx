@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import type { NationId } from '../../core/types';
 import type { Briefing, Objective } from '../briefing';
 import { Flag } from '../flags';
@@ -16,17 +16,30 @@ const pct = (x: number) => `${Math.round(x * 100)}%`;
 const DOMAIN_NAME = { land: 'land', air: 'the air war', naval: 'the navy', homefront: 'the home front', strategic: 'war, peace and nuclear release' } as const;
 
 /** The cinematic beat while the camera falls from orbit to the theatre: letterbox, place, date. */
+const HOLD_MS = 3000, OUT_MS = 600;
+
 export function OpeningTitle({ scenario, theatre, date, onDone }: { scenario: string; theatre: string; date: Date; onDone(): void }) {
+  const [phase, setPhase] = useState<'wait' | 'in' | 'out'>('wait');
   useEffect(() => {
-    const id = setTimeout(onDone, 3600);
+    // The first frames of a new game are busy building the map; the beat starts once the page paints, and
+    // leaves on a timer rather than a CSS clock, so a slow frame never skips it.
+    let id = 0, raf = requestAnimationFrame(() => {
+      raf = requestAnimationFrame(() => {
+        setPhase('in');
+        id = window.setTimeout(() => {
+          setPhase('out');
+          id = window.setTimeout(onDone, OUT_MS);
+        }, HOLD_MS);
+      });
+    });
     const skip = (e: KeyboardEvent) => { if (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onDone(); } };
     window.addEventListener('keydown', skip, true);
-    return () => { clearTimeout(id); window.removeEventListener('keydown', skip, true); };
+    return () => { cancelAnimationFrame(raf); clearTimeout(id); window.removeEventListener('keydown', skip, true); };
   }, []);
   return (
-    <div className="op-title" onClick={onDone} data-testid="opening-title" role="presentation">
-      <i className="op-bar top" />
-      <i className="op-bar bottom" />
+    <div className={`op-title ${phase === 'wait' ? '' : 'go'} ${phase === 'out' ? 'out' : ''}`} onClick={onDone} data-testid="opening-title" role="presentation">
+      <i className="op-bar op-bar-top" />
+      <i className="op-bar op-bar-bottom" />
       <div className="op-words">
         <span className="op-kicker ww-mono">{pad(date.getUTCHours())}:00Z · {date.getUTCDate()} {MONTHS[date.getUTCMonth()].toUpperCase()} {date.getUTCFullYear()}</span>
         <span className="op-name ww-title">{scenario}</span>

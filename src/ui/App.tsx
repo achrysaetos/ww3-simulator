@@ -4,6 +4,10 @@ import { DEFAULT_DELEGATION, DOMAIN_OF_KIND } from '../systems/orders';
 import type { SimClient } from './client';
 import { Palette } from './colors';
 import { briefingFor, objectives as objectivesOf, outcome as outcomeOf } from './briefing';
+import { coachDue, markCoachDone } from './coach/coach';
+import { MomentOverlay } from './moments/MomentOverlay';
+import { momentsOf, type Moment } from './moments/moments';
+import { CoachMarks } from './coach/CoachMarks';
 import { CrisisScreen } from './crisis/CrisisScreen';
 import { nextCrisis, type Crisis, type CrisisContext } from './crisis/crisis';
 import { ConfirmDialog, EndDialog, GameMenu, type Confirmation } from './GameFlow';
@@ -98,6 +102,12 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
   const [toast, setToast] = useState<Toast | null>(null);
   const [crisis, setCrisis] = useState<{ c: Crisis; resume: number; chosen: number | null } | null>(null);
   const shownCrises = useRef(new Set<string>());
+  const [coach, setCoach] = useState(false);
+  const [moment, setMoment] = useState<Moment | null>(null);
+  const [lastMoment, setLastMoment] = useState<Moment | null>(null);
+  const moments = useRef<Moment[]>([]);
+  const capitals = useMemo(() => new Map(client.map.data.nations.flatMap((x, i) => (x.capital ? [[x.capital.cell as NodeId, client.map.nationIds[i]] as const] : []))), [client]);
+  const coachOffered = useRef(false);
   const watch = useRef<Watch | null>(null);
   const lastSeq = () => client.feed.newest(new Set(), null, 1)[0]?.seq ?? -1;
   const speed = client.ticksPerSec;
@@ -183,7 +193,7 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
   // A crisis stops the clock and takes the screen; otherwise the brief opens itself when a decision
   // needs the player (or each morning, by the player's setting).
   useEffect(() => {
-    if (brief || crisis || briefingOpen || (endKey && endKey !== endSeen) || !client.state.date) return;
+    if (brief || crisis || coach || briefingOpen || (endKey && endKey !== endSeen) || !client.state.date) return;
     const ctx = crisesOn() ? crisisContext() : null;
     const next = ctx && nextCrisis(desk.cards, shownCrises.current, ctx);
     if (next) {
@@ -194,8 +204,12 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
       if (next.node !== undefined) focusHandle.current?.(next.node, 'wide');
       return;
     }
+    if (!coachOffered.current) {
+      coachOffered.current = true;
+      if (coachDue()) return setCoach(true);
+    }
     if (desk.briefDue(new Date(client.state.date), cadence)) openBrief();
-  }, [client.state.tick, desk.version, brief, crisis, briefingOpen, cadence]);
+  }, [client.state.tick, desk.version, brief, crisis, coach, briefingOpen, cadence]);
 
   const chooseCrisis = (i: number) => {
     if (!crisis) return;
@@ -217,11 +231,32 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
     setCrisis(null);
   };
 
+  // Moments of dread and triumph, from each turn's events as the player knows them.
+  useEffect(() => {
+    if (!d || !client.state.latestEvents.length) return;
+    const seen = new Set(moments.current.map((m) => m.key));
+    const found = momentsOf(client.state.latestEvents, {
+      me: playAs, enemies: new Set(d.enemies), capitals, isSea: (node) => client.map.isSea(node),
+      platformClass: (id) => client.meta?.platforms[id]?.class,
+      place: (node) => places.name(node).replace(/^(near|off) /, ''), at: (node) => places.at(node),
+      name: (id) => client.namer.nation(id),
+    });
+    moments.current.push(...found.filter((m) => !seen.has(m.key)).slice(0, 2));
+  }, [client.state.latestEvents]);
+  useEffect(() => {
+    if (moment || crisis || opening || brief || coach || !moments.current.length) return;
+    const next = moments.current.shift()!;
+    if (next.tick < client.state.tick - 8) return;
+    setMoment(next);
+    setLastMoment(next);
+    focusHandle.current?.(next.node, 'wide');
+  }, [client.state.tick, moment, crisis, opening, brief, coach]);
+
   const toggleDrawer = useCallback((id: Drawer) => setDrawer((cur) => (cur === id ? null : id)), []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (brief || opening || crisis || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (brief || opening || crisis || coach || e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key === 'Escape') {
         if (pending || nuclearPick) { setPending(null); setNuclearPick(false); setNuclearTarget(null); }
         else setDrawer(null);
@@ -240,7 +275,7 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [client, brief, opening, crisis, pending, nuclearPick, openBrief, toggleDrawer]);
+  }, [client, brief, opening, crisis, coach, pending, nuclearPick, openBrief, toggleDrawer]);
 
   const quit = () => setConfirm({
     title: 'Quit to the start screen?',
@@ -341,6 +376,7 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
     enemies: d?.enemies ?? [], places, commandOf,
   }), [client.state.tick, client.state.formations, commandOf, enemiesKey]);
   const news = useMemo(() => headlines(client.feed, client.map), [client.feed.version]);
+  const pinned = lastMoment && lastMoment.tick >= client.state.tick - 8 ? lastMoment : null;
   const front = desk.frontChange(7);
   const atWar = (d?.enemies.length ?? 0) > 0;
   const defcon = desk.nuclearStep === 2 ? 1 : desk.nuclearStep === 1 ? 2 : atWar ? 3 : 5;
@@ -487,8 +523,9 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
       )}
 
       <footer className="ww-ticker" aria-label="News" data-testid="ticker">
-        {news.length > 0 && news[0].tick >= client.state.tick - 4 && <span className="ww-chip red">Breaking</span>}
-        {news.map((h, i) => <span key={h.seq} className={i === 0 ? 'fresh' : ''}>{i > 0 && <i className="ww-muted"> · </i>}{h.text}</span>)}
+        {(pinned || (news.length > 0 && news[0].tick >= client.state.tick - 4)) && <span className="ww-chip red">Breaking</span>}
+        {pinned && <span className="fresh ww-moment-line" data-testid="ticker-moment">{pinned.headline}</span>}
+        {news.map((h, i) => <span key={h.seq} className={i === 0 && !pinned ? 'fresh' : ''}>{(i > 0 || pinned) && <i className="ww-muted"> · </i>}{h.text}</span>)}
         {!news.length && <span className="ww-muted">No news from the wider world.</span>}
       </footer>
 
@@ -562,6 +599,8 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
       {ending && endKey !== endSeen && !briefingOpen && !brief && !crisis && (
         <EndDialog outcome={ending} objectives={objectives} onContinue={() => setEndSeen(endKey)} onQuit={() => client.quit()} />
       )}
+      {moment && <MomentOverlay moment={moment} onDone={() => setMoment(null)} />}
+      {coach && <CoachMarks onDone={() => { markCoachDone(); setCoach(false); }} />}
       {crisis && date && (
         <CrisisScreen
           crisis={crisis.c}

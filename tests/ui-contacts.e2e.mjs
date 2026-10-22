@@ -5,6 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { chromium } from '/opt/node-tools/node_modules/playwright/index.mjs';
+import { newGame } from './e2e-start.mjs';
 
 const [, , url, out, play = 'ukraine-2026:UKR'] = process.argv;
 fs.mkdirSync(out, { recursive: true });
@@ -21,15 +22,7 @@ const check = (ok, what) => {
   console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`);
   if (!ok) failures.push(what);
 };
-const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
-const errors = [];
-page.on('pageerror', (e) => errors.push(e.message));
-await page.goto(url);
-await page.click(`[data-testid="scenario-${scenario}"]`, { timeout: 60_000 });
-await page.selectOption('[data-testid="nation-select"]', nation);
-await page.click('[data-testid="start"]');
-await page.waitForSelector('[data-testid="shell"]', { timeout: 120_000 });
-await page.getByRole('button', { name: 'Take command' }).click({ timeout: 30_000 });
+const { page, errors } = await newGame(browser, url, scenario, nation);
 await page.waitForFunction(() => window.__map && window.__client?.state.formations.length > 0, null, { timeout: 120_000 });
 
 for (;;) {

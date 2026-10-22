@@ -14,6 +14,7 @@ import { COMMAND_ROLES } from '../src/ui/staff/roles';
 import { CrisisScreen } from '../src/ui/crisis/CrisisScreen';
 import { crisisOf, nextCrisis, type CrisisContext } from '../src/ui/crisis/crisis';
 import type { Card } from '../src/ui/staff/advice';
+import { momentsOf } from '../src/ui/moments/moments';
 import { playWithStaff } from './staff-mirror';
 
 const map = loadMap();
@@ -213,4 +214,29 @@ describe('crises stop the clock with one decision', () => {
     expect(routine.length).toBeGreaterThan(0);
     expect(nextCrisis(routine, new Set(), contextOf(g))).toBeNull();
   }, 300_000);
+});
+
+describe('moments land only when the player would know them', () => {
+  const capital = map.data.nations[map.nationIds.indexOf(N('UKR'))].capital!.cell as NodeId;
+  const ctx = {
+    me: N('UKR'), enemies: new Set([N('RUS')]), capitals: new Map([[capital, N('UKR')]]), isSea: (n: NodeId) => map.isSea(n),
+    platformClass: (id: string) => (id === 'cvn' ? 'carrier' : 'destroyer'), place: () => 'Kyiv', at: () => 'at Kyiv', name: (id: NationId) => id as string,
+  };
+  const land = (k: number) => [...Array(map.landCount).keys()].filter((n) => !map.isSea(n as NodeId)).slice(1000, 1000 + k) as NodeId[];
+
+  it('a nuclear detonation anywhere, the fall of a capital we fight over, and a breakthrough', () => {
+    expect(momentsOf([{ type: 'nuclear_detonation', tick: 5, by: N('IND'), node: 10 as NodeId, yieldKt: 15, casualties: 1000 }], ctx)).toMatchObject([{ kind: 'nuclear', title: 'Nuclear detonation' }]);
+    expect(momentsOf([{ type: 'node_captured', tick: 5, node: capital, from: N('UKR'), to: N('RUS') }], ctx)).toMatchObject([{ kind: 'capital', tone: 'dread', title: 'Our capital has fallen' }]);
+    const taken = land(3).map((node) => ({ type: 'node_captured' as const, tick: 5, node, from: N('RUS'), to: N('UKR') }));
+    expect(momentsOf(taken, ctx)).toMatchObject([{ kind: 'breakthrough', tone: 'triumph' }]);
+    expect(momentsOf(taken.slice(0, 2), ctx), 'two cells in a turn is not a breakthrough').toEqual([]);
+  });
+
+  it('a capital changing hands in a war we are not in, and a carrier lost in a battle we did not fight, are not ours to see', () => {
+    expect(momentsOf([{ type: 'node_captured', tick: 5, node: capital, from: N('PER'), to: N('BOL') }], { ...ctx, capitals: new Map([[capital, N('PER')]]) })).toEqual([]);
+    const battle = (attacker: string, defender: string, loser: string) => ({ type: 'battle' as const, tick: 5, node: 3 as NodeId, attacker: N(attacker), defender: N(defender), domain: 'sea' as const, losses: { [loser]: { cvn: 1 } }, casualties: {} });
+    expect(momentsOf([battle('USA', 'CHN', 'CHN')], ctx)).toEqual([]);
+    expect(momentsOf([battle('RUS', 'UKR', 'RUS')], ctx)).toMatchObject([{ kind: 'carrier', tone: 'triumph', title: 'Enemy carrier sunk' }]);
+    expect(momentsOf([battle('RUS', 'UKR', 'UKR')], ctx)).toMatchObject([{ kind: 'carrier', tone: 'dread' }]);
+  });
 });
