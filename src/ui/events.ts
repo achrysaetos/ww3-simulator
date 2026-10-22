@@ -181,6 +181,8 @@ export interface Namer {
   item(id: string): string;
   /** A catalog item's name, or undefined when `id` is not a catalog id. */
   known(id: string): string | undefined;
+  /** A platform's domain ('air', 'land', 'sea'...), or undefined when unknown. */
+  domain?(id: string): string | undefined;
   place: PlaceNamer;
 }
 
@@ -215,8 +217,15 @@ function fight(e: Extract<SimEvent, { type: 'battle' }>, n: Namer): string {
   const unit = e.domain === 'sea' ? 'ship' : e.domain === 'air' ? 'aircraft' : 'platform';
   const people = e.domain === 'sea' ? 'sailors' : e.domain === 'air' ? 'aircrew' : 'casualties';
   const losses = [...new Set([...Object.keys(e.losses), ...Object.keys(e.casualties)])].flatMap((id) => {
-    const lost = total(e.losses[id as NationId] ?? {}), cas = e.casualties[id as NationId] ?? 0;
-    const parts = [lost > 0 ? plural(lost, unit, unit === 'aircraft' ? 'aircraft' : undefined) : '', cas > 0 ? `${cas.toLocaleString()} ${people}` : ''].filter(Boolean);
+    const lostBy = e.losses[id as NationId] ?? {}, cas = e.casualties[id as NationId] ?? 0;
+    // A strike's air battle also tallies what its bombs killed on the ground: those are not aircraft, nor their crews aircrew.
+    const ground = e.domain === 'air' ? total(Object.fromEntries(Object.entries(lostBy).filter(([pid]) => (n.domain?.(pid) ?? 'air') !== 'air'))) : 0;
+    const lost = total(lostBy) - ground;
+    const parts = [
+      lost > 0 ? plural(lost, unit, unit === 'aircraft' ? 'aircraft' : undefined) : '',
+      ground > 0 ? plural(ground, 'platform') : '',
+      cas > 0 ? `${cas.toLocaleString()} ${ground > 0 ? 'casualties' : people}` : '',
+    ].filter(Boolean);
     return parts.length ? [`${n.nation(id as NationId)} ${parts.join(', ')}`] : [];
   });
   const lost = losses.length ? ` Lost: ${losses.join('; ')}.` : ' No losses.';

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { NationId, NodeId } from '../src/core/types';
 import { loadMap } from '../src/data/load';
-import { humanizeMessage, PlaceNamer, type Namer } from '../src/ui/events';
+import { describeEvent, humanizeMessage, PlaceNamer, type Namer } from '../src/ui/events';
 import { EventFeed } from '../src/ui/feed';
 import { activity } from '../src/ui/FormationPanel';
 import { SimHost } from '../src/ui/host';
@@ -67,5 +67,17 @@ describe('a resumed game keeps its news', () => {
   it('describes a strike by the target class the order carries, in the words the strike dropdown uses', () => {
     const detail = { formation: { status: 'active', node: 0, order: { posture: 'strike', target: 0, targetClass: 'soft' } }, engaged: false, trackedBy: [] } as unknown as FormationDetail;
     expect(activity(detail, () => 'near St. Petersburg', (id) => id)).toBe('Striking near St. Petersburg: trucks and soft vehicles.');
+  });
+
+  it('counts only aircraft as aircraft in an air battle that also killed troops on the ground', () => {
+    const domains: Record<string, string> = { f14a_irn: 'air', infantry_squad: 'land' };
+    const n: Namer = { nation: (id) => id, formation: () => undefined, item: (id) => id, known: () => undefined, domain: (id) => domains[id], place: new PlaceNamer(map) };
+    const battle = (losses: Record<string, number>, casualties: number) => describeEvent({
+      type: 'battle', tick: 0, node: 0 as NodeId, attacker: 'USA' as NationId, defender: 'IRN' as NationId, domain: 'air',
+      losses: { IRN: losses } as never, casualties: { IRN: casualties } as never,
+    }, n);
+    expect(battle({ infantry_squad: 1 }, 9)).toMatch(/Lost: IRN 1 platform, 9 casualties\./);
+    expect(battle({ f14a_irn: 1, infantry_squad: 2 }, 20)).toMatch(/Lost: IRN 1 aircraft, 2 platforms, 20 casualties\./);
+    expect(battle({ f14a_irn: 2 }, 4)).toMatch(/Lost: IRN 2 aircraft, 4 aircrew\./);
   });
 });

@@ -139,6 +139,7 @@ export class SimClient {
     formation: (id) => this.formationNames.get(id),
     item: (id) => this.namer.known(id) ?? id.replace(/_/g, ' '),
     known: (id) => this.meta?.platforms[id]?.name ?? this.meta?.munitions[id]?.name,
+    domain: (id) => this.meta?.platforms[id]?.domain,
     place: this.places,
   };
 

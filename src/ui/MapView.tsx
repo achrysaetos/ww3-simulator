@@ -61,7 +61,6 @@ export function MapView(props: MapViewProps) {
   const [hud, setHud] = useState<{ band: ZoomBand; km: number }>({ band: 'theatre', km: 1 });
   const [failed, setFailed] = useState<string | null>(null);
   const dirty = useRef(true);
-  const opened = useRef(false);
 
   useEffect(() => {
     const canvas = canvasRef.current!;
@@ -77,11 +76,13 @@ export function MapView(props: MapViewProps) {
     (window as unknown as { __map?: MapRenderer }).__map = r;
     r.onInvalidate = () => (dirty.current = true);
     r.namePlace = (n) => propsRef.current.places.name(n).replace(/^near /, '');
+    // Per renderer, not per component: StrictMode mounts the effect twice and the second renderer needs its opening too.
+    let opened = false;
     const fit = () => {
       const rect = canvas.getBoundingClientRect();
       r.resize(rect.width, rect.height, window.devicePixelRatio || 1);
-      if (!opened.current && rect.width > 0) {
-        opened.current = true;
+      if (!opened && rect.width > 0) {
+        opened = true;
         const { client: c, playAs } = propsRef.current;
         const focus = c.meta ? openingFocus(c.map, c.meta.scenario, playAs) : null;
         const at = focus === null ? { lon: 24, lat: 50 } : { lon: c.map.lon[focus], lat: c.map.lat[focus] };
