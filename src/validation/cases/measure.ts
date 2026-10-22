@@ -1,7 +1,6 @@
-import type { NationId, NodeId, PlatformClass, World } from '../../core/types';
-import { metric } from '../../forecast/metrics';
+import type { NationId, PlatformClass, World } from '../../core/types';
+import { areaKm2, metric, progress } from '../../forecast/metrics';
 import type { StrikeWeaponClass } from '../../metrics';
-import { cellDepthKm } from '../../systems/land/state';
 import type { CaseRun } from '../types';
 
 export const CREWED_AIRCRAFT: ReadonlySet<string> = new Set(['fighter', 'multirole', 'attack_aircraft', 'bomber', 'stealth_bomber', 'awacs', 'tanker', 'ew_aircraft', 'maritime_patrol', 'transport_aircraft', 'attack_helo', 'transport_helo', 'asw_helo']);
@@ -31,27 +30,13 @@ export const battleLosses = (run: CaseRun, n: string, classes: readonly Platform
 /** Who holds the land cell at a place at the end of the run. */
 export const holderAt = (run: CaseRun, lat: number, lon: number): NationId | undefined => run.end.control[run.map.nodeAt(lat, lon)];
 
-/** Area of a land cell in km2. */
-const areaKm2 = (run: CaseRun, n: number) => (2 * run.map.halfDeg[n] * 111.32) ** 2 * Math.cos((run.map.lat[n] * Math.PI) / 180);
-
-/**
- * Share of a cell `nation` holds or has pushed across, 0..1. A cell it holds counts less the share an enemy has pushed
- * back across it: a Kursk cell Russia has retaken all but a sliver of is not 1,900 km2 of Ukrainian ground.
- */
-function progress(run: CaseRun, control: readonly NationId[], contest: Readonly<Record<number, { by: NationId; km: number }>>, nation: string, n: number): number {
-  const c = contest[n];
-  const share = c ? Math.min(1, c.km / cellDepthKm(run.map, n as NodeId)) : 0;
-  if (control[n] === nation) return c && c.by !== nation ? 1 - share : 1;
-  return c?.by === nation ? share : 0;
-}
-
 /** Ground `nation` gained, net, in km2, on land `owner` owns, counting partial advances across contested cells. */
 export function groundKm2On(run: CaseRun, nation: string, owner: string): number {
   const endContest = run.end.slices.land?.contest ?? {};
   let km2 = 0;
   for (let n = 0; n < run.map.landCount; n++) {
     if (run.map.owner[n] !== owner) continue;
-    km2 += (progress(run, run.end.control, endContest, nation, n) - progress(run, run.start.control, run.start.contest, nation, n)) * areaKm2(run, n);
+    km2 += (progress(run.map, run.end.control, endContest, nation, n) - progress(run.map, run.start.control, run.start.contest, nation, n)) * areaKm2(run.map, n);
   }
   return km2;
 }

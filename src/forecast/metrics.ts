@@ -36,13 +36,17 @@ export interface MetricFn {
 }
 
 /** Area of a land cell in km2. */
-const areaKm2 = (map: GameMap, n: number) => (2 * map.halfDeg[n] * 111.32) ** 2 * Math.cos((map.lat[n] * Math.PI) / 180);
+export const areaKm2 = (map: GameMap, n: number) => (2 * map.halfDeg[n] * 111.32) ** 2 * Math.cos((map.lat[n] * Math.PI) / 180);
 
-/** Share of a cell `nation` holds or has pushed across, 0..1. */
-function progress(map: GameMap, control: readonly NationId[], contest: FrontSnapshot['contest'], nation: NationId, n: NodeId): number {
-  if (control[n] === nation) return 1;
+/**
+ * Share of a cell `nation` holds or has pushed across, 0..1. A cell it holds counts less the share an enemy has pushed
+ * back across it, so ground retaken short of the whole cell is not still counted as held.
+ */
+export function progress(map: GameMap, control: readonly NationId[], contest: FrontSnapshot['contest'], nation: string, n: number): number {
   const c = contest[n];
-  return c?.by === nation ? Math.min(1, c.km / cellDepthKm(map, n)) : 0;
+  const share = c ? Math.min(1, c.km / cellDepthKm(map, n as NodeId)) : 0;
+  if (control[n] === nation) return c && c.by !== nation ? 1 - share : 1;
+  return c?.by === nation ? share : 0;
 }
 
 /** Per land cell, the change in `nation`'s hold on it from start to end, as a share of the cell. */
