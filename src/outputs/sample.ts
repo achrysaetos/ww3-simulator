@@ -1,12 +1,15 @@
 import type { Catalog } from '../core/catalog';
-import type { ItemId, Munition, MunitionKind, NationId, World } from '../core/types';
+import type { ItemId, Munition, MunitionId, MunitionKind, NationId, PlatformId, World } from '../core/types';
 import { AID_FLOWS, ITEMS, itemSpec } from '../data/industry';
 import { aidKey } from '../systems/economy';
 import type { RaceItem } from './types';
 
 /** The counters of one nation at one tick. Cumulative counters run from the start of the run. */
 export interface NationSample {
-  /** Discrete items in magazines and warehouses; `ammo` in national depots, tons. */
+  /**
+   * Discrete items in magazines and in warehouses that one of the nation's living formations can
+   * load; `ammo` in national depots, tons. Rounds nobody left can fire are not a stock to run down.
+   */
   stock: Partial<Record<RaceItem, number>>;
   produced: Partial<Record<RaceItem, number>>;
   /** Net arms aid received so far: deliveries in, less what it shipped from its own stocks. */
@@ -14,6 +17,8 @@ export interface NationSample {
   /** Units of every kind received through standing arms pipelines (AID_FLOWS). */
   aidReceived: number;
   shellsFired: number;
+  /** Catalog value of everything its production lines have delivered, USD M. */
+  producedUsdM: number;
 }
 
 export interface OutputSample {
@@ -62,7 +67,8 @@ export function involved(world: World): NationId[] {
 /** Reads the counters of `nations` from the World. Pure. */
 export function sampleOutputs(world: World, catalog: Catalog, nations: readonly NationId[] = involved(world)): OutputSample {
   const out: Record<NationId, NationSample> = {};
-  for (const id of nations) out[id] = { stock: { ammo: world.nations[id].bulk.ammo }, produced: {}, aid: {}, aidReceived: 0, shellsFired: world.slices.land?.shellsFired[id] ?? 0 };
+  for (const id of nations) out[id] = { stock: { ammo: world.nations[id].bulk.ammo }, produced: {}, aid: {}, aidReceived: 0, shellsFired: world.slices.land?.shellsFired[id] ?? 0, producedUsdM: 0 };
+  const launchable = new Map<NationId, Set<string>>();
   for (const f of Object.values(world.formations)) {
     const s = out[f.nation];
     if (!s || f.status === 'destroyed') continue;
@@ -70,14 +76,20 @@ export function sampleOutputs(world: World, catalog: Catalog, nations: readonly 
       const g = groupOf(catalog.munitions.get(m as Munition['id']));
       if (g) s.stock[g] = (s.stock[g] ?? 0) + k;
     }
+    const can = launchable.get(f.nation) ?? launchable.set(f.nation, new Set()).get(f.nation)!;
+    for (const [pid, n] of Object.entries(f.equipment)) if (n > 0) for (const l of catalog.platform(pid as PlatformId).loadout) can.add(l.munition);
   }
   for (const id of nations) {
     const s = out[id];
+    const can = launchable.get(id);
     for (const [m, k] of Object.entries(world.nations[id].stockpile)) {
-      const g = groupOf(catalog.munitions.get(m as Munition['id']));
+      const g = can?.has(m) ? groupOf(catalog.munitions.get(m as Munition['id'])) : undefined;
       if (g) s.stock[g] = (s.stock[g] ?? 0) + k;
     }
-    for (const [item, k] of Object.entries(world.slices.economy?.nations[id]?.delivered ?? {})) credit(catalog, item as ItemId, k, s.produced);
+    for (const [item, k] of Object.entries(world.slices.economy?.nations[id]?.delivered ?? {})) {
+      credit(catalog, item as ItemId, k, s.produced);
+      s.producedUsdM += k * ((catalog.platforms.get(item as PlatformId) ?? catalog.munitions.get(item as MunitionId))?.unitCostUsdM ?? 0);
+    }
   }
   for (const f of AID_FLOWS) {
     const k = world.slices.economy?.aid[aidKey(f)]?.delivered ?? 0;

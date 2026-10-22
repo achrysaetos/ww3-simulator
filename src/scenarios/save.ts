@@ -82,6 +82,44 @@ function worldProblem(w: unknown, mapSize: number): string | null {
   if ((w.control as unknown[]).length !== mapSize) return `save was made on a different map (${(w.control as unknown[]).length} nodes, this build has ${mapSize})`;
   const bad = jsonViolations(w);
   if (bad.length) return `world is not plain JSON:\n  ${bad.join('\n  ')}`;
+  return rangeProblem(w as unknown as World);
+}
+
+/**
+ * The richest state's treasury is a few trillion dollars; a war chest a hundred times that
+ * is a tampered or corrupt save, not a strategy.
+ */
+const TREASURY_LIMIT_USD_B = 1e5;
+
+/** Names the first count, share or reference in the World that no run can produce, or null. */
+function rangeProblem(w: World): string | null {
+  const count = (v: unknown) => typeof v === 'number' && v >= 0;
+  const share = (v: unknown) => typeof v === 'number' && v >= 0 && v <= 1;
+  const counts = (where: string, r: unknown): string | null => {
+    if (!isRecord(r)) return `${where} is not an object`;
+    for (const [k, v] of Object.entries(r)) if (!count(v)) return `${where}.${k} must be a count of at least 0, got ${JSON.stringify(v)}`;
+    return null;
+  };
+  for (const [id, f] of Object.entries(w.formations)) {
+    if (!isRecord(f)) return `formation ${id} is not an object`;
+    const at = `formation ${id}`;
+    const problem = counts(`${at} equipment`, f.equipment) ?? counts(`${at} damaged`, f.damaged) ?? counts(`${at} magazine`, f.magazine) ?? counts(`${at} supply`, f.supply) ?? counts(`${at} supplyCapacity`, f.supplyCapacity);
+    if (problem) return problem;
+    if (!count(f.personnel)) return `${at} personnel must be at least 0, got ${f.personnel}`;
+    for (const k of ['readiness', 'morale', 'experience', 'fatigue', 'entrenchment'] as const) if (!share(f[k])) return `${at} ${k} must lie in 0..1, got ${f[k]}`;
+    if (!(f.nation in w.nations)) return `${at} belongs to unknown nation ${f.nation}`;
+    if (!Number.isInteger(f.node) || f.node < 0 || f.node >= w.control.length) return `${at} stands on no node of this map (${f.node})`;
+  }
+  for (const [id, n] of Object.entries(w.nations)) {
+    if (!isRecord(n)) return `nation ${id} is not an object`;
+    const at = `nation ${id}`;
+    for (const k of ['population', 'reserves', 'reservists'] as const) if (!count(n[k])) return `${at} ${k} must be at least 0, got ${n[k]}`;
+    for (const k of ['mobilization', 'warSupport'] as const) if (!share(n[k])) return `${at} ${k} must lie in 0..1, got ${n[k]}`;
+    const problem = counts(`${at} stockpile`, n.stockpile) ?? counts(`${at} bulk`, n.bulk);
+    if (problem) return problem;
+    if (typeof n.treasuryUsdB !== 'number' || Math.abs(n.treasuryUsdB) > TREASURY_LIMIT_USD_B) return `${at} treasury of ${n.treasuryUsdB} billion USD is beyond any state's`;
+  }
+  for (let i = 0; i < w.control.length; i++) if (w.control[i] && !(w.control[i] in w.nations)) return `node ${i} is held by unknown nation ${w.control[i]}`;
   return null;
 }
 

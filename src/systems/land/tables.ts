@@ -1,5 +1,6 @@
-import type { FormationKind, PlatformClass, TargetClass, Terrain } from '../../core/types';
+import type { Formation, FormationKind, PlatformClass, PlatformId, TargetClass, Terrain } from '../../core/types';
 import { defineParam } from '../../core/params';
+import { eraDroneFire, eraKillZoneCommit, eraPositionalIntensity } from '../adaptation/era';
 
 export interface TerrainProfile {
   /**
@@ -38,8 +39,52 @@ export const TARGET_CLASS: Partial<Record<PlatformClass, TargetClass>> = {
 };
 export const targetClassOf = (c: PlatformClass): TargetClass => TARGET_CLASS[c] ?? 'soft';
 
-/** Area-fire weapons: Lanchester linear law (kills scale with target density), the rest aimed fire (square law). */
+/**
+ * Area-fire weapons: Lanchester linear law (kills scale with target density), the rest aimed fire (square law).
+ * Drone teams are aimed fire: only so many crews can fly over one stretch of front, so they share its frontage.
+ */
 export const INDIRECT_FIRE: ReadonlySet<PlatformClass> = new Set(['sp_artillery', 'towed_artillery', 'mlrs']);
+
+/**
+ * Multiplier on the land fire of drone teams (FPV and Lancet-class loitering munitions). Ukrainian
+ * commanders and RUSI put drones behind 60-80% of Russian casualties and destroyed vehicles in 2024-25
+ * (Watling and Reynolds, "Tactical Developments During the Third Year of the Russo-Ukrainian War", RUSI,
+ * Feb 2025; Ukrainian General Staff statements). These are combatant claims, likely high. At 1, drone teams
+ * hold some 45% of a Ukrainian front brigade's anti-personnel fire and 15% of a Russian one's, and Russian
+ * counter-drone EW halves Ukraine's (ukraine-2026). Casualty totals keep to their realism bands from 0.3 to 2.
+ * The era dial era.STRIKE_COST_RATIO scales it; the drone-versus-counter-drone cycle over a war moves the
+ * jamming of drone links instead (src/systems/adaptation).
+ */
+const DRONE_FIRE_2025 = defineParam({
+  id: 'land.DRONE_FIRE', value: 1, range: [0.3, 2], tag: 'contested',
+  source: 'RUSI (Watling and Reynolds, Feb 2025); Ukrainian General Staff: drones cause 60-80% of casualties (combatant claims)',
+  affects: 'land fire of FPV and loitering-munition teams',
+});
+/** Drone-team fire under the run's era (era.STRIKE_COST_RATIO); the calibrated value at the default era. */
+export const DRONE_FIRE = (): number => eraDroneFire(DRONE_FIRE_2025());
+export const fireScaleOf = (c: PlatformClass): number => (c === 'loitering_munition_launcher' ? DRONE_FIRE() : 1);
+
+/**
+ * Special-forces platforms. A formation most of whose dismounts are special forces infiltrates: on any
+ * order but an attack it slips through and stays behind enemy lines without fighting for ground, is
+ * hard to find there, inserts by air without air control, and raids the command posts it finds.
+ */
+export const SOF_PLATFORMS: ReadonlySet<string> = new Set(['sof_squad']);
+export function isSof(f: Formation): boolean {
+  let sof = 0, all = 0;
+  for (const pid of SOF_PLATFORMS) sof += f.equipment[pid as PlatformId] ?? 0;
+  if (sof <= 0) return false;
+  for (const pid in f.equipment) if (!SOF_PLATFORMS.has(pid) && pid.includes('squad')) all += f.equipment[pid as PlatformId];
+  return sof >= all;
+}
+/** An infiltrating special-forces formation: behind the lines it avoids battle rather than seeking it. */
+export const infiltrating = (f: Formation): boolean => f.order.posture !== 'attack' && isSof(f);
+/**
+ * Km of march an infiltrator spends per km of enemy-held ground: on foot, by night, round the
+ * positions. North Korean infiltration doctrine has light infantry crossing the DMZ and covering
+ * 20-40 km a night through the hills (ROK Defense White Paper 2022). Judgment.
+ */
+export const INFILTRATION_COST = 2;
 
 /** Platforms that are not vehicles; in a formation that has vehicles they ride (mechanized/motorized). */
 export const DISMOUNTS: ReadonlySet<PlatformClass> = new Set(['infantry', 'atgm']);
@@ -183,9 +228,11 @@ export const SURRENDER_GRACE_DAYS = 7;
  * assault's engaged hours. Estimate, tuned so a quiet 2024-25 Ukrainian front
  * sector costs each side a few tenths of a percent of its strength per day.
  */
-export const POSITIONAL_INTENSITY = defineParam({ id: 'land.POSITIONAL_INTENSITY', value: 0.25, range: [0.15, 0.4], tag: 'judgment',
+const POSITIONAL_INTENSITY_2025 = defineParam({ id: 'land.POSITIONAL_INTENSITY', value: 0.25, range: [0.15, 0.4], tag: 'judgment',
   source: 'Tuned so a quiet 2024-25 Ukrainian sector costs a few tenths of a percent of strength a day',
   affects: 'positional attrition and shell use' });
+/** Positional intensity under the run's era (era.STRIKE_COST_RATIO); the calibrated value at the default era. */
+export const POSITIONAL_INTENSITY = (): number => eraPositionalIntensity(POSITIONAL_INTENSITY_2025());
 
 /**
  * The front law. Each pace below is a pace on the sector an attacker assaults, cited from the axes it was observed
@@ -243,7 +290,7 @@ export const COVERED_KM_PER_DAY = defineParam({ id: 'land.COVERED_KM_PER_DAY', v
 export const EXPOSURE: Partial<Record<PlatformClass, number>> = {
   mbt: 0.35, ifv: 0.5, apc: 0.5,
   truck: 0.05, fuel_truck: 0.05, engineer: 0.5, recon: 0.8,
-  sp_artillery: 0.3, towed_artillery: 0.3, mlrs: 0.25,
+  sp_artillery: 0.3, towed_artillery: 0.3, mlrs: 0.25, loitering_munition_launcher: 0.3,
   sam_long: 0.05, sam_medium: 0.15, shorad: 0.4, abm: 0.05, ew: 0.2, radar: 0.1,
   tel_srbm: 0.05, tel_mrbm: 0.05, tel_irbm: 0.05, cruise_launcher: 0.05, coastal_asm: 0.05, icbm_mobile: 0.02,
 };
@@ -273,9 +320,11 @@ export const ASSAULT_EXPOSURE = defineParam({ id: 'land.ASSAULT_EXPOSURE', value
  * the front supplied so that Russia loses ~1,000-1,700 men and 5-8 tanks a day
  * (UK MoD, Oryx) while firing 10-20k shells.
  */
-export const KILL_ZONE_COMMIT = defineParam({ id: 'land.KILL_ZONE_COMMIT', value: 0.3, range: [0.15, 0.6], tag: 'judgment',
+const KILL_ZONE_COMMIT_2025 = defineParam({ id: 'land.KILL_ZONE_COMMIT', value: 0.3, range: [0.15, 0.6], tag: 'judgment',
   source: 'Drone-era small-group assaults (RUSI, Watling and Reynolds 2025); tuned to 1,000-1,700 Russian casualties a day (UK MoD, Oryx)',
   affects: 'assault mass and casualties' });
+/** Kill-zone commitment under the run's era (era.TRANSPARENCY); the calibrated value at the default era. */
+export const KILL_ZONE_COMMIT = (): number => eraKillZoneCommit(KILL_ZONE_COMMIT_2025());
 /**
  * Entrenchment a shaken defender must have dug before it can give up a line for the
  * next one: two and a half days of digging at ENTRENCH_PER_DAY. Below it there is no

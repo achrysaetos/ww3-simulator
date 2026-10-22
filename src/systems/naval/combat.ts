@@ -1,5 +1,6 @@
 import { atWar } from '../../core/engine';
 import type { Formation, FormationId, Munition, MunitionId, NationId, PlatformId, TargetClass } from '../../core/types';
+import { measureEffect } from '../adaptation';
 import { estimate } from '../intel';
 import { CURRENT_CONFIDENCE } from '../intel/view';
 import { smallCraftFactorAt } from '../weather/effects';
@@ -181,7 +182,7 @@ function usvAttack(env: TickEnv, tracks: Tracks, f: Formation, queue: Queue): vo
     if (launched >= USV_WAVE) break;
   }
   env.invalidate(f);
-  const out = resolveSalvo(env.ctx.rng, USV_STRIKE, launched, poolDefense(env, target), 'ship');
+  const out = resolveSalvo(env.ctx.rng, USV_STRIKE, Math.round(launched * measureEffect(env.world, 'sea_drone_port', f.nation, target.nation)), poolDefense(env, target), 'ship');
   const lb = ledger(env.world, f.nation);
   lb.leakers += out.leakers;
   env.ctx.emit({ type: 'message', tick: env.world.tick, nation: f.nation, text: `${launched} strike USVs from ${f.name} attacked ${target.name}: ${out.hits.length} hits` });

@@ -5,6 +5,8 @@ import { loadMap } from '../src/data/load';
 import { allOrbat } from '../src/data/orbat';
 import { ALIASES } from '../src/data/orbat/aliases';
 import { placeOrbat } from '../src/scenarios/build';
+import { LAUNCHER } from '../src/systems/air/tables';
+import type { PlatformId } from '../src/core/types';
 
 describe('orders of battle against the catalog', () => {
   it('places every formation with every piece of equipment and every magazine round', () => {
@@ -25,6 +27,15 @@ describe('orders of battle against the catalog', () => {
     const schofield = Object.values(world.formations).find((f) => f.name === '2nd Brigade Combat Team, 25th Infantry Division')!;
     expect(world.control[schofield.node]).toBe('USA');
     expect(map.distanceKm(schofield.node, map.nodeAt(21.3, -157.9))).toBeLessThan(150);
+  });
+
+  it('puts every ground launcher in a ground formation: an air wing flies only airframes, so a launcher in one never fires', () => {
+    const map = loadMap();
+    const world = createWorld(map);
+    const catalog = loadCatalog();
+    placeOrbat(world, map, catalog, allOrbat(map), ALIASES);
+    const stranded = Object.values(world.formations).filter((f) => f.kind === 'air_wing' && Object.entries(f.equipment).some(([pid, n]) => n > 0 && LAUNCHER[catalog.platform(pid as PlatformId).class]));
+    expect(stranded.map((f) => `${f.nation} ${f.name}`)).toEqual([]);
   });
 
   it('never aliases to a missing catalog id', () => {

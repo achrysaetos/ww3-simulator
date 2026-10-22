@@ -27,13 +27,15 @@ const GARRISON: Tanks = { t72b3: 0.7, t72b: 0.3 };
 
 // Tables of organisation (full strength). Sources: IISS Military Balance 2025; Grau & Bartles,
 // "The Russian Way of War" (2016) for brigade/division establishments.
-const MRB_TOE = (tanks: Tanks, ifv: string): Kit => merge(mix(41, tanks), { [ifv]: 120, mtlb: 25, '2s19_msta': 18, '2s3': 18, bm21_grad: 18, tor_m2: 6, strela10: 6, infantry_squad: 110, truck: 450 });
-const MRD_TOE = (tanks: Tanks, ifv: string): Kit => merge(mix(160, tanks), { [ifv]: 280, mtlb: 40, '2s19_msta': 54, '2s3': 18, bm21_grad: 18, tor_m2: 12, strela10: 12, infantry_squad: 260, truck: 1100 });
-const TD_TOE = (tanks: Tanks): Kit => merge(mix(250, tanks), { bmp2: 110, bmp3: 40, '2s19_msta': 54, bm21_grad: 18, tor_m2: 12, strela10: 12, infantry_squad: 110, truck: 900 });
-const TANK_BDE_TOE = (tanks: Tanks): Kit => merge(mix(94, tanks), { bmp2: 40, '2s19_msta': 18, bm21_grad: 6, tor_m2: 4, infantry_squad: 40, truck: 300 });
-const VDV_DIV_TOE: Kit = { bmd4m: 80, bmd2: 120, btr_mdm: 60, t72b3: 31, '2s9': 36, '2s19_msta': 12, bm21_grad: 12, strela10: 12, infantry_squad: 170, truck: 450 };
-const VDV_BDE_TOE: Kit = { bmd2: 70, bmd4m: 20, btr_mdm: 20, '2s9': 18, strela10: 6, infantry_squad: 90, truck: 250 };
-const NIB_TOE = (tanks: Tanks): Kit => merge(mix(31, tanks), { btr82a: 100, mtlb: 30, '2s19_msta': 18, '2s9': 12, bm21_grad: 18, strela10: 6, infantry_squad: 100, truck: 350 });
+// Drone teams: FPV detachments and Lancet crews, which Russia spread through its formations in
+// 2024-25, with the Rubikon centre's teams on the main axes (RUSI, Feb 2025; ISW). Estimate.
+const MRB_TOE = (tanks: Tanks, ifv: string): Kit => merge(mix(41, tanks), { [ifv]: 120, mtlb: 25, '2s19_msta': 18, '2s3': 18, bm21_grad: 18, tor_m2: 6, strela10: 6, infantry_squad: 110, fpv_team: 14, lancet_team: 3, truck: 450 });
+const MRD_TOE = (tanks: Tanks, ifv: string): Kit => merge(mix(160, tanks), { [ifv]: 280, mtlb: 40, '2s19_msta': 54, '2s3': 18, bm21_grad: 18, tor_m2: 12, strela10: 12, infantry_squad: 260, fpv_team: 30, lancet_team: 8, truck: 1100 });
+const TD_TOE = (tanks: Tanks): Kit => merge(mix(250, tanks), { bmp2: 110, bmp3: 40, '2s19_msta': 54, bm21_grad: 18, tor_m2: 12, strela10: 12, infantry_squad: 110, fpv_team: 20, lancet_team: 6, truck: 900 });
+const TANK_BDE_TOE = (tanks: Tanks): Kit => merge(mix(94, tanks), { bmp2: 40, '2s19_msta': 18, bm21_grad: 6, tor_m2: 4, infantry_squad: 40, fpv_team: 6, lancet_team: 2, truck: 300 });
+const VDV_DIV_TOE: Kit = { bmd4m: 80, bmd2: 120, btr_mdm: 60, t72b3: 31, '2s9': 36, '2s19_msta': 12, bm21_grad: 12, strela10: 12, infantry_squad: 170, fpv_team: 24, lancet_team: 6, truck: 450 };
+const VDV_BDE_TOE: Kit = { bmd2: 70, bmd4m: 20, btr_mdm: 20, '2s9': 18, strela10: 6, infantry_squad: 90, fpv_team: 12, lancet_team: 3, truck: 250 };
+const NIB_TOE = (tanks: Tanks): Kit => merge(mix(31, tanks), { btr82a: 100, mtlb: 30, '2s19_msta': 18, '2s9': 12, bm21_grad: 18, strela10: 6, infantry_squad: 100, fpv_team: 12, lancet_team: 3, truck: 350 });
 
 const deployed = { readiness: 0.6, experience: 0.7 };
 const home = { readiness: 0.55, experience: 0.45 };
@@ -155,7 +157,7 @@ const vdv: OrbatEntry[] = [
   unit(RUS, '11th Guards Air Assault Brigade', 'maneuver', 'brigade', KURSK(-0.15), scale(VDV_BDE_TOE, 0.6), { ...deployed, airborne: true }),
   unit(RUS, '83rd Guards Air Assault Brigade', 'maneuver', 'brigade', KURSK(-0.2), scale(VDV_BDE_TOE, 0.6), { ...deployed, airborne: true }),
   unit(RUS, '31st Guards Air Assault Brigade', 'maneuver', 'brigade', KOSTIANTYNIVKA(0.35), scale(VDV_BDE_TOE, 0.55), { ...deployed, airborne: true }),
-  unit(RUS, '45th Guards Spetsnaz Brigade (VDV)', 'maneuver', 'brigade', at('Kubinka', 55.6, 36.65), { gaz_tigr: 60, infantry_squad: 60, truck: 80 }, { readiness: 0.7, experience: 0.7 }),
+  unit(RUS, '45th Guards Spetsnaz Brigade (VDV)', 'maneuver', 'brigade', at('Kubinka', 55.6, 36.65), { gaz_tigr: 60, sof_squad: 60, truck: 80 }, { readiness: 0.7, experience: 0.7, airborne: true }),
 ];
 
 const navalInfantry: OrbatEntry[] = [

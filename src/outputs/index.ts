@@ -1,12 +1,13 @@
 import type { Catalog } from '../core/catalog';
-import { atWar } from '../core/engine';
+import { atWar, enemiesOf } from '../core/engine';
 import type { GameMap } from '../core/map';
 import type { NationId, World } from '../core/types';
 import { AID_FLOWS, DEFAULT_SEABORNE_TRADE_SHARE, RESOURCE_SPECS, SEABORNE_TRADE_SHARE } from '../data/industry';
 import { hostedBy } from '../systems/civil/state';
-import { exportCapacity } from '../systems/economy';
+import { adaptationEdge } from '../systems/adaptation';
+import { exportCapacity, ladderOf } from '../systems/economy';
 import { involved, sampleOutputs, type NationSample, type OutputSample } from './sample';
-import { RACE_ITEMS, type Humanitarian, type ItemRace, type NationOutputs, type Outputs, type RaceItem, type Workaround, type WorkaroundStatus } from './types';
+import { RACE_ITEMS, type Edges, type Humanitarian, type ItemRace, type NationOutputs, type Outputs, type RaceItem, type Workaround, type WorkaroundStatus } from './types';
 
 export * from './types';
 export { involved, sampleOutputs, type NationSample, type OutputSample } from './sample';
@@ -187,6 +188,20 @@ function workarounds(world: World, trade: Trade, id: NationId, series: { tick: n
   return out;
 }
 
+/**
+ * The adaptation edge from the duels, and the production edge over the trailing month (or the run so far):
+ * the catalog value its lines delivered against what its current enemies' lines delivered together.
+ */
+function edges(world: World, id: NationId, samples: readonly OutputSample[]): Edges {
+  const last = samples[samples.length - 1];
+  const monthTicks = (DAYS_PER_MONTH * 24) / world.dtHours;
+  const from = samples.find((x) => x.tick >= last.tick - monthTicks) ?? samples[0];
+  const made = (n: NationId) => (last.nations[n]?.producedUsdM ?? 0) - (from.nations[n]?.producedUsdM ?? 0);
+  const own = made(id);
+  const theirs = enemiesOf(world, id).reduce((a, n) => a + made(n), 0);
+  return { adaptation: Math.tanh(adaptationEdge(world, id)), production: own + theirs > 0 ? (own - theirs) / (own + theirs) : 0 };
+}
+
 /** The Outputs of a run so far, from its samples (oldest first, the latest taken at the World's tick). Pure. */
 export function outputsOf(world: World, map: GameMap, samples: readonly OutputSample[]): Outputs {
   const hosted = world.slices.civil ? hostedBy(world.slices.civil) : new Map<NationId, number>();
@@ -199,6 +214,8 @@ export function outputsOf(world: World, map: GameMap, samples: readonly OutputSa
       humanitarian: humanitarian(world, map, id, hosted.get(id) ?? 0),
       race: RACE_ITEMS.flatMap((item) => race(world, series, item) ?? []),
       workarounds: workarounds(world, trade, id, series),
+      edges: edges(world, id, samples),
+      ladder: ladderOf(world, map, id).map((c) => ({ ...c, cutoff: c.cutoff as NationId | 'sea' })),
     };
   }
   const hosts = [...hosted].filter(([, n]) => n >= 1).sort((a, b) => b[1] - a[1]).slice(0, HOSTS_SHOWN).map(([nation, refugees]) => ({ nation, refugees }));

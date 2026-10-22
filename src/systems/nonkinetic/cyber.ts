@@ -1,5 +1,6 @@
 import type { GameMap } from '../../core/map';
 import type { NationId, NodeId, World } from '../../core/types';
+import { measureEffect } from '../adaptation';
 import { cyberCapability } from '../strategic';
 import { draw, keyOf } from '../civil/hash';
 import { accessKey, type AccessStage, type CyberAccess, type CyberSector, type NonKineticState } from './state';
@@ -29,7 +30,7 @@ export function stepAccess(world: World, s: NonKineticState): void {
   for (const key of Object.keys(s.access)) {
     const a = s.access[key];
     const def = cyberCapability(a.on);
-    const hazard = DISCOVERY_PER_DAY() * (1 + 2 * def) * (a.building ? BUILD_DISCOVERY_MULT() : 1);
+    const hazard = (DISCOVERY_PER_DAY() * (1 + 2 * def) * (a.building ? BUILD_DISCOVERY_MULT() : 1)) / measureEffect(world, 'cyber_hunting', a.by, a.on);
     if (draw(world.seed, world.tick, keyOf(key)) < 1 - Math.exp(-hazard * dtDays)) {
       // Discovered. A standing campaign is set back a stage and keeps working; an abandoned intrusion
       // (stood down) that is found is evicted for good.

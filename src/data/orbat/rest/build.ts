@@ -4,7 +4,7 @@ import type { KitId, MunitionKitId } from './kit';
 
 export type Base = OrbatEntry['base'];
 export type Kit = Partial<Record<KitId, number>>;
-export type Extra = Partial<Pick<OrbatEntry, 'personnel' | 'readiness' | 'experience' | 'airborne'>> & {
+export type Extra = Partial<Pick<OrbatEntry, 'personnel' | 'readiness' | 'experience' | 'airborne' | 'territorial'>> & {
   extraMagazine?: Partial<Record<MunitionKitId, number>>;
   /** Overrides the nation-level source for this one entry. */
   source?: string;

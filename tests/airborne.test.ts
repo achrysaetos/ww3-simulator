@@ -157,6 +157,23 @@ describe('airborne planning', () => {
     expect(dropped[0].node).toBe(target);
   });
 
+  it('weighs the defenders against the assault echelon the lift can carry, not the whole brigade', () => {
+    const t = setup([createOrderRouter([applyLandOrder]), landMovement, createAi()]);
+    const target = t.nodeAt(...KHARKIV);
+    // Two airlifters land about a third of the brigade; the garrison is more than half that echelon but less than half the brigade.
+    const wing = Object.values(t.world.formations).find((f) => f.name === 'Transport aviation')!;
+    wing.equipment = { [P('t_airlifter')]: 2 };
+    for (let i = 0; i < t.map.landCount; i++) if (t.map.distanceKm(Node(i), target) < 400) t.airOver(Node(i), 'RUS');
+    t.add({ nation: N('RUS'), name: 'Tank army', kind: 'maneuver', echelon: 'division', node: t.nodeAt(...BELGOROD), equipment: { [P('t_mbt')]: 300, [P('t_ifv')]: 300, [P('t_inf')]: 200 } });
+    t.add({ nation: N('UKR'), name: 'Kharkiv garrison', kind: 'maneuver', echelon: 'brigade', node: target, equipment: { [P('t_inf')]: 30 } });
+    const landings: NodeId[] = [];
+    for (let d = 0; d < 10; d++) {
+      t.day();
+      for (const fid of Object.keys(landSlice(t.world).airheads)) landings.push(t.world.formations[fid as keyof typeof t.world.formations].node);
+    }
+    expect(landings).not.toContain(target);
+  });
+
   it('holds its airborne troops back while the ground thrust is not winning, rather than drop them beyond relief', () => {
     const t = setup([createOrderRouter([applyLandOrder]), landMovement, createAi()]);
     const target = t.nodeAt(...KHARKIV);

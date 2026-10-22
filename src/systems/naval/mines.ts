@@ -3,7 +3,7 @@ import { allied } from '../land/state';
 import type { MunitionId, NationId } from '../../core/types';
 import { applyHits } from './combat';
 import type { TickEnv } from './env';
-import { ledger } from './state';
+import { chart, ledger } from './state';
 import { LAY_PER_HULL, MINE_DENSITY, SWEEP_PER_HULL_DAY } from './tables';
 
 /** Damage of one mine strike in Exocet equivalents. Princeton and Tripoli (1991) and Samuel B. Roberts (1988) each survived one mine; small craft do not. */
@@ -41,11 +41,14 @@ export function mineWarfare(env: TickEnv): void {
         const at = (mines[f.node] ??= {});
         at[f.nation] = (at[f.nation] ?? 0) + laid;
         ledger(world, f.nation).minesLaid += laid;
+        // A minelayer tracked in the act gives the field away: USS Jarrett's helicopters caught Iran Ajr laying in 1987.
+        for (const n of [f.nation, ...(world.slices.naval.tracks[f.id] ?? [])]) chart(world, n, f.node);
       }
     }
     const mcm = c.hulls.filter((h) => h.platform.class === 'mine_warfare').reduce((s, h) => s + h.count, 0);
     const laid = mines[f.node];
     if (mcm && laid) {
+      chart(world, f.nation, f.node);
       let capacity = mcm * SWEEP_PER_HULL_DAY * (world.dtHours / 24) * f.readiness;
       for (const layer of Object.keys(laid) as NationId[]) {
         // Sweeping clears a sea lane, not an act of war: in 1987-88 Belgian, Dutch, British, French and Italian
@@ -69,6 +72,8 @@ export function mineWarfare(env: TickEnv): void {
     const p = (1 - Math.exp(-hostile / MINE_DENSITY)) * (env.comp(f).submerged ? SUBMERGED_STRIKE_FACTOR : 1);
     let strikes = 0;
     for (const h of env.comp(f).hulls) strikes += ctx.rng.binomial(h.count, h.platform.class === 'mine_warfare' ? p * MCM_STRIKE_FACTOR : p);
-    if (strikes) applyHits(env, f, new Array(strikes).fill(MINE_HIT), Object.keys(laid)[0] as NationId);
+    if (!strikes) continue;
+    chart(world, f.nation, f.node);
+    applyHits(env, f, new Array(strikes).fill(MINE_HIT), Object.keys(laid)[0] as NationId);
   }
 }

@@ -119,10 +119,27 @@ describe('ukraine-2026, 60 days, ensemble of 8', () => {
  * border (RUSSIA_WEST_2027 in src/scenarios), so the judgment band is ground taken but no
  * collapse: 1-6 Baltic cells in three weeks.
  */
-describe('baltic-2027, 21 days, ensemble of 8', () => {
+describe('baltic-2027, 21 days, ensemble of 8 over seeds 1-6', () => {
   it('Russia takes 1-6 cells of the Baltic states', async () => {
-    expect(bandOf('baltic-2027-21d')(await ensemble('baltic-2027-21d'), 'baltic_cells')).toBeUndefined();
+    expect(bandOf('baltic-2027-21d')(await ensemble('baltic-2027-21d', 8, [1, 2, 3, 4, 5, 6]), 'baltic_cells')).toBeUndefined();
   }, 1_800_000);
+});
+
+/**
+ * BB-8: a Russian main effort on Tallinn reaches the city or a cell next to it by day 18 on most of
+ * seeds 1-6 (RAND's 36-60 hours against 2016 posture, slowed by the thicker 2027 defence above).
+ */
+describe('baltic-2027 seeds 1-6, 18 days', () => {
+  it('Russia reaches Tallinn or a cell next to it by day 18 on a majority of seeds', () => {
+    const seeds = [1, 2, 3, 4, 5, 6];
+    const reached = seeds.filter((seed) => {
+      const r = run('baltic-2027', seed, 18);
+      const tallinn = r.map.nodeAt(59.44, 24.75);
+      const control = r.world.control;
+      return control[tallinn] === 'RUS' || [...r.map.neighbors(tallinn)].some((n) => n < r.map.landCount && control[n] === 'RUS');
+    });
+    expect(reached.length, `seeds that reached Tallinn: ${reached.join(', ') || 'none'}`).toBeGreaterThan(seeds.length / 2);
+  }, 3_600_000);
 });
 
 /**

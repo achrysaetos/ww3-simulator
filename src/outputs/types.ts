@@ -1,4 +1,5 @@
 import type { NationId } from '../core/types';
+import type { CutKind, RungId } from '../systems/economy';
 
 /**
  * What a war has cost so far and where it is heading, per nation: the people it has hurt, the
@@ -21,6 +22,35 @@ export interface NationOutputs {
   race: ItemRace[];
   /** Only the workarounds the nation needs: none when nothing is cut off. */
   workarounds: Workaround[];
+  edges: Edges;
+  /** One row per cut-off the nation is climbing the workaround ladder out of: a sanctioning or warring partner, or a blockade of its ports. */
+  ladder: CutoffCoverage[];
+}
+
+/**
+ * Who is winning the race to adapt and the race to produce, separately (issue #2, section 3): a side
+ * can win one and lose the other. Each runs from -1 (the enemy has it all) through 0 (even) to 1.
+ */
+export interface Edges {
+  /**
+   * Its measures' standing against its enemies' counters, less theirs against its own: the mean log
+   * effect across its duels (src/systems/adaptation), squashed by tanh. 0 at the calibrated opening.
+   */
+  adaptation: number;
+  /** Value of its war production over the trailing month against its enemies' together: (own - theirs) / (own + theirs). */
+  production: number;
+}
+
+export interface CutoffCoverage {
+  /** The partner nation cut off, or 'sea' for a blockade of its own ports. */
+  cutoff: NationId | 'sea';
+  kind: CutKind;
+  /** Months it has been climbing this ladder; cut-offs the 2024 baseline already carries start mature. */
+  months: number;
+  /** Share of the supply lost to the cut-off that the ladder makes good so far, 0..1: trade won back, plus demand cut by rationing. */
+  coverage: number;
+  /** Each rung's part of the coverage. */
+  rungs: Record<RungId, number>;
 }
 
 export interface Humanitarian {

@@ -6,6 +6,7 @@ import { AIRFRAME } from '../air/tables';
 import { supplyFactor } from '../logistics';
 import { detach } from '../naval/orders';
 import { allied, canEnter, landSlice } from './state';
+import { isSof } from './tables';
 import { airTons, liftTons, transportRadiusKm } from './strategic';
 
 /**
@@ -128,8 +129,7 @@ export function airBridge(world: World, map: GameMap, catalog: Catalog, nation: 
   if (air) return allied(world, nation, air.nation);
   for (const [n, c] of Object.entries(world.theater.airControl)) if (c && atWar(world, nation, c.nation) && map.distanceKm(Number(n) as NodeId, node) <= APPROACH_KM) return false;
   const { fighters, ownFighters } = enemyAir(world, catalog, nation);
-  const radius = (ts: Threat[]) => ts.reduce((w, t) => (map.distanceKm(t.node, node) <= t.reachKm / 2 ? w + t.weight : w), 0);
-  return radius(fighters) <= radius(ownFighters);
+  return over(map, fighters, node) <= over(map, ownFighters, node);
 }
 
 /** The friendly airfield nearest the formation that it can mount an operation from, if any is within a day's move. */
@@ -175,7 +175,7 @@ function liftFlown(world: World, catalog: Catalog, nation: NationId): number {
 }
 
 /** Share of the formation the transports left today can land: a brigade too big for them drops an assault echelon. */
-function dropShare(world: World, catalog: Catalog, f: Formation): number {
+export function dropShare(world: World, catalog: Catalog, f: Formation): number {
   return Math.min(1, (liftTons(world, catalog, f.nation) * LIFTS - liftFlown(world, catalog, f.nation)) / airTons(catalog, f));
 }
 
@@ -190,7 +190,8 @@ export function cannotDrop(world: World, map: GameMap, catalog: Catalog, f: Form
   if (from === undefined) return { code: 'no_airfield', reason: 'no friendly airfield within a day’s move' };
   if (map.distanceKm(from, target) > transportRadiusKm(world, catalog, f.nation)) return { code: 'out_of_range', reason: 'beyond the transports’ radius' };
   if (dropShare(world, catalog, f) < MIN_ASSAULT_ECHELON) return { code: 'no_lift', reason: 'not enough airlift left to land its assault echelon today' };
-  if (!friendlyAir(world, map, catalog, f.nation, target)) return { code: 'no_air_cover', reason: 'no friendly air control over the drop zone' };
+  // Special forces go in low and by night in small packets, under the radar rather than under air cover.
+  if (!isSof(f) && !friendlyAir(world, map, catalog, f.nation, target)) return { code: 'no_air_cover', reason: 'no friendly air control over the drop zone' };
   return undefined;
 }
 
@@ -207,7 +208,7 @@ export function insert(world: World, ctx: SimContext, whole: Formation, target: 
   f.progressKm = 0;
   for (const k of ['fuel', 'ammo', 'food'] as const) f.supply[k] = Math.min(f.supply[k], f.supplyCapacity[k] * CARRIED_SHARE);
   const holder = world.control[target];
-  f.order = holder && atWar(world, f.nation, holder) ? { posture: 'attack', target, issuedTick: world.tick } : { posture: 'defend', issuedTick: world.tick };
+  f.order = holder && atWar(world, f.nation, holder) && !isSof(f) ? { posture: 'attack', target, issuedTick: world.tick } : { posture: 'defend', issuedTick: world.tick };
   landSlice(world).airheads[f.id] = world.tick;
   ctx.emit({ type: 'message', tick: world.tick, nation: f.nation, text: `${f.name} inserted by air, ${Math.round(loss * 100)}% lost on the way in` });
 }

@@ -231,6 +231,7 @@ export const WEST_PLATFORMS = {
   tb2: 'strike_drone',
   lyutyi_launcher: 'loitering_munition_launcher',
   bober_launcher: 'loitering_munition_launcher',
+  fpv_team: 'loitering_munition_launcher',
   akinci: 'strike_drone',
   ac130j: 'attack_aircraft',
 

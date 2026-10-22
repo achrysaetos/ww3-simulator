@@ -21,6 +21,11 @@ export interface NavalLedger {
 export interface NavalState {
   /** Mines per sea node by laying nation. */
   mines: Record<number, Record<NationId, number>>;
+  /**
+   * Sea zones each nation knows hold mines: fields it laid or watched being laid, struck, or hunted.
+   * Planners see a field only through these charts (intel/view.ts minefields), never `mines` itself.
+   */
+  charted: Record<NationId, number[]>;
   /** Space-based ocean surveillance search effort by nation. */
   oceanSurveillance: Record<NationId, number>;
   /** Hostile nations holding a track on each naval formation this tick. Other systems (air, missile) read this to target ships. */
@@ -64,6 +69,11 @@ export const NAVAL_KINDS: ReadonlySet<Formation['kind']> = new Set(['surface_gro
 
 export function isNavalFormation(f: Formation): boolean {
   return NAVAL_KINDS.has(f.kind);
+}
+
+export function chart(world: World, nation: NationId, node: number): void {
+  const known = (world.slices.naval.charted ??= {})[nation] ??= [];
+  if (!known.includes(node)) known.push(node);
 }
 
 export function ledger(world: World, nation: NationId): NavalLedger {

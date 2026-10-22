@@ -395,19 +395,20 @@ export function planNaval(p: Plan): void {
   // A fleet in a closed sea (the Caspian Flotilla, a Black Sea squadron with the Straits shut to it)
   // fights where open water takes it; a station it cannot reach falls back to its home waters.
   // Open water joins the two, and once enemy minefields close some zones, a route around them does too.
-  const closing = Object.keys(p.world.slices.naval?.mines ?? {}).some((z) => minedClosed(p.world, Number(z), p.nation)) || map.straits.some((s) => straitBarred(p.world, s, p.nation));
+  const minefields = p.view.minefields();
+  const closing = Object.keys(minefields).some((z) => minedClosed(p.world, Number(z), p.nation, minefields)) || map.straits.some((s) => straitBarred(p.world, s, p.nation));
   const routes = new Map<string, boolean>();
   // Only sweepers go into an enemy minefield: a station or chokepoint inside one is a minefield, not a patrol line
   // (NWP 3-15; in 1991 carriers and SSNs kept out of the northern Gulf until lanes were cleared).
   const sails = (g: Formation, n: NodeId, intoMines = false) => {
-    if (!sailable(p.world, map, g, n)) return false;
+    if (!sailable(p.world, map, g, n, minefields)) return false;
     const dest = navalDestination(p.world, map, g.nation, n)!;
-    if (!intoMines && minedClosed(p.world, dest, g.nation)) return false;
+    if (!intoMines && minedClosed(p.world, dest, g.nation, minefields)) return false;
     if (beyondCoastalReach(g, dest)) return false;
     if (!closing) return true;
     const key = `${g.node}|${dest}`;
     let ok = routes.get(key);
-    if (ok === undefined) routes.set(key, (ok = seaPath(p.world, map, g.nation, g.node, dest) !== null));
+    if (ok === undefined) routes.set(key, (ok = seaPath(p.world, map, g.nation, g.node, dest, undefined, minefields) !== null));
     return ok;
   };
   // Coastal craft (patrol boats and coast-guard cutters, corvettes, sweepers) carry no replenishment-at-sea rig and
@@ -436,7 +437,7 @@ export function planNaval(p: Plan): void {
     return true;
   };
 
-  const mined = Object.values(p.world.slices.naval?.mines ?? {}).some((laid) => Object.keys(laid).some((layer) => isAtWar(p.world, layer as NationId, p.nation)));
+  const mined = Object.values(minefields).some((laid) => Object.keys(laid).some((layer) => isAtWar(p.world, layer as NationId, p.nation)));
   // What keeps sweepers off a minefield: an enemy surface group or a submarine known to be about, or a shore battery
   // whose anti-ship missiles reach it (Gulf 1991: the sweepers waited on the Silkworm sites being hit).
   const enemyArmed = [...p.enemies].flatMap((e) => (p.index.byNation.get(e) ?? []).filter((f) => f.status === 'active' && f.kind !== 'submarine'));
@@ -525,7 +526,7 @@ export function planNaval(p: Plan): void {
       // the sweepers went in once the Iraqi navy was sunk) and otherwise keep home waters.
       case 'mcm': {
         let field: NodeId | undefined, bestD = Infinity;
-        for (const [node, laid] of Object.entries(p.world.slices.naval?.mines ?? {})) {
+        for (const [node, laid] of Object.entries(minefields)) {
           if (!Object.keys(laid).some((layer) => isAtWar(p.world, layer as NationId, p.nation)) || fieldGuarded(Number(node))) continue;
           const d = km(g.node, Number(node));
           if (d < bestD && sails(g, Number(node) as NodeId, true)) { bestD = d; field = Number(node) as NodeId; }

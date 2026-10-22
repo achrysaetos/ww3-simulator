@@ -237,6 +237,8 @@ const infantry: PlatformSpec<MunitionKey>[] = [
   { id: 'infantry_squad_conscript', name: 'Infantry squad (conscript/mobilised)', cls: 'infantry', producers: [], inService: 1990, unitCostUsdM: 0.05, q: 0.7, load: { small_arms: 2, rpg7: 1 } },
   { id: 'militia_squad', name: 'Militia / irregular squad', cls: 'infantry', crew: 10, producers: [], inService: 1980, unitCostUsdM: 0.02, armor: 0.03, q: 0.45, load: { small_arms: 2, rpg7: 1 } },
   { id: 'marine_squad', name: 'Marine rifle squad', cls: 'infantry', crew: 13, producers: [], inService: 2010, unitCostUsdM: 0.25, q: 1.3, load: { small_arms: 4, at4: 2 } },
+  // Special-forces team: picked, trained to move by night and fight behind the lines; see SOF_PLATFORMS in systems/land/tables.ts.
+  { id: 'sof_squad', name: 'Special-forces team', cls: 'infantry', producers: [], inService: 2000, unitCostUsdM: 0.5, q: 1.2, detectionKm: 4, load: { small_arms: 3, at4: 2 } },
   { id: 'airborne_squad', name: 'Airborne / air assault squad', cls: 'infantry', producers: [], inService: 2010, unitCostUsdM: 0.2, q: 1.3, load: { small_arms: 3, at4: 2 } },
   { id: 'sof_team', name: 'Special operations team (12)', cls: 'infantry', crew: 12, producers: [], inService: 2010, unitCostUsdM: 1, stealth: 0.8, detectionKm: 10, q: 2.5, load: { small_arms: 4, javelin: 2 } },
   { id: 'engineer_squad', name: 'Combat engineer squad', cls: 'engineer', producers: [], inService: 2000, unitCostUsdM: 0.15, speedKph: 4, rangeKm: 40, fuelTph: 0, armor: 0.05, stealth: 0.5, q: 1.0, load: { small_arms: 2 } },
