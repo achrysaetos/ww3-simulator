@@ -18,7 +18,7 @@ import { spaceSupport } from '../strategic/space';
 import { jammedHits } from '../c2';
 import { strikeChokepoint } from '../logistics/chokepoints';
 import { conditionsAt, pgmFactor } from '../weather/effects';
-import { AIR_DEFENSE_CLASSES, AIRFRAME, ATTRITABLE_COST_USD_M, DRONE_SITE_LAUNCHES_PER_DAY, isRoundOnRail, LAUNCHER, MOBILE_TARGETS, NON_STRIKE_KINDS, PENETRATOR_VISIBILITY, RAMP_LETHAL_RADIUS_M, STRIKE_ROLES, TARGET_OF_CLASS, TERMINAL_SEEKER_KINDS, TUNING } from './tables';
+import { AIR_DEFENSE_CLASSES, AIRFRAME, ATTRITABLE_COST_USD_M, DEEP_FIRE_CLASSES, DEEP_FIRE_MISSIONS_PER_DAY, DRONE_SITE_LAUNCHES_PER_DAY, isRoundOnRail, LAUNCHER, MOBILE_TARGETS, NON_STRIKE_KINDS, PENETRATOR_VISIBILITY, RAMP_LETHAL_RADIUS_M, STRIKE_ROLES, TARGET_OF_CLASS, TERMINAL_SEEKER_KINDS, TUNING } from './tables';
 
 export interface AirSlice {
   /** Runway capacity per airbase node after cratering, 0..1; absent = intact. */
@@ -69,7 +69,7 @@ function assess(world: World, slice: AirSlice, nation: NationId, key: string, ef
 }
 
 /** Sorties (aircraft) or launches (ground launchers) available this tick, and how far the carrier itself goes. */
-interface Carrier { platform: Platform; n: number; reachKm: number; group?: AirGroup }
+interface Carrier { platform: Platform; n: number; reachKm: number; group?: AirGroup; /** Each launch fires the platform's whole load (artillery), not one round. */ volley?: boolean }
 
 interface Package {
   f: Formation;
@@ -79,7 +79,16 @@ interface Package {
   penetrators: AirGroup[];
   /** How far inside the outermost hostile envelope the penetrators release, km. */
   depthKm: number;
+  /** Decoys the package's aircraft launch ahead of it. */
+  decoys?: { munition: Munition; count: number };
 }
+
+/**
+ * A strike round with no warhead is a decoy: ADM-160 MALD flies a strike aircraft's or cruise missile's radar picture
+ * ahead of a raid to draw interceptors and make radars emit for the HARMs, as TALDs and BQM-74s did over Baghdad on
+ * the first night of Desert Storm (GWAPS).
+ */
+const isDecoy = (m: Munition) => isStrikeMunition(m) && m.warheadKg === 0;
 
 /** The pk that matters for a target class. Airbase attacks kill parked aircraft as soft targets. */
 export function effectPk(m: Munition, tc: TargetClass): number {
@@ -104,6 +113,7 @@ export function dailyRounds(f: Formation, m: MunitionId, catalog: Catalog): numb
     const load = loadOf(p, m);
     if (n <= 0 || load <= 0) continue;
     if (f.kind === 'air_wing') rounds += n * (AIRFRAME[p.class]?.surgePerDay ?? 0) * load;
+    else if (f.kind === 'artillery') rounds += DEEP_FIRE_CLASSES.has(p.class) ? n * load * DEEP_FIRE_MISSIONS_PER_DAY : isRoundOnRail(p) ? 0 : n * (LAUNCHER[p.class]?.launchesPerDay ?? 0);
     else if (isRoundOnRail(p)) rounds += DRONE_SITE_LAUNCHES_PER_DAY();
     // A loaded launcher's first day on a strike order: its salvo, then reloads as they come up.
     else rounds += n * ((LAUNCHER[p.class]?.salvo ?? 0) + (LAUNCHER[p.class]?.launchesPerDay ?? 0));
@@ -119,6 +129,7 @@ export function dailyRounds(f: Formation, m: MunitionId, catalog: Catalog): numb
 function carriersOf(f: Formation, pic: AirPicture, ctx: SimContext, world: World, slice: AirSlice): Carrier[] {
   if (f.kind === 'air_wing')
     return (pic.byFormation.get(f.id) ?? []).filter((g) => STRIKE_ROLES.has(g.profile.role) && g.sorties > 0).map((g) => ({ platform: g.platform, n: g.sorties, reachKm: g.radiusKm, group: g }));
+  if (f.kind === 'artillery') return deepFires(f, ctx, world);
   if (f.kind !== 'missile') return [];
   const out: Carrier[] = [];
   const loaded = slice.salvo?.[f.id] ?? 1;
@@ -129,6 +140,25 @@ function carriersOf(f: Formation, pic: AirPicture, ctx: SimContext, world: World
     const expected = isRoundOnRail(platform) ? DRONE_SITE_LAUNCHES_PER_DAY() * f.readiness * (world.dtHours / 24) : n * rate.salvo * f.readiness * loaded;
     const launches = Math.floor(expected) + (ctx.rng.chance(expected % 1) ? 1 : 0);
     if (launches > 0) out.push({ platform, n: launches, reachKm: 0 });
+  }
+  return out;
+}
+
+/**
+ * An artillery formation's guns and rocket launchers on deep fire missions this tick, each a volley of its load, and
+ * the missile launchers an army brigade fields beside them (Azerbaijan's LORAs and Iskanders) at their sustained launch
+ * rate. Drones counted by the round (Russia's Lancet teams) are left to the land fight: no rate fitted to their use yet.
+ */
+function deepFires(f: Formation, ctx: SimContext, world: World): Carrier[] {
+  const out: Carrier[] = [];
+  for (const [pid, n] of Object.entries(f.equipment) as [PlatformId, number][]) {
+    const platform = ctx.catalog.platform(pid);
+    const gun = DEEP_FIRE_CLASSES.has(platform.class);
+    const perDay = gun ? DEEP_FIRE_MISSIONS_PER_DAY : isRoundOnRail(platform) ? 0 : LAUNCHER[platform.class]?.launchesPerDay ?? 0;
+    if (n <= 0 || !perDay) continue;
+    const expected = n * f.readiness * perDay * (world.dtHours / 24);
+    const launches = Math.floor(expected) + (ctx.rng.chance(expected % 1) ? 1 : 0);
+    if (launches > 0) out.push({ platform, n: launches, reachKm: 0, volley: gun });
   }
   return out;
 }
@@ -183,13 +213,13 @@ export function reloadSalvos(world: World, slice: AirSlice, catalog: Catalog): v
  * Russia's KAB glide bombs (~USD 40k) did the front-line work in 2024-25 while
  * Kh-59/69s (~USD 1M) went to defended rear targets.
  */
-function chooseMunition(f: Formation, carriers: Carrier[], tc: TargetClass, dist: number, ringKm: number, rearKm: number, ctx: SimContext): Munition | undefined {
+function chooseMunition(f: Formation, carriers: Carrier[], tc: TargetClass, dist: number, ringKm: number, rearKm: number, ctx: SimContext, only: MunitionId | undefined, cheap = false): Munition | undefined {
   let best: Munition | undefined, bestCost = Infinity;
   for (const [mid, n] of Object.entries(f.magazine) as [MunitionId, number][]) {
-    if (n < 1 || (f.order.munition && f.order.munition !== mid)) continue;
+    if (n < 1 || (only && only !== mid)) continue;
     const m = ctx.catalog.munitions.get(mid);
     const pk = m && isStrikeMunition(m) ? effectPk(m, tc) : 0;
-    if (!m || pk <= 0) continue;
+    if (!m || pk <= 0 || (cheap && m.unitCostUsdM >= ATTRITABLE_COST_USD_M)) continue;
     for (const c of carriers) {
       const load = loadOf(c.platform, mid);
       if (load <= 0 || c.reachKm + m.rangeKm < dist) continue;
@@ -299,6 +329,31 @@ const carriesArm = (g: AirGroup, ctx: SimContext) =>
   g.platform.loadout.some((l) => ctx.catalog.munition(l.munition).kind === 'arm' && (g.f.magazine[l.munition] ?? 0) >= 1);
 
 /**
+ * How a striking formation's carriers split into packages, each with the munition it must use if any. A missile or
+ * artillery brigade told to fire, not what with, fires each launcher type its own round. A wing told what to drop sends
+ * the aircraft that carry it with it, and the rest with their own attritable weapons (the national fire budget rations
+ * the dearer ones): Azerbaijan's TB2s dropped MAM-Ls on the same Armenian positions its Su-25s bombed in 2020.
+ */
+function packagesOf(f: Formation, carriers: Carrier[]): { set: Carrier[]; only?: MunitionId; cheap?: true }[] {
+  const named = f.order.munition;
+  if (f.kind !== 'air_wing') return named ? [{ set: carriers, only: named }] : carriers.map((c) => ({ set: [c] }));
+  if (!named) return [{ set: carriers }];
+  const load = (c: Carrier) => loadOf(c.platform, named) > 0;
+  return [{ set: carriers.filter(load), only: named }, ...carriers.filter((c) => !load(c)).map((c) => ({ set: [c], cheap: true as const }))];
+}
+
+/** Decoys the aircraft of a package carry, limited by the formation's magazine. */
+function decoysOf(f: Formation, set: Carrier[], ctx: SimContext): Package['decoys'] {
+  for (const [mid, have] of Object.entries(f.magazine) as [MunitionId, number][]) {
+    const m = ctx.catalog.munitions.get(mid);
+    if (!m || have < 1 || !isDecoy(m)) continue;
+    const count = Math.min(Math.floor(have), set.reduce((s, c) => s + (c.group ? c.n * loadOf(c.platform, mid) : 0), 0));
+    if (count > 0) return { munition: m, count };
+  }
+  return undefined;
+}
+
+/**
  * The packages a striking formation flies this tick. A missile brigade told to fire, not what with, fires every launcher
  * type in reach, each its own round: Iran's 1 October 2024 wave mixed Emads, Ghadrs and Fattahs from the same bases
  * (IDF, CSIS).
@@ -314,13 +369,13 @@ function planPackages(world: World, ctx: SimContext, pic: AirPicture, f: Formati
   const ring = threatRingKm(world, ctx, pic, f.node, target, f.nation);
   const rearKm = behindLineKm(world, ctx, pic, target, f.nation);
   const out: Package[] = [];
-  for (const set of f.kind === 'missile' && !f.order.munition ? carriers.map((c) => [c]) : [carriers]) {
-    const m = chooseMunition(f, set, tc, dist, ring, rearKm, ctx);
+  for (const { set, only, cheap } of packagesOf(f, carriers)) {
+    const m = chooseMunition(f, set, tc, dist, ring, rearKm, ctx, only, cheap);
     let weapons = 0;
     const penetrators: AirGroup[] = [];
     for (const c of set) {
       // A sortie delivers the full load; a ground launch is one round (the loadout is the launcher's reload capacity).
-      const per = !m ? 0 : c.group ? loadOf(c.platform, m.id) : Math.min(1, loadOf(c.platform, m.id));
+      const per = !m ? 0 : c.group || c.volley ? loadOf(c.platform, m.id) : Math.min(1, loadOf(c.platform, m.id));
       const strikes = m !== undefined && per > 0 && c.reachKm + m.rangeKm >= dist;
       if (strikes) weapons += c.n * per;
       const g = c.group;
@@ -332,7 +387,8 @@ function planPackages(world: World, ctx: SimContext, pic: AirPicture, f: Formati
     weapons = m ? Math.min(weapons, Math.floor(f.magazine[m.id] ?? 0)) : 0;
     const strike = m && weapons > 0 ? { munition: m, targetClass: tc, weapons } : undefined;
     const depthKm = ring - (m && m.rangeKm < ring ? m.rangeKm : 0);
-    if (strike || penetrators.length) out.push({ f, strike, penetrators, depthKm });
+    const decoys = strike || penetrators.length ? decoysOf(f, set, ctx) : undefined;
+    if (strike || penetrators.length) out.push({ f, strike, penetrators, depthKm, ...(decoys ? { decoys } : {}) });
   }
   return out;
 }
@@ -441,7 +497,15 @@ function resolveRaid(world: World, ctx: SimContext, pic: AirPicture, slice: AirS
   const overflown = new Map<NodeId, number>();
   const overflight = (from: NodeId) => overflown.get(from) ?? overflown.set(from, overflightKm(world, ctx, pic, from, target, attacker)).get(from)!;
   const streams: RaidStream[] = live.map((p) => ({ munition: p.munition, count: p.weapons, overflightKm: overflight(p.f.node) }));
-  const leaked = defendRaid(world, ctx, pic, target, attacker, streams);
+  // Decoys fly at the head of the raid, each as dear to the defence as the dearest weapon it screens.
+  const looksLikeUsdM = Math.max(0, ...live.map((p) => p.munition.unitCostUsdM));
+  const decoys: RaidStream[] = [];
+  for (const p of pkgs) {
+    if (!p.decoys) continue;
+    p.f.magazine[p.decoys.munition.id] -= p.decoys.count;
+    decoys.push({ munition: p.decoys.munition, count: p.decoys.count, overflightKm: overflight(p.f.node), looksLikeUsdM: Math.max(looksLikeUsdM, p.decoys.munition.unitCostUsdM) });
+  }
+  const leaked = defendRaid(world, ctx, pic, target, attacker, [...decoys, ...streams]).slice(decoys.length);
   live.forEach((p, i) => {
     // An aircraft carries its weapon to the release point; only the weapon's own flight, at most its range, lets a mobile target move away.
     const flightMin = Math.min(nodeDistance(ctx, p.f.node, target), p.munition.rangeKm) / (Math.max(0.05, p.munition.speedMach) * MACH_KM_PER_MIN);

@@ -155,9 +155,9 @@ function punitive(p: Plan, owner: NationId): boolean {
  * Its original parties strike each other wherever deepStrikeAllowed lets them, but
  * a state that joined the war fights the other side's joiners only inside the
  * theatre: in Korea in 1950-53 the US kept Manchuria off limits while Soviet
- * pilots fought over the Yalu. Enemy forces on a neutral's soil are struck only
+ * pilots fought over the Yalu. Enemy air bases on a neutral's soil are struck only
  * when the host is already hostile and inside the theatre, which brings the host
- * into the war (see diplomacy processEvents). CSIS "The First Battle of the Next
+ * into the war (see diplomacy processEvents); other enemy forces there are not (strikeTargets). CSIS "The First Battle of the Next
  * War" (2023) has China strike US bases on Okinawa, ~650 km from Taipei, in most
  * iterations; mainland Japan and Korea, 1,300-1,500 km out, stay unstruck in its
  * base case. A friendly or ambivalent host is never struck: China would not hit
@@ -231,6 +231,11 @@ export function strikeTargets(p: Plan, battleArea: Set<number>): TargetGrid {
   // Aimed where intelligence last fixed each formation, worth less as the fix goes stale.
   for (const e of p.enemies)
     for (const { f, node, confidence, contact } of sighted(p, e)) {
+      // On the ground of a nation the planner is not at war with, only the air bases the enemy flies its war from are
+      // worth widening the war for (allowed, below): CSIS's 2023 Taiwan wargames had China strike US bases on Okinawa,
+      // while in 2022 Ukraine left the Russian armies and missile units staged in Belarus alone and kept Belarus out.
+      const holder = p.world.control[node];
+      if (!map.isSea(node) && holder && !p.enemies.has(holder) && !p.friends.has(holder) && f.kind !== 'air_wing' && !isBomberForce(p, f)) continue;
       const v = VALUE_BY_KIND[f.kind] ?? (isBomberForce(p, f) ? VALUE_BY_KIND.air_wing : isGround(f) && battleArea.has(node) ? FRONT_FORCES : undefined);
       if (!v) continue;
       const value = (f.kind === 'missile' && reachesHome(p, f, node) ? TEL_HUNT : v.value) * worth(f) * confidence;
@@ -273,14 +278,14 @@ export function strikeTargets(p: Plan, battleArea: Set<number>): TargetGrid {
   return new TargetGrid(kept.sort((a, b) => b.value - a.value || a.node - b.node), map);
 }
 
-/** Whether a conventional strike round `f`'s launchers carry reaches the planner's capital from `node`. */
+/** Whether a missile `f`'s launchers carry reaches the planner's capital from `node`. */
 function reachesHome(p: Plan, f: Formation, node: NodeId): boolean {
   const km = p.ctx.map.distanceKm(node, p.world.nations[p.nation].capital);
   for (const [id, n] of Object.entries(f.equipment)) {
     if (n <= 0) continue;
     for (const l of p.ctx.catalog.platform(id as PlatformId).loadout) {
       const m = p.ctx.catalog.munition(l.munition);
-      if (!m.yieldKt && m.rangeKm >= km && STRIKE_KINDS.has(m.kind)) return true;
+      if (!m.yieldKt && m.rangeKm >= km && HUNTED_KINDS.has(m.kind)) return true;
     }
   }
   return false;
@@ -391,7 +396,7 @@ export class FireBudget {
       const cap = capacity.get(m) ?? 0;
       if (cap <= 0) return 0;
       let stock = world.nations[nation].stockpile[m] ?? 0;
-      for (const f of this.p.index.byNation.get(nation) ?? []) if (f.kind === 'air_wing' || f.kind === 'missile') stock += f.magazine[m] ?? 0;
+      for (const f of this.p.index.byNation.get(nation) ?? []) if (f.kind === 'air_wing' || f.kind === 'missile' || f.kind === 'artillery') stock += f.magazine[m] ?? 0;
       const produced = (world.slices.economy?.nations[nation]?.lines[m]?.capacityPerMonth ?? 0) / 30;
       const cycle = SALVO_EVERY_DAYS * (produced + stock / horizon);
       return Math.min(1, (salvoDay ? cycle : Math.max(0, cycle - cap) / (SALVO_EVERY_DAYS - 1)) / cap);
@@ -434,7 +439,8 @@ export function strikeOptions(stock: readonly Munition[], t: StrikeTarget): Muni
 }
 
 const INTERCEPTOR_KINDS: ReadonlySet<Munition['kind']> = new Set(['sam', 'abm', 'shorad_missile']);
-const STRIKE_KINDS: ReadonlySet<Munition['kind']> = new Set(['srbm', 'mrbm', 'irbm', 'cruise', 'drone_oneway', 'loitering']);
+/** Rounds whose launchers are hunted (TEL_HUNT); one-way drones go up from dispersed rails no hunt has kept down (Ukraine's from 2023). */
+const HUNTED_KINDS: ReadonlySet<Munition['kind']> = new Set(['srbm', 'mrbm', 'irbm', 'cruise']);
 /**
  * How far a strike sortie will fly into a known SAM envelope before releasing.
  * Russian and Ukrainian strike aviation in 2023-25 released glide bombs and rockets

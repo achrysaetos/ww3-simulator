@@ -88,6 +88,15 @@ export const LAUNCHER: Partial<Record<PlatformClass, { launchesPerDay: number; s
 };
 
 /**
+ * Artillery that fires deep on a strike order: each launcher or gun puts its full load of the round into a fire mission,
+ * DEEP_FIRE_MISSIONS_PER_DAY a day (shoot, move, reload; judgment), as an aircraft's sortie delivers its load. HIMARS raids on Russian depots and command posts from June 2022,
+ * ATACMS on Berdyansk and Luhansk airfields in October 2023 (ISW); the KPA's 240 mm rockets and 170 mm guns north of the
+ * DMZ, and its 300 mm KN-09s, reach Seoul (Barnett et al., "North Korean Conventional Artillery", RAND, 2020). The rounds come from the formation's own magazine.
+ */
+export const DEEP_FIRE_CLASSES: ReadonlySet<PlatformClass> = new Set(['mlrs', 'sp_artillery', 'towed_artillery']);
+export const DEEP_FIRE_MISSIONS_PER_DAY = 4;
+
+/**
  * A one-way-drone row whose ORBAT count is drones staged on rails, not launch
  * trucks (shahed_136: "one drone on its rail", load 1). Its launch rate is set by
  * the site's crews, not by how many drones are staged.

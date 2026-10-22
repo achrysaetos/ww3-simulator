@@ -19,7 +19,9 @@ export const azerbaijan = [
   az('artillery', 'brigade', 'Missile and Rocket Brigades', base('Ganja', 40.68, 46.36), { polonez_mlrs: 10, lynx_mlrs: 18, smerch: 30, tos1a: 18, lora_launcher: 4, iskander_e_tel: 4, truck: 200 }),
   az('air_defense', 'brigade', 'Air Defence Forces', base('Baku', 40.45, 49.95), { s300pmu2: 8, barak8_launcher: 4, buk_m1: 12, tor_m2: 8, s125_pechora: 12 }),
   az('air_wing', 'wing', 'Kurdamir AB', base('Kurdamir', 40.27, 48.18), { mig29: 14, su24: 2 }),
-  az('air_wing', 'wing', 'Kyurdamir and Dollyar ABs', base('Dollyar', 40.73, 46.3), { su25: 15, bayraktar_tb2: 36, harop_launcher: 6, mi35: 20 }),
+  az('air_wing', 'wing', 'Kyurdamir and Dollyar ABs', base('Dollyar', 40.73, 46.3), { su25: 15, bayraktar_tb2: 36, mi35: 20 }),
+  // Harops fly from truck-mounted canister launchers, a launch group of their own beside the TB2s' base.
+  az('missile', 'battalion', 'Harop Launch Group', base('Dollyar', 40.73, 46.3), { harop_launcher: 6 }),
   az('surface_group', 'flotilla', 'Caspian Naval Forces', base('Baku', 40.37, 49.85), { petya_frigate: 1, patrol_craft: 15 }),
 ];
 

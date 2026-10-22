@@ -93,7 +93,13 @@ function interceptorFighters(world: World, ctx: SimContext, pic: AirPicture, nod
 }
 
 /** One attacker's weapons of one kind arriving together; `overflightKm` is how much defended ground they crossed. */
-export interface RaidStream { munition: Munition; count: number; overflightKm: number }
+export interface RaidStream {
+  munition: Munition;
+  count: number;
+  overflightKm: number;
+  /** A decoy's radar picture: the defence prices its interceptors against the weapon it mimics (USD M). */
+  looksLikeUsdM?: number;
+}
 
 /**
  * Km of the route from `from` to `to` that lies over land held by a nation defending
@@ -142,7 +148,7 @@ export function defendRaid(world: World, ctx: SimContext, pic: AirPicture, node:
       });
       leaked[i] -= fighterIntercepts(ctx, fighters, m, cat, leaked[i]);
     }
-    const maxCost = Math.max(TUNING.interceptorCostFloorUsdM, TUNING.interceptorCostRatio * m.unitCostUsdM);
+    const maxCost = Math.max(TUNING.interceptorCostFloorUsdM, TUNING.interceptorCostRatio * (streams[i].looksLikeUsdM ?? m.unitCostUsdM));
     const ls = layers(ctx, sams, node, cat, m.interceptDifficulty, maxCost);
     const ready = (k: number) => ls[k].d.channels > 0 && ls[k].d.f.magazine[ls[k].shot.m.id] >= 1;
     for (let k = 0; k < ls.length && leaked[i]; k++) {

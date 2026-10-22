@@ -1,6 +1,5 @@
 import type { Formation, FormationId, Munition, MunitionId, NodeId, PlatformClass, PlatformId, TargetClass } from '../../core/types';
 import { ferryKm, tankerStretch, visibility } from '../air';
-import { TUNING } from '../air/tables';
 import { dominant, issue } from './forces';
 import { arsenal, FireBudget, pickTarget, pkAgainst, SamCover, reachKm, strikeOptions, withinKm, type StrikeTarget, type TargetGrid } from './strikes';
 import type { Plan } from './types';

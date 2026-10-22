@@ -13,7 +13,7 @@ import { buildPicture, type AirPicture } from './picture';
 import { rearm, stockWarReserves } from './rearm';
 import { isStrikeMunition, reloadSalvos, resolveStrikes, type AirSlice } from './strike';
 import { resolveAirSuperiority } from './superiority';
-import { AIRFRAME, LAUNCHER, OFFENSIVE_POSTURES, STRIKE_ROLES, TUNING } from './tables';
+import { AIRFRAME, DEEP_FIRE_CLASSES, LAUNCHER, OFFENSIVE_POSTURES, STRIKE_ROLES, TUNING } from './tables';
 
 export { combatRadiusKm, resolveAirBattle, tankerStretch, visibility } from './combat';
 export { engagementCycles, interceptSalvo, type SalvoDefense, type SalvoResult, type SalvoThreat, type ShotDoctrine } from './intercept';
@@ -31,6 +31,8 @@ const POSTURES: Partial<Record<FormationKind, ReadonlySet<Posture>>> = {
   air_wing: new Set(['reserve', 'defend', 'move', 'strike', 'air_superiority', 'patrol', 'escort']),
   missile: new Set(['reserve', 'defend', 'move', 'strike']),
   air_defense: new Set(['reserve', 'defend', 'move']),
+  // An artillery formation's deep fire missions; every other order of its is the land system's.
+  artillery: new Set(['strike']),
 };
 
 /** Ferry range with drop tanks, roughly 2.5x combat radius (manufacturer ferry vs radius figures, F-16/Su-27). */
@@ -109,7 +111,7 @@ function recover(world: World, slice: AirSlice, idle: (f: Formation) => boolean)
 export function applyAirOrder(world: World, cmd: OrderCommand, ctx: SimContext): OrderOutcome | undefined {
   const f = world.formations[cmd.formation];
   const allowed = f && POSTURES[f.kind];
-  if (!f || !allowed) return undefined;
+  if (!f || !allowed || (f.kind === 'artillery' && cmd.order.posture !== 'strike')) return undefined;
   const refuse = (code: RefusalCode, reason: string): OrderOutcome => ({ ok: false, code, reason });
   if (f.nation !== cmd.nation) return refuse('not_yours', 'not your formation');
   if (f.status !== 'active') return refuse('not_ready', `formation is ${f.status}`);
@@ -185,7 +187,7 @@ function maxReachKm(world: World, f: Formation, strike: boolean, ctx: SimContext
     const p = ctx.catalog.platform(pid as PlatformId);
     const role = AIRFRAME[p.class]?.role;
     if (role && (strike ? STRIKE_ROLES.has(role) : role === 'counter_air')) reach = Math.max(reach, combatRadiusKm(p, tankers) + weapon);
-    else if (strike && LAUNCHER[p.class]) reach = Math.max(reach, weapon);
+    else if (strike && (LAUNCHER[p.class] || (f.kind === 'artillery' && DEEP_FIRE_CLASSES.has(p.class)))) reach = Math.max(reach, weapon);
   }
   return reach;
 }
