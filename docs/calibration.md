@@ -45,20 +45,20 @@ A3's report flagged that ukraine-2026 gained ground about 30 times too fast by a
 
 Each opposed pace is now multiplied by `sector` (`combat.ts`), the share of the cell's front the attacker's platforms in contact fill at `FRONTAGE_PLATFORMS` density. Against a prepared line only the first echelon is in contact (`KILL_ZONE_COMMIT`), so a Russian brigade of ~130 exposed platforms fills about 1.3 km of a 45 km cell. A force spread over many cells now opens many narrow axes, and its total area per day is bounded by its total committed frontage, not by how many cells it presses. A routed or absent defender confines nothing, so exploitation and the road march still run the cell's full width. A cell still changes hands only once the whole cell has been pushed across.
 
-Measured with `npm run validate -- --cases ukraine-2026-60d,kursk-2024,baltic-2027-21d,karabakh-2020 --workers 2` (8 runs, seeds 1-4 with tagged params by Latin hypercube), before and after:
+Measured with `npm run validate -- --cases ukraine-2026-60d,kursk-2024,baltic-2027-21d,karabakh-2020 --workers 2` (8 runs, seeds 1-4 with tagged params by Latin hypercube), on integration e934827 before and after:
 
 | Case | Question | Observed | Before p10 / p50 / p90 | After p10 / p50 / p90 |
 | --- | --- | --- | --- | --- |
-| `ukraine-2026-60d` | `rus_km2_per_year` | 3,500-5,000 | 46,075 / 148,738 / 296,941 | 12,238 / 37,815 / 210,284 |
-| `ukraine-2026-60d` | `rus_net_cells` | 0-2 | 0.18 / 1.9 / 4.2 | 0.00 / 0.38 / 3.9 |
-| `ukraine-2026-60d` | `rus_tanks_per_day` | 2-8 | 4.3 / 6.3 / 9.6 | 4.5 / 6.6 / 10.4 |
-| `kursk-2024` | `ukr_ground_km2` | 800-1,300 | 0 / 1,811 / 3,479 | 1,489 / 3,009 / 3,810 |
-| `baltic-2027-21d` | `baltic_cells` | 1-6 | 2.1 / 3.7 / 5.0 | 0.99 / 1.6 / 2.4 |
-| `karabakh-2020` | `armenia_taken` | 0 | 11 / 12 / 13 | 11 / 12 / 13 |
+| `ukraine-2026-60d` | `rus_km2_per_year` | 3,500-5,000 | 57,881 / 84,647 / 203,809 | 10,081 / 14,212 / 27,980 |
+| `ukraine-2026-60d` | `rus_net_cells` | 0-2 | 0.18 / 0.75 / 3.1 | 0.00 / 0.00 / 0.25 |
+| `ukraine-2026-60d` | `rus_tanks_per_day` | 2-8 | 5.3 / 7.9 / 8.7 | 5.3 / 7.7 / 9.1 |
+| `kursk-2024` | `ukr_ground_km2` | 800-1,300 | 1,279 / 1,939 / 2,889 | 1,940 / 2,632 / 3,503 |
+| `baltic-2027-21d` | `baltic_cells` | 1-6 | 2.1 / 3.6 / 5.5 | 1.0 / 1.9 / 3.1 |
+| `karabakh-2020` | `armenia_taken` | 0 | 12 / 13 / 13 | 11 / 12 / 12 |
 
-The ukraine-2026 median is still about eight times the record. Three causes remain, none of them the width of an assault:
+The ukraine-2026 median is still about three times the record. The causes found so far are not the width of an assault:
 
-- In three of the eight runs Ukraine's AI moves most of its line into Russian-held ground after about day 35 and leaves up to 27 front cells empty. Russia then marches through them at road speed, which gives the 150,000-350,000 km2 tail. That is the operational AI (`ai/land.ts`), not the front law.
+- On the earlier base (786c2c1), three of eight runs had Ukraine's AI move most of its line into Russian-held ground after about day 35, leaving up to 27 front cells empty for Russia to march through at road speed (a 150,000-350,000 km2 tail). On e934827 the p90 is 27,980 km2, so that tail did not appear in these eight runs; why it went away is not measured. When it occurs it is the operational AI (`ai/land.ts`), not the front law.
 - Where the line holds, Russia keeps a whole-force ratio of 10-20:1 on every cell it presses, because Ukraine spreads ~100 exposed platforms over each 45 km cell. At that ratio every axis moves at the best-massed drive pace, 1.2 km a day through a belt, for 60 days. The record's sustained axis pace was nearer 0.1-0.5 km a day. The next lever is that pace or the force ratio, and it is a calibration choice, left for a separate change.
 - Ammunition never throttles an assault: every formation in a contested cell held a full ammunition load for the whole of a 60-day probe. Logistics refills the front as fast as it fires.
 
