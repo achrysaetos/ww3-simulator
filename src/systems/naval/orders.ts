@@ -89,8 +89,8 @@ export function boardable(room: number, share: number): boolean {
   return room > 0 && room >= MIN_LANDING_TEAM * share;
 }
 
-/** Split `share` of a formation off as a landing team; the parent keeps the rest at the port. */
-export function detach(world: World, ctx: SimContext, f: Formation, share: number): Formation {
+/** Split `share` of a formation off as a landing team (or another `echelon`); the parent keeps the rest where it is. */
+export function detach(world: World, ctx: SimContext, f: Formation, share: number, echelon = 'landing team'): Formation {
   const take = <K extends string>(r: Record<K, number>): Record<K, number> => {
     const out = {} as Record<K, number>;
     for (const [k, n] of Object.entries(r) as [K, number][]) {
@@ -105,7 +105,7 @@ export function detach(world: World, ctx: SimContext, f: Formation, share: numbe
   const team: Formation = {
     ...f,
     id: newId(world, `${f.id}-lt`),
-    name: f.name.endsWith(' landing team') ? f.name : `${f.name} landing team`,
+    name: f.name.endsWith(` ${echelon}`) ? f.name : `${f.name} ${echelon}`,
     equipment: take(f.equipment),
     damaged: {},
     magazine: take(f.magazine),
@@ -118,7 +118,7 @@ export function detach(world: World, ctx: SimContext, f: Formation, share: numbe
   f.supply = scaled(f.supply, 1 - share);
   f.supplyCapacity = scaled(f.supplyCapacity, 1 - share);
   world.formations[team.id] = team;
-  ctx.emit({ type: 'message', tick: world.tick, nation: f.nation, text: `${team.name} formed to embark (${Math.round(share * 100)}% of ${f.name})` });
+  ctx.emit({ type: 'message', tick: world.tick, nation: f.nation, text: `${team.name} formed (${Math.round(share * 100)}% of ${f.name})` });
   return team;
 }
 

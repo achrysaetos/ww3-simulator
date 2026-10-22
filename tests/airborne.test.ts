@@ -130,12 +130,14 @@ describe('airborne insertion', () => {
     expect(landSlice(t.world).isolatedDays[t.paras.id]).toBeGreaterThan(0);
   });
 
-  it('ends the airhead once ground supply reaches it', () => {
+  it('ends the airhead once ground supply reaches it and its transports are back', () => {
     const t = setup([landMovement, logistics]);
     const target = t.nodeAt(...BELGOROD);
     t.airOver(target, 'RUS');
     t.order(t.paras, { posture: 'air_assault', target });
     expect(landSlice(t.world).airheads[t.paras.id]).toBeDefined();
+    // The drop holds the day's lift for 24 hours whether or not ground supply has reached it.
+    t.day();
     t.day();
     expect(landSlice(t.world).airheads[t.paras.id]).toBeUndefined();
   });

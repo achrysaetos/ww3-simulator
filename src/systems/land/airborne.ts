@@ -4,6 +4,7 @@ import type { GameMap } from '../../core/map';
 import type { Formation, FormationId, NationId, NodeId, PlatformId, RefusalCode, World } from '../../core/types';
 import { AIRFRAME } from '../air/tables';
 import { supplyFactor } from '../logistics';
+import { detach } from '../naval/orders';
 import { allied, canEnter, landSlice } from './state';
 import { airTons, liftTons, transportRadiusKm } from './strategic';
 
@@ -33,6 +34,12 @@ const CONTESTING_FIGHTERS = 8;
  * assault followed the same day by Il-76s air-landing two battalions).
  */
 const LIFTS = 2;
+/**
+ * Smallest share of a formation worth dropping on its own: a parachute battalion group of a brigade of about six
+ * battalions with its support (Kolwezi 1978 was the 2e REP of the 11e DP; 16 Air Assault's high-readiness echelon
+ * is one battlegroup).
+ */
+const MIN_ASSAULT_ECHELON = 0.15; // param:
 /** Furthest a formation moves by road or rail to its departure airfield while the operation is mounted (estimate: one day's move). */
 const MARSHAL_KM = 400;
 /** Days of fuel, ammunition and food a dropped formation carries, as a share of its capacity (estimate: two to three days' combat load). */
@@ -49,6 +56,8 @@ interface Threat {
 interface EnemyAir {
   sams: Threat[];
   fighters: Threat[];
+  /** Counter-air of the nation and the allies fighting beside it, which contests the same skies. */
+  ownFighters: Threat[];
 }
 const enemyMemo = new WeakMap<World, { tick: number; byNation: Map<NationId, EnemyAir> }>();
 
@@ -58,13 +67,19 @@ function enemyAir(world: World, catalog: Catalog, nation: NationId): EnemyAir {
   if (!memo || memo.tick !== world.tick) enemyMemo.set(world, (memo = { tick: world.tick, byNation: new Map() }));
   let air = memo.byNation.get(nation);
   if (air) return air;
-  air = { sams: [], fighters: [] };
+  air = { sams: [], fighters: [], ownFighters: [] };
+  const enemies = (Object.keys(world.nations) as NationId[]).filter((n) => atWar(world, nation, n));
+  const fighting = new Map<NationId, boolean>();
+  const beside = (n: NationId) => fighting.get(n) ?? fighting.set(n, n === nation || (allied(world, nation, n) && enemies.some((e) => atWar(world, n, e)))).get(n)!;
   for (const f of Object.values(world.formations)) {
-    if ((f.kind !== 'air_defense' && f.kind !== 'air_wing') || f.status !== 'active' || !atWar(world, nation, f.nation)) continue;
+    if ((f.kind !== 'air_defense' && f.kind !== 'air_wing') || f.status !== 'active') continue;
+    const enemy = atWar(world, nation, f.nation);
+    if (!enemy && !(f.kind === 'air_wing' && beside(f.nation))) continue;
     for (const [pid, n] of Object.entries(f.equipment) as [PlatformId, number][]) {
       const p = catalog.platform(pid);
       if (n <= 0) continue;
-      if (f.kind === 'air_wing' && AIRFRAME[p.class]?.role === 'counter_air') air.fighters.push({ node: f.node, reachKm: p.mobility.rangeKm, weight: n * f.readiness });
+      if (f.kind === 'air_wing' && AIRFRAME[p.class]?.role === 'counter_air') (enemy ? air.fighters : air.ownFighters).push({ node: f.node, reachKm: p.mobility.rangeKm, weight: n * f.readiness });
+      if (!enemy) continue;
       if (f.kind === 'air_defense' && p.engagementChannels) {
         const reachKm = p.loadout.reduce((r, l) => Math.max(r, catalog.munition(l.munition).rangeKm), 0);
         air.sams.push({ node: f.node, reachKm, weight: n * p.engagementChannels * f.readiness });
@@ -97,6 +112,24 @@ export function friendlyAir(world: World, map: GameMap, catalog: Catalog, nation
   return over(map, enemyAir(world, catalog, nation).fighters, node) < CONTESTING_FIGHTERS;
 }
 
+/** Radius around a field its transports descend and line up through, km (estimate: a C-17 starts its descent ~150 km out). */
+const APPROACH_KM = 150; // param:
+
+/**
+ * Whether a transport stream can fly into a field day after day: its side won the air there this tick, the enemy
+ * holds no air on the approach, and no more enemy fighters reach it on a combat radius than its own side's
+ * (Berlin 1948 and the 2003 flow into Iraq ran under friendly fighters; CSIS 2023 puts no US airlift into Taiwan
+ * under PLA air superiority).
+ */
+export function airBridge(world: World, map: GameMap, catalog: Catalog, nation: NationId, node: NodeId): boolean {
+  const air = world.theater.airControl[node];
+  if (air) return allied(world, nation, air.nation);
+  for (const [n, c] of Object.entries(world.theater.airControl)) if (c && atWar(world, nation, c.nation) && map.distanceKm(Number(n) as NodeId, node) <= APPROACH_KM) return false;
+  const { fighters, ownFighters } = enemyAir(world, catalog, nation);
+  const radius = (ts: Threat[]) => ts.reduce((w, t) => (map.distanceKm(t.node, node) <= t.reachKm / 2 ? w + t.weight : w), 0);
+  return radius(fighters) <= radius(ownFighters);
+}
+
 /** The friendly airfield nearest the formation that it can mount an operation from, if any is within a day's move. */
 export function departure(world: World, map: GameMap, f: Formation): NodeId | undefined {
   let best: NodeId | undefined, bestKm = MARSHAL_KM;
@@ -125,6 +158,27 @@ function fieldsNear(map: GameMap, node: NodeId): NodeId[] {
   return fields;
 }
 
+/**
+ * Tons the nation has dropped in the last day: the transports that flew them are still on their
+ * two lifts, so every drop in a day shares one fleet (Market Garden needed three days of lifts for
+ * three divisions because the aircraft were shared).
+ */
+function liftFlown(world: World, catalog: Catalog, nation: NationId): number {
+  let tons = 0;
+  for (const [id, tick] of Object.entries(landSlice(world).airheads) as [FormationId, number][]) {
+    const f = world.formations[id];
+    if (f?.nation === nation && fresh(world, tick)) tons += airTons(catalog, f);
+  }
+  return tons;
+}
+
+/** Share of the formation the transports left today can land: a brigade too big for them drops an assault echelon. */
+function dropShare(world: World, catalog: Catalog, f: Formation): number {
+  return Math.min(1, (liftTons(world, catalog, f.nation) * LIFTS - liftFlown(world, catalog, f.nation)) / airTons(catalog, f));
+}
+
+const fresh = (world: World, landed: number) => (world.tick - landed) * world.dtHours < 24;
+
 /** Why the formation cannot be dropped on `target`, or undefined when it can. */
 export function cannotDrop(world: World, map: GameMap, catalog: Catalog, f: Formation, target: NodeId): { code: RefusalCode; reason: string } | undefined {
   if (!f.airborne) return { code: 'wrong_role', reason: 'not an airborne or air-assault formation' };
@@ -133,14 +187,16 @@ export function cannotDrop(world: World, map: GameMap, catalog: Catalog, f: Form
   const from = departure(world, map, f);
   if (from === undefined) return { code: 'no_airfield', reason: 'no friendly airfield within a day’s move' };
   if (map.distanceKm(from, target) > transportRadiusKm(world, catalog, f.nation)) return { code: 'out_of_range', reason: 'beyond the transports’ radius' };
-  if (liftTons(world, catalog, f.nation) * LIFTS < airTons(catalog, f)) return { code: 'no_lift', reason: 'not enough airlift to land it in a day' };
+  if (dropShare(world, catalog, f) < MIN_ASSAULT_ECHELON) return { code: 'no_lift', reason: 'not enough airlift left to land its assault echelon today' };
   if (!friendlyAir(world, map, catalog, f.nation, target)) return { code: 'no_air_cover', reason: 'no friendly air control over the drop zone' };
   return undefined;
 }
 
-/** Fly the formation in and land it, minus what the defence shoots down. */
-export function insert(world: World, ctx: SimContext, f: Formation, target: NodeId): void {
+/** Fly the formation, or the assault echelon of it the transports can carry, in and land it, minus what the defence shoots down. */
+export function insert(world: World, ctx: SimContext, whole: Formation, target: NodeId): void {
   const { map, catalog } = ctx;
+  const share = dropShare(world, catalog, whole);
+  const f = share < 1 ? detach(world, ctx, whole, share, 'assault echelon') : whole;
   const loss = dropLoss(world, map, catalog, f.nation, target);
   for (const pid of Object.keys(f.equipment) as PlatformId[]) f.equipment[pid] = Math.round(f.equipment[pid] * (1 - loss));
   f.personnel = Math.round(f.personnel * (1 - loss));
@@ -165,12 +221,9 @@ export function supplyAirheads(world: World, map: GameMap, catalog: Catalog): vo
   const dtDays = world.dtHours / 24;
   for (const id of Object.keys(airheads) as FormationId[]) {
     const f = world.formations[id];
-    if (!f || f.status === 'destroyed' || map.isSea(f.node)) {
-      delete airheads[id];
-      continue;
-    }
-    if (supplyFactor(world, map, f.node, f.nation) > 0) {
-      delete airheads[id];
+    // A drop stays on the books for a day after it lands, linked up or not, while its transports fly it.
+    if (!f || f.status === 'destroyed' || map.isSea(f.node) || supplyFactor(world, map, f.node, f.nation) > 0) {
+      if (!fresh(world, airheads[id])) delete airheads[id];
       continue;
     }
     if (!airFed(world, map, catalog, f)) continue;
