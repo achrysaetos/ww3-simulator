@@ -11,6 +11,8 @@ export interface OpsState {
   sent: Record<FormationId, { posture: string; target?: NodeId; tick: number }>;
   /** Tick each running operation began fighting for its current bound. */
   boundSince: Record<OperationId, { bound: number; tick: number }>;
+  /** Km each assaulting operation stood past its line of departure at each of its last ticks, oldest first: the pace it is making. */
+  pace: Record<OperationId, number[]>;
 }
 
 declare module '../../core/types' {
@@ -20,7 +22,10 @@ declare module '../../core/types' {
 }
 
 export function opsSlice(world: World): OpsState {
-  return (world.slices.ops ??= { byId: {}, planned: {}, base: {}, sent: {}, boundSince: {} });
+  const s = (world.slices.ops ??= { byId: {}, planned: {}, base: {}, sent: {}, boundSince: {}, pace: {} });
+  // Saves from before the pace record have none.
+  s.pace ??= {};
+  return s;
 }
 
 export const ACTIVE: ReadonlySet<OperationPhase> = new Set(['launched', 'stalled']);
@@ -65,6 +70,7 @@ export function endOperation(world: World, s: OpsState, op: Operation, phase: 's
   op.endedTick = world.tick;
   op.progress.note = note;
   delete s.boundSince[op.id];
+  delete s.pace[op.id];
   for (const id of [...op.formations, ...op.progress.relieved]) {
     delete s.base[id];
     delete s.sent[id];

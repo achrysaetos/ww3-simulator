@@ -5,13 +5,15 @@
  * the rest of the forecast core, so a browser worker can run it; the Node pool is `./operation-pool`.
  */
 import type { Catalog } from '../core/catalog';
-import { Engine } from '../core/engine';
+import { Engine, type System } from '../core/engine';
 import type { GameMap } from '../core/map';
 import { paramDef, withParams } from '../core/params';
 import type { Command, FormationId, NationId, NodeId, OperationId, World } from '../core/types';
 import { loadCatalog } from '../data/catalog';
 import { loadMap } from '../data/load';
 import { SYSTEMS } from '../systems';
+import { supplyFactor } from '../systems/logistics';
+import { MAX_REFILL_FRACTION_PER_DAY } from '../systems/logistics/tables';
 import { believedWorld, viewOf } from '../systems/intel/view';
 import { holds, platforms } from '../systems/ops/state';
 import { beyondWarAims, routeAxis } from '../systems/ops';
@@ -69,7 +71,11 @@ export interface OperationForecast {
 
 /** Formations this far from the axis or the committed force are left out of the forecast: they cannot reach the fight in its window. */
 const THEATRE_KM = 350;
-/** The systems a ground operation's outcome turns on. Air, sea, the home front, diplomacy and the AI hold still: the forecast assumes the enemy defends where it stands. */
+/**
+ * The systems a ground operation's outcome turns on, with logistics' refill run over today's supply lines
+ * (theatreSupply). Air, sea, the home front, diplomacy and the AI hold still: the forecast assumes the enemy defends
+ * where it stands.
+ */
 const THEATRE_SYSTEMS: ReadonlySet<string> = new Set(['weather', 'orders', 'landMovement', 'landCombat', 'ops']);
 /** World slices those systems read (logistics for its supply network, frozen as it stands: the forecast runs on today's supply lines); the rest stay behind. */
 const THEATRE_SLICES = ['land', 'weather', 'command', 'logistics'] as const;
@@ -107,8 +113,35 @@ export function theatreWorld(world: World, map: GameMap, catalog: Catalog, natio
   return structuredClone({ ...world, formations, slices: slices as World['slices'], pending: [], events: [], history: [] });
 }
 
+/**
+ * Logistics' refill over the frozen supply lines: each formation draws toward full at logistics' rate scaled by its
+ * supply factor. Without it the force would run dry in about a week of fighting, which the real one, fed by
+ * logistics, does not. Depot throughput and national stocks are not modelled here.
+ */
+const theatreSupply: System = {
+  id: 'theatreSupply',
+  step(world, ctx) {
+    const rate = MAX_REFILL_FRACTION_PER_DAY * (world.dtHours / 24);
+    for (const id in world.formations) {
+      const f = world.formations[id as FormationId];
+      if (f.status === 'destroyed' || f.status === 'embarked' || f.node >= ctx.map.landCount) continue;
+      const phi = supplyFactor(world, ctx.map, f.node, f.nation);
+      if (phi <= 0) continue;
+      const cap = f.supplyCapacity, have = f.supply;
+      have.fuel = Math.min(cap.fuel, have.fuel + cap.fuel * rate * phi);
+      have.ammo = Math.min(cap.ammo, have.ammo + cap.ammo * rate * phi);
+      have.food = Math.min(cap.food, have.food + cap.food * rate * phi);
+    }
+  },
+};
+
 let theatreEngine: Engine | undefined;
-const engine = () => (theatreEngine ??= new Engine(loadMap(), loadCatalog(), SYSTEMS.filter((s) => THEATRE_SYSTEMS.has(s.id))));
+const engine = () => {
+  if (theatreEngine) return theatreEngine;
+  const systems = SYSTEMS.filter((s) => THEATRE_SYSTEMS.has(s.id));
+  systems.splice(systems.findIndex((s) => s.id === 'landCombat') + 1, 0, theatreSupply);
+  return (theatreEngine = new Engine(loadMap(), loadCatalog(), systems));
+};
 
 /** Loads the map, catalog and systems, so the first forecast pays only for its runs. */
 export function warmOperationForecast(): void {

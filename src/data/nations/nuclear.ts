@@ -53,6 +53,11 @@ export const nuclearForces: Record<string, NuclearForces> = {
  *   Kinzhal units over the exercise's first phase. Dual-capable launchers: Iskander-M TELs, one
  *   9M723 round ready each; Yasen-M and Akula submarines, Kalibr land-attack rounds (FAS counts
  *   about 820 naval non-strategic warheads, Kalibr among them). Estimates.
+ * - USA: about 1,930 of the 3,700-warhead stockpile are a non-deployed hedge (FAS Nuclear Notebook 2025, "United
+ *   States nuclear weapons"). Bombers have been off day-to-day alert since 1991 and are generated in a crisis with
+ *   the gravity bombs and cruise missiles stored at their bases, over days; the rest is an upload hedge for Trident
+ *   II and Minuteman III, loaded as submarines cycle through port and as crews re-MIRV silos, over months (CRS
+ *   RL33640, Woolf, "U.S. Strategic Nuclear Forces"). The bomber share of the hedge and both times are estimates.
  */
 export interface AlertSpec {
   firstHours: number;
@@ -68,6 +73,7 @@ export interface AlertSpec {
 
 export const NUCLEAR_ALERT: Record<string, AlertSpec> = {
   PAK: { firstHours: 12, firstShare: 0.25, fullHours: 72 },
+  USA: { firstHours: 72, firstShare: 0.15, fullHours: 24 * 180 },
   IND: { firstHours: 6, firstShare: 0.2, fullHours: 48 },
   ISR: { firstHours: 24, firstShare: 0.3, fullHours: 72 },
   PRK: { firstHours: 24, firstShare: 0.2, fullHours: 96 },
