@@ -49,10 +49,11 @@ function credit(catalog: Catalog, item: ItemId, k: number, into: Partial<Record<
   if (g) add(g, k);
 }
 
-/** Nations a war touches: belligerents, nations that lost people to it, and arms donors that have shipped. */
+/** Nations a war touches: belligerents (and those about to be, by a queued declaration), nations that lost people to it, and arms donors that have shipped. */
 export function involved(world: World): NationId[] {
   const out = new Set<NationId>();
   for (const n of Object.values(world.nations)) if (n.status !== 'peace') out.add(n.id);
+  for (const c of world.pending) if (c.type === 'declare_war') out.add(c.nation).add(c.target);
   for (const [id, c] of Object.entries(world.slices.civil?.nations ?? {})) if (c.killed > 0 || (c.military ?? 0) > 0) out.add(id as NationId);
   for (const f of AID_FLOWS) if ((world.slices.economy?.aid[aidKey(f)]?.delivered ?? 0) > 0) out.add(f.donor as NationId).add(f.recipient as NationId);
   return [...out].filter((id) => world.nations[id]).sort();
