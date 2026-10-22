@@ -25,7 +25,8 @@ export const airMunitions: Munition[] = [
   // Peak Mach ~10 is claimed; terminal speed is far lower, which is why PAC-3 intercepts it.
   M({ id: 'x_kinzhal', name: 'Aeroballistic missile', kind: 'srbm', rangeKm: 2000, speedMach: 8, warheadKg: 480, cepM: 10, pk: { structure: 0.8, soft: 0.6, hardened: 0.4 }, interceptDifficulty: 0.45, unitCostUsdM: 10, weightKg: 4300 }),
   // Iranian MRBM (Emad/Kheibar Shekan class).
-  M({ id: 'x_mrbm', name: 'MRBM', kind: 'mrbm', rangeKm: 1700, speedMach: 7, warheadKg: 600, cepM: 100, pk: { structure: 0.6, soft: 0.5, hardened: 0.2 }, interceptDifficulty: 0.35, unitCostUsdM: 2, weightKg: 17000 }),
+  // PLARF-class accuracy (DF-16 and DF-21C, CEP 10-50 m: CSIS Missile Threat), the salvos CSIS 2023 put on Kadena.
+  M({ id: 'x_mrbm', name: 'MRBM', kind: 'mrbm', rangeKm: 1700, speedMach: 7, warheadKg: 600, cepM: 30, pk: { structure: 0.6, soft: 0.5, hardened: 0.2 }, interceptDifficulty: 0.35, unitCostUsdM: 2, weightKg: 17000 }),
   // PAC-3 MSE: hit-to-kill, ~$4M, ~35 km TBM / ~100 km aircraft.
   M({ id: 'x_pac3', name: 'Hit-to-kill interceptor', kind: 'sam', rangeKm: 100, speedMach: 5, warheadKg: 10, cepM: 1, pk: { aircraft: 0.8, missile: 0.85 }, interceptDifficulty: 0, unitCostUsdM: 4, weightKg: 320 }),
   // Arrow 2/3 exo/endo ABM.

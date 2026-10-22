@@ -79,6 +79,9 @@ export const airMunitions = defineMunitions([
   { id: 'aargm_er', name: 'AGM-88G AARGM-ER', kind: 'arm', producers: ['USA'], rangeKm: 300, speedMach: 4, warheadKg: 66, cepM: 5, pk: { soft: 0.75, structure: 0.3 }, interceptDifficulty: 0.55, unitCostUsdM: 1.5, weightKg: 460 },
   { id: 'kh31p', name: 'Kh-31PD', kind: 'arm', producers: ['RUS'], rangeKm: 250, speedMach: 3.5, warheadKg: 110, cepM: 8, pk: { soft: 0.65, structure: 0.3 }, interceptDifficulty: 0.5, unitCostUsdM: 0.7, weightKg: 715 },
   { id: 'kh31a', name: 'Kh-31AD anti-ship', kind: 'antiship_cruise', producers: ['RUS'], rangeKm: 160, speedMach: 3.5, warheadKg: 110, cepM: 5, pk: { ship: 0.5, structure: 0.3, soft: 0.4 }, interceptDifficulty: 0.55, unitCostUsdM: 0.8, weightKg: 715 },
+  // ADM-160B/C MALD and MALD-J: a jet decoy with a radar signature like a strike aircraft or missile, ~USD 0.32M
+  // (USAF FY2024 P-1). Fired with a raid, it draws interceptors and fire-control channels and kills nothing.
+  { id: 'mald', name: 'ADM-160 MALD / MALD-J decoy', kind: 'cruise', producers: ['USA'], rangeKm: 925, speedMach: 0.8, warheadKg: 0, cepM: 0, pk: { structure: 0 }, interceptDifficulty: 0.3, unitCostUsdM: 0.32, weightKg: 130 },
   { id: 'ld10', name: 'LD-10 / CM-102', kind: 'arm', producers: ['CHN'], rangeKm: 100, speedMach: 3, warheadKg: 60, cepM: 8, pk: { soft: 0.6, structure: 0.3 }, interceptDifficulty: 0.4, unitCostUsdM: 0.6, weightKg: 600 },
   { id: 'yj91', name: 'YJ-91 ARM / anti-ship', kind: 'arm', producers: ['CHN'], rangeKm: 120, speedMach: 3.5, warheadKg: 90, cepM: 8, pk: { soft: 0.6, ship: 0.35, structure: 0.3 }, interceptDifficulty: 0.5, unitCostUsdM: 0.7, weightKg: 600 },
 
