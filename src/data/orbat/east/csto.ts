@@ -35,7 +35,7 @@ const kyrgyzstan: OrbatEntry[] = [
 
 const tajikistan: OrbatEntry[] = [
   unit('TJK', '1st Motor Rifle Brigade', 'maneuver', 'brigade', at('Dushanbe TJK', 38.58, 68.75), CORPS(25, 'bmp2'), TJK_BDE),
-  unit('TJK', '7th Air Assault Brigade', 'maneuver', 'brigade', at('Kurgan-Tyube', 37.84, 68.78), CORPS(12, 'btr82a'), TJK_BDE),
+  unit('TJK', '7th Air Assault Brigade', 'maneuver', 'brigade', at('Kurgan-Tyube', 37.84, 68.78), CORPS(12, 'btr82a'), { ...TJK_BDE, airborne: true }),
 ];
 
 export const csto: OrbatEntry[] = [...kazakhstan, ...kyrgyzstan, ...tajikistan];

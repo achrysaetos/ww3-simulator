@@ -37,7 +37,7 @@ export const pol = [
 
   // 1st Legions Infantry Division and independent brigades
   u('1st Legions Infantry Division (forming)', 'maneuver', 'division', base('Białystok', 53.13, 23.16), { infantry_squad: 54, rosomak: 60, truck: 200 }, { readiness: 0.5, personnel: 4000 }),
-  u('6th Airborne Brigade', 'maneuver', 'brigade', base('Kraków', 50.06, 19.94), { infantry_squad: 54, truck: 150 }, { readiness: 0.8, personnel: 3000 }),
+  u('6th Airborne Brigade', 'maneuver', 'brigade', base('Kraków', 50.06, 19.94), { infantry_squad: 54, truck: 150 }, { readiness: 0.8, personnel: 3000, airborne: true }),
   u('25th Air Cavalry Brigade', 'air_wing', 'brigade', base('Tomaszów Mazowiecki', 51.53, 20.01), { mi24: 16, mi8: 20, infantry_squad: 27 }, { readiness: 0.65, personnel: 2500 }),
   u('Armoured training and reserve (Land Forces Training Centre)', 'maneuver', 'battalion', base('Poznań-Biedrusko', 52.53, 16.95), { k2_black_panther: 26, pt91: 20 }, { readiness: 0.4, personnel: 800 }),
 

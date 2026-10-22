@@ -134,7 +134,7 @@ export const usaArmy = [
 
   // 11th Airborne Division (Arctic)
   u('1st Infantry Brigade Combat Team, 11th Airborne Division', 'maneuver', 'brigade', fortWainwright, US_IBCT, IBCT_P),
-  u('2nd Infantry Brigade Combat Team (Airborne), 11th Airborne Division', 'maneuver', 'brigade', jber, US_IBCT, IBCT_P),
+  u('2nd Infantry Brigade Combat Team (Airborne), 11th Airborne Division', 'maneuver', 'brigade', jber, US_IBCT, { ...IBCT_P, airborne: true }),
   u('Aviation Task Force, 11th Airborne Division', 'air_wing', 'battalion', fortWainwright, { ah64e: 12, uh60m: 20, ch47f: 12, hh60m: 6 }, { readiness: 0.8, personnel: 1200 }),
 
   // Forward-based in Europe

@@ -30,7 +30,7 @@ export const fra = [
   // 3e Division
   u('2e Brigade blindée', 'maneuver', 'brigade', base('Illkirch-Graffenstaden', 48.53, 7.71), add({ leclerc: 100, caesar: 16, truck: 400 }, MECH_INF_REGT, MECH_INF_REGT), { ...ACTIVE, personnel: 7000 }),
   u('6e Brigade légère blindée', 'maneuver', 'brigade', base('Nîmes', 43.84, 4.36), add(MOTOR_INF_REGT, MOTOR_INF_REGT, CAV_REGT, CAV_REGT, { caesar: 8, truck: 300 }), { ...ACTIVE, personnel: 6500 }),
-  u('11e Brigade parachutiste', 'maneuver', 'brigade', base('Toulouse-Balma', 43.61, 1.49), { infantry_squad: 90, vbl: 40, caesar: 8, truck: 250 }, { readiness: 0.85, personnel: 7500 }),
+  u('11e Brigade parachutiste', 'maneuver', 'brigade', base('Toulouse-Balma', 43.61, 1.49), { infantry_squad: 90, vbl: 40, caesar: 8, truck: 250 }, { readiness: 0.85, personnel: 7500, airborne: true }),
   u('1er Régiment d’artillerie (LRU)', 'artillery', 'battalion', base('Bourogne', 47.56, 6.92), { lru: 9, truck: 60 }, { ...ACTIVE, personnel: 900, extraMagazine: { gmlrs: 108 } }),
   u('4e Brigade d’aérocombat', 'air_wing', 'brigade', base('Clermont-Ferrand', 45.78, 3.08), { tiger: 67, nh90: 60 }, { ...ACTIVE, personnel: 4500 }),
   u('Mission Aigle (NATO Forward Land Forces Romania)', 'maneuver', 'battalion', base('Cincu, Romania', 45.92, 24.8), add(MECH_INF_REGT, { caesar: 4 }), { readiness: 0.85, personnel: 1000 }),
