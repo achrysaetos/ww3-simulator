@@ -15,7 +15,7 @@ function march(reorder: boolean) {
     .filter((n) => w.control[n] === AZE)
     .filter((n) => map.distanceKm(f.node, n) > 150 && map.distanceKm(f.node, n) < 300)
     .sort((a, b) => map.distanceKm(f.node, b) - map.distanceKm(f.node, a) || a - b)[0];
-  const order = { type: 'order' as const, nation: AZE, formation: f.id, byPlayer: true, order: { posture: 'move' as const, target } };
+  const order = { type: 'order' as const, nation: AZE, formation: f.id, byPlayer: true as const, order: { posture: 'move' as const, target } };
   w.pending.push(order);
   const progress: number[] = [];
   for (let t = 0; t < 16; t++) {
