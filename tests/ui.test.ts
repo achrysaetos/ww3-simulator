@@ -56,6 +56,7 @@ describe('snapshot codec', () => {
     expect(s.sync().rosterAdd?.map((r) => r.name)).toEqual(['Alpha']);
 
     a.equipment[tank] = 25;
+    a.damaged[tank] = 75;
     a.order = { posture: 'attack', target: s.nodeAt(53.9, 27.6), issuedTick: 0 };
     expect(s.sync().roster).toBeUndefined();
     const view = s.client.formations[0];
@@ -76,7 +77,7 @@ describe('snapshot codec', () => {
     s.world.nations[id.nation('UKR')].controlledBy = 'human';
     const cards = new Map(nationCards(s.map, {}).map((c) => [c.id, c]));
     const enc = new SnapshotEncoder(s.map.nationIds, s.catalog, s.map.size);
-    // A twin that forgets what it sent, so every snapshot it makes is whole; it shares the first-seen strengths.
+    // A twin that forgets what it sent, so every snapshot it makes is whole.
     const twin = new SnapshotEncoder(s.map.nationIds, s.catalog, s.map.size);
     const viaDiffs = emptyClientState(s.map.size);
     applySnapshot(viaDiffs, enc.encode(s.world, s.map), s.map.nationIds, cards);
@@ -101,6 +102,30 @@ describe('snapshot codec', () => {
     expect(aiAnswers).toBeGreaterThan(0);
     expect([...diffed]).toEqual(expect.arrayContaining(['fNode', 'fStrength', 'nations']));
   });
+
+  it('reads strength against establishment, so a resumed game and a first sighting match a session that watched all along', () => {
+    const s = createSession('ukraine-2026', 1);
+    const UKR = id.nation('UKR');
+    s.world.nations[UKR].controlledBy = 'human';
+    const cards = new Map(nationCards(s.map, {}).map((c) => [c.id, c]));
+    const strengths = (enc: SnapshotEncoder) => {
+      const c = emptyClientState(s.map.size);
+      applySnapshot(c, enc.encode(s.world, s.map), s.map.nationIds, cards);
+      return c.formations;
+    };
+    s.engine.step(s.world);
+    const firstSight = strengths(new SnapshotEncoder(s.map.nationIds, s.catalog, s.map.size)).filter((f) => f.entry.nation !== UKR);
+    expect(firstSight.length).toBeGreaterThan(20);
+    expect(firstSight.filter((f) => f.strength < 0.99).length).toBeGreaterThan(firstSight.length / 4);
+
+    const watching = new SnapshotEncoder(s.map.nationIds, s.catalog, s.map.size);
+    watching.encode(s.world, s.map);
+    s.engine.run(s.world, 40);
+    const along = strengths(watching).filter((f) => f.entry.nation === UKR);
+    const resumed = strengths(new SnapshotEncoder(s.map.nationIds, s.catalog, s.map.size)).filter((f) => f.entry.nation === UKR);
+    expect(resumed.map((f) => [f.entry.id, f.strength])).toEqual(along.map((f) => [f.entry.id, f.strength]));
+    expect(resumed.filter((f) => f.strength < 0.9).length).toBeGreaterThan(5);
+  }, 300_000);
 
   it('delivers buffered events once, capped with a dropped count', () => {
     const s = setup();
