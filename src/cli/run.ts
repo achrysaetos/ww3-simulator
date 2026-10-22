@@ -1,14 +1,17 @@
 /**
- * Headless run: npm run sim -- --scenario ww3-2027 --days 30 [--seed 1] [--quiet] [--save run.json]
+ * Headless run: npm run sim -- --scenario ww3-2027 --days 30 [--seed 1] [--quiet] [--report] [--save run.json]
  * Resume a saved run: npm run sim -- --resume run.json --days 30 [--save later.json]
- * Prints notable events as they happen and a daily line per belligerent.
+ * Prints notable events as they happen and a daily line per belligerent; --report ends with the
+ * after-action report: war cost, the production race and economic workarounds.
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { currentDate } from '../core/engine';
 import type { NationId, SimEvent, World } from '../core/types';
+import { involved, OutputsRecorder } from '../outputs';
 import { createSession, SCENARIOS } from '../scenarios';
 import { resumeRun, saveRun } from '../scenarios/save';
 import { CliError, parseArgs, type CliArgs } from './args';
+import { formatOutputs } from './outputs-report';
 
 let args: CliArgs;
 try {
@@ -92,6 +95,8 @@ function territory(w: World, n: NationId): number {
 
 const ticksPerDay = Math.round(24 / world.dtHours);
 const startTerritory = new Map(Object.keys(world.nations).map((n) => [n, territory(world, n as NationId)]));
+const recorder = args.report ? new OutputsRecorder(engine.catalog) : undefined;
+recorder?.observe(world);
 let stepMs = 0, worst = 0;
 for (let day = 1; day <= days; day++) {
   const battles = new Map<NationId, { lost: number; kia: number }>();
@@ -101,6 +106,7 @@ for (let day = 1; day <= days; day++) {
     const dt = performance.now() - s;
     stepMs += dt;
     worst = Math.max(worst, dt);
+    recorder?.observe(world);
     for (const e of events) {
       const line = describe(e);
       if (line) console.log(`  ${currentDate(world).toISOString().slice(0, 13)}  ${line}`);
@@ -123,6 +129,11 @@ for (let day = 1; day <= days; day++) {
       });
     console.log(`day ${world.tick / ticksPerDay} ${currentDate(world).toISOString().slice(0, 10)} | ${rows.join(' | ') || 'no wars'}`);
   }
+}
+if (recorder) {
+  const fighting = belligerents(world).sort();
+  const order = [...fighting, ...involved(world).filter((n) => !fighting.includes(n))];
+  console.log(formatOutputs(recorder.outputs(world, map), order, name).join('\n'));
 }
 if (saveTo) {
   writeFileSync(saveTo, saveRun(scenarioId, world));
