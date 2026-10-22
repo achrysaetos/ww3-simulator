@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Formation, MunitionId, NationId, NodeId, SimEvent } from '../src/core/types';
+import type { Formation, MunitionId, NationId, NodeId, PlatformId, SimEvent } from '../src/core/types';
 import { createSession } from '../src/scenarios';
 import { karabakh2020 } from '../src/validation/cases/karabakh-2020';
 
@@ -52,7 +52,7 @@ describe('missile brigades mass their salvos (AS-2)', () => {
     s.world.nations[N('IRN')].controlledBy = 'human';
     const nevatim = s.map.nodeAt(31.21, 35.01);
     for (const f of Object.values(s.world.formations))
-      if (f.nation === 'IRN' && f.kind === 'missile' && Object.keys(f.equipment).some((p) => s.catalog.platform(p as never).class === 'tel_mrbm'))
+      if (f.nation === 'IRN' && f.kind === 'missile' && Object.keys(f.equipment).some((p) => s.catalog.platform(p as PlatformId).class === 'tel_mrbm'))
         order(s, f, nevatim, { targetClass: 'aircraft' });
     let most = 0;
     for (let t = 0; t < 4; t++) {
@@ -153,6 +153,29 @@ describe("Iran's launchers are hunted (gulf-2027 launcher attrition)", () => {
     const start = launchers();
     steps(s, (30 * 24) / s.world.dtHours);
     expect(start - launchers()).toBeGreaterThanOrEqual(start / 6);
+  }, SCENARIO_MS);
+});
+
+describe("Iran's land-attack cruise missiles fly (gulf-2027)", () => {
+  // 13-14 Apr 2024: Iran fired ~30 cruise missiles at Israel with its ballistic missiles and drones (IDF). Its cruise TELs
+  // once shared Haji Abad with Sejjil TELs, ~1,940 km from Israel's nearest cell and past Paveh's 1,650 km; a brigade
+  // fires one munition a tick, so they never fired. Seed 3 draws a salvo before Israel's strikes find the launchers.
+  it('every Iranian cruise TEL unit has Israel in reach and no ballistic launcher, and Iran fires cruise missiles at Israel in 10 days', () => {
+    const s = createSession('gulf-2027', 3);
+    const { catalog, map, world } = s;
+    const israel = [...Array(map.landCount).keys()].filter((n) => world.control[n] === 'ISR') as NodeId[];
+    const units = Object.values(world.formations).filter((f) => f.nation === 'IRN' && Object.keys(f.equipment).some((p) => catalog.platform(p as PlatformId).class === 'cruise_launcher'));
+    expect(units.length).toBeGreaterThan(0);
+    for (const f of units) {
+      const reach = Math.max(...Object.keys(f.magazine).map((m) => catalog.munitions.get(m as MunitionId)).filter((m) => m?.kind === 'cruise').map((m) => m!.rangeKm));
+      expect(Math.min(...israel.map((n) => map.distanceKm(f.node, n))), f.name).toBeLessThan(reach);
+      expect(Object.keys(f.equipment).filter((p) => ['tel_srbm', 'tel_mrbm', 'tel_irbm'].includes(catalog.platform(p as PlatformId).class)), f.name).toEqual([]);
+    }
+    let cruise = 0;
+    steps(s, (10 * 24) / world.dtHours, (e) => {
+      if (strikesBy(s, e, 'IRN', 'ISR') && catalog.munition(e.munition).kind === 'cruise') cruise += e.fired;
+    });
+    expect(cruise).toBeGreaterThan(0);
   }, SCENARIO_MS);
 });
 
