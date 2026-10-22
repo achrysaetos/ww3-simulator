@@ -5,17 +5,17 @@
  */
 import { atWar, type SimContext, type System } from '../../core/engine';
 import type { Catalog } from '../../core/catalog';
-import type { Formation, FormationKind, MunitionId, NationId, NodeId, PlatformId, Posture, RefusalCode, World } from '../../core/types';
+import type { Formation, FormationId, FormationKind, MunitionId, NationId, NodeId, PlatformId, Posture, RefusalCode, World } from '../../core/types';
 import type { OrderCommand, OrderOutcome } from '../orders';
 import { navalPosition } from '../naval';
 import { combatRadiusKm } from './combat';
-import { buildPicture } from './picture';
+import { buildPicture, type AirPicture } from './picture';
 import { rearm, stockWarReserves } from './rearm';
 import { isStrikeMunition, reloadSalvos, resolveStrikes, type AirSlice } from './strike';
 import { resolveAirSuperiority } from './superiority';
 import { AIRFRAME, LAUNCHER, OFFENSIVE_POSTURES, STRIKE_ROLES, TUNING } from './tables';
 
-export { combatRadiusKm, resolveAirBattle, visibility } from './combat';
+export { combatRadiusKm, resolveAirBattle, tankerStretch, visibility } from './combat';
 export { engagementCycles, interceptSalvo, type SalvoDefense, type SalvoResult, type SalvoThreat, type ShotDoctrine } from './intercept';
 export { aimKey, dailyRounds, effectPk, futileAim, type AirSlice, type Assessment } from './strike';
 export { ATTRITABLE_COST_USD_M, PENETRATOR_VISIBILITY } from './tables';
@@ -56,19 +56,33 @@ export const airWar: System = {
     const slice = (world.slices.air ??= { runway: {} });
     world.theater.airControl = {};
     const pic = buildPicture(world, ctx, slice.runway);
+    for (const [nation, share] of pic.tankerShare) (slice.tanking ??= {})[nation] = share;
+    const offered = combatSorties(pic);
     resolveAirSuperiority(world, ctx, pic);
     resolveStrikes(world, ctx, pic, slice);
-    recover(world, slice);
+    const left = combatSorties(pic);
+    recover(world, slice, (f) => offered.has(f.id) && left.get(f.id) === offered.get(f.id));
     reloadSalvos(world, slice, ctx.catalog);
     rearm(world, ctx);
   },
 };
 
-function recover(world: World, slice: AirSlice) {
+/** Sorties left to each wing's combat aircraft (fighters, strikers, bombers, helicopters); a wing with none is absent. */
+function combatSorties(pic: AirPicture): Map<FormationId, number> {
+  const out = new Map<FormationId, number>();
+  for (const g of pic.groups) if (STRIKE_ROLES.has(g.profile.role)) out.set(g.f.id, (out.get(g.f.id) ?? 0) + g.sorties);
+  return out;
+}
+
+/**
+ * Surge tempo tires crews and wears airframes; a wing whose offensive order flew nothing this tick (out of reach on
+ * the day's tanker share, no weapon to release, no war yet) stood down and rests instead.
+ */
+function recover(world: World, slice: AirSlice, idle: (f: Formation) => boolean) {
   const days = world.dtHours / 24;
   for (const f of Object.values(world.formations)) {
     if (f.kind !== 'air_wing' || f.status !== 'active') continue;
-    const delta = OFFENSIVE_POSTURES.has(f.order.posture) ? TUNING.surgeFatiguePerDay * days : -TUNING.restRecoveryPerDay * days;
+    const delta = OFFENSIVE_POSTURES.has(f.order.posture) && !idle(f) ? TUNING.surgeFatiguePerDay * days : -TUNING.restRecoveryPerDay * days;
     f.fatigue = Math.max(0, Math.min(1, f.fatigue + delta));
   }
   const grid = world.theater.power ?? {};

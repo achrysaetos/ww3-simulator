@@ -27,6 +27,8 @@ export interface AirSlice {
   bda?: Record<NationId, Record<string, Assessment>>;
   /** Share of each missile formation's ready rounds (LAUNCHER salvo) still on its launchers, 0..1; absent = all loaded. */
   salvo?: Record<FormationId, number>;
+  /** Each nation's tanker sorties per receiving sortie, the last tick its wings needed tanking; planners stretch their reach by it. */
+  tanking?: Record<NationId, number>;
 }
 
 /** What a shooter's last raids on one aim achieved, as its sensors and reports show it. */
@@ -441,7 +443,8 @@ function resolveRaid(world: World, ctx: SimContext, pic: AirPicture, slice: AirS
   const streams: RaidStream[] = live.map((p) => ({ munition: p.munition, count: p.weapons, overflightKm: overflight(p.f.node) }));
   const leaked = defendRaid(world, ctx, pic, target, attacker, streams);
   live.forEach((p, i) => {
-    const flightMin = nodeDistance(ctx, p.f.node, target) / (Math.max(0.05, p.munition.speedMach) * MACH_KM_PER_MIN);
+    // An aircraft carries its weapon to the release point; only the weapon's own flight, at most its range, lets a mobile target move away.
+    const flightMin = Math.min(nodeDistance(ctx, p.f.node, target), p.munition.rangeKm) / (Math.max(0.05, p.munition.speedMach) * MACH_KM_PER_MIN);
     const { effects, effective } = applyEffect(world, ctx, pic, slice, target, attacker, p.munition, p.targetClass, leaked[i], tally, flightMin, p.f.order.targetFormation);
     if (p.munition.unitCostUsdM >= ATTRITABLE_COST_USD_M) assess(world, slice, attacker, aimKey(target, p.f.order.targetFormation, p.targetClass), effective);
     ctx.emit({ type: 'strike', tick: world.tick, by: attacker, munition: p.munition.id, fired: p.weapons, intercepted: p.weapons - leaked[i], target, effects });
@@ -558,9 +561,12 @@ function victims(ctx: SimContext, pic: AirPicture, target: NodeId, attacker: Nat
   for (const f of pic.atNode.get(target) ?? []) {
     if (f.status !== 'active' || !pic.atWar(f.nation, attacker) || (mobile && aimed && f.id !== aimed)) continue;
     if (tc === 'aircraft' && f.kind !== 'air_wing' && f.kind !== 'strategic') continue;
+    // A strike aimed at a missile brigade goes for its launchers, the TELs that keep firing, not the trucks beside
+    // them (the 1991 Scud hunt; Israel's strikes on Iran's launchers in June 2025); the trucks are left once none stand.
+    const launchersOnly = mobile && f.id === aimed && f.kind === 'missile' && Object.entries(f.equipment).some(([pid, n]) => n > 0 && LAUNCHER[ctx.catalog.platform(pid as PlatformId).class]);
     for (const pid of Object.keys(f.equipment) as PlatformId[]) {
       const platform = ctx.catalog.platform(pid);
-      if (f.equipment[pid] > 0 && TARGET_OF_CLASS[platform.class] === tc)
+      if (f.equipment[pid] > 0 && TARGET_OF_CLASS[platform.class] === tc && (!launchersOnly || LAUNCHER[platform.class]))
         out.push({ f, pid, seen: mobile ? visibility(Math.max(0, platform.protection.stealth - OPEN_STEALTH)) * (AIR_DEFENSE_CLASSES.has(platform.class) ? TUNING.airDefenseLocated : 1) : 1 });
     }
   }

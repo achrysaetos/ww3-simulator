@@ -116,3 +116,41 @@ describe('stealth and tanking (AS-10)', () => {
     expect(hits).toBeGreaterThan(0);
   }, SCENARIO_MS);
 });
+
+describe('idle strike orders do not tire a wing (AS-7, AS-13)', () => {
+  // A wing tires from flying at surge tempo (RAND MG-1028), not from holding an order its tankers cannot carry it to.
+  it("Nevatim's F-35Is stay fresh for three days on an order to strike Bandar Abbas, past what Israel's tankers reach", () => {
+    const s = createSession('gulf-2027', 1);
+    s.world.nations[N('ISR')].controlledBy = 'human';
+    const bandarAbbas = s.map.nodeAt(27.19, 56.27);
+    const wing = Object.values(s.world.formations).find((f) => f.nation === 'ISR' && f.kind === 'air_wing' && (f.equipment['f35a' as never] ?? 0) > 0)!;
+    order(s, wing, bandarAbbas, { targetClass: 'structure' });
+    const before = wing.fatigue;
+    let fired = 0;
+    steps(s, (3 * 24) / s.world.dtHours, (e) => {
+      if (e.type === 'strike' && e.by === 'ISR' && e.target === bandarAbbas) fired += e.fired;
+    });
+    expect(wing.order.posture).toBe('strike');
+    expect(fired).toBe(0);
+    expect(wing.fatigue).toBeLessThanOrEqual(before);
+  }, SCENARIO_MS);
+});
+
+describe("Iran's launchers are hunted (gulf-2027 launcher attrition)", () => {
+  // June 2025: the IAF hunted Iran's missile launchers from the first night and the IDF claimed about half destroyed or
+  // disabled within twelve days (IDF; CSIS Missile Defense Project). The floor is a sixth over a month: the model's
+  // Israel strikes Iran with its F-35Is alone, its other wings held off by Iran's air defences.
+  it('Israel destroys at least a sixth of Iran\'s ballistic missile launchers in 30 days', () => {
+    const s = createSession('gulf-2027', 1);
+    const TEL = new Set(['tel_srbm', 'tel_mrbm', 'tel_irbm']);
+    const launchers = () => {
+      let n = 0;
+      for (const f of Object.values(s.world.formations))
+        if (f.nation === 'IRN' && f.kind === 'missile') for (const [pid, k] of Object.entries(f.equipment)) if (TEL.has(s.catalog.platform(pid as never).class)) n += k;
+      return n;
+    };
+    const start = launchers();
+    steps(s, (30 * 24) / s.world.dtHours);
+    expect(start - launchers()).toBeGreaterThanOrEqual(start / 6);
+  }, SCENARIO_MS);
+});

@@ -42,6 +42,8 @@ export interface AirPicture {
   atWar(a: NationId, b: NationId): boolean;
   /** Best AAM per formation magazine, cached. */
   aamOf(f: Formation): Munition | undefined;
+  /** Tanker sorties per receiving sortie, for each nation whose wings needed tanking this tick. */
+  tankerShare: Map<NationId, number>;
 }
 
 const UNLISTED_FIELD_CAPACITY = 0.75;
@@ -85,7 +87,7 @@ export function buildPicture(world: World, ctx: SimContext, runway: Record<numbe
     byFormation.set(f.id, fg);
     groups.push(...fg);
   }
-  applyTankerSupport(groups, map);
+  const tankerShare = applyTankerSupport(groups, map);
   for (const g of groups) if (g.profile.role === 'counter_air') g.interceptLeft = g.sorties * TUNING.fighterInterceptShare;
 
   const aamCache = new Map<FormationId, Munition | undefined>();
@@ -109,7 +111,7 @@ export function buildPicture(world: World, ctx: SimContext, runway: Record<numbe
     (enemies.get(b) ?? enemies.set(b, new Set()).get(b)!).add(a);
   }
   const atWar = (a: NationId, b: NationId) => enemies.get(a)?.has(b) ?? false;
-  return { groups, byFormation, defenders, defendersInRange: new Map(), atNode, atWar, aamOf };
+  return { groups, byFormation, defenders, defendersInRange: new Map(), atNode, atWar, aamOf, tankerShare };
 }
 
 /**
@@ -151,9 +153,10 @@ function limitByFuel(f: Formation, fg: AirGroup[], ctx: SimContext) {
  * national tanker pool per region; packages that can make it on internal fuel do not
  * queue for the boom). The ratio extends receivers' combat radius.
  */
-function applyTankerSupport(groups: AirGroup[], map: GameMap) {
+function applyTankerSupport(groups: AirGroup[], map: GameMap): Map<NationId, number> {
+  const share = new Map<NationId, number>();
   const tankers = groups.filter((g) => g.profile.role === 'tanker' && g.sorties > 0);
-  if (!tankers.length) return;
+  if (!tankers.length) return share;
   const receivers = groups.filter((g) => {
     const t = g.f.order.target;
     return RECEIVER_ROLES.has(g.profile.role) && OFFENSIVE_POSTURES.has(g.f.order.posture) && g.sorties > 0 && t !== undefined && map.distanceKm(g.f.node, t) > g.radiusKm;
@@ -166,6 +169,8 @@ function applyTankerSupport(groups: AirGroup[], map: GameMap) {
       if (t.f.nation === g.f.nation && map.distanceKm(t.f.node, g.f.node) <= t.platform.mobility.rangeKm) near += t.sorties;
     g.radiusKm = combatRadiusKm(g.platform, near / demand.get(g.f.nation)!);
   }
+  for (const [nation, d] of demand) share.set(nation, tankers.reduce((s, t) => s + (t.f.nation === nation ? t.sorties : 0), 0) / d);
+  return share;
 }
 
 function defenderOf(f: Formation, ctx: SimContext): Defender | undefined {

@@ -55,6 +55,14 @@ const VALUE_BY_KIND: Partial<Record<FormationKind, { value: number; cls: TargetC
  */
 const WORTH_REF_USD_M: Partial<Record<FormationKind, number>> = { surface_group: 1000, air_wing: 2000 };
 const WORTH = { min: 0.5, max: 3 };
+/**
+ * A missile brigade whose rounds reach the planner's capital is hunted ahead of the air defences: its launchers are
+ * what is falling on the planner's cities. In 1991 the Coalition flew some 1,500 sorties a month after Iraq's Scud
+ * launchers once they fell on Israel (GWAPS); in June 2025 the IAF went after Iran's launchers from the first night
+ * alongside its air defences, and the IDF claimed about half of them destroyed or disabled within twelve days, while
+ * Iran's salvos shrank from ~100 to a handful a night (IDF; CSIS Missile Defense Project). Judgment on the value.
+ */
+const TEL_HUNT = 6;
 const FRONT_FORCES = { value: 2, cls: 'armor' as TargetClass };
 const RAIL_HUB = { value: 1.5, cls: 'structure' as TargetClass, minRailKm: 50 };
 const CAPITAL = { value: 2.5, cls: 'structure' as TargetClass };
@@ -225,7 +233,7 @@ export function strikeTargets(p: Plan, battleArea: Set<number>): TargetGrid {
     for (const { f, node, confidence, contact } of sighted(p, e)) {
       const v = VALUE_BY_KIND[f.kind] ?? (isBomberForce(p, f) ? VALUE_BY_KIND.air_wing : isGround(f) && battleArea.has(node) ? FRONT_FORCES : undefined);
       if (!v) continue;
-      const value = v.value * worth(f) * confidence;
+      const value = (f.kind === 'missile' && reachesHome(p, f, node) ? TEL_HUNT : v.value) * worth(f) * confidence;
       if (f.kind !== 'surface_group') out.push({ node, cls: v.cls, value, formation: f.id, assigned: 0 });
       else {
         const fresh = confidence === 1;
@@ -263,6 +271,19 @@ export function strikeTargets(p: Plan, battleArea: Set<number>): TargetGrid {
   const kept = out.filter((t) => allowed(t) && live(t));
   for (const t of chokepointTargets(p, front)) if (live(t)) kept.push(t);
   return new TargetGrid(kept.sort((a, b) => b.value - a.value || a.node - b.node), map);
+}
+
+/** Whether a conventional strike round `f`'s launchers carry reaches the planner's capital from `node`. */
+function reachesHome(p: Plan, f: Formation, node: NodeId): boolean {
+  const km = p.ctx.map.distanceKm(node, p.world.nations[p.nation].capital);
+  for (const [id, n] of Object.entries(f.equipment)) {
+    if (n <= 0) continue;
+    for (const l of p.ctx.catalog.platform(id as PlatformId).loadout) {
+      const m = p.ctx.catalog.munition(l.munition);
+      if (!m.yieldKt && m.rangeKm >= km && STRIKE_KINDS.has(m.kind)) return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -413,6 +434,7 @@ export function strikeOptions(stock: readonly Munition[], t: StrikeTarget): Muni
 }
 
 const INTERCEPTOR_KINDS: ReadonlySet<Munition['kind']> = new Set(['sam', 'abm', 'shorad_missile']);
+const STRIKE_KINDS: ReadonlySet<Munition['kind']> = new Set(['srbm', 'mrbm', 'irbm', 'cruise', 'drone_oneway', 'loitering']);
 /**
  * How far a strike sortie will fly into a known SAM envelope before releasing.
  * Russian and Ukrainian strike aviation in 2023-25 released glide bombs and rockets
