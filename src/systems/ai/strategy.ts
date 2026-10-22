@@ -372,18 +372,25 @@ function strike(p: Plan, candidates: readonly NodeId[], size: StrikeSize, prefer
  * retaliation, or one whose homeland the attacker hit with a strategic weapon, answers at the general rung against
  * the attacker's homeland, in proportion to the detonations it suffered less what it already launched on warning.
  * Otherwise the answer is tailored: in kind, on the attacker's forces in the theatre of the attack, one weapon pair at
- * first and theatre-wide once the exchange is under way.
+ * first and theatre-wide once the exchange is under way. A leadership that holds its answer (one time in ten) weighs it
+ * again after the next attack or once its alert has mated more warheads; a single refusal does not write the attack off.
  */
 function retaliate(p: Plan, t: NuclearThreshold, ladder: NuclearLadder, rec: WarRecord, striker: NationId): void {
   const attacks = rec.nuclearHits + rec.nuclearStruckBy.length;
   if (attacks <= ladder.answered) return;
+  const nuclear = p.world.nations[p.nation].nuclear;
+  const { held } = ladder;
+  if (held && attacks <= held.attacks && nuclear.deployed <= held.deployed) return;
+  if (!p.ctx.rng.chance(0.9)) {
+    ladder.held = { attacks, deployed: nuclear.deployed };
+    return;
+  }
   const fresh = attacks - ladder.answered;
   ladder.answered = attacks;
+  ladder.held = undefined;
   const launched = ladder.launchedOnWarning ?? 0;
   ladder.launchedOnWarning = 0;
-  if (!p.ctx.rng.chance(0.9)) return;
   const answer = t.answer ?? DEFAULT_ANSWER;
-  const nuclear = p.world.nations[p.nation].nuclear;
   if (answer.scale === 'massive' || rec.strategicStruckBy?.includes(striker)) {
     const budget = generalBudget(answer, nuclear.deployed, fresh) - launched;
     if (budget > 0) strike(p, generalTargets(p.world, p.ctx, p.nation, striker, answer.targets), RUNG.general, 'largest', budget);
