@@ -8,6 +8,7 @@ import { marchBurnPerHour, marchKmPerDay } from './movement';
 import { allied, cellDepthKm, destroyFormation, hostilesAt, indexByNode, landSlice } from './state';
 import { updateEncirclement } from './encirclement';
 import { c2FireFactor } from '../c2';
+import { contactShare } from '../diplomacy/aims';
 import { groundFactorAt } from '../weather/effects';
 import {
   AIR_SUPPRESSION, AMMO_DAYS_INTENSE, ATTRITION_KM_PER_DAY, ATTRITION_MAX_KM_PER_DAY, BREAKTHROUGH_KM_PER_DAY, COVERED_KM_PER_DAY, HOSTILE_GROUND_COST,
@@ -573,6 +574,7 @@ function lineOfContact(world: World, ctx: SimContext, byNode: Map<number, Format
     for (const m of map.neighbors(node as NodeId)) {
       const foe = world.control[m];
       if (m >= map.landCount || !foe || !atWar(world, holder, foe)) continue;
+      if (contactShare(world, holder, foe) < 1 && !ctx.rng.chance(contactShare(world, holder, foe))) continue;
       const theirs = idle(m, foe);
       if (!theirs.length) continue;
       for (const f of [...mine, ...theirs]) firing.add(f.id);

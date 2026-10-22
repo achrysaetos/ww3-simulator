@@ -1,10 +1,12 @@
 import { atWar, relation, relationKey, relationMut, setAtWar, type SimContext } from '../../core/engine';
 import type { GameMap } from '../../core/map';
-import { ESCALATION, type EscalationLevel, type NationId, type NodeId, type World } from '../../core/types';
+import { ESCALATION, type DeclaredAim, type EscalationLevel, type NationId, type NodeId, type World } from '../../core/types';
 import { isOverseas } from '../../data/territories';
 import { clearTreatyAnswer, delegated, treatyAnswer } from '../orders';
+import { answeringAim, declaredAim } from './aims';
 import { neighbours } from './assess';
-import { DEFAULT_PROFILE, type AllianceTreaty, type Assessment, type DiplomacyState, type PendingJoin, type Side, type StrategicProfile, type War } from './types';
+import { settle } from './terms';
+import { DEFAULT_PROFILE, type AllianceTreaty, type Assessment, type DiplomacyState, type PendingJoin, type Settlement, type Side, type StrategicProfile, type War } from './types';
 
 export const rung = (l: EscalationLevel) => ESCALATION.indexOf(l);
 
@@ -201,7 +203,10 @@ export function adoptWars(world: World, s: DiplomacyState, enemies: Map<NationId
       if (!war) {
         s.wars.push({
           id: `w${world.tick}_${a}_${b}`, name: `${a}-${b} war`, since: world.tick, theatre: world.nations[b].capital,
-          sides: [{ leader: a, members: { [a]: { joined: world.tick, via: 'scenario' } } }, { leader: b, members: { [b]: { joined: world.tick, via: 'scenario' } } }],
+          sides: [
+            { leader: a, members: { [a]: { joined: world.tick, via: 'scenario' } }, aim: { kind: 'total' }, gained: world.tick },
+            { leader: b, members: { [b]: { joined: world.tick, via: 'scenario' } }, aim: { kind: 'total' }, gained: world.tick },
+          ],
         });
         s.rev++;
       } else if (sideOf(war, a) === -1) addMember(world, s, war, a, (1 - sideOf(war, b)) as 0 | 1, 'scenario');
@@ -220,8 +225,12 @@ function condemn(world: World, victim: NationId, aggressor: NationId, by: number
   }
 }
 
-/** `by` goes to war with `on`. Treaties are called later, by the armed attacks that follow (treatyCalls). */
-export function declareWar(world: World, ctx: SimContext, s: DiplomacyState, by: NationId, on: NationId, reason: string): void {
+/**
+ * `by` goes to war with `on`. Treaties are called later, by the armed attacks that follow (treatyCalls). A new war
+ * takes the declarer's aim (stated, or read by declaredAim) and the answering aim for its victim; a nation entering a
+ * war already under way fights for that side's aim.
+ */
+export function declareWar(world: World, ctx: SimContext, s: DiplomacyState, by: NationId, on: NationId, reason: string, aim?: DeclaredAim): void {
   if (by === on || atWar(world, by, on)) return;
   if (!world.nations[by] || !world.nations[on]) return;
   if (world.nations[by].status === 'capitulated' || world.nations[on].status === 'capitulated') return;
@@ -233,10 +242,15 @@ export function declareWar(world: World, ctx: SimContext, s: DiplomacyState, by:
     if (war) {
       joinSide(world, ctx, s, war, on, (1 - sideOf(war, by)) as 0 | 1, reason, 'attacked', 'attacked');
     } else {
+      const declared = declaredAim(world, ctx.map, by, on, aim);
       war = {
         id: `w${world.tick}_${by}_${on}`, name: `${by}-${on} war`, since: world.tick, theatre: world.nations[on].capital,
-        sides: [{ leader: by, members: { [by]: { joined: world.tick, via: 'declared' } } }, { leader: on, members: {} }],
+        sides: [
+          { leader: by, members: { [by]: { joined: world.tick, via: 'declared' } }, aim: declared, gained: world.tick },
+          { leader: on, members: {}, aim: answeringAim(declared), gained: world.tick },
+        ],
       };
+      if (declared.kind !== 'total') ctx.emit({ type: 'message', tick: world.tick, nation: by, text: `${by} declares a ${declared.kind} war on ${on}${declared.kind === 'limited' ? ` for ${declared.claim.length} cells` : ''}` });
       s.wars.push(war);
       s.rev++;
       enterWar(world, s, by, 'aggressor');
@@ -431,21 +445,29 @@ function dropWar(s: DiplomacyState, war: War): void {
   s.rev++;
 }
 
-/** Peace between the two sides: every member of each stops fighting every member of the other. */
-export function endWar(world: World, ctx: SimContext, s: DiplomacyState, war: War, terms: string): void {
+function record(world: World, ctx: SimContext, s: DiplomacyState, war: War, parties: [NationId[], NationId[]], kind: Settlement['kind'], terms: string): void {
+  const done = settle(world, ctx.map, war, parties, kind, terms);
+  (s.settlements ??= []).push(done);
+  if (done.returned.length) ctx.emit({ type: 'message', tick: world.tick, text: `${war.name}: ${done.returned.length} cells handed back under the terms` });
+}
+
+/** Peace between the two sides: every member of each stops fighting every member of the other, on the terms recorded. */
+export function endWar(world: World, ctx: SimContext, s: DiplomacyState, war: War, terms: string, kind: Settlement['kind'] = 'armistice'): void {
   const [a, b] = [members(war.sides[0]), members(war.sides[1])];
+  record(world, ctx, s, war, [a, b], kind, terms);
   dropWar(s, war);
   for (const x of a) for (const y of b) endHostilities(world, ctx, s, war, x, y, terms);
   demobilise(world, s, [...a, ...b]);
 }
 
 /** `n` leaves `war` alone, by capitulation or a separate peace; the side fights on under a new leader if `n` led it. */
-export function leaveWar(world: World, ctx: SimContext, s: DiplomacyState, war: War, n: NationId, terms: string): void {
+export function leaveWar(world: World, ctx: SimContext, s: DiplomacyState, war: War, n: NationId, terms: string, kind: Settlement['kind']): void {
   const side = sideOf(war, n);
   if (side === -1) return;
   const own = war.sides[side];
-  if (members(own).length === 1) return endWar(world, ctx, s, war, terms);
+  if (members(own).length === 1) return endWar(world, ctx, s, war, terms, kind);
   const foes = members(war.sides[1 - side]);
+  record(world, ctx, s, war, side === 0 ? [[n], foes] : [foes, [n]], kind, terms);
   delete own.members[n];
   s.rev++;
   if (own.leader === n) own.leader = strongest(world, own);

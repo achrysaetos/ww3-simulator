@@ -43,6 +43,8 @@ export interface TreatyArea {
 /** Two states at peace by treaty or normalisation: neither answers an alliance call to fight the other. */
 export interface PeaceTreaty {
   between: readonly [NationId, NationId];
+  /** ISO date it holds from (signature); absent, it predates every scenario. */
+  inForce?: string;
   source: string;
 }
 
@@ -71,6 +73,11 @@ export interface Alliance {
   area?: TreatyArea;
   /** Members the guarantee protects without being bound to defend others (TRA covers TWN; COFA covers FSM/MHL/PLW). */
   protectedOnly?: NationId[];
+  /**
+   * ISO date the commitment holds from (signature); absent, it predates every scenario. A run dated earlier, such
+   * as a historical validation case, does not have it: Turkey owed Azerbaijan nothing in 2020.
+   */
+  inForce?: string;
   source: string;
 }
 

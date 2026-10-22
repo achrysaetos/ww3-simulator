@@ -132,8 +132,8 @@ describe('dashboard detail', () => {
       wars: [{
         id: 'w1', name: 'RUS-POL war', since: 0, theatre: t.world.nations[POL].capital,
         sides: [
-          { leader: RUS, members: { [RUS]: { joined: 0, via: 'declared' } } },
-          { leader: POL, members: { [POL]: { joined: 0, via: 'attacked' }, [DEU]: { joined: 8, via: 'NATO', defends: POL } } },
+          { leader: RUS, members: { [RUS]: { joined: 0, via: 'declared' } }, aim: { kind: 'total' }, gained: 0 },
+          { leader: POL, members: { [POL]: { joined: 0, via: 'attacked' }, [DEU]: { joined: 8, via: 'NATO', defends: POL } }, aim: { kind: 'total' }, gained: 0 },
         ],
       }],
       joins: [{ nation: FRA, war: 'w1', side: 1, dueTick: 12, treaty: 'NATO', kind: 'collective_defense', victim: POL, aggressor: RUS }],

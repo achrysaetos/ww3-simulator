@@ -261,6 +261,25 @@ export interface Relation {
   warSince?: number;
 }
 
+/**
+ * What one side of a war fights for (issue #2, section 4). It bounds what the side's forces may do (diplomacy/aims.ts
+ * mayEnter and aimRefusal, the rules of engagement) and sets when its leader settles (aimStatus).
+ * - punitive: strikes only. No ground entry onto ground the foe holds beyond the side's own soil, no fleet action in
+ *   the foe's waters; it settles once it has hit back for a few days (Balakot 2019, Sindoor 2025).
+ * - limited: ground entry only onto `claim` and the side's own soil; it settles once it holds the claim, or once the
+ *   cost or a stalled offensive outruns it (Karabakh 2020: Azerbaijan fought for the districts, not Armenia).
+ * - total: no bound; it ends in exhaustion or capitulation.
+ * - regime_change: as total, and its leader takes no armistice while the foe's capital stands.
+ */
+export type WarAim =
+  | { kind: 'punitive' }
+  | { kind: 'limited'; claim: NodeId[] }
+  | { kind: 'total' }
+  | { kind: 'regime_change' };
+
+/** The aim a declaration states: a limited aim without a claim claims the declarer's own soil the target holds. */
+export type DeclaredAim = { kind: 'punitive' | 'total' | 'regime_change' } | { kind: 'limited'; claim?: NodeId[] };
+
 // ---------------------------------------------------------------- events and commands
 
 /**
@@ -318,7 +337,9 @@ export type RefusalCode =
   | 'not_in_port'
   | 'embarked'
   /** The target belongs to a nation the issuer is not at war with. */
-  | 'neutral_territory';
+  | 'neutral_territory'
+  /** The order would carry the war past what its side fights for (WarAim): ground outside a limited claim, a fleet in a punitive war's enemy waters. */
+  | 'beyond_war_aims';
 
 /**
  * The answer to one command, emitted by whichever system applied it. 'relayed' means the order is
@@ -351,7 +372,8 @@ export type Command =
    * delegate; refused, the delegate keeps it. Only the session host sets it.
    */
   | { type: 'order'; nation: NationId; formation: FormationId; order: Omit<Order, 'issuedTick'>; byPlayer?: true }
-  | { type: 'declare_war'; nation: NationId; target: NationId; reason?: string }
+  /** Absent, `aim` is read from the declarer's situation and objectives (diplomacy/aims.ts declaredAim). */
+  | { type: 'declare_war'; nation: NationId; target: NationId; reason?: string; aim?: DeclaredAim }
   | { type: 'offer_peace'; nation: NationId; target: NationId }
   | { type: 'sanction'; nation: NationId; target: NationId; on: boolean }
   | { type: 'set_mobilization'; nation: NationId; level: number }
