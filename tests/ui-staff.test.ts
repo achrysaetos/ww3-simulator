@@ -275,9 +275,12 @@ describe('display errors (BA-14)', () => {
   it('names each sector Ukraine holds after a town on its own side of the line, never a Russian city across it', () => {
     const g = start('ukraine-2026', 'UKR');
     g.step();
-    const { control } = g.state;
     const mine = map.nationIds.indexOf(N('UKR'));
     const enemyIdx = new Set(g.state.focusNation!.enemies.map((e) => map.nationIds.indexOf(e)));
+    // Kharkiv taken, so the cells around it hold the line facing a city the enemy holds.
+    const control = Uint16Array.from(g.state.control);
+    const kharkiv = map.cities.find((c) => c.name === 'Kharkiv')!;
+    control[map.nodeAt(kharkiv.lat, kharkiv.lon)] = map.nationIds.indexOf(N('RUS'));
     const cityCells = new Map<string, NodeId[]>();
     for (const c of map.cities) cityCells.set(c.name, [...(cityCells.get(c.name) ?? []), map.nodeAt(c.lat, c.lon)]);
     const enemyCity = (name: string) => (cityCells.get(name.replace(/^near /, '')) ?? []).some((n) => enemyIdx.has(control[n]));
