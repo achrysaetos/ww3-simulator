@@ -5,7 +5,7 @@ import { formationNamed, sessionOn } from './setup';
 
 const RUS = 'RUS' as NationId, UKR = 'UKR' as NationId;
 const SUDZHA = { lat: 51.19, lon: 35.27 };
-/** Russian manoeuvre units this close to Sudzha in the 2026 world arrived after August 2024 to retake Kursk. */
+/** Russian manoeuvre units this close to Sudzha in the 2026 world came in after August 2024 to retake Kursk. */
 const CLEARED_KM = 60;
 /** Ukrainian brigades of the Sumy group sent across the border; the 80th and 82nd fought in Kursk in 2024 (ISW). */
 const STRIKE_GROUP = [
@@ -27,10 +27,10 @@ export const kursk2024: ValidationCase = {
   provenance: 'partly-tuned',
   contamination: [
     'The breakthrough rate (land.BREAKTHROUGH_KM_PER_DAY, 25-30 km in the first days) and the culmination depth (ai.MAX_DRIVE_CELLS) cite Kursk, so the speed of the first days is tuned on; the ground held after three weeks is not.',
-    "Russia's nuclear threshold (src/data/nations/strategic.ts) is set below the Kursk loss, so no nuclear use is tuned on.",
+    "Russia's nuclear threshold (src/data/nations/strategic.ts) is set above the Kursk loss because Kursk did not trigger use, so no nuclear use is tuned on.",
   ].join(' '),
   representation: [
-    'ukraine-2026 moved to 6 August 2024. Russian manoeuvre units within 60 km of Sudzha go to Belgorod, the sector they were drawn from, and the Korean expeditionary force goes home: the border was held by conscripts and border guards (ISW, August 2024), which the order of battle has no formation for.',
+    'ukraine-2026 moved to 6 August 2024. Russian manoeuvre units within 60 km of Sudzha go to Belgorod, about 110 km off, and the Korean expeditionary force goes home: the border was held by conscripts and border guards (ISW, August 2024), which the order of battle has no formation for.',
     'Ukraine is player-commanded with its AI delegate on; six Sumy-group brigades are ordered across on the two historical axes and the delegate runs everything else.',
     'The front from 2025, not 2024, stands everywhere else. Each Kursk cell is half a degree (~1,900 km2), so the score reads contest progress inside cells.',
   ].join(' '),
