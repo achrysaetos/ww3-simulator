@@ -12,6 +12,7 @@ import { TopBar, type TopBarStat } from './map/TopBar';
 import { ContactPanel } from './map/ContactPanel';
 import { DOMAIN_LABEL, NationPanel } from './NationPanel';
 import { NuclearDialog } from './NuclearDialog';
+import { OutputsPanel } from './outputs/OutputsPanel';
 import { Routes } from './routes';
 import type { LoggedEvent } from './feed';
 import { StartScreen } from './StartScreen';
@@ -34,8 +35,9 @@ const DRAWERS: { id: Drawer; label: string; key: string }[] = [
   { id: 'forces', label: 'Forces', key: 'F' },
   { id: 'nation', label: 'Nation', key: 'N' },
   { id: 'log', label: 'Log', key: 'L' },
+  { id: 'cost', label: 'War cost', key: 'C' },
 ];
-const DRAWER_TITLE: Record<Drawer, string> = { forces: 'Forces', nation: 'Nation', log: 'Event log' };
+const DRAWER_TITLE: Record<Drawer, string> = { forces: 'Forces', nation: 'Nation', log: 'Event log', cost: 'War cost' };
 const FORM_CONTROLS = new Set(['INPUT', 'SELECT', 'TEXTAREA']);
 const CADENCE_KEY = 'ww3.briefCadence';
 /** Postures whose target can lie far from the unit: picking one frames the map wide (BA-13). */
@@ -383,6 +385,7 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
             {drawer === 'nation' && (
               <NationPanel client={client} palette={palette} playAs={playAs} objectives={objectives} onCommand={sendCommand} onNuclear={() => { setPending(null); setNuclearPick(true); }} />
             )}
+            {drawer === 'cost' && <OutputsPanel view={client.state.outputs} name={(id) => client.state.nations.get(id)?.name ?? client.namer.nation(id)} />}
             {drawer === 'log' && <EventLog client={client} playAs={playAs} logVersion={client.feed.version} onFocus={focusNode} />}
             {drawer === 'forces' && (selected && selectedView?.contact && client.state.focusContact?.id === selected ? (
               <ContactPanel
