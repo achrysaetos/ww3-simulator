@@ -71,6 +71,7 @@ describe('a lift group disabled with troops aboard (P1 C1)', () => {
     expect(team.status).toBe('active');
     expect(team.node).toBe(port);
     expect(team.personnel).toBe(men);
+    expect(order(s, lift, { posture: 'attack', target: s.map.nodeAt(24.15, 120.65) }).ok).toBe(false);
   }, 120_000);
 
   it('answers the player when it is disabled at sea on its way to land, carries the troops home and puts them ashore there', () => {
