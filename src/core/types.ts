@@ -318,7 +318,9 @@ export type RefusalCode =
   | 'not_in_port'
   | 'embarked'
   /** The target belongs to a nation the issuer is not at war with. */
-  | 'neutral_territory';
+  | 'neutral_territory'
+  /** A cyber payload ordered without access into the target's systems, or a cable that does not exist or is already cut. */
+  | 'no_access';
 
 /**
  * The answer to one command, emitted by whichever system applied it. 'relayed' means the order is
@@ -370,7 +372,13 @@ export type Command =
   /** The host `nation` opens its land to `target`'s troops, or closes it again. */
   | { type: 'grant_access'; nation: NationId; target: NationId; on: boolean }
   /** `nation` helps the belligerent `target` without joining its war: its air defence covers `target`. */
-  | { type: 'set_aid'; nation: NationId; target: NationId; on: boolean };
+  | { type: 'set_aid'; nation: NationId; target: NationId; on: boolean }
+  /** Build access into a sector of `target`'s networks, fire the payload that access unlocks, or stand the intrusion down (nonkinetic). */
+  | { type: 'cyber_op'; nation: NationId; target: NationId; sector: 'grid' | 'telecom' | 'satcom'; action: 'build' | 'attack' | 'stop' }
+  /** Run, or end, a covert sabotage campaign against `target`'s rail, depots and plant (nonkinetic). */
+  | { type: 'sabotage'; nation: NationId; target: NationId; on: boolean }
+  /** Cut an undersea cable or pipeline by id (src/data/geo/cables.ts) (nonkinetic). */
+  | { type: 'cut_cable'; nation: NationId; cable: string };
 
 /**
  * What a human player can delegate to the AI: the forces of each domain, the home front
