@@ -192,6 +192,7 @@ describe('the plan for Tokmak at D+10 of ukraine-2026', () => {
     expect(f.casualties.p90).toBeLessThanOrEqual(committed);
     const html = renderToStaticMarkup(createElement(ForecastView, { forecast: f, objective: 'Tokmak', dayOf: (d: number) => `D+${d}` }));
     expect(html).not.toMatch(/(\d+ h)–\1 old/);
+    expect(html.replace(/<!-- -->/g, '')).toMatch(new RegExp(`of ${legs} ${legs === 1 ? 'cell' : 'cells'} on the axis`));
   });
 
   it('names the plan from the first click, shows its force, and warns before launching a losing plan', () => {
