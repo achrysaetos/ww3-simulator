@@ -1,5 +1,6 @@
-import type { Formation, NationId, NodeId } from '../../core/types';
+import type { Formation, FormationId, NationId, NodeId, Operation } from '../../core/types';
 import { landSlice, openTo } from '../land';
+import { ACTIVE, committedFormations, routeAxis } from '../ops';
 import { aggressor, commitment, releasable } from './deploy';
 import { isGround, issue, strength } from './forces';
 import { enemyPowerAt, landMass, stagingSector } from './fronts';
@@ -19,6 +20,14 @@ export const ATTACK_RATIO = defineParam({ id: 'ai.ATTACK_RATIO', value: 3, range
 const HOLD_RATIO = 3;
 /** Fraction of power kept back as an operational reserve: 30% for a cautious command, 15% for an aggressive one. */
 const reserveShare = (aggression: number) => 0.3 - 0.15 * aggression;
+/**
+ * Share of that reserve a defender keeps out of the line even when the line is short of what the threat needs. Ukraine
+ * in 2023-25 held a few brigades back as a counterattack reserve while its line was thin (ISW, RUSI); a larger reserve
+ * thins the ukraine-2026 line past the realism bands (A2b probes: 0.33 lets Russia net 3.5 cells on seed 1).
+ */
+const SHORT_LINE_RESERVE = defineParam({ id: 'ai.SHORT_LINE_RESERVE', value: 0.25, range: [0, 0.5], tag: 'judgment',
+  source: 'Judgment, band-fitting: a defender\'s operational reserve of a few brigades (FM 3-90; Ukraine 2023-25, ISW)',
+  affects: 'how many formations a defender holds back from a short line to meet the main effort' });
 /** Farther than this, a formation is in another theatre and is not pulled into this front. */
 const MAX_COMMIT_KM = 1500;
 const RETREAT_BELOW = { strength: 0.4, supply: 0.15, morale: 0.25 };
@@ -41,7 +50,7 @@ const pressureRatio = (aggression: number, casualtyTolerance: number) => ATTACK_
  */
 const MAX_DRIVE_CELLS = defineParam({ id: 'ai.MAX_DRIVE_CELLS', value: 3, range: [2, 5], tag: 'judgment',
   source: 'Judgment, band-fitting: Russia 2022, Kharkiv 2022 and Kursk 2024 drives stalled ~300 km deep',
-  affects: 'offensive culmination depth' });
+  affects: 'offensive culmination depth, in one-degree cells' });
 /**
  * Most of an army a nation sends to partners' fronts. NATO's regional plans assign each ally a region and expect it to hold its own territory
  * first (Vilnius summit 2023), so half the army stays home (judgement call).
@@ -128,6 +137,9 @@ function rear(p: Plan, from: NodeId, front: Set<number>): NodeId {
   return queue.length > 1 && ok(queue[queue.length - 1]) ? (queue[queue.length - 1] as NodeId) : from;
 }
 
+/** Most of its out-of-contact formations a nation spends screening border build-ups; the rest stays in reserve (judgment). */
+const SCREEN_SHARE = 0.5;
+
 /** A formation fighting inside an enemy-held cell is this many km further from a home task than its distance: it must break contact first (estimate). */
 const ENGAGED_KM = 400;
 
@@ -167,14 +179,15 @@ function defendHomeland(p: Plan, fit: (f: Formation) => boolean): Set<Formation>
   // Enemy orders are not seen, only forces: troops moved out of their garrisons (home, from the open
   // order of battle) into an enemy cell with the 3:1 they need against the friendly troops around it are
   // read as an assault forming, as the 2021-22 build-up around Ukraine was read from units away from base.
+  /** Enemy power massing in `m`, or 0 when what stands there is not an assault forming. */
   const massing = (m: number) => {
     let enemy = 0;
     for (const g of p.index.groundAt.get(m) ?? []) if (p.enemies.has(g.nation) && g.node !== g.home) enemy += p.index.power(g);
-    if (enemy <= 0) return false;
+    if (enemy <= 0) return 0;
     let friendly = 0;
     for (let k = map.adjStart[m]; k < map.adjStart[m + 1]; k++)
       for (const g of p.index.groundAt.get(map.adj[k]) ?? []) if (p.friends.has(g.nation)) friendly += p.index.power(g);
-    return enemy >= ATTACK_RATIO() * friendly;
+    return enemy >= ATTACK_RATIO() * friendly ? enemy : 0;
   };
   const occupied = (n: number) => (p.index.groundAt.get(n) ?? []).some((g) => g.nation === p.nation);
   // Home cells lost across a border, not ground given up on the old front (Russian gains in Donbas are not a penetration of Ukraine's rear).
@@ -183,6 +196,7 @@ function defendHomeland(p: Plan, fit: (f: Formation) => boolean): Set<Formation>
   const lostCells = new Set<number>(lost.map((l) => l.n));
   /** Cells to hold: true next to a penetration (any formation will do), false on a border facing an assault (reserves only). */
   const screen = new Map<NodeId, boolean>();
+  const facing = new Map<NodeId, number>();
   for (const n of map.nodesOf(p.nation)) {
     if (!home(n) || world.control[n] !== p.nation) continue;
     for (let k = map.adjStart[n]; k < map.adjStart[n + 1]; k++) {
@@ -190,20 +204,35 @@ function defendHomeland(p: Plan, fit: (f: Formation) => boolean): Set<Formation>
       if (m >= map.landCount || !p.enemies.has(world.control[m])) continue;
       if (lostCells.has(m)) {
         screen.set(n, true);
+        facing.delete(n);
         break;
       }
-      if (massing(m) && !oldFront(m) && !occupied(n)) screen.set(n, false);
+      const e = !oldFront(m) && !occupied(n) ? massing(m) : 0;
+      if (e > 0) {
+        screen.set(n, false);
+        facing.set(n, Math.max(facing.get(n) ?? 0, e));
+      }
     }
   }
   if (!lost.length && !screen.size) return committed;
   const power = p.index.power;
-  const own = (p.index.byNation.get(p.nation) ?? []).filter((f) => isGround(f) && f.kind === 'maneuver' && !map.isSea(f.node) && !needsRetreat(p, f));
+  const inOperation = committedFormations(world);
+  const own = (p.index.byNation.get(p.nation) ?? []).filter((f) => isGround(f) && f.kind === 'maneuver' && !map.isSea(f.node) && !needsRetreat(p, f) && !inOperation.has(f.id));
   const cost = (f: Formation, n: number) => map.distanceKm(f.node, n as NodeId) + (p.enemies.has(world.control[f.node]) ? ENGAGED_KM : 0);
   const nearest = (n: number, ok: (f: Formation) => boolean) =>
     own
       .filter((f) => !committed.has(f) && ok(f) && mass[f.node] === mass[n] && map.distanceKm(f.node, n as NodeId) <= MAX_COMMIT_KM)
       .sort((a, b) => cost(a, n) - cost(b, n) || (a.id < b.id ? -1 : 1));
 
+  // A border screen takes formations out of contact, so it never strips the line or the nation's own assault groups.
+  const inContact = (f: Formation) => {
+    for (let k = map.adjStart[f.node]; k < map.adjStart[f.node + 1]; k++) if (map.adj[k] < map.landCount && p.enemies.has(world.control[map.adj[k]])) return true;
+    return p.enemies.has(world.control[f.node]);
+  };
+  // The reserve screens only the heaviest build-ups and keeps the rest back to meet the enemy's main effort when it shows,
+  // not one brigade per border cell: FM 3-90 keeps a reserve uncommitted until the decisive point is known.
+  const screens = Math.floor(SCREEN_SHARE * own.filter((g) => !inContact(g)).length);
+  [...facing].sort((x, y) => y[1] - x[1] || x[0] - y[0]).slice(screens).forEach(([n]) => screen.delete(n));
   // Formations already on a homeland task keep it.
   const sent = new Map<number, number>();
   for (const f of own) {
@@ -233,11 +262,6 @@ function defendHomeland(p: Plan, fit: (f: Formation) => boolean): Set<Formation>
       if (got >= need) break;
     }
   }
-  // A border screen takes formations out of contact, so it never strips the line or the nation's own assault groups.
-  const inContact = (f: Formation) => {
-    for (let k = map.adjStart[f.node]; k < map.adjStart[f.node + 1]; k++) if (map.adj[k] < map.landCount && p.enemies.has(world.control[map.adj[k]])) return true;
-    return p.enemies.has(world.control[f.node]);
-  };
   for (const [n, block] of [...screen].sort((a, b) => a[0] - b[0])) {
     const f = own.find((g) => g.node === n && !committed.has(g)) ?? nearest(n, block ? () => true : (g) => !inContact(g))[0];
     if (!f) continue;
@@ -332,20 +356,20 @@ function landPicture(p: Plan): LandPicture | undefined {
   const attritional = p.profile.aggression >= AGGRESSOR;
   const pressAt = pressureRatio(p.profile.aggression, p.profile.casualtyTolerance);
   const origin = landSlice(p.world).origin;
+  // Counted in one-degree cells: a finer Baltic, Korean or Israeli cell is a fraction of a step, so it does not shorten the reach.
   const inReach = (t: number) => {
     if (!origin.length) return true;
-    const seen = new Set<number>([t]);
-    let ring = [t];
-    for (let hop = 0; hop <= MAX_DRIVE_CELLS(); hop++) {
-      const next: number[] = [];
-      for (const n of ring) {
-        if (p.friends.has(origin[n])) return true;
-        for (let k = map.adjStart[n]; k < map.adjStart[n + 1]; k++) {
-          const m = map.adj[k];
-          if (m < map.landCount && !seen.has(m)) { seen.add(m); next.push(m); }
-        }
+    const steps = new Map<number, number>([[t, 0]]);
+    const queue = [t];
+    for (let i = 0; i < queue.length; i++) {
+      const n = queue[i];
+      if (p.friends.has(origin[n])) return true;
+      for (let k = map.adjStart[n]; k < map.adjStart[n + 1]; k++) {
+        const m = map.adj[k];
+        if (m >= map.landCount) continue;
+        const d = steps.get(n)! + 2 * map.halfDeg[m];
+        if (d <= MAX_DRIVE_CELLS() + 1e-9 && d < (steps.get(m) ?? Infinity)) { steps.set(m, d); queue.push(m); }
       }
-      ring = next;
     }
     return false;
   };
@@ -381,8 +405,9 @@ function triage(lp: LandPicture, countering: Set<Formation>): Formation[] {
   const { p, mass, theatres, front, fit, canPress, inReach, weakestNeighbour, friendlyPowerAt, attritional, pressAt } = lp;
   const { map } = p.ctx;
   const pool: Formation[] = [];
+  const committed = committedFormations(p.world);
   for (const f of p.index.byNation.get(p.nation) ?? []) {
-    if (!isGround(f) || map.isSea(f.node) || !theatres.has(mass[f.node]) || countering.has(f)) continue;
+    if (!isGround(f) || map.isSea(f.node) || !theatres.has(mass[f.node]) || countering.has(f) || committed.has(f.id)) continue;
     if (needsRetreat(p, f)) {
       const to = rear(p, f.node, front);
       issue(p, f, to === f.node ? { posture: 'reserve' } : { posture: 'move', target: to });
@@ -506,8 +531,8 @@ function pressureOn(p: Plan, n: number): number {
   return e;
 }
 
-/** Mans every sector in proportion to the threat against it, own fronts first, partners' as committed. */
-function holdTheLine(a: Allocation): void {
+/** Mans every sector in proportion to the threat against it, own fronts first, partners' as committed. Returns the power now holding each line cell. */
+function holdTheLine(a: Allocation, reserved: number): Map<number, number> {
   const { lp, pool, free } = a;
   const { p, sectors, sectorOf, fit, canPress, weakestNeighbour, attritional } = lp;
   const power = p.index.power;
@@ -524,7 +549,10 @@ function holdTheLine(a: Allocation): void {
     return Math.max(0, s.threat / HOLD_RATIO - covered) * commitment(p.nation, p.world.control[s.key]);
   });
   const needTotal = need.reduce((x, y) => x + y, 0);
-  const scale = needTotal > a.total ? a.total / needTotal : 1;
+  // However short the line, the reserve is not fed into it: it is kept back to meet the enemy's main effort (FM 3-90).
+  const lineBudget = a.total - reserved;
+  const scale = needTotal > lineBudget ? lineBudget / needTotal : 1;
+  const manned = new Map<number, number>();
   const byDuty = sectors.map((_, i) => i).sort((x, y) => Number(a.own(sectors[y])) - Number(a.own(sectors[x])) || need[y] - need[x] || x - y);
   for (const i of byDuty) {
     const s = sectors[i];
@@ -539,7 +567,6 @@ function holdTheLine(a: Allocation): void {
       .filter((f) => a.mayServe(f, s) && (post(f) !== undefined || a.inRange(f, s.key)))
       .sort((x, y) => a.km(x.node, s.key) - a.km(y.node, s.key) || (x.id < y.id ? -1 : 1));
     const pressure = new Map<number, number>();
-    const manned = new Map<number, number>();
     for (const n of s.nodes) {
       pressure.set(n, pressureOn(p, n));
       manned.set(n, others.get(n) ?? 0);
@@ -584,6 +611,172 @@ function holdTheLine(a: Allocation): void {
       assign(f, target!);
     }
   }
+  return manned;
+}
+
+/** A cell pressed this much harder than the line's average is where the enemy's main effort is falling (judgment). */
+const MAIN_EFFORT_PRESSURE = 2;
+
+/**
+ * Commits the reserve against the enemy's main effort: line cells pressed far harder than the rest of the line, where
+ * the enemy has the 3:1 it needs, get the nearest reserve formations until it no longer does, worst first, up to half
+ * the reserve.
+ */
+function meetMainEffort(a: Allocation, reserve: Set<Formation>, manned: Map<number, number>): void {
+  const { lp } = a;
+  const { p, front } = lp;
+  if (!reserve.size || !front.size) return;
+  const power = p.index.power;
+  const pressure = new Map<number, number>();
+  let total = 0;
+  for (const n of front) {
+    const e = pressureOn(p, n);
+    pressure.set(n, e);
+    total += e;
+  }
+  const mean = total / front.size;
+  const held = (n: number) => manned.get(n) ?? lp.friendlyPowerAt(n);
+  const threatened = [...front]
+    .filter((n) => pressure.get(n)! >= MAIN_EFFORT_PRESSURE * mean && pressure.get(n)! > ATTACK_RATIO() * held(n))
+    .sort((x, y) => pressure.get(y)! / Math.max(1e-9, held(y)) - pressure.get(x)! / Math.max(1e-9, held(x)) || x - y);
+  // Half the reserve at most, so a second thrust still meets one.
+  let budget = Math.floor(reserve.size / 2);
+  for (const n of threatened) {
+    if (budget <= 0) break;
+    const s = lp.sectorOf.get(n)!;
+    const near = [...reserve].filter((f) => a.inRange(f, n) && a.mayServe(f, s) && !a.overBudget(f, s)).sort((x, y) => a.km(x.node, n) - a.km(y.node, n) || (x.id < y.id ? -1 : 1));
+    for (const f of near) {
+      if (pressure.get(n)! <= ATTACK_RATIO() * held(n) || budget <= 0) break;
+      budget--;
+      reserve.delete(f);
+      a.spend(f, s);
+      manned.set(n, held(n) + power(f));
+      issue(p, f, { posture: 'defend', target: n as NodeId });
+    }
+  }
+}
+
+/** What an assault on enemy cell `t` meets: the troops in it, and half of those in the enemy cells next to it, whose fire covers it. */
+function defenceOf(p: Plan, t: number): number {
+  const { map } = p.ctx;
+  let d = enemyPowerAt(t, p.index, p.enemies);
+  for (let k = map.adjStart[t]; k < map.adjStart[t + 1]; k++) {
+    const m = map.adj[k];
+    if (m < map.landCount && p.enemies.has(p.world.control[m])) d += 0.5 * enemyPowerAt(m, p.index, p.enemies);
+  }
+  return d;
+}
+
+/** A failed or cancelled main effort is not tried again on the same objective for this long (judgment: a staff re-plans rather than repeats). */
+const RETRY_OBJECTIVE_DAYS = 5;
+/** Smallest main effort, in the nation's average formations: a division's worth of brigades (judgment). */
+const MIN_EFFORT_UNITS = 3;
+/** Share of the spare force the main effort takes; supporting directions get only what their axis needs (judgment). */
+const MAIN_EFFORT_SHARE = 0.3;
+/** Weight of an axis mounted from a host's ground rather than the nation's own (judgment: its railheads and depots are its own). */
+const HOSTED_AXIS = 0.8;
+/** Artillery this close to the line of departure goes with an operation. */
+const GUNS_KM = 400;
+
+/**
+ * Main efforts. A general staff does not attack everywhere at once: on each strategic direction (each enemy state it
+ * invades) it picks the axis toward the war aim worth most for what defends it, masses a force on it as an operation,
+ * and leaves supporting attacks and the reserve to what is left (FM 3-0 "main effort"; Soviet operational art's axis
+ * of main attack, Glantz 1991). RAND's Baltic games (Shlapak and Johnson 2016) reach Tallinn or Riga in 36-60 hours on
+ * such thrusts. Only a nation that started the war runs them, one per direction, no deeper than its culmination point,
+ * and it feeds one whose force has worn below what the rest of its axis needs. On a fortified, drone-watched front it keeps up attritional pressure
+ * instead, as Russia did in 2023-25 (ISW): no deep operation is aimed into the belts.
+ */
+function mainEffort(a: Allocation): void {
+  const { lp, free, pool } = a;
+  const { p, front, fit, inReach, mass, sectorOf } = lp;
+  const { map } = p.ctx;
+  if (!aggressor(p)) return;
+  const power = p.index.power;
+  const unit = a.total / pool.length;
+  const take = (near: NodeId, need: number, s: Sector | undefined): Formation[] => {
+    const group: Formation[] = [];
+    let got = 0;
+    const candidates = [...free]
+      .filter((f) => f.kind === 'maneuver' && fit(f) && a.inRange(f, near) && (!s || (a.mayServe(f, s) && !a.overBudget(f, s))))
+      .sort((x, y) => a.km(x.node, near) - a.km(y.node, near) || (x.id < y.id ? -1 : 1));
+    for (const f of candidates) {
+      if (got >= need) break;
+      group.push(f);
+      got += power(f);
+      free.delete(f);
+      if (s) a.spend(f, s);
+    }
+    return group;
+  };
+  let spare = [...free].reduce((t, f) => t + power(f), 0) - reserveShare(p.profile.aggression) * a.total;
+  /** The force an axis needs: the attacker's ratio against every defended bound on it, and never less than a division's worth. */
+  const needFor = (axis: readonly NodeId[], from: number) => {
+    let d = 0;
+    for (let i = Math.max(1, from); i < axis.length; i++) if (p.enemies.has(p.world.control[axis[i]])) d += defenceOf(p, axis[i]);
+    return Math.max(ATTACK_RATIO() * d, MIN_EFFORT_UNITS * unit);
+  };
+
+  const ops = Object.values(p.world.slices.ops?.byId ?? {}).filter((o) => o.nation === p.nation && o.planner === 'ai');
+  const directions = new Set<NationId>();
+  for (const o of ops) {
+    if (!ACTIVE.has(o.phase)) continue;
+    directions.add(map.owner[o.objectives[0]]);
+    if (spare <= 0) continue;
+    const have = o.formations.reduce((t, id) => t + (p.world.formations[id] ? power(p.world.formations[id]) : 0), 0);
+    const need = Math.min(needFor(o.axis, o.progress.bound) - have, spare);
+    if (need <= 0) continue;
+    const more = take(o.axis[Math.max(0, o.progress.bound - 1)], need, sectorOf.get(o.axis[0]));
+    spare -= more.reduce((t, f) => t + power(f), 0);
+    if (more.length) p.out.push({ type: 'adjust_operation', nation: p.nation, operation: o.id, formations: [...o.formations, ...more.map((f) => f.id)] });
+  }
+
+  const recent = (o: Operation) => o.endedTick !== undefined && o.phase !== 'succeeded' && (p.world.tick - o.endedTick) * p.world.dtHours < RETRY_OBJECTIVE_DAYS * 24;
+  const tried = new Set<number>(ops.filter(recent).flatMap((o) => o.objectives));
+  const { fortified } = landSlice(p.world);
+  const best = new Map<NationId, { axis: NodeId[]; score: number }>();
+  for (const aim of p.ai.aims[p.nation] ?? []) {
+    const direction = map.owner[aim.node];
+    if (directions.has(direction) || !p.enemies.has(p.world.control[aim.node]) || !lp.theatres.has(mass[aim.node])) continue;
+    let from = -1, fromKm = Infinity;
+    for (const n of front) {
+      const km = mass[n] === mass[aim.node] ? map.distanceKm(n as NodeId, aim.node) : Infinity;
+      if (km < fromKm) { fromKm = km; from = n; }
+    }
+    if (from < 0) continue;
+    // Through the gaps, not the strongpoints: the route avoids believed defenders the way it avoids bad going.
+    const route = routeAxis(p.world, map, p.nation, [from as NodeId, aim.node], (n) => (p.enemies.has(p.world.control[n]) ? defenceOf(p, n) / unit : 0));
+    if (!route) continue;
+    let end = 1;
+    while (end < route.length && inReach(route[end]) && p.enemies.has(p.world.control[route[end]])) end++;
+    const axis = route.slice(0, end);
+    if (axis.length < 2 || tried.has(axis[axis.length - 1]) || axis.slice(1, 3).some((n) => fortified[n])) continue;
+    // An axis mounted from the nation's own soil runs on its own railheads; one from a host's ground is second choice.
+    const base = p.world.control[axis[0]] === p.nation ? 1 : HOSTED_AXIS;
+    const score = (base * aim.value * axis.length) / route.length / (1 + defenceOf(p, axis[1]) / unit);
+    if (score > (best.get(direction)?.score ?? -Infinity)) best.set(direction, { axis, score });
+  }
+  let first = true;
+  for (const { axis } of [...best.values()].sort((x, y) => y.score - x.score || x.axis[0] - y.axis[0])) {
+    const need = needFor(axis, 1);
+    if (spare < need) continue;
+    // The main effort gets the mass; the other directions get what their axis needs.
+    const group = take(axis[0], first ? Math.max(need, MAIN_EFFORT_SHARE * spare) : need, sectorOf.get(axis[0]));
+    const got = group.reduce((t, f) => t + power(f), 0);
+    if (got < need) {
+      for (const f of group) free.add(f);
+      continue;
+    }
+    spare -= got;
+    first = false;
+    // Guns go with it: half a battalion group of artillery per manoeuvre formation, nearest first.
+    const guns = [...free]
+      .filter((f) => f.kind === 'artillery' && a.inRange(f, axis[0]) && a.km(f.node, axis[0]) <= GUNS_KM)
+      .sort((x, y) => a.km(x.node, axis[0]) - a.km(y.node, axis[0]) || (x.id < y.id ? -1 : 1))
+      .slice(0, Math.ceil(group.length / 2));
+    for (const g of guns) free.delete(g);
+    p.out.push({ type: 'plan_operation', nation: p.nation, kind: 'offensive', objectives: [axis[axis.length - 1]], axis, formations: [...group, ...guns].map((f) => f.id), launch: true });
+  }
 }
 
 /** Sends spare power beyond the reserve to sectors where a local 3:1 can be assembled, weighted toward the war aims. */
@@ -599,14 +792,7 @@ function launchAttacks(a: Allocation): void {
     for (const o of aims) best = Math.max(best, o.value / (1 + a.km(t, o.node) / 300));
     return best;
   };
-  const defence = (t: number) => {
-    let d = enemyPowerAt(t, p.index, p.enemies);
-    for (let k = map.adjStart[t]; k < map.adjStart[t + 1]; k++) {
-      const m = map.adj[k];
-      if (m < map.landCount && p.enemies.has(p.world.control[m])) d += 0.5 * enemyPowerAt(m, p.index, p.enemies);
-    }
-    return d;
-  };
+  const defence = (t: number) => defenceOf(p, t);
   const unit = a.total / pool.length;
   for (const s of sectors) {
     if (spare <= 0 || !free.size) break;
@@ -642,6 +828,39 @@ function launchAttacks(a: Allocation): void {
   }
 }
 
+/**
+ * Sets the operational reserve aside before the line is manned: formations out of contact, those already in reserve
+ * first, then the nearest to the front, up to SHORT_LINE_RESERVE of the command's reserve share. A short line does not swallow it; it is
+ * kept for the enemy's main effort or one's own (FM 3-90: the reserve is committed at the decisive point, not spread).
+ */
+function keepReserve(a: Allocation): Set<Formation> {
+  const { lp, free } = a;
+  const { p, sectors, sectorOf } = lp;
+  const { map } = p.ctx;
+  const power = p.index.power;
+  const want = SHORT_LINE_RESERVE() * reserveShare(p.profile.aggression) * a.total;
+  const touching = (f: Formation) => {
+    if (sectorOf.has(f.node) || p.enemies.has(p.world.control[f.node])) return true;
+    for (let k = map.adjStart[f.node]; k < map.adjStart[f.node + 1]; k++) if (map.adj[k] < map.landCount && p.enemies.has(p.world.control[map.adj[k]])) return true;
+    return false;
+  };
+  const toFront = (f: Formation) => Math.min(...sectors.map((s) => (a.inRange(f, s.key) ? a.km(f.node, s.key) : Infinity)));
+  const kept = new Set<Formation>();
+  let got = 0;
+  const candidates = [...free]
+    .filter((f) => f.kind === 'maneuver' && !touching(f))
+    .map((f) => ({ f, d: toFront(f), r: f.order.posture === 'reserve' ? 0 : 1 }))
+    .filter((c) => c.d <= MAX_COMMIT_KM)
+    .sort((x, y) => x.r - y.r || x.d - y.d || (x.f.id < y.f.id ? -1 : 1));
+  for (const { f } of candidates) {
+    if (got >= want) break;
+    kept.add(f);
+    free.delete(f);
+    got += power(f);
+  }
+  return kept;
+}
+
 /** Puts everything left in reserve behind the nearest sector it may serve on without leaving the country beyond its share. */
 function holdReserve(a: Allocation): void {
   const { lp, free } = a;
@@ -662,8 +881,8 @@ function holdReserve(a: Allocation): void {
 
 /**
  * Operational plan for one nation's ground forces: defend the homeland, pull back spent units,
- * man every sector in proportion to the threat against it, launch attacks only where a local
- * 3:1 can be assembled, and keep the rest in reserve.
+ * man every sector in proportion to the threat against it, mass a main effort on one axis,
+ * launch other attacks only where a local 3:1 can be assembled, and keep the rest in reserve.
  */
 export function planLand(p: Plan): void {
   const lp = landPicture(p);
@@ -671,7 +890,13 @@ export function planLand(p: Plan): void {
   const pool = triage(lp, defendHomeland(p, lp.fit));
   if (!pool.length) return;
   const a = new Allocation(lp, pool);
-  holdTheLine(a);
+  // A defender keeps its reserve out of the line to meet the enemy's main effort; an attacker's reserve is what its own
+  // main effort and attacks are mounted from, below.
+  const reserve = aggressor(p) ? new Set<Formation>() : keepReserve(a);
+  const manned = holdTheLine(a, [...reserve].reduce((t, f) => t + p.index.power(f), 0));
+  meetMainEffort(a, reserve, manned);
+  for (const f of reserve) a.free.add(f);
+  mainEffort(a);
   launchAttacks(a);
   holdReserve(a);
 }
