@@ -136,16 +136,22 @@ export function defendRaid(world: World, ctx: SimContext, pic: AirPicture, node:
     const threat = { speedMach: m.speedMach, interceptDifficulty: m.interceptDifficulty };
     if (streams[i].overflightKm > 0)
       leaked[i] -= ctx.rng.binomial(leaked[i], beltKillProbability(m.kind, streams[i].overflightKm, m.interceptDifficulty));
-    if (cat === 'air_breathing')
-      for (const g of fighters) {
-        if (!leaked[i]) break;
+    if (cat === 'air_breathing' && leaked[i]) {
+      // Each air force flies its own sector, so the stream splits across the groups by intercept sorties up
+      // (13-14 Apr 2024: US, UK, French and Jordanian jets each downed drones over their own areas).
+      const armed = fighters.flatMap((g) => {
         const aam = pic.aamOf(g.f);
-        if (!aam || g.interceptLeft <= 0) continue;
-        const r = interceptSalvo({ ...threat, count: leaked[i] }, { channels: g.interceptLeft, interceptors: g.f.magazine[aam.id] ?? 0, pk: pkAgainst(aam, cat), rangeKm: aam.rangeKm }, ctx.rng);
+        return aam && g.interceptLeft > 0 && (g.f.magazine[aam.id] ?? 0) >= 1 ? [{ g, aam }] : [];
+      });
+      const shares = splitBySorties(ctx.rng, leaked[i], armed.map(({ g }) => g.interceptLeft));
+      armed.forEach(({ g, aam }, k) => {
+        if (!shares[k]) return;
+        const r = interceptSalvo({ ...threat, count: shares[k] }, { channels: g.interceptLeft, interceptors: g.f.magazine[aam.id] ?? 0, pk: pkAgainst(aam, cat), rangeKm: aam.rangeKm }, ctx.rng);
         g.interceptLeft -= r.channelsUsed;
         g.f.magazine[aam.id] -= r.interceptorsUsed;
-        leaked[i] = r.leaked;
-      }
+        leaked[i] -= r.intercepted;
+      });
+    }
     const maxCost = Math.max(TUNING.interceptorCostFloorUsdM, TUNING.interceptorCostRatio * m.unitCostUsdM);
     for (const { d, shot } of layers(ctx, sams, node, cat, m.interceptDifficulty, maxCost)) {
       if (!leaked[i]) break;
@@ -153,6 +159,20 @@ export function defendRaid(world: World, ctx: SimContext, pic: AirPicture, node:
     }
   }
   return leaked;
+}
+
+/**
+ * Which group meets each of `n` threats: a weighted draw per threat (sequential binomials), so even a lone
+ * drone can fall in a small contingent's sector, as often as its share of the sorties up says.
+ */
+function splitBySorties(rng: SimContext['rng'], n: number, weights: number[]): number[] {
+  let left = n, rest = weights.reduce((a, w) => a + w, 0);
+  return weights.map((w) => {
+    const k = rest > 0 && left > 0 ? rng.binomial(left, Math.min(1, w / rest)) : 0;
+    left -= k;
+    rest -= w;
+    return k;
+  });
 }
 
 export function threatCategory(m: Munition): ThreatCategory | null {
