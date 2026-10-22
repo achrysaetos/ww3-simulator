@@ -119,7 +119,7 @@ const pct = (x: number) => `${Math.round(x * 100)}%`;
 const SANCTIONED_SHARE = 0.1;
 
 /**
- * The workarounds a cut-off war economy leans on, each read from the economy model (B4):
+ * The workarounds a cut-off war economy leans on, each read from the economy model:
  * - trade_rerouting: goods from sanctioning states arriving through third countries. Russia's
  *   goods imports fell ~15% in 2022 and were near 2021 levels by 2023 (Bank of Russia balance of payments).
  * - dual_use_imports: export-controlled chips through China, Turkey and Central Asia, and stocks.
