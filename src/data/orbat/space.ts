@@ -43,6 +43,11 @@ export const constellations: OrbatEntry[] = [
   // European and Israeli military satellites.
   space('GBR', 'Skynet 5 (GEO)', { name: 'RAF Oakhanger', lat: 51.11, lon: -0.9 }, { skynet5: 4 }, 'UK MoD'),
   space('FRA', 'Syracuse IV (GEO)', { name: 'Toulouse (CMOS)', lat: 43.6, lon: 1.44 }, { syracuse4: 2 }, 'DGA 2024'),
+  space('FRA', 'CSO reconnaissance (LEO)', { name: 'Creil (CMOS)', lat: 49.25, lon: 2.48 }, { cso: 3 }, 'DGA; CNES 2024'),
+  space('JPN', 'Information Gathering Satellites (LEO)', { name: 'Cabinet Satellite Intelligence Center, Tokyo', lat: 35.68, lon: 139.75 }, { igs: 8 }, 'CSICE; UCS Satellite Database'),
+  space('KOR', '425 Project reconnaissance (LEO)', { name: 'Gyeryongdae', lat: 36.29, lon: 127.24 }, { k425: 5 }, 'ADD; Yonhap 2025'),
+  space('DEU', 'SARah reconnaissance (LEO)', { name: 'Gelsdorf', lat: 50.58, lon: 7.07 }, { sarah: 3 }, 'Bundeswehr 2023'),
+  space('ITA', 'COSMO-SkyMed (LEO)', { name: 'Fucino', lat: 41.98, lon: 13.6 }, { cosmo_skymed: 4 }, 'ASI'),
   space('ISR', 'Ofek reconnaissance (LEO)', { name: 'Palmachim', lat: 31.88, lon: 34.69 }, { ofek16: 6 }, 'UCS Satellite Database (Ofek 5, 10, 11, 13, 16, 19)'),
 ];
 
