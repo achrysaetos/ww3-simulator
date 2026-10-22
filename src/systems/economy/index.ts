@@ -8,12 +8,15 @@ import {
 } from '../../data/industry';
 import { defenseObligations } from '../../data/nations';
 import { recallReservists } from '../../data/nations/reserves';
+import { advanceCuts, coverage, hasLandBorder, neutralAsk, neutralSpare, rungShares, SEA, type CutKind, type FlowKind, type RungId } from './ladder';
+import type { EconomyState } from './state';
 import { newLine, newNationEconomy, oilStockMonths, stocksOf, type LineState, type NationEconomy } from './state';
 import { defineParam } from '../../core/params';
 import { digitalLost } from '../nonkinetic/reads';
 import { DIGITAL_GDP_ELASTICITY } from '../nonkinetic/tables';
 
 export type { EconomyState, LineState, NationEconomy } from './state';
+export { RUNGS, SEA, type Cut, type CutKind, type RungId } from './ladder';
 
 const HOURS_PER_MONTH = 730;
 const REPORT_HOURS = 720;
@@ -34,20 +37,7 @@ const WAR_TAX_FINANCED = 0.45;
 /** Months for the economy to convert toward a new mobilization level (contracts, laws, labour). Demobilization is faster. */
 const MOBILIZE_MONTHS = 3;
 const DEMOBILIZE_MONTHS = 1;
-/**
- * Share of a partner's trade that still arrives, by why it stopped. Under sanctions, export-
- * controlled inputs (`ResourceSpec.exportControlled`) leak through third countries: Russia's
- * imports of Western dual-use chips recovered largely via China, Turkey and Central Asia (KSE
- * 2023-24). Ordinary goods mostly reroute: Russia's goods imports fell ~15% in 2022 and were back
- * near 2021 levels by 2023 (Bank of Russia balance of payments) though most of the world's GDP
- * sanctioned it, as Chinese, Turkish and Central Asian suppliers replaced Western ones; traded
- * commodities such as oil and grain find other buyers and sellers the same way.
- */
-const STILL_ARRIVES: Record<Breach, { goods: number; controlled: number }> = {
-  war: { goods: 0, controlled: 0 },
-  sanctions: { goods: 0.8, controlled: 0.3 },
-};
-type Breach = 'war' | 'sanctions';
+type Breach = Exclude<CutKind, 'blockade'>;
 /** Months of normal flow needed to rebuild one month of drawn-down stocks. */
 const BUFFER_REFILL_PER_MONTH = 0.25;
 /** Fraction of imports that GDP cannot replace at home in the short run (est.). */
@@ -344,6 +334,9 @@ interface Scan {
   worldGdp: number;
   /** Each resource's import flow for a buyer that trades with every supplier and is not one itself, which most nations are. */
   openMarket: Map<Resource, ImportFlow>;
+  map: GameMap;
+  /** Share of what cut-off nations ask of the neutral pool that it can give this tick, 0..1. */
+  pool: number;
 }
 
 /** Share-weighted flow arriving from a resource's suppliers, and the shares counted. */
@@ -362,7 +355,7 @@ function scan(world: World, ctx: SimContext): Scan {
   for (const f of Object.values(world.formations)) if (f.status !== 'destroyed') personnel.set(f.nation, (personnel.get(f.nation) ?? 0) + f.personnel);
   let worldGdp = 0;
   for (const n of Object.values(world.nations)) worldGdp += n.stats.gdp ?? 0;
-  const s: Scan = { integrity, exports: exportCapacity(world, ctx.map), grid: gridIntact(world, ctx.map), cut: tradePartners(world), personnel, worldGdp, openMarket: new Map() };
+  const s: Scan = { integrity, exports: exportCapacity(world, ctx.map), grid: gridIntact(world, ctx.map), cut: tradePartners(world), personnel, worldGdp, openMarket: new Map(), map: ctx.map, pool: 1 };
   for (const r of RESOURCES) s.openMarket.set(r, importFlow(world, s, undefined, r));
   return s;
 }
@@ -387,11 +380,22 @@ function energyExportsLost(world: World, s: Scan): number {
 /** World energy price relative to normal: lost export capacity through a short-run elasticity. */
 const energyPrice = (lost: number) => Math.min(MAX_ENERGY_PRICE, Math.pow(Math.max(1e-3, 1 - lost), -1 / ENERGY_PRICE_ELASTICITY()));
 
+const flowOf = (r: Resource): FlowKind => (RESOURCE_SPECS[r].exportControlled ? 'controlled' : 'commodity');
+
+/** Share of the flow `buyer` lost to its cut-off `key` (a partner, or SEA) that its workaround ladder has won back, 0..1. */
+function ladderCover(world: World, s: Scan, buyer: NationId, key: string, flow: FlowKind): number {
+  const cut = world.slices.economy.nations[buyer]?.cuts?.[key];
+  return cut ? coverage(cut, flow, hasLandBorder(s.map, buyer), s.pool) : 0;
+}
+
+/** Share of `buyer`'s seaborne trade a blockade of its own ports stops, net of the trade its ladder has won back. */
+const seaCutNet = (world: World, s: Scan, buyer: NationId, flow: FlowKind) => seaCut(world, buyer) * (1 - ladderCover(world, s, buyer, SEA, flow));
+
 /** How much of a supplier's exports reach `buyer`, 0..1. */
 function supplierFlow(world: World, s: Scan, buyer: NationId | undefined, supplier: string, r: Resource): number {
   if (supplier === 'other' || !world.nations[supplier as NationId]) return 1;
   const breach = buyer && s.cut.get(buyer)?.get(supplier as NationId);
-  const politics = breach ? STILL_ARRIVES[breach][RESOURCE_SPECS[r].exportControlled ? 'controlled' : 'goods'] : 1;
+  const politics = buyer && breach ? ladderCover(world, s, buyer, supplier, flowOf(r)) : 1;
   const sites = r === 'energy' ? s.exports.get(supplier as NationId) ?? 1 : 1;
   return politics * (1 - seaCut(world, supplier as NationId)) * (s.integrity.get(supplier as NationId) ?? 1) * sites;
 }
@@ -403,7 +407,7 @@ function rawAccess(world: World, s: Scan, n: Nation, r: Resource): number {
   if (self >= 1) return 1;
   const open = !s.cut.has(n.id) && !Object.hasOwn(RESOURCE_SPECS[r].market, n.id);
   const { num, den } = open ? s.openMarket.get(r)! : importFlow(world, s, n.id, r);
-  const imported = (den > 0 ? num / den : 1) * (1 - seaCut(world, n.id));
+  const imported = (den > 0 ? num / den : 1) * (1 - seaCutNet(world, s, n.id, flowOf(r)));
   return self + (1 - self) * imported;
 }
 
@@ -450,7 +454,7 @@ function drawOil(world: World, s: Scan, n: Nation, e: NationEconomy, need: numbe
   const imported = clamp01(OIL_IMPORT_SHARE[n.id] ?? 1 - selfShare(n, 'energy'));
   const open = !s.cut.has(n.id) && !Object.hasOwn(RESOURCE_SPECS.energy.market, n.id);
   const { num, den } = open ? s.openMarket.get('energy')! : importFlow(world, s, n.id, 'energy');
-  const blocked = (world.theater.tradeBlocked[n.id] ?? 0) * (OIL_SEABORNE_SHARE[n.id] ?? DEFAULT_OIL_SEABORNE_SHARE);
+  const blocked = (world.theater.tradeBlocked[n.id] ?? 0) * (OIL_SEABORNE_SHARE[n.id] ?? DEFAULT_OIL_SEABORNE_SHARE) * (1 - ladderCover(world, s, n.id, SEA, 'commodity'));
   const raw = 1 - imported + imported * (den > 0 ? num / den : 1) * (1 - blocked);
   const oil = (e.oil ??= { months: oilStockMonths(n.id), supply: 1 });
   const shortfall = need - raw;
@@ -474,10 +478,39 @@ function tradeLossOf(world: World, s: Scan, n: Nation, beyondBaseline: boolean):
   const baseline = beyondBaseline ? BASELINE_SANCTIONS[n.id] : undefined;
   for (const [p, breach] of s.cut.get(n.id) ?? []) {
     if (breach === 'sanctions' && baseline?.includes(p)) continue;
-    lost += ((world.nations[p]?.stats.gdp ?? 0) / gdpOthers) * (1 - STILL_ARRIVES[breach].goods);
+    lost += ((world.nations[p]?.stats.gdp ?? 0) / gdpOthers) * (1 - ladderCover(world, s, n.id, p, 'goods'));
   }
-  const blocked = seaCut(world, n.id);
+  const blocked = seaCutNet(world, s, n.id, 'goods');
   return clamp01(1 - (1 - blocked) * (1 - clamp01(lost)));
+}
+
+/** A blockade cutting less than this share of a nation's trade is noise in the fleet picture, not a cut-off to work around. */
+const BLOCKADE_CUTOFF = 0.01;
+const importsUsdB = (n: Nation) => ((n.stats.gdp ?? 0) / 1e9) * ((n.stats.importsPctGdp ?? 30) / 100);
+
+/**
+ * Climbs every cut-off nation's workaround ladder by a tick, and sizes the shared neutral pool: what
+ * neutral economies (at war with no one) can offer, against what the cut-off nations' neutral rungs
+ * ask, each ask the import value it lost to that cut-off.
+ */
+function climbLadders(world: World, s: Scan, dtMonths: number): EconomyState['neutralPool'] {
+  const foes = hostility(world).foes;
+  let offer = 0, ask = 0;
+  for (const n of Object.values(world.nations)) if (!foes.has(n.id)) offer += importsUsdB(n);
+  for (const [id, e] of Object.entries(world.slices.economy.nations) as [NationId, NationEconomy][]) {
+    const n = world.nations[id];
+    if (!n || n.status === 'collapsed') continue;
+    const present = new Map<string, CutKind>(s.cut.get(id) ?? []);
+    const sea = seaCut(world, id);
+    if (sea > BLOCKADE_CUTOFF) present.set(SEA, 'blockade');
+    advanceCuts((e.cuts ??= {}), id, present, dtMonths);
+    const gdpOthers = s.worldGdp - (n.stats.gdp ?? 0);
+    for (const [key, cut] of Object.entries(e.cuts)) {
+      const lost = key === SEA ? sea : (world.nations[key as NationId]?.stats.gdp ?? 0) / gdpOthers;
+      ask += neutralAsk(cut) * lost * importsUsdB(n);
+    }
+  }
+  return { offerUsdB: offer * neutralSpare(), askUsdB: ask };
 }
 
 function categoryFactor(e: NationEconomy, cat: ItemCategory): number {
@@ -603,6 +636,22 @@ function stepNation(world: World, ctx: SimContext, s: Scan, n: Nation, e: Nation
   n.reserves += graduates;
   const called = opening.mobilization < 1 ? clamp01((n.mobilization - opening.mobilization) / (1 - opening.mobilization)) : 0;
   n.reserves += recallReservists(n, dtMonths, opening.reservists, called);
+}
+
+/** Share of what cut-off nations ask of the neutral pool that it gives, 0..1. */
+const poolShare = (p: EconomyState['neutralPool'] | undefined): number => (p && p.askUsdB > p.offerUsdB ? p.offerUsdB / p.askUsdB : 1);
+
+/**
+ * Where a nation stands on each cut-off's workaround ladder: share of the supply lost to it that is made
+ * good so far, for a traded commodity (rationing counts, as it closes the gap), and each rung's part of it.
+ * Pure; outputs read it.
+ */
+export function ladderOf(world: World, map: GameMap, nation: NationId): { cutoff: string; kind: CutKind; months: number; coverage: number; rungs: Record<RungId, number> }[] {
+  const e = world.slices.economy?.nations[nation];
+  if (!e?.cuts) return [];
+  const pool = poolShare(world.slices.economy.neutralPool);
+  const border = hasLandBorder(map, nation);
+  return Object.entries(e.cuts).map(([cutoff, cut]) => ({ cutoff, kind: cut.kind, months: cut.months, coverage: coverage(cut, 'commodity', border, pool), rungs: rungShares(cut, 'commodity', border, pool) }));
 }
 
 export const aidKey = (f: AidFlow) => `${f.donor}>${f.recipient}:${f.item}${f.source === 'market' ? ':market' : ''}`;
@@ -757,7 +806,7 @@ export const economy: System = {
   commands: ['set_mobilization', 'produce', 'sanction'],
 
   init(world, ctx) {
-    world.slices.economy = { nations: {}, lastReportTick: world.tick, aid: {}, allied: {}, energyPrice: 1, energyExportsLost: 0 };
+    world.slices.economy = { nations: {}, lastReportTick: world.tick, aid: {}, allied: {}, energyPrice: 1, energyExportsLost: 0, neutralPool: { offerUsdB: 0, askUsdB: 0 } };
     const integrity = industrialIntegrity(world, ctx.map);
     for (const n of Object.values(world.nations)) {
       const e = newNationEconomy(n);
@@ -786,6 +835,7 @@ export const economy: System = {
     const dtMonths = world.dtHours / HOURS_PER_MONTH;
     const s = scan(world, ctx);
     const state = world.slices.economy;
+    s.pool = poolShare((state.neutralPool = climbLadders(world, s, dtMonths)));
     state.energyExportsLost = energyExportsLost(world, s);
     state.energyPrice = energyPrice(state.energyExportsLost);
     for (const [id, e] of Object.entries(state.nations) as [NationId, NationEconomy][]) {
