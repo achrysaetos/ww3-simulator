@@ -298,7 +298,7 @@ describe('the biggest events reach the War Room (P1 H5)', () => {
 });
 
 describe('a crisis tells the player what they hold and what they face (P1 H2, M4, M8, M9)', () => {
-  it('ww3-2027 as the United States, Russia readies nuclear weapons: our deployed deterrent is the answer, the clock counts down to Russia fully armed, and Look first marks launchers', () => {
+  it('ww3-2027 as the United States, Russia readies nuclear weapons: we can raise our own alert, the clock counts down to Russia fully armed, and Look first marks launchers', () => {
     const g = play('ww3-2027', 'USA');
     for (let i = 0; i < 8 && !g.state.focusNation?.enemies.includes(N('RUS')); i++) {
       g.step();
@@ -308,11 +308,13 @@ describe('a crisis tells the player what they hold and what they face (P1 H2, M4
     g.step();
     const card = g.desk.cards.find((c) => c.key.startsWith('nalert|RUS|'))!;
     expect(card.text).not.toMatch(/no nuclear answer/i);
-    expect(card.text).toMatch(/warheads on launchers already answer/);
+    // The US hedge can now be uploaded (NUCLEAR_ALERT.USA), so the answer is an order, not only standing firm.
+    expect(card.text).toMatch(/warheads in storage/);
+    expect(card.primary).toMatchObject({ kind: 'command', command: { type: 'nuclear_alert', nation: 'USA' } });
     const c = crisisOf(card, contextOf(g))!;
-    expect(c.options.map((o) => o.title)).toEqual(['Stand firm', 'Look first']);
+    expect(c.options.map((o) => o.title)).toEqual(['Raise our alert', 'Hold readiness', 'Look first']);
     expect(c.options[0].recommended).toBe(true);
-    const look = c.options[1].action;
+    const look = c.options[2].action;
     expect(look.kind === 'show' && look.marks?.length, 'Look first marks the launchers on the map').toBeGreaterThan(0);
     const spec = NUCLEAR_ALERT.RUS!;
     expect(c.windowHours).toBe(spec.fullHours);
