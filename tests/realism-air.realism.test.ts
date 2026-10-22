@@ -16,11 +16,19 @@ function upperTierStock(world: World, nation: string): number {
   return n;
 }
 
-function run(scenario: string, days: number, seeds: number[]): RunMetrics[] {
+/** Runs each seed; `joins` answer their treaty calls yes at the deadline, where the AI would draw its answer. */
+function run(scenario: string, days: number, seeds: number[], joins: string[] = []): RunMetrics[] {
   return seeds.map((seed) => {
     const s = createSession(scenario, seed);
     const start = upperTierStock(s.world, 'ISR');
-    const r = measureRun(s.engine, s.world, s.map, days);
+    const engine = Object.assign(Object.create(s.engine), {
+      step: (w: World) => {
+        for (const j of w.slices.diplomacy.joins)
+          if (joins.includes(j.nation) && w.tick + 1 >= j.dueTick) w.pending.push({ type: 'answer_treaty', nation: j.nation, war: j.war, treaty: j.treaty, join: true });
+        return s.engine.step(w);
+      },
+    });
+    const r = measureRun(engine, s.world, s.map, days);
     upperTier.set(r, { start, end: upperTierStock(s.world, 'ISR') });
     return r;
   });
@@ -138,28 +146,26 @@ describe('gulf-2027, 30 days', () => {
 describe('taiwan-2027, first week', () => {
   let runs: RunMetrics[];
   beforeAll(() => {
-    runs = run('taiwan-2027', 7, [1, 2]);
+    runs = run('taiwan-2027', 7, [1, 2], ['USA']);
   });
 
   // CSIS 2023 "The First Battle of the Next War": PLARF opens with salvos of hundreds of SRBMs and cruise missiles on Taiwanese and US/Japanese bases.
   // CSIS assumes the US and Japan fight from the first day. The sim draws US entry on day 6 at odds of about 0.8
-  // (diplomacy/wars.ts ambiguousResolve), with a second look a week later, and Japan comes in with it; so the Japan
-  // clause is held on the runs where Japan is at war by day 6.
+  // (diplomacy/wars.ts ambiguousResolve), and Japan comes in with it. These runs answer the US call yes at that
+  // deadline, so they measure the war with the US and Japan in it, not the draw.
   it('the PLA fires hundreds of missiles at Taiwan and the bases in Japan', () => {
     const japanIn = (r: RunMetrics) => r.wars.some((w) => [w.a, w.b].sort().join() === 'CHN,JPN' && w.since < (7 * 24) / 6);
-    expect(runs.some(japanIn)).toBe(true);
     for (const r of runs) {
+      expect(japanIn(r)).toBe(true);
       expect(tally(r, 'CHN', 'TWN', MISSILES).fired).toBeGreaterThan(300);
-      if (japanIn(r)) expect(tally(r, 'CHN', 'JPN', MISSILES).fired).toBeGreaterThan(30);
+      expect(tally(r, 'CHN', 'JPN', MISSILES).fired).toBeGreaterThan(30);
     }
   });
 
-  // CSIS 2023: ~90 % of US aircraft losses were on the ground. Held, like the Japan clause, on the runs where the
-  // US has drawn entry by the end of the week.
+  // CSIS 2023: ~90 % of US aircraft losses were on the ground.
   it('most US aircraft losses are on the ground', () => {
-    const usIn = runs.filter((r) => r.nations.USA !== undefined);
-    expect(usIn.length).toBeGreaterThan(0);
-    for (const r of usIn) {
+    for (const r of runs) {
+      expect(r.nations.USA).toBeDefined();
       const usa = r.nations.USA!;
       expect(usa.aircraftLostOnGround).toBeGreaterThan(0);
       expect(usa.aircraftLostOnGround).toBeGreaterThanOrEqual(0.5 * crewedLost(r, 'USA'));

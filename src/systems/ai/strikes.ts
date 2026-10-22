@@ -152,10 +152,10 @@ function punitive(p: Plan, owner: NationId): boolean {
 
 /**
  * A war is fought in its theatre, within THEATRE_KM of the capital first attacked.
- * Its original parties strike each other wherever deepStrikeAllowed lets them, but
- * a state that joined the war fights the other side's joiners only inside the
- * theatre: in Korea in 1950-53 the US kept Manchuria off limits while Soviet
- * pilots fought over the Yalu. Enemy air bases on a neutral's soil are struck only
+ * An original party is struck wherever deepStrikeAllowed lets its enemies, joiners
+ * among them, but the other side's joiners are fought only inside the theatre: in
+ * Korea in 1950-53 the US, a joiner, bombed all of North Korea but kept Manchuria
+ * off limits while Soviet pilots fought over the Yalu. Enemy air bases on a neutral's soil are struck only
  * when the host is already hostile and inside the theatre, which brings the host
  * into the war (see diplomacy processEvents); other enemy forces there are not (strikeTargets). CSIS "The First Battle of the Next
  * War" (2023) has China strike US bases on Okinawa, ~650 km from Taipei, in most
@@ -172,7 +172,7 @@ function inTheatre(p: Plan, owner: NationId, foe: NationId, node: NodeId): boole
   for (const w of p.world.slices.diplomacy?.wars ?? []) {
     const mine = sideOf(w, p.nation);
     if (mine === -1 || sideOf(w, foe) !== 1 - mine) continue;
-    if (owner === foe && PRINCIPAL.has(w.sides[mine].members[p.nation].via) && PRINCIPAL.has(w.sides[1 - mine].members[foe].via)) return true;
+    if (owner === foe && PRINCIPAL.has(w.sides[1 - mine].members[foe].via)) return true;
     if (withinKm(p.ctx.map, node, w.theatre, THEATRE_KM)) return true;
   }
   return false;
@@ -238,7 +238,8 @@ export function strikeTargets(p: Plan, battleArea: Set<number>): TargetGrid {
       if (!map.isSea(node) && holder && !p.enemies.has(holder) && !p.friends.has(holder) && f.kind !== 'air_wing' && !isBomberForce(p, f)) continue;
       const v = VALUE_BY_KIND[f.kind] ?? (isBomberForce(p, f) ? VALUE_BY_KIND.air_wing : isGround(f) && battleArea.has(node) ? FRONT_FORCES : undefined);
       if (!v) continue;
-      const value = (f.kind === 'missile' && reachesHome(p, f, node) ? TEL_HUNT : v.value) * worth(f) * confidence;
+      const base = f.kind === 'missile' && reachesHome(p, f, node) ? TEL_HUNT : f.kind === 'missile' && guardsMinefield(p, f, node) ? MINE_GUARD : v.value;
+      const value = base * worth(f) * confidence;
       if (f.kind !== 'surface_group') out.push({ node, cls: v.cls, value, formation: f.id, assigned: 0 });
       else {
         const fresh = confidence === 1;
@@ -276,6 +277,25 @@ export function strikeTargets(p: Plan, battleArea: Set<number>): TargetGrid {
   const kept = out.filter((t) => allowed(t) && live(t));
   for (const t of chokepointTargets(p, front)) if (live(t)) kept.push(t);
   return new TargetGrid(kept.sort((a, b) => b.value - a.value || a.node - b.node), map);
+}
+
+/**
+ * A shore battery whose anti-ship missiles cover an enemy minefield the planner has charted keeps its sweepers off the
+ * field, as a SAM site keeps its aircraft off a target, and is worth as much: in 1991 the Silkworm sites covering
+ * Kuwait's mined approaches were hit so the minehunters could work (US Navy, "Conduct of the Persian Gulf War", 1992).
+ */
+const MINE_GUARD = VALUE_BY_KIND.air_defense!.value;
+
+function guardsMinefield(p: Plan, f: Formation, node: NodeId): boolean {
+  let reach = 0;
+  for (const [id, n] of Object.entries(f.magazine)) {
+    const m = p.ctx.catalog.munition(id as MunitionId);
+    if (n > 0 && ANTISHIP_KINDS.has(m.kind)) reach = Math.max(reach, m.rangeKm);
+  }
+  if (!reach) return false;
+  for (const [z, laid] of Object.entries(p.view.minefields()))
+    if (Object.keys(laid).some((layer) => p.enemies.has(layer as NationId)) && p.ctx.map.distanceKm(node, Number(z) as NodeId) <= reach) return true;
+  return false;
 }
 
 /** Whether a missile `f`'s launchers carry reaches the planner's capital from `node`. */
@@ -362,6 +382,14 @@ const STANDOFF_HORIZON_DAYS = 30;
 const SALVO_EVERY_DAYS = 3;
 
 /**
+ * Salvos' worth of budget a weapon can go undrawn before the next proposal fires regardless. Each draw stands alone, so
+ * a run of misses can leave a fortnight's budget unspent: B-1Bs at Guam held every LRASM for 14 days of war on one
+ * seed at odds of 1 in 4 a day. A staff fires to a rate (US doctrine apportions sorties and weapons per ATO day, JP
+ * 3-30), so a weapon held for twice its expected interval goes next. Estimate.
+ */
+const HELD_FIRE_SALVOS = 2;
+
+/**
  * A nation's daily firing budget per rationed munition: production plus stock
  * over the horizon. Planners propose strikes with the weapons that could do them,
  * cheapest per kill first; `settle` lets each proposal fire its first weapon whose
@@ -401,10 +429,17 @@ export class FireBudget {
       const cycle = SALVO_EVERY_DAYS * (produced + stock / horizon);
       return Math.min(1, (salvoDay ? cycle : Math.max(0, cycle - cap) / (SALVO_EVERY_DAYS - 1)) / cap);
     };
+    const held = (this.p.ai.heldFire ??= {});
     for (const x of this.proposals) {
       const owner = world.control[x.t.node];
       const horizon = front.has(owner) && !punitive(this.p, owner) ? ATTRITION_HORIZON_DAYS : STANDOFF_HORIZON_DAYS;
-          const m = x.options.find((m) => ctx.rng.chance(share(m.id, horizon)));
+      const m = x.options.find((m) => {
+        const key = `${nation}|${m.id}`;
+        const due = share(m.id, horizon);
+        const fire = ctx.rng.chance(due) || (held[key] ?? 0) + due >= HELD_FIRE_SALVOS;
+        held[key] = fire ? 0 : (held[key] ?? 0) + due;
+        return fire;
+      });
       if (m) issue(this.p, x.f, { ...x.order, munition: m.id });
       else {
         x.t.assigned--;

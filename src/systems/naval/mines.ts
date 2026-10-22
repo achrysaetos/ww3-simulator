@@ -1,6 +1,6 @@
 import { atWar } from '../../core/engine';
 import { allied } from '../land/state';
-import type { MunitionId, NationId } from '../../core/types';
+import type { Formation, FormationId, MunitionId, NationId, World } from '../../core/types';
 import { applyHits } from './combat';
 import type { TickEnv } from './env';
 import { chart, ledger } from './state';
@@ -26,8 +26,9 @@ const MCM_STRIKE_FACTOR = 0.02;
  */
 const SUBMERGED_STRIKE_FACTOR = 0.3;
 
-/** Lay, sweep, then roll strikes on every hull sitting in a hostile minefield. */
-export function mineWarfare(env: TickEnv): void {
+/** Lay, sweep, then roll strikes on every hull sitting in a hostile minefield. Returns the groups that laid this tick. */
+export function mineWarfare(env: TickEnv): Formation[] {
+  const layers: Formation[] = [];
   const { world, ctx } = env;
   const mines = world.slices.naval.mines;
   for (const f of env.naval) {
@@ -41,8 +42,8 @@ export function mineWarfare(env: TickEnv): void {
         const at = (mines[f.node] ??= {});
         at[f.nation] = (at[f.nation] ?? 0) + laid;
         ledger(world, f.nation).minesLaid += laid;
-        // A minelayer tracked in the act gives the field away: USS Jarrett's helicopters caught Iran Ajr laying in 1987.
-        for (const n of [f.nation, ...(world.slices.naval.tracks[f.id] ?? [])]) chart(world, n, f.node);
+        chart(world, f.nation, f.node);
+        if (!layers.includes(f)) layers.push(f);
       }
     }
     const mcm = c.hulls.filter((h) => h.platform.class === 'mine_warfare').reduce((s, h) => s + h.count, 0);
@@ -76,4 +77,13 @@ export function mineWarfare(env: TickEnv): void {
     chart(world, f.nation, f.node);
     applyHits(env, f, new Array(strikes).fill(MINE_HIT), Object.keys(laid)[0] as NationId);
   }
+  return layers;
+}
+
+/**
+ * A minelayer tracked in the act gives the field away: USS Jarrett's helicopters caught Iran Ajr laying in 1987. Read
+ * from this tick's tracks: a layer lays on the tick it arrives, before the last tick's tracks had it on station.
+ */
+export function chartWatchedLaying(world: World, layers: readonly Formation[], tracks: ReadonlyMap<FormationId, ReadonlySet<NationId>>): void {
+  for (const f of layers) for (const n of tracks.get(f.id) ?? []) chart(world, n, f.node);
 }

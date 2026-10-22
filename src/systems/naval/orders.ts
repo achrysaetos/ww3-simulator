@@ -201,7 +201,7 @@ export function playerHolds(world: World, f: Formation): boolean {
   return world.nations[f.nation]?.controlledBy === 'human' && !!authority(world, f.nation).held[f.id];
 }
 
-function mostlyDamaged(f: Formation): boolean {
+export function mostlyDamaged(f: Formation): boolean {
   let damaged = 0, fit = 0;
   for (const k in f.damaged) damaged += f.damaged[k as PlatformId];
   for (const k in f.equipment) fit += f.equipment[k as PlatformId];

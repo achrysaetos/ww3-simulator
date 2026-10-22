@@ -39,6 +39,8 @@ export interface AiState {
   airBases?: Record<FormationId, NodeId>;
   /** The last order sent to each formation; cleared when a front changes. */
   sent: Record<FormationId, SentOrder>;
+  /** Budget shares each `nation|munition` has been granted and drawn nothing on since it last fired (FireBudget.settle). */
+  heldFire?: Record<string, number>;
 }
 
 /** An order the AI sent a formation, and where the formation stood then. */
