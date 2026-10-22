@@ -211,9 +211,12 @@ describe('oil blockade (LE-5)', () => {
       world.pending.push({ type: 'order', nation: ind, formation: f.id, order: { posture: 'blockade', target: f.node } });
     });
 
-    runDays(open, 30);
-    runDays(blockaded, 30);
-    const [open30, blockaded30] = [fuel(open), fuel(blockaded)];
+    runDays(open, 14);
+    runDays(blockaded, 14);
+    const [open14, blockaded14] = [fuel(open), fuel(blockaded)];
+    runDays(open, 16);
+    runDays(blockaded, 16);
+    const blockaded30 = fuel(blockaded);
     const delivered = (s: ReturnType<typeof createSession>) => s.world.slices.economy.nations[pak].fuelDelivered;
     const [openIn30, blockadedIn30] = [delivered(open), delivered(blockaded)];
     runDays(open, 30);
@@ -222,7 +225,7 @@ describe('oil blockade (LE-5)', () => {
     // Stocks carry the first three weeks; after that the forces burn their depots down with little coming in. The
     // inflow is compared, not the open run's depot drop: that drop is wartime burn less refills, two near-equal flows
     // (~240 kt and ~187 kt on seed 1), plus the fuel of formations destroyed, so how hard Pakistan fights swings it.
-    expect(blockaded30).toBeGreaterThan(0.9 * open30);
+    expect(blockaded14).toBeGreaterThan(0.9 * open14);
     expect(delivered(blockaded) - blockadedIn30).toBeLessThan(0.05 * (delivered(open) - openIn30));
     expect(fuel(blockaded)).toBeLessThan(0.5 * blockaded30);
     expect(fuel(blockaded)).toBeLessThan(0.6 * fuel(open));
