@@ -17,6 +17,7 @@ import type { Catalog } from '../../core/catalog';
 import { hostility, type System } from '../../core/engine';
 import { platformCount } from '../../core/forces';
 import type { Formation, FormationId, Munition, NationId, NodeId, PlatformId, World } from '../../core/types';
+import { measureEffect } from '../adaptation';
 import { assessHqs, attach, chainOf, draw, hqFunction, relocate, tallyOf } from './command';
 import { buildJam, jamAgainst } from './ew';
 import type { C2State, Jam, OrderCommand } from './state';
@@ -47,8 +48,16 @@ function platformMixOf(catalog: Catalog, pid: PlatformId): { fire: number; mix: 
   return v;
 }
 
+/**
+ * How much harder the enemy's drone-band jamming bites `nation`'s drone links than calibrated: its
+ * jammers' standing against its fibre-optic drones, over its own drones' standing against their jammers
+ * (adaptation pairs jamming_fiber and fpv_jamming). 1 at the calibrated point.
+ */
+const linkJamScale = (world: World, nation: NationId): number =>
+  measureEffect(world, 'jamming_fiber', undefined, nation) / measureEffect(world, 'fpv_jamming', nation, undefined);
+
 /** Share of a formation's fire that jamming takes away: guided rounds that miss and drones whose links are cut. */
-function jammedFire(catalog: Catalog, f: Formation, jam: Jam): number {
+function jammedFire(catalog: Catalog, f: Formation, jam: Jam, linkScale: number): number {
   let fire = 0, lost = 0;
   for (const pid in f.equipment) {
     const n = f.equipment[pid as PlatformId];
@@ -62,7 +71,7 @@ function jammedFire(catalog: Catalog, f: Formation, jam: Jam): number {
       link += share * x.link;
     }
     fire += n * v.fire;
-    lost += n * v.fire * (1 - (1 - gnss * jam.gnss) * (1 - link * jam.drone));
+    lost += n * v.fire * (1 - (1 - gnss * jam.gnss) * (1 - Math.min(1, link * jam.drone * linkScale)));
   }
   return fire > 0 ? lost / fire : 0;
 }
@@ -163,7 +172,7 @@ export const c2: System = {
         coordination *= SURPRISE.fire();
         delayH += SURPRISE.delayH();
       }
-      s.formations[f.id] = { coordination, delayH, guided: jam.gnss > 0 || jam.drone > 0 ? 1 - jammedFire(catalog, f, jam) : 1 };
+      s.formations[f.id] = { coordination, delayH, guided: jam.gnss > 0 || jam.drone > 0 ? 1 - jammedFire(catalog, f, jam, linkJamScale(world, f.nation)) : 1 };
     }
 
     for (const fid in s.transit) {
@@ -201,7 +210,7 @@ export function jammedHits(world: World, target: NodeId, attacker: NationId, m: 
   const { gnss: g, link: l } = vulnOf(m);
   if (!g && !l) return hits;
   const jam = jamAgainst(world, target, attacker);
-  const keep = (1 - g * jam.gnss) * (1 - l * jam.drone);
+  const keep = (1 - g * jam.gnss) * (1 - Math.min(1, l * jam.drone * linkJamScale(world, attacker)));
   if (keep >= 1) return hits;
   const expected = hits * keep;
   const kept = Math.floor(expected) + (draw(`${attacker}|${target}|${m.id}`, world.tick, world.seed) < expected % 1 ? 1 : 0);

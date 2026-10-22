@@ -2,6 +2,7 @@ import type { System } from '../core/engine';
 import type { NationId } from '../core/types';
 import { airDefencePledges, alliances, peaceTreaties, strategicProfile } from '../data/nations';
 import type { Alliance, StrategicProfile as NationStrategy } from '../data/nations';
+import { adaptation } from './adaptation';
 import { createAi } from './ai';
 import { airWar, applyAirOrder } from './air';
 import { civil } from './civil';
@@ -98,7 +99,7 @@ const orders = createOrderRouter([
  * then every system steps in this order: today's weather first, since everything else reads it;
  * the air picture is settled before ground and sea combat read it, combat before logistics refills, the non-kinetic
  * war (cyber, sabotage, cable cuts, shipping fear, occupation resistance) after logistics so the economy reads its
- * effects, economy before
+ * effects, adaptation once every domain's losses for the tick are in (each side learns from what it lost), economy before
  * diplomacy reads economic stress, intelligence after every sensor has moved, command and
  * control once the tick's strikes and captures have hit its HQs, operations once the tick's
  * ground is settled, and AI last so its orders queue for next tick around the operations' forces.
@@ -113,6 +114,7 @@ export const SYSTEMS: System[] = [
   landCombat,
   logistics,
   nonKinetic,
+  adaptation,
   economy,
   civil,
   politics,

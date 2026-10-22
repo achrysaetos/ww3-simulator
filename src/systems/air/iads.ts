@@ -6,6 +6,7 @@
  */
 import type { SimContext } from '../../core/engine';
 import type { Formation, Munition, MunitionId, NationId, NodeId, World } from '../../core/types';
+import { measureEffect } from '../adaptation';
 import { visibility } from './combat';
 import { interceptSalvo, type ShotDoctrine } from './intercept';
 import { takeLosses, type LossTally } from './losses';
@@ -140,7 +141,7 @@ export function defendRaid(world: World, ctx: SimContext, pic: AirPicture, node:
     const cat = threatCategory(m);
     if (!cat) continue;
     if (streams[i].overflightKm > 0)
-      leaked[i] -= ctx.rng.binomial(leaked[i], beltKillProbability(m.kind, streams[i].overflightKm, m.interceptDifficulty));
+      leaked[i] -= ctx.rng.binomial(leaked[i], beltKillProbability(m.kind, streams[i].overflightKm, m.interceptDifficulty) / (m.kind === 'drone_oneway' ? measureEffect(world, 'jet_drone_interceptor', attacker, world.control[node] || undefined) : 1));
     if (cat === 'air_breathing' && leaked[i]) {
       fighters ??= interceptorFighters(world, ctx, pic, node, attacker).flatMap((g) => {
         const aam = pic.aamOf(g.f);
