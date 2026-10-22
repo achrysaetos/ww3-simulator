@@ -182,8 +182,8 @@ export interface OutwardRecord {
 }
 
 /**
- * How a war, or one member's part in it, ended and on what terms. `line` is what each party holds of the other
- * side's homeland once the terms take effect, the ceasefire line; `returned` is ground handed back to its owner
+ * How a war, or one member's part in it, ended and on what terms. `line` is the ground that changed hands in the
+ * war, by who holds it once the terms take effect: the other side's homeland it keeps and its own it took back; `returned` is ground handed back to its owner
  * under them; `dmz` is the cells on either side of the line where the fighting stopped. The terms are recorded;
  * nothing yet polices the demilitarised zone.
  */

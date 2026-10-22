@@ -144,6 +144,7 @@ describe('wars end for their aims, on recorded terms', () => {
     const done = world.slices.diplomacy.settlements!.at(-1)!;
     expect(done.kind).toBe('ceasefire');
     expect(done.returned).toEqual([beyond]);
+    expect(done.line[N('AZE')]).toEqual([claim]);
     expect(world.control[beyond]).toBe('ARM');
     expect(world.control[claim]).toBe('AZE');
   });

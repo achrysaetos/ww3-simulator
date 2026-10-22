@@ -18,7 +18,11 @@ export function settle(world: World, map: GameMap, war: War, parties: [NationId[
   for (let n = 0 as NodeId; n < map.landCount; n++) {
     const holder = world.control[n], owner = map.owner[n];
     const [h, o] = [sideOf(holder), sideOf(owner)];
-    if (h === -1 || o === -1 || h === o) continue;
+    if (h === -1 || o === -1) continue;
+    if (h === o) {
+      if (taken.has(n)) (line[holder] ??= []).push(n);
+      continue;
+    }
     if (kind !== 'capitulation' && taken.has(n) && !withinAim(war.sides[h], owner, n) && world.nations[owner]?.status !== 'capitulated') {
       world.control[n] = owner;
       returned.push(n);
