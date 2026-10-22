@@ -362,6 +362,14 @@ const STANDOFF_HORIZON_DAYS = 30;
 const SALVO_EVERY_DAYS = 3;
 
 /**
+ * Salvos' worth of budget a weapon can go undrawn before the next proposal fires regardless. Each draw stands alone, so
+ * a run of misses can leave a fortnight's budget unspent: B-1Bs at Guam held every LRASM for 14 days of war on one
+ * seed at odds of 1 in 4 a day. A staff fires to a rate (US doctrine apportions sorties and weapons per ATO day, JP
+ * 3-30), so a weapon held for twice its expected interval goes next. Estimate.
+ */
+const HELD_FIRE_SALVOS = 2;
+
+/**
  * A nation's daily firing budget per rationed munition: production plus stock
  * over the horizon. Planners propose strikes with the weapons that could do them,
  * cheapest per kill first; `settle` lets each proposal fire its first weapon whose
@@ -401,10 +409,17 @@ export class FireBudget {
       const cycle = SALVO_EVERY_DAYS * (produced + stock / horizon);
       return Math.min(1, (salvoDay ? cycle : Math.max(0, cycle - cap) / (SALVO_EVERY_DAYS - 1)) / cap);
     };
+    const held = (this.p.ai.heldFire ??= {});
     for (const x of this.proposals) {
       const owner = world.control[x.t.node];
       const horizon = front.has(owner) && !punitive(this.p, owner) ? ATTRITION_HORIZON_DAYS : STANDOFF_HORIZON_DAYS;
-          const m = x.options.find((m) => ctx.rng.chance(share(m.id, horizon)));
+      const m = x.options.find((m) => {
+        const key = `${nation}|${m.id}`;
+        const due = share(m.id, horizon);
+        const fire = ctx.rng.chance(due) || (held[key] ?? 0) + due >= HELD_FIRE_SALVOS;
+        held[key] = fire ? 0 : (held[key] ?? 0) + due;
+        return fire;
+      });
       if (m) issue(this.p, x.f, { ...x.order, munition: m.id });
       else {
         x.t.assigned--;
