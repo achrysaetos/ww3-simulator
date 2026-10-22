@@ -2,6 +2,7 @@ import { atWar } from '../../core/engine';
 import type { SimContext } from '../../core/engine';
 import type { Formation, NationId, World } from '../../core/types';
 import { cellPopulation } from '../civil';
+import { draw } from '../civil/hash';
 import type { NonKineticState, OccupationLedger } from './state';
 import { GARRISON_PER_1000, GARRISON_READINESS_PER_DAY, OCCUPATION_COST_USD_M_DAY, RESISTANCE_PER_MILLION_DAY } from './tables';
 
@@ -45,7 +46,8 @@ export function stepOccupation(world: World, ctx: SimContext, s: NonKineticState
 
     const rate = RESISTANCE_PER_MILLION_DAY() * (people / 1e6) * exposure;
     const l = ledger(s, occupier);
-    if (ctx.rng.chance(1 - Math.exp(-rate * dtDays))) l.resistanceActs++;
+    // A per-cell hash draw, like civil's partisans, so suppressing one cell never shifts another's outcome.
+    if (draw(world.seed, world.tick, c + 2_000_000) < 1 - Math.exp(-rate * dtDays)) l.resistanceActs++;
 
     for (const f of formationsAt.get(c) ?? []) f.readiness = Math.max(0, f.readiness - GARRISON_READINESS_PER_DAY() * exposure * dtDays);
 

@@ -1,4 +1,4 @@
-import { defineParam, paramTable, tableParam as P } from '../../core/params';
+import { defineParam, paramTable, tableParam } from '../../core/params';
 import type { AccessStage, CyberSector } from './state';
 
 // ---------------------------------------------------------------- cyber access
@@ -9,14 +9,14 @@ import type { AccessStage, CyberSector } from './state';
  * discovery (CISA, Feb 2024), and the Sandworm grid intrusions were prepared over many months.
  */
 export const ACCESS_DAYS = paramTable('nonkinetic', {
-  foothold: P({ value: 60, range: [20, 120], tag: 'estimated', source: 'Volt Typhoon pre-positioning (CISA 2024); Sandworm grid campaigns 2015-16', affects: 'time to first access into a sector' }),
-  persistent: P({ value: 150, range: [60, 300], tag: 'estimated', source: 'Volt Typhoon "at least five years" undiscovered (CISA 2024)', affects: 'time to deep, firing-ready access' }),
+  foothold: tableParam({ value: 60, range: [20, 120], tag: 'estimated', source: 'Volt Typhoon pre-positioning (CISA 2024); Sandworm grid campaigns 2015-16', affects: 'time to first access into a sector' }),
+  persistent: tableParam({ value: 150, range: [60, 300], tag: 'estimated', source: 'Volt Typhoon "at least five years" undiscovered (CISA 2024)', affects: 'time to deep, firing-ready access' }),
 });
 
 /** Per-day chance an intrusion is discovered and evicted, scaled by the defender's cyber capability. Higher while actively building. */
-export const DISCOVERY_PER_DAY = defineParam({ id: 'nonkinetic.DISCOVERY_PER_DAY', value: 0.004, range: [0.001, 0.02], tag: 'judgment',
+export const DISCOVERY_PER_DAY = defineParam({ id: 'nonkinetic.DISCOVERY_PER_DAY', value: 0.002, range: [0.001, 0.02], tag: 'judgment',
   source: 'Judgment: Volt Typhoon undetected for years implies a low daily discovery hazard against a capable defender', affects: 'how long cyber access survives' });
-export const BUILD_DISCOVERY_MULT = defineParam({ id: 'nonkinetic.BUILD_DISCOVERY_MULT', value: 3, range: [1, 6], tag: 'judgment',
+export const BUILD_DISCOVERY_MULT = defineParam({ id: 'nonkinetic.BUILD_DISCOVERY_MULT', value: 1.5, range: [1, 6], tag: 'judgment',
   source: 'Judgment: active intrusion is noisier than dwelling', affects: 'discovery risk while building access' });
 
 // ---------------------------------------------------------------- cyber payloads

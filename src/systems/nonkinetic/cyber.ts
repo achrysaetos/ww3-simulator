@@ -1,7 +1,7 @@
-import type { SimContext } from '../../core/engine';
 import type { GameMap } from '../../core/map';
 import type { NationId, NodeId, World } from '../../core/types';
 import { cyberCapability } from '../strategic';
+import { draw, keyOf } from '../civil/hash';
 import { accessKey, type AccessStage, type CyberAccess, type CyberSector, type NonKineticState } from './state';
 import { ACCESS_DAYS, BUILD_DISCOVERY_MULT, DISCOVERY_PER_DAY, PAYLOAD, PAYLOAD_CELLS } from './tables';
 
@@ -19,17 +19,25 @@ export function buildAccess(s: NonKineticState, by: NationId, on: NationId, sect
   return a;
 }
 
-/** Move every live intrusion forward a tick: progress toward the next stage, dwell, and the discovery hazard. */
-export function stepAccess(world: World, ctx: SimContext, s: NonKineticState): void {
+/**
+ * Move every live intrusion forward a tick: progress toward the next stage, dwell, and the discovery
+ * hazard. Chance events use a hash draw, like civil's partisans, so this system never perturbs the
+ * shared RNG the other systems draw from.
+ */
+export function stepAccess(world: World, s: NonKineticState): void {
   const dtDays = world.dtHours / 24;
   for (const key of Object.keys(s.access)) {
     const a = s.access[key];
     const def = cyberCapability(a.on);
     const hazard = DISCOVERY_PER_DAY() * (1 + 2 * def) * (a.building ? BUILD_DISCOVERY_MULT() : 1);
-    if (ctx.rng.chance(1 - Math.exp(-hazard * dtDays))) {
-      // Discovered and evicted: drop one stage, stop building.
-      if (a.stage === 'persistent') { a.stage = 'foothold'; a.progressDays = 0; a.dwellDays = 0; a.building = false; }
-      else { delete s.access[key]; }
+    if (draw(world.seed, world.tick, keyOf(key)) < 1 - Math.exp(-hazard * dtDays)) {
+      // Discovered. A standing campaign is set back a stage and keeps working; an abandoned intrusion
+      // (stood down) that is found is evicted for good.
+      if (!a.building) { delete s.access[key]; continue; }
+      if (a.stage === 'persistent') a.stage = 'foothold';
+      else if (a.stage === 'foothold') a.stage = 'none';
+      a.progressDays = 0;
+      a.dwellDays = 0;
       continue;
     }
     a.dwellDays += dtDays;

@@ -14,11 +14,11 @@
  * Commands (cyber_op, sabotage, cut_cable) are the player's handle; for AI nations the system runs a
  * modest standing campaign against their enemies. Sole writer of slices.nonKinetic.
  */
-import { atWar, hostility, type SimContext, type System } from '../../core/engine';
+import { atWar, type SimContext, type System } from '../../core/engine';
 import type { GameMap } from '../../core/map';
 import type { Command, CommandResult, NationId, World } from '../../core/types';
 import { cyberCapability } from '../strategic';
-import { delegated } from '../orders';
+import { draw, keyOf } from '../civil/hash';
 import { accessOf, buildAccess, firePayload, recoverOutage, stepAccess } from './cyber';
 import { cutCable, stepRepairs } from './cables';
 import { stepMaritimeRisk } from './maritime';
@@ -81,8 +81,7 @@ export const nonKinetic: System = {
   },
   step(world, ctx) {
     const s = world.slices.nonKinetic;
-    planCampaigns(world, s);
-    stepAccess(world, ctx, s);
+    stepAccess(world, s);
     recoverOutage(world, s);
     stepSabotage(world, ctx, s);
     stepRepairs(world, s);
@@ -91,38 +90,27 @@ export const nonKinetic: System = {
   },
 };
 
-/** For AI belligerents, keep access-building and a sabotage campaign running against each enemy; players drive their own. */
-function planCampaigns(world: World, s: NonKineticState): void {
-  for (const { a, b, war } of hostility(world).pairs) {
-    if (!war) continue;
-    campaign(world, s, a, b);
-    campaign(world, s, b, a);
-  }
-}
-
-function campaign(world: World, s: NonKineticState, by: NationId, on: NationId): void {
-  if (world.nations[by]?.status !== 'war' || !delegated(world, by, 'strategic')) return;
-  if (cyberCapability(by) < 0.4) return;
-  if (!accessOf(s, by, on, 'grid')) buildAccess(s, by, on, 'grid');
-  s.sabotage[pairKey(by, on)] ??= { by, on, startedTick: world.tick, acts: 0, attributed: 0 };
-}
-
-/** Covert sabotage of the target's rear: a landed act cuts rail/infrastructure at one of its rail cells. */
+/**
+ * Covert sabotage of the target's rear: a landed act cuts rail/infrastructure at one of its rail
+ * cells. Hash draws, so sabotage never perturbs the RNG the other systems draw from.
+ */
 function stepSabotage(world: World, ctx: SimContext, s: NonKineticState): void {
   for (const key of Object.keys(s.sabotage)) {
     const c = s.sabotage[key];
     if (!atWar(world, c.by, c.on) || world.nations[c.on]?.status === 'capitulated') continue;
-    if (!ctx.rng.chance(SABOTAGE_LAND * cyberCapability(c.by))) continue;
-    const cell = railCell(world, ctx.map, c.on, ctx);
-    if (cell === undefined) continue;
+    const k = keyOf(key);
+    if (draw(world.seed, world.tick, k) >= SABOTAGE_LAND * cyberCapability(c.by)) continue;
+    const held = railCells(ctx.map, c.on).filter((n) => world.control[n] === c.on);
+    if (!held.length) continue;
+    const cell = held[Math.min(held.length - 1, Math.floor(draw(world.seed, world.tick, k + 1) * held.length))];
     world.theater.infrastructure[cell] *= 1 - SABOTAGE_CUT;
     c.acts++;
-    if (ctx.rng.chance(ATTRIBUTION)) c.attributed++;
+    if (draw(world.seed, world.tick, k + 2) < ATTRIBUTION) c.attributed++;
   }
 }
 
 const railCache = new WeakMap<GameMap, Map<NationId, number[]>>();
-function railCell(world: World, map: GameMap, nation: NationId, ctx: SimContext): number | undefined {
+function railCells(map: GameMap, nation: NationId): number[] {
   let byNation = railCache.get(map);
   if (!byNation) railCache.set(map, (byNation = new Map()));
   let cells = byNation.get(nation);
@@ -131,6 +119,5 @@ function railCell(world: World, map: GameMap, nation: NationId, ctx: SimContext)
     for (let n = 0; n < map.landCount; n++) if (map.owner[n] === nation && map.railKm[n] >= SABOTAGE_MIN_RAIL_KM) cells.push(n);
     byNation.set(nation, cells);
   }
-  const held = cells.filter((n) => world.control[n] === nation);
-  return held.length ? ctx.rng.pick(held) : undefined;
+  return cells;
 }
