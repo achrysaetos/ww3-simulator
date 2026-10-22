@@ -10,7 +10,7 @@ import { RACE_ITEMS, type Humanitarian, type ItemRace, type NationOutputs, type 
 
 export * from './types';
 export { involved, sampleOutputs, type NationSample, type OutputSample } from './sample';
-export { outputRows, type OutputRow } from './rows';
+export { outputRanges, outputRows, type OutputRange, type OutputRow } from './rows';
 
 const DAYS_PER_MONTH = 30;
 const HOSTS_SHOWN = 5;

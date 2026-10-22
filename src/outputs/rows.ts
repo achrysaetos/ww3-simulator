@@ -46,3 +46,34 @@ export function outputRows(o: Outputs, nations: readonly NationId[]): OutputRow[
   }
   return rows;
 }
+
+export interface OutputRange {
+  key: string;
+  label: string;
+  unit: string;
+  p10: number;
+  p50: number;
+  p90: number;
+  /** Runs that reported the row; a nation that never entered the war in a run leaves it out. */
+  runs: number;
+}
+
+function quantile(sorted: readonly number[], q: number): number {
+  const at = (sorted.length - 1) * q, lo = Math.floor(at), hi = Math.ceil(at);
+  if (sorted[lo] === sorted[hi]) return sorted[lo];
+  return sorted[lo] + (sorted[hi] - sorted[lo]) * (at - lo);
+}
+
+/** p10, p50 and p90 of each row over an ensemble's runs, in the order rows first appear. */
+export function outputRanges(runs: readonly (readonly OutputRow[])[]): OutputRange[] {
+  const by = new Map<string, { row: OutputRow; values: number[] }>();
+  for (const rows of runs)
+    for (const row of rows) {
+      const e = by.get(row.key) ?? by.set(row.key, { row, values: [] }).get(row.key)!;
+      e.values.push(row.value);
+    }
+  return [...by.values()].map(({ row, values }) => {
+    const sorted = [...values].sort((a, b) => a - b);
+    return { key: row.key, label: row.label, unit: row.unit, p10: quantile(sorted, 0.1), p50: quantile(sorted, 0.5), p90: quantile(sorted, 0.9), runs: values.length };
+  });
+}
