@@ -119,9 +119,9 @@ describe('ukraine-2026, 60 days, ensemble of 8', () => {
  * border (RUSSIA_WEST_2027 in src/scenarios), so the judgment band is ground taken but no
  * collapse: 1-6 Baltic cells in three weeks.
  */
-describe('baltic-2027, 21 days, ensemble of 8', () => {
+describe('baltic-2027, 21 days, ensemble of 8 over seeds 1-6', () => {
   it('Russia takes 1-6 cells of the Baltic states', async () => {
-    expect(bandOf('baltic-2027-21d')(await ensemble('baltic-2027-21d'), 'baltic_cells')).toBeUndefined();
+    expect(bandOf('baltic-2027-21d')(await ensemble('baltic-2027-21d', 8, [1, 2, 3, 4, 5, 6]), 'baltic_cells')).toBeUndefined();
   }, 1_800_000);
 });
 

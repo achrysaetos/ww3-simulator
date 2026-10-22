@@ -24,9 +24,10 @@ const reserveShare = (aggression: number) => 0.3 - 0.15 * aggression;
 /**
  * Share of that reserve a defender keeps out of the line even when the line is short of what the threat needs. Ukraine
  * in 2023-25 held a few brigades back as a counterattack reserve while its line was thin (ISW, RUSI); a larger reserve
- * thins the ukraine-2026 line past the realism bands (A2b probes: 0.33 lets Russia net 3.5 cells on seed 1).
+ * thins the ukraine-2026 line past the realism bands (the 8-run ensemble over [0, 0.5] put Russia's net gain at p50 2.1
+ * cells against 0-2, with one Ukrainian capitulation; over [0.05, 0.2], p50 0.6 and none).
  */
-const SHORT_LINE_RESERVE = defineParam({ id: 'ai.SHORT_LINE_RESERVE', value: 0.25, range: [0, 0.5], tag: 'judgment',
+const SHORT_LINE_RESERVE = defineParam({ id: 'ai.SHORT_LINE_RESERVE', value: 0.1, range: [0.05, 0.2], tag: 'judgment',
   source: 'Judgment, band-fitting: a defender\'s operational reserve of a few brigades (FM 3-90; Ukraine 2023-25, ISW)',
   affects: 'how many formations a defender holds back from a short line to meet the main effort' });
 /** Farther than this, a formation is in another theatre and is not pulled into this front. */
