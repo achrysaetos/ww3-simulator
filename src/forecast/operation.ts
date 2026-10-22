@@ -14,7 +14,7 @@ import { loadMap } from '../data/load';
 import { SYSTEMS } from '../systems';
 import { believedWorld, viewOf } from '../systems/intel/view';
 import { holds, platforms } from '../systems/ops/state';
-import { routeAxis } from '../systems/ops';
+import { beyondWarAims, routeAxis } from '../systems/ops';
 import type { RunSpec } from './run';
 import { sampleRuns } from './sample';
 
@@ -27,6 +27,8 @@ export interface OperationForecastInput {
   days: number;
   /** Age in hours of the planner's fix on each enemy formation in the theatre. */
   contactAgeHours: Record<FormationId, number>;
+  /** The first cell of the plan past the planner's war aims, and why: launching it makes the war total. */
+  beyondWarAims?: { node: NodeId; why: string };
 }
 
 /** One run of the forecast. */
@@ -61,6 +63,8 @@ export interface OperationForecast {
   intelAgeHours: { min: number; max: number } | null;
   /** Enemy formations in the theatre the planner holds a fix on; the forecast cannot see the rest. */
   enemyContacts: number;
+  /** Set when the plan goes past the war aims: the forecast assumes it is launched, which makes the war total. */
+  beyondWarAims?: { node: NodeId; why: string };
 }
 
 /** Formations this far from the axis or the committed force are left out of the forecast: they cannot reach the fight in its window. */
@@ -72,6 +76,12 @@ const THEATRE_SLICES = ['land', 'weather', 'command', 'logistics'] as const;
 /** Swept by default: the ground-combat and operations knobs whose real values are uncertain. */
 const SWEEP_PREFIXES = ['land.', 'ops.'];
 
+/** The axis the staff would route for `plan` from its lead manoeuvre formation, as the ops system does. */
+function planAxis(world: World, map: GameMap, plan: OperationPlan): NodeId[] {
+  const first = plan.formations.map((id) => world.formations[id]).find((f) => f?.kind === 'maneuver') ?? world.formations[plan.formations[0]];
+  return (first && routeAxis(world, map, plan.nation, [first.node, ...(plan.axis ?? []), ...plan.objectives])) || [];
+}
+
 /**
  * The world as `nation` believes it, cut to the theatre of `plan`: its own forces true, the enemy's as its intelligence
  * holds them, everything far from the axis left out. Built on the caller's thread from the live world; the result is
@@ -81,9 +91,7 @@ export function theatreWorld(world: World, map: GameMap, catalog: Catalog, natio
   const belief = believedWorld(world, map, nation, catalog);
   const anchors = new Set<number>(plan.objectives);
   for (const id of plan.formations) if (belief.formations[id]) anchors.add(belief.formations[id].node);
-  const first = plan.formations.map((id) => belief.formations[id]).find((f) => f && f.kind === 'maneuver') ?? belief.formations[plan.formations[0]];
-  const axis = first ? routeAxis(belief, map, nation, [first.node, ...(plan.axis ?? []), ...plan.objectives]) : undefined;
-  for (const n of axis ?? []) anchors.add(n);
+  for (const n of planAxis(belief, map, plan)) anchors.add(n);
   const near = (node: NodeId) => {
     if (node >= map.landCount) return false;
     for (const a of anchors) if (map.distanceKm(node, a as NodeId) <= THEATRE_KM) return true;
@@ -186,11 +194,10 @@ export function summarizeOperation(input: OperationForecastInput, map: GameMap, 
 
   const view = input.world;
   const ages = Object.values(input.contactAgeHours);
-  const first = input.plan.formations.map((id) => view.formations[id]).find((f) => f?.kind === 'maneuver');
   return {
     runs: n,
     days: input.days,
-    axis: (first && routeAxis(view, map, input.plan.nation, [first.node, ...(input.plan.axis ?? []), ...input.plan.objectives])) || [],
+    axis: planAxis(view, map, input.plan),
     pObjectiveByDay,
     losses: spread(results.map((r) => r.losses)),
     casualties: spread(results.map((r) => r.casualties)),
@@ -198,6 +205,7 @@ export function summarizeOperation(input: OperationForecastInput, map: GameMap, 
     drivers: top,
     intelAgeHours: ages.length ? { min: Math.min(...ages), max: Math.max(...ages) } : null,
     enemyContacts: ages.length,
+    ...(input.beyondWarAims ? { beyondWarAims: input.beyondWarAims } : {}),
   };
 }
 
@@ -210,7 +218,8 @@ export function forecastInput(world: World, map: GameMap, catalog: Catalog, plan
     const c = view.contacts.get(id);
     if (c) contactAgeHours[id] = c.ageHours;
   }
-  return { world: cut, plan: structuredClone(plan), days, contactAgeHours };
+  const beyond = beyondWarAims(world, map, { nation: plan.nation, kind: plan.kind, objectives: plan.objectives, axis: planAxis(cut, map, plan) });
+  return { world: cut, plan: structuredClone(plan), days, contactAgeHours, ...(beyond ? { beyondWarAims: { node: beyond.node, why: beyond.why } } : {}) };
 }
 
 /** A forecast in this thread, serially. The UI's worker and the Node pool run the same `runOperation` per draw. */

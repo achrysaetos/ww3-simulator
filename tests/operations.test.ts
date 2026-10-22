@@ -160,3 +160,37 @@ describe('the AI general staff in baltic-2027', () => {
     expect(reserve.length).toBeGreaterThan(0);
   }, 300_000);
 });
+
+describe('operations and the war aims (south-asia-2027 opens as a punitive war)', () => {
+  it("India's staff may not plan a ground operation into Pakistan; a player may, the forecast warns, and launching makes the war total", async () => {
+    const { forecastInput } = await import('../src/forecast/operation');
+    const s = createSession('south-asia-2027', 1);
+    const { world, engine } = s;
+    const { map } = engine;
+    const IND = 'IND' as NationId;
+    engine.step(world);
+    const lahore = map.nodeAt(31.55, 74.35);
+    const brigades = Object.values(world.formations)
+      .filter((f) => f.nation === IND && f.kind === 'maneuver' && f.status === 'active')
+      .sort((a, b) => map.distanceKm(a.node, lahore) - map.distanceKm(b.node, lahore))
+      .slice(0, 2)
+      .map((f) => f.id);
+    const result = (c: Command) => {
+      world.pending.push(c);
+      return engine.step(world).find((e): e is CommandResult => e.type === 'command_result' && e.command === c.type)!;
+    };
+    const aims = () => world.slices.diplomacy.wars[0].sides.map((x) => x.aim.kind);
+    const plan: Extract<Command, { type: 'plan_operation' }> = { type: 'plan_operation', nation: IND, kind: 'offensive', objectives: [lahore], formations: brigades };
+
+    expect(result(plan)).toMatchObject({ ok: false, code: 'beyond_war_aims' });
+    expect(forecastInput(world, map, engine.catalog, plan, 2).beyondWarAims?.why).toMatch(/punitive/);
+
+    world.nations[IND].controlledBy = 'human';
+    const drafted = result({ ...plan, byPlayer: true });
+    expect(drafted).toMatchObject({ ok: true, reason: expect.stringMatching(/past the war aims/) });
+    expect(aims()).toEqual(['punitive', 'punitive']);
+
+    expect(result({ type: 'launch_operation', nation: IND, operation: drafted.operation!, byPlayer: true })).toMatchObject({ ok: true });
+    expect(aims()).toEqual(['total', 'total']);
+  }, 300_000);
+});

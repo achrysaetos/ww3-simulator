@@ -1,4 +1,5 @@
 import type { Formation, FormationId, NationId, NodeId, Operation } from '../../core/types';
+import { mayEnter } from '../diplomacy/aims';
 import { landSlice, openTo } from '../land';
 import { ACTIVE, committedFormations, routeAxis } from '../ops';
 import { aggressor, commitment, releasable } from './deploy';
@@ -327,7 +328,7 @@ interface LandPicture {
   theatres: Set<number>;
   attritional: boolean;
   pressAt: number;
-  /** Within MAX_DRIVE_CELLS of ground the coalition held at the start. */
+  /** Ground the war aims let the nation enter (diplomacy/aims.ts mayEnter), within MAX_DRIVE_CELLS of ground the coalition held at the start. */
   inReach: (t: number) => boolean;
   fit: (f: Formation) => boolean;
   friendlyPowerAt: (n: number) => number;
@@ -358,6 +359,7 @@ function landPicture(p: Plan): LandPicture | undefined {
   const origin = landSlice(p.world).origin;
   // Counted in one-degree cells: a finer Baltic, Korean or Israeli cell is a fraction of a step, so it does not shorten the reach.
   const inReach = (t: number) => {
+    if (!mayEnter(p.world, map, p.nation, t as NodeId)) return false;
     if (!origin.length) return true;
     const steps = new Map<number, number>([[t, 0]]);
     const queue = [t];

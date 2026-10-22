@@ -5,6 +5,8 @@ import {
   OPERATION_KINDS, type FormationId, type FormationKind, type NationId, type NodeId, type Operation, type OperationId,
   type OperationPhase, type RefusalCode, type World,
 } from '../../core/types';
+import { mayEnter, warAgainst, widen } from '../diplomacy/aims';
+import type { War } from '../diplomacy/types';
 import { allied } from '../land/state';
 import { RIVER_ASSAULT_COST, TERRAIN } from '../land/tables';
 import { answerCommand, type OperationCommand, type OrderOutcome } from '../orders';
@@ -104,6 +106,34 @@ function neutralObjective(world: World, op: Pick<Operation, 'nation' | 'kind' | 
   return undefined;
 }
 
+/** Where an operation's ground would carry `nation` past its war aims (diplomacy/aims.ts mayEnter): the first such cell and the war it widens. */
+export function beyondWarAims(world: World, map: GameMap, op: Pick<Operation, 'nation' | 'kind' | 'objectives' | 'axis'>): { node: NodeId; war: War; why: string } | undefined {
+  const s = world.slices.diplomacy;
+  if (op.kind === 'defence' || !s) return undefined;
+  for (const n of [...op.axis, ...op.objectives]) {
+    if (mayEnter(world, map, op.nation, n)) continue;
+    const at = warAgainst(s, op.nation, world.control[n])!;
+    const why = at.own.aim.kind === 'punitive' ? 'the war is a punitive strike campaign: no ground forces cross the line' : 'the ground lies outside what the war is being fought for';
+    return { node: n, war: at.war, why };
+  }
+  return undefined;
+}
+
+/**
+ * The war aims bind the AI's staff as they bind its orders: it may not plan an operation past them. A player sets its
+ * own aims: its plan is accepted with a warning, and launching it widens the war (orders.ts applyOrder does the same).
+ */
+function checkAims(world: World, ctx: SimContext, op: Pick<Operation, 'nation' | 'kind' | 'objectives' | 'axis'>, byPlayer: boolean, launching: boolean): Refusal | string {
+  const beyond = beyondWarAims(world, ctx.map, op);
+  if (!beyond) return '';
+  if (!byPlayer) return refuse('beyond_war_aims', beyond.why);
+  if (launching) {
+    widen(world, ctx, beyond.war, `${op.nation} launched an operation past its war aims`);
+    return '; past the war aims: the war is now total';
+  }
+  return `; past the war aims (${beyond.why}): launching it makes the war total`;
+}
+
 function hHourOf(world: World, h: unknown): number | Refusal {
   if (h === undefined) return world.tick;
   if (!Number.isInteger(h) || (h as number) < world.tick || (h as number) > world.tick + (MAX_LEAD_DAYS * 24) / world.dtHours) return refuse('invalid', 'H-hour must be a tick from now to 90 days ahead');
@@ -147,6 +177,8 @@ function apply(world: World, cmd: OperationCommand, ctx: SimContext): { outcome:
     const draft = { nation: cmd.nation, kind: cmd.kind, objectives, axis };
     const neutral = cmd.launch ? neutralObjective(world, draft) : undefined;
     if (neutral) return { outcome: neutral, accepted: '' };
+    const aims = checkAims(world, ctx, draft, !!cmd.byPlayer, !!cmd.launch);
+    if (typeof aims !== 'string') return { outcome: aims, accepted: '' };
     const name = typeof cmd.name === 'string' && cmd.name.trim() ? cmd.name.trim().slice(0, 60) : codeName(s, cmd.nation);
     if (typeof cmd.name === 'string' && cmd.name.trim()) s.planned[cmd.nation] = (s.planned[cmd.nation] ?? 0) + 1;
     const id = newId<OperationId>(world, 'op');
@@ -158,7 +190,7 @@ function apply(world: World, cmd: OperationCommand, ctx: SimContext): { outcome:
     s.byId[id] = op;
     if (cmd.launch) launch(world, s, op, hHour);
     const eta = (hHour - world.tick) * world.dtHours;
-    return { outcome: { ok: true, ...(cmd.launch ? { etaHours: eta } : {}) }, operation: id, accepted: `${name} ${cmd.launch ? 'launched' : 'planned'}: ${formations.length} formations on a ${axis.length}-cell axis` };
+    return { outcome: { ok: true, ...(cmd.launch ? { etaHours: eta } : {}) }, operation: id, accepted: `${name} ${cmd.launch ? 'launched' : 'planned'}: ${formations.length} formations on a ${axis.length}-cell axis${aims}` };
   }
 
   const op = s.byId[cmd.operation];
@@ -174,9 +206,11 @@ function apply(world: World, cmd: OperationCommand, ctx: SimContext): { outcome:
       if (isRefusal(alive)) return { outcome: alive.code === 'invalid' ? refuse('destroyed', `${op.name} has no formations left`) : alive, operation: op.id, accepted: '' };
       const neutral = neutralObjective(world, op);
       if (neutral) return { outcome: neutral, operation: op.id, accepted: '' };
+      const aims = checkAims(world, ctx, op, !!cmd.byPlayer, true);
+      if (typeof aims !== 'string') return { outcome: aims, operation: op.id, accepted: '' };
       op.formations = alive;
       launch(world, s, op, hHour);
-      return { outcome: { ok: true, etaHours: (hHour - world.tick) * world.dtHours }, operation: op.id, accepted: `${op.name} launched` };
+      return { outcome: { ok: true, etaHours: (hHour - world.tick) * world.dtHours }, operation: op.id, accepted: `${op.name} launched${aims}` };
     }
     case 'cancel_operation':
       for (const id of op.formations) {
@@ -201,6 +235,8 @@ function apply(world: World, cmd: OperationCommand, ctx: SimContext): { outcome:
         const neutral = neutralObjective(world, { ...op, objectives, axis });
         if (neutral) return { outcome: neutral, operation: op.id, accepted: '' };
       }
+      const aims = checkAims(world, ctx, { ...op, objectives, axis }, !!cmd.byPlayer, op.phase !== 'draft');
+      if (typeof aims !== 'string') return { outcome: aims, operation: op.id, accepted: '' };
       for (const id of op.formations) if (!formations.includes(id)) { delete s.base[id]; delete s.sent[id]; }
       op.objectives = objectives;
       op.axis = axis;
@@ -211,7 +247,7 @@ function apply(world: World, cmd: OperationCommand, ctx: SimContext): { outcome:
         for (const id of formations) s.base[id] ??= platforms(world.formations[id]);
         op.progress.platformsAtLaunch = formations.reduce((t, id) => t + (s.base[id] ?? 0), 0) + op.progress.relieved.reduce((t, id) => t + (s.base[id] ?? 0), 0);
       }
-      return { outcome: { ok: true }, operation: op.id, accepted: `${op.name} re-planned` };
+      return { outcome: { ok: true }, operation: op.id, accepted: `${op.name} re-planned${aims}` };
     }
   }
 }
