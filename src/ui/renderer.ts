@@ -8,6 +8,7 @@ import type { GameMap } from '../core/map';
 import type { FormationId, NodeId, SimEvent } from '../core/types';
 import type { Palette } from './colors';
 import { eventNode } from './events';
+import { contactLabel, contactRing, isStale, type ContactInfo } from './map/contacts';
 import { GlobeGL } from './map/globe';
 import { ControlMask, OverlayRaster, Rel, relations } from './map/situation';
 import type { Manifest } from './map/tiles';
@@ -38,20 +39,6 @@ export interface RenderInput {
   hoverNode: NodeId | null;
   targeting: 'order' | 'nuclear' | null;
   overlays: Overlays;
-}
-
-/** What an intel contact adds to a formation the viewer does not own (unit A1's fog of war). */
-export interface ContactInfo {
-  ageHours: number;
-  confidence: number;
-  errorKm: number;
-}
-
-/** Contacts below this confidence are drawn grey; matches the engine's STALE_CONFIDENCE. */
-export const STALE_CONFIDENCE = 0.25;
-
-export function contactOf(f: FormationView): ContactInfo | null {
-  return (f as FormationView & { contact?: ContactInfo | null }).contact ?? null;
 }
 
 interface Flash {
@@ -252,8 +239,7 @@ export class MapRenderer {
     const r = i < 0 ? Rel.None : this.rel[i];
     if (r === Rel.Own || r === Rel.Friend) return 'friend';
     if (r === Rel.Enemy) {
-      const c = f && contactOf(f);
-      return c && c.confidence < STALE_CONFIDENCE ? 'stale' : 'enemy';
+      return f?.contact && isStale(f.contact) ? 'stale' : 'enemy';
     }
     return 'neutral';
   }
@@ -567,6 +553,7 @@ export class MapRenderer {
     const order = [...this.stacks].sort((a, b) => Number(own(a)) - Number(own(b)));
     this.hits = [];
     let selectedBox: CounterBox | null = null;
+    let focusRing: { c: ContactInfo; x: number; y: number } | null = null;
     const labelled: { stack: Stack; box: CounterBox; side: Side }[] = [];
     for (const stack of order) {
       const p = this.screenOf(stack.node);
@@ -580,7 +567,11 @@ export class MapRenderer {
       const nth = atNode.get(stack.node) ?? 0;
       atNode.set(stack.node, nth + 1);
       const nodePx = 2 * this.map.halfDeg[stack.node] * ppd;
-      if (side !== 'friend') this.drawUncertainty(stack, cx, cy);
+      if (side !== 'friend') {
+        const picked = input.selected ? stack.members.find((f) => f.entry.id === input.selected && f.contact) : undefined;
+        if (picked) focusRing = { c: picked.contact!, x: cx, y: cy };
+        else if (lead.contact) this.drawUncertainty(lead.contact, cx, cy, false);
+      }
       if (nodePx >= FAN_PX && stack.nodes === 1 && stack.members.length > 1) {
         const cols = Math.max(2, Math.min(4, Math.floor(nodePx / FAN_SLOT_PX)));
         const cap = cols * cols;
@@ -620,31 +611,34 @@ export class MapRenderer {
     }
     for (const b of this.hits) placed.push([b.x, b.y, b.x + b.w, b.y + b.h]);
     for (const l of labelled) this.stackLabel(l.stack, l.box, l.side, placed);
+    if (focusRing) this.drawUncertainty(focusRing.c, focusRing.x, focusRing.y, true);
     if (selectedBox) this.drawSelection(selectedBox);
     return placed;
   }
 
-  /** Where an enemy contact probably is now: a dashed ring of its error radius, and its age once it is not fresh. */
-  private drawUncertainty(stack: Stack, x: number, y: number) {
-    const c = contactOf(stack.members[0]);
-    if (!c) return;
-    const r = c.errorKm / this.kmPerPx, ctx = this.ctx;
-    const stale = c.confidence < STALE_CONFIDENCE;
-    if (r >= 14) {
+  /**
+   * Where a foreign contact probably is now (map/contacts.ts): a dashed ring of its error radius at
+   * the last fix, and its age. The selected contact always shows both, with its error in km.
+   */
+  private drawUncertainty(c: ContactInfo, x: number, y: number, focused: boolean) {
+    const ctx = this.ctx;
+    const ring = contactRing(c, this.kmPerPx, focused);
+    if (ring) {
       ctx.beginPath();
-      ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.fillStyle = stale ? 'rgba(143,166,192,0.05)' : 'rgba(255,77,79,0.06)';
+      ctx.arc(x, y, ring.radiusPx, 0, Math.PI * 2);
+      ctx.fillStyle = ring.fill;
       ctx.fill();
-      ctx.setLineDash([3, 4]);
-      ctx.strokeStyle = stale ? 'rgba(143,166,192,0.45)' : 'rgba(255,107,94,0.5)';
-      ctx.lineWidth = 1;
+      ctx.setLineDash(ring.dash);
+      ctx.strokeStyle = ring.stroke;
+      ctx.lineWidth = ring.width;
       ctx.stroke();
       ctx.setLineDash([]);
     }
-    if (c.ageHours >= 2 && this.band !== 'world') {
-      const age = c.ageHours < 48 ? `${Math.round(c.ageHours)}h old` : `${Math.round(c.ageHours / 24)}d old`;
-      const l = this.label(age, '500 10px "IBM Plex Mono", ui-monospace, monospace', stale ? '#8fa6c0' : '#ff9a9b', 0);
-      const lx = x + 14, ly = y + 2;
+    const text = contactLabel(c, focused);
+    if (text && (focused || this.band !== 'world')) {
+      const l = this.label(text, '500 10px "IBM Plex Mono", ui-monospace, monospace', isStale(c) ? '#8fa6c0' : '#ff9a9b', 0);
+      // The selected contact's label sits under its ring, clear of the counters at the fix.
+      const lx = focused && ring ? x - l.w / 2 : x + 14, ly = focused && ring ? y + ring.radiusPx + 4 : y + 2;
       ctx.fillStyle = 'rgba(8,13,22,0.8)';
       ctx.fillRect(lx, ly, l.w, l.h - 2);
       this.blit(l, lx, ly - 1);

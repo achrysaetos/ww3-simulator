@@ -9,6 +9,7 @@ import { EventLog } from './EventLog';
 import { FormationList, FormationPanel, GROUND_KINDS, postureLabel, type Command as CommandHolder } from './FormationPanel';
 import { MapView } from './MapView';
 import { TopBar, type TopBarStat } from './map/TopBar';
+import { ContactPanel } from './map/ContactPanel';
 import { DOMAIN_LABEL, NationPanel } from './NationPanel';
 import { NuclearDialog } from './NuclearDialog';
 import { Routes } from './routes';
@@ -375,7 +376,7 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
       {drawer && (
         <aside className="ww-drawer ww-glass" aria-label={DRAWER_TITLE[drawer]} data-testid={`drawer-panel-${drawer}`}>
           <header className="ww-drawer-head">
-            <span className="ww-title">{drawer === 'forces' && selectedView ? 'Unit' : DRAWER_TITLE[drawer]}</span>
+            <span className="ww-title">{drawer === 'forces' && selectedView ? (selectedView.contact ? 'Intel contact' : 'Unit') : DRAWER_TITLE[drawer]}</span>
             <button type="button" className="ww-dock-btn" onClick={() => setDrawer(null)} aria-label="Close drawer, Esc">Esc</button>
           </header>
           <div className="ww-drawer-body">
@@ -383,7 +384,16 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
               <NationPanel client={client} palette={palette} playAs={playAs} objectives={objectives} onCommand={sendCommand} onNuclear={() => { setPending(null); setNuclearPick(true); }} />
             )}
             {drawer === 'log' && <EventLog client={client} playAs={playAs} logVersion={client.feed.version} onFocus={focusNode} />}
-            {drawer === 'forces' && (selected && selectedView ? (
+            {drawer === 'forces' && (selected && selectedView?.contact && client.state.focusContact?.id === selected ? (
+              <ContactPanel
+                contact={client.state.focusContact}
+                nationName={client.state.nations.get(client.state.focusContact.nation)?.name ?? client.state.focusContact.nation}
+                palette={palette}
+                places={places}
+                onFocus={focusNode}
+                onClose={() => selectFormation(null)}
+              />
+            ) : selected && selectedView ? (
               <FormationPanel
                 client={client}
                 palette={palette}
