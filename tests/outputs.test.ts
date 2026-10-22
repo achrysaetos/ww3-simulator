@@ -163,6 +163,19 @@ describe('outputs of ukraine-2026', () => {
     expect(killed.p50).toBe(d45.nations[UKR].humanitarian.civiliansKilled);
     expect(killed.p10).toBeLessThan(killed.p90);
   });
+
+  it('reports who leads the race to produce and the race to adapt, and each cut-off\'s workaround coverage', () => {
+    const rows = outputRows(d45, [RUS, UKR]);
+    const key = (k: string) => rows.find((r) => r.key === k)?.value;
+    // Russia out-builds Ukraine several times over in shells, missiles and drones (RUSI, ISW 2024-25).
+    expect(key('RUS production_edge')).toBeGreaterThan(0.3);
+    expect(key('UKR production_edge')).toBeLessThan(-0.3);
+    // With one enemy, one side's adaptation edge is the other's loss.
+    expect(key('RUS adaptation_edge')).toBeCloseTo(-key('UKR adaptation_edge')!, 9);
+    // The 2024 Western sanctions open mature: 80% of the cut supply made good (Bank of Russia BoP).
+    expect(key('RUS coverage_USA')).toBeCloseTo(0.8, 6);
+    expect(d45.nations[RUS].ladder.find((c) => c.cutoff === 'USA')?.kind).toBe('sanctions');
+  });
 });
 
 describe('reading outputs leaves the run alone', () => {

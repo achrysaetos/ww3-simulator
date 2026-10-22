@@ -8,7 +8,7 @@ A run reports three things beside the front line. These are the humanitarian tol
 
 ```ts
 Outputs { tick, day, nations: Record<NationId, NationOutputs>, hosts: { nation, refugees }[] }
-NationOutputs { humanitarian: Humanitarian, race: ItemRace[], workarounds: Workaround[] }
+NationOutputs { humanitarian: Humanitarian, race: ItemRace[], workarounds: Workaround[], edges: Edges, ladder: CutoffCoverage[] }
 ```
 
 - `OutputsRecorder.observe(world)` takes a sample (`sampleOutputs`) at most once a game day. `outputs(world, map)` turns the samples into the record.
@@ -55,7 +55,24 @@ Each workaround reads the economy model and is graded `holding`, `strained` or `
 | `shadow_fleet` | a sanctioned energy exporter | export capacity left after blockade, war damage and strikes on export sites | KSE Institute: ~70% of Russian seaborne crude moved on shadow-fleet tankers in 2024 |
 | `foreign_arms` | a recipient of an arms pipeline (`AID_FLOWS`) | deliveries over the last month against the planned rate | `src/data/industry/aid.ts` |
 
-The economy reroutes sanctioned oil in full. Only blockade and damage cut it, so `shadow_fleet` holds until a navy or a strike campaign acts.
+`shadow_fleet` reads only the exporter's side: blockade, war damage and strikes on export sites. What a cut-off buyer gets back is the workaround ladder below.
+
+### Edges
+
+`edges` says who leads two races, separately, because a side can win one and lose the other (issue #2, section 3). Each runs from -1 through 0 (even) to 1.
+
+- `adaptation` is the mean log effect of the nation's measures against its enemies' counters, less theirs against it, across the duels of `src/systems/adaptation`, squashed by `tanh`. It is 0 at the calibrated opening. With one enemy, the two sides' values are equal and opposite.
+- `production` is the catalog value its production lines delivered over the trailing month against its current enemies' together: (own − theirs) / (own + theirs).
+
+### The workaround ladder
+
+`ladder` has one `CutoffCoverage` row per cut-off the nation is climbing out of: a partner that sanctions it or fights it, or `sea` for a blockade of its own ports. `coverage` is the share of the supply lost to the cut-off that the ladder makes good so far, for a traded commodity, and `rungs` splits it into `reroute`, `ration`, `neutral`, `overland` and `substitute`. `months` is how long the nation has been climbing. Cut-offs the 2024 baseline already carries (the Western sanctions on Russia, Belarus and Iran; the Russia-Ukraine war) start mature, at 80% made good. The ladder itself is described in [adaptation.md](adaptation.md).
+
+### Rows
+
+`outputRows` adds `adaptation_edge` and `production_edge` per nation, and `coverage_<cutoff>` per cut-off (`RUS coverage_USA`, `TWN coverage_sea`).
+
+The ally-and-enemy view in `src/ui/outputs/view.ts` predates these fields. `production_edge` reads the enemy's delivered output, which a real staff knows only as an assessment, and an enemy's `ladder` is its own economy. A fogged view should show the enemy's edges and ladder as assessed values or leave them out.
 
 ## In the game
 

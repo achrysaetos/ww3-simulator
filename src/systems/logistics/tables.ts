@@ -1,3 +1,4 @@
+import { defineParam } from '../../core/params';
 import type { FormationKind, PlatformClass, Terrain } from '../../core/types';
 
 /**
@@ -292,7 +293,38 @@ export const REGENERATED_CLASSES: ReadonlySet<PlatformClass> = new Set(['infantr
  * 2022 (e.g. 1st Guards Tank Army, 4th Guards Tank Division) within about 3-6 months
  * (ISW, RUSI 2023); Ukraine withdraws brigades for 2-3 months of restoration. Estimate.
  */
-export const RECONSTITUTE_DAYS = 90;
+const LAND_RECONSTITUTE_DAYS = 90;
+/**
+ * Days a destroyed air wing takes to work up again once airframes are in hand: most aircrew survive
+ * the loss of their aircraft (ejection and losses on the ground), and conversion and squadron
+ * training on new airframes take one to a few months. Judgment.
+ */
+export const RECONSTITUTE_AIR_DAYS = defineParam({ id: 'logistics.RECONSTITUTE_AIR_DAYS', value: 60, range: [30, 120], tag: 'judgment',
+  source: 'Judgment: surviving aircrew convert and work up a squadron on new airframes in 1-4 months',
+  affects: 'how soon a destroyed air wing returns once its aircraft are built' });
+/**
+ * Days a lost ship's or submarine's new crew takes to work up a new hull once it is in hand: the US
+ * Navy's basic phase of the Optimized Fleet Response Plan runs about six months (OPNAVINST 3000.15A);
+ * a wartime navy cuts it short. Judgment.
+ */
+export const RECONSTITUTE_NAVAL_DAYS = defineParam({ id: 'logistics.RECONSTITUTE_NAVAL_DAYS', value: 120, range: [60, 240], tag: 'judgment',
+  source: 'Judgment, below the ~6-month OFRP basic phase (OPNAVINST 3000.15A) for a wartime crew',
+  affects: 'how soon a sunk ship returns once its hull is built' });
+/**
+ * Days after its destruction a formation can be re-formed, by kind; a kind not listed is never re-formed.
+ * Every platform but rifle squads and trucks comes from the national stockpile, which for ships and
+ * aircraft only production lines fill (none are warehoused at the start), so a sunk ship or destroyed
+ * air wing returns only once its yard or factory has built the replacement.
+ */
+export const RECONSTITUTE_DAYS: Readonly<Partial<Record<FormationKind, () => number>>> = {
+  maneuver: () => LAND_RECONSTITUTE_DAYS,
+  artillery: () => LAND_RECONSTITUTE_DAYS,
+  air_defense: () => LAND_RECONSTITUTE_DAYS,
+  missile: () => LAND_RECONSTITUTE_DAYS,
+  air_wing: RECONSTITUTE_AIR_DAYS,
+  surface_group: RECONSTITUTE_NAVAL_DAYS,
+  submarine: RECONSTITUTE_NAVAL_DAYS,
+};
 /** A re-formed formation must field at least this share of its establishment platforms. */
 export const RECONSTITUTE_MIN_STRENGTH = 0.5;
 /**
@@ -313,5 +345,5 @@ export const RAISE_TRAINING_DAYS = 90;
 export const RESERVE_BUFFER_SHARE = 0.1;
 /** Smallest establishment counted as a brigade to copy when raising one; smaller entries are battalions or cadres. */
 export const MIN_BRIGADE_PERSONNEL = 2_000;
-/** Kinds that are re-formed after destruction. Lost ships and air wings are not rebuilt this way. */
-export const RECONSTITUTED_KINDS: ReadonlySet<FormationKind> = new Set(['maneuver', 'artillery', 'air_defense', 'missile']);
+/** Land kinds a nation raises new formations of from reserves (raise_formation), modelled on one it fields. */
+export const RAISED_KINDS: ReadonlySet<FormationKind> = new Set(['maneuver', 'artillery', 'air_defense', 'missile']);

@@ -1,5 +1,5 @@
 import type { Catalog } from '../core/catalog';
-import type { ItemId, Munition, MunitionKind, NationId, PlatformId, World } from '../core/types';
+import type { ItemId, Munition, MunitionId, MunitionKind, NationId, PlatformId, World } from '../core/types';
 import { AID_FLOWS, ITEMS, itemSpec } from '../data/industry';
 import { aidKey } from '../systems/economy';
 import type { RaceItem } from './types';
@@ -17,6 +17,8 @@ export interface NationSample {
   /** Units of every kind received through standing arms pipelines (AID_FLOWS). */
   aidReceived: number;
   shellsFired: number;
+  /** Catalog value of everything its production lines have delivered, USD M. */
+  producedUsdM: number;
 }
 
 export interface OutputSample {
@@ -65,7 +67,7 @@ export function involved(world: World): NationId[] {
 /** Reads the counters of `nations` from the World. Pure. */
 export function sampleOutputs(world: World, catalog: Catalog, nations: readonly NationId[] = involved(world)): OutputSample {
   const out: Record<NationId, NationSample> = {};
-  for (const id of nations) out[id] = { stock: { ammo: world.nations[id].bulk.ammo }, produced: {}, aid: {}, aidReceived: 0, shellsFired: world.slices.land?.shellsFired[id] ?? 0 };
+  for (const id of nations) out[id] = { stock: { ammo: world.nations[id].bulk.ammo }, produced: {}, aid: {}, aidReceived: 0, shellsFired: world.slices.land?.shellsFired[id] ?? 0, producedUsdM: 0 };
   const launchable = new Map<NationId, Set<string>>();
   for (const f of Object.values(world.formations)) {
     const s = out[f.nation];
@@ -84,7 +86,10 @@ export function sampleOutputs(world: World, catalog: Catalog, nations: readonly 
       const g = can?.has(m) ? groupOf(catalog.munitions.get(m as Munition['id'])) : undefined;
       if (g) s.stock[g] = (s.stock[g] ?? 0) + k;
     }
-    for (const [item, k] of Object.entries(world.slices.economy?.nations[id]?.delivered ?? {})) credit(catalog, item as ItemId, k, s.produced);
+    for (const [item, k] of Object.entries(world.slices.economy?.nations[id]?.delivered ?? {})) {
+      credit(catalog, item as ItemId, k, s.produced);
+      s.producedUsdM += k * ((catalog.platforms.get(item as PlatformId) ?? catalog.munitions.get(item as MunitionId))?.unitCostUsdM ?? 0);
+    }
   }
   for (const f of AID_FLOWS) {
     const k = world.slices.economy?.aid[aidKey(f)]?.delivered ?? 0;

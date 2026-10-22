@@ -1,5 +1,6 @@
 import type { ItemId, Nation, NationId } from '../../core/types';
 import { DEFAULT_DRAFT_LAW, DRAFT_LAWS } from '../../data/nations/conscription';
+import type { Cut } from './ladder';
 import { CATEGORIES, GENERIC_AMMO_SURGE_MULTIPLE, GENERIC_AMMO_TONS_PER_MFG_USD_B, ITEMS, LINES, OIL_STOCK_MONTHS, RESOURCES, RESOURCE_SPECS, type Resource, type Stock } from '../../data/industry';
 
 export interface LineState {
@@ -37,6 +38,8 @@ export interface NationEconomy {
   baseIntegrity: number;
   /** Share of foreign trade lost to blockade, sanctions, and war, 0..1. */
   tradeLoss: number;
+  /** The cut-offs it is climbing the workaround ladder out of, keyed by partner nation or SEA (src/systems/economy/ladder.ts). */
+  cuts: Record<string, Cut>;
   /** Output relative to the baseline GDP in stats. */
   gdpIndex: number;
   /** Annualised government deficit from war spending, share of current GDP. */
@@ -83,6 +86,11 @@ export interface EconomyState {
   energyPrice: number;
   /** Share of world energy exports lost to blockade and war damage this tick, 0..1; sets energyPrice. */
   energyExportsLost: number;
+  /**
+   * The shared pool of spare neutral supply this tick, USD B a year: what neutral exporters can offer
+   * cut-off nations, and what those nations' neutral rungs ask of it. Asks beyond the offer are cut pro rata.
+   */
+  neutralPool: { offerUsdB: number; askUsdB: number };
 }
 
 declare module '../../core/types' {
@@ -147,6 +155,7 @@ export function newNationEconomy(nation: Nation): NationEconomy {
     integrity: 1,
     baseIntegrity: 1,
     tradeLoss: 0,
+    cuts: {},
     gdpIndex: 1,
     deficitPctGdp: 0,
     inTraining: 0,

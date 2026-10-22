@@ -43,6 +43,9 @@ export function outputRows(o: Outputs, nations: readonly NationId[]): OutputRow[
       row(`${r.item}_zero_day`, `${r.item} run out on day`, 'day', r.ranOutDay ?? r.zeroDay ?? Infinity);
     }
     for (const w of n.workarounds) row(`workaround_${w.id}`, WORKAROUND_LABEL[w.id], 'share', w.level);
+    row('adaptation_edge', 'adaptation edge over its enemies', 'edge', n.edges.adaptation);
+    row('production_edge', 'production edge over its enemies', 'edge', n.edges.production);
+    for (const c of n.ladder) row(`coverage_${c.cutoff}`, c.cutoff === 'sea' ? 'blockaded supply made good' : `supply lost to ${c.cutoff} made good`, 'share', c.coverage);
   }
   return rows;
 }

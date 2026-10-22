@@ -15,6 +15,7 @@ import { nodeDistance, type AirGroup, type AirPicture } from './picture';
 import { visibility } from './combat';
 import { emitBattle, hasSupport } from './superiority';
 import { spaceSupport } from '../strategic/space';
+import { measureEffect } from '../adaptation';
 import { jammedHits } from '../c2';
 import { strikeChokepoint } from '../logistics/chokepoints';
 import { conditionsAt, pgmFactor } from '../weather/effects';
@@ -689,7 +690,7 @@ function applyEffect(world: World, ctx: SimContext, pic: AirPicture, slice: AirS
   }
   const pool = victims(ctx, pic, target, attacker, tc, aimed);
   let left = pool.reduce((s, v) => s + v.f.equipment[v.pid], 0);
-  if (tc === 'aircraft') p *= Math.min(1, left / TUNING.packedRampAircraft);
+  if (tc === 'aircraft') p *= Math.min(1, left / TUNING.packedRampAircraft) * measureEffect(world, 'base_dispersal', attacker, world.control[target] || undefined);
   if (MOBILE_TARGETS.has(tc) && left) p *= pool.reduce((s, v) => s + v.f.equipment[v.pid] * v.seen, 0) / left;
   const kills = ctx.rng.binomial(hits, p);
   const picked = new Map<Victim, number>();

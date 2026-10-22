@@ -11,7 +11,7 @@ import type { NetworkSearch } from './network';
 import { refreshNetworks, searchesOf, snapshotInputs, type NetworkState } from './refresh';
 import {
   FOOD_TONS_PER_PERSON_DAY, BEACH_CAPACITY, CAPTURED_INFRASTRUCTURE, CAPTURED_REPAIR_SHARE, FRONT_REPAIR_SHARE, INFRA_REPAIR_PER_DAY, LIFT_TONS_PER_TROOP, LIFT_TONS_PER_VEHICLE, MAX_REFILL_FRACTION_PER_DAY, NODE_TONS_PER_DAY,
-  MIN_BRIGADE_PERSONNEL, PEACETIME_READINESS_HOURS_PER_DAY, RAISE_EVERY_DAYS, RAISE_TRAINING_DAYS, READINESS_HOURS_PER_DAY, REARM_PER_DAY, REARMS_IN_PORT_ONLY, RESERVE_BUFFER_SHARE, SEALIFT_CLASSES, RECONSTITUTE_DAYS, RECONSTITUTE_MIN_STRENGTH, RECONSTITUTED_KINDS, REGENERATED_CLASSES,
+  MIN_BRIGADE_PERSONNEL, PEACETIME_READINESS_HOURS_PER_DAY, RAISE_EVERY_DAYS, RAISE_TRAINING_DAYS, READINESS_HOURS_PER_DAY, REARM_PER_DAY, REARMS_IN_PORT_ONLY, RESERVE_BUFFER_SHARE, SEALIFT_CLASSES, RAISED_KINDS, RECONSTITUTE_DAYS, RECONSTITUTE_MIN_STRENGTH, REGENERATED_CLASSES,
   REPAIR_FRACTION_PER_DAY, REPLACE_FRACTION_PER_DAY, RESERVE_REPLACE_MULTIPLIER, SUPPLY_CLASSES, type SupplyClass,
 } from './tables';
 
@@ -114,7 +114,7 @@ function activeFormations(world: World, ctx: SimContext, s: LogisticsState): For
   for (const id in world.formations) {
     const f = world.formations[id as FormationId];
     if (f.status === 'destroyed') {
-      if (RECONSTITUTED_KINDS.has(f.kind) && s.establishment[f.id]) s.fallen[f.id] ??= world.tick;
+      if (RECONSTITUTE_DAYS[f.kind] && s.establishment[f.id]) s.fallen[f.id] ??= world.tick;
       else delete s.establishment[f.id];
       continue;
     }
@@ -349,23 +349,24 @@ function fullLoad(f: Formation, upkeep: Upkeep, out: FullLoad): void {
 }
 
 /**
- * Re-forms land formations destroyed at least RECONSTITUTE_DAYS ago at their home
+ * Re-forms formations destroyed at least RECONSTITUTE_DAYS of their kind ago at their home
  * garrison, or the capital if that is lost: full manpower from reserves, equipment
  * from the stockpile, green and with empty stocks for logistics to fill. A formation
  * waits while reserves cannot man it or the stockpile cannot field half its platforms.
+ * Ships re-form only in their home port, never at an inland capital.
  */
 function reconstitute(world: World, ctx: SimContext, s: LogisticsState): void {
-  const due = world.tick - (RECONSTITUTE_DAYS * 24) / world.dtHours;
   for (const key in s.fallen) {
     const id = key as FormationId;
-    if (s.fallen[id] > due) continue;
     const f = world.formations[id], est = s.establishment[id], nation = world.nations[f.nation];
+    if (world.tick - s.fallen[id] < (RECONSTITUTE_DAYS[f.kind]!() * 24) / world.dtHours) continue;
     if (nation.status === 'capitulated' || nation.status === 'collapsed') {
       delete s.fallen[id];
       delete s.establishment[id];
       continue;
     }
-    const node = world.control[f.home] === f.nation ? f.home : world.control[nation.capital] === f.nation ? nation.capital : undefined;
+    const homeHeld = f.home >= ctx.map.landCount || world.control[f.home] === f.nation;
+    const node = homeHeld ? f.home : NAVAL_KINDS.has(f.kind) ? undefined : world.control[nation.capital] === f.nation ? nation.capital : undefined;
     if (node === undefined || nation.reserves < est.personnel) continue;
     const equipment = equipFromStock(ctx, nation, est, true);
     if (!equipment) continue;
@@ -471,7 +472,7 @@ export function raiseFormation(world: World, ctx: SimContext, nationId: NationId
 
 function templateOf(s: LogisticsState, f: Formation | undefined, nation: NationId): { f: Formation; est: Establishment } | undefined {
   const est = f && s.establishment[f.id];
-  return f && est && f.nation === nation && RECONSTITUTED_KINDS.has(f.kind) ? { f, est } : undefined;
+  return f && est && f.nation === nation && RAISED_KINDS.has(f.kind) ? { f, est } : undefined;
 }
 
 function lightestBrigade(world: World, s: LogisticsState, nation: NationId): { f: Formation; est: Establishment } | undefined {
