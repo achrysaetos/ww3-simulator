@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 import type { NationId, NodeId } from '../src/core/types';
 import { loadMap } from '../src/data/load';
 import { humanizeMessage, PlaceNamer, type Namer } from '../src/ui/events';
-import { nationCards } from '../src/ui/snapshot';
+import { EventFeed } from '../src/ui/feed';
+import { SimHost } from '../src/ui/host';
+import { nationCards, type FromWorker } from '../src/ui/snapshot';
+import { headlines } from '../src/ui/staff/ticker';
 
 const map = loadMap();
 
@@ -28,4 +31,35 @@ describe('player-facing text', () => {
     expect(places.at(map.nodeAt(26, 125))).toBe('300 km E of Keelung');
     for (let n = 0; n < map.size; n++) expect(places.name(n as NodeId), `node ${n}`).not.toMatch(/sea zone/);
   });
+});
+
+describe('a resumed game keeps its news', () => {
+  it('sends the notable events from before the save with the first snapshot, so the log and ticker are not empty', () => {
+    const posts: FromWorker[] = [];
+    const host = new SimHost((m) => posts.push(m));
+    host.handle({ type: 'start', scenario: 'ukraine-2026', nation: 'UKR' as NationId, seed: 1 });
+    for (let i = 0; i < 16; i++) {
+      host.handle({ type: 'ack' });
+      host.handle({ type: 'step' });
+    }
+    host.handle({ type: 'save' });
+    const saved = posts.find((m) => m.type === 'saved');
+    if (saved?.type !== 'saved') throw new Error('no save');
+    host.handle({ type: 'quit' });
+
+    const after: FromWorker[] = [];
+    const resumed = new SimHost((m) => after.push(m));
+    resumed.handle({ type: 'load', text: saved.text });
+    const ready = after.find((m) => m.type === 'ready');
+    if (ready?.type !== 'ready') throw new Error('no ready');
+    expect(ready.snapshot.events).toEqual([]);
+    const history = ready.snapshot.history ?? [];
+    expect(history.length).toBeGreaterThan(10);
+    expect(history.some((e) => e.type === 'war_declared')).toBe(true);
+    const n: Namer = { nation: (id) => id, formation: () => undefined, item: (id) => id, known: () => undefined, place: new PlaceNamer(map) };
+    const feed = new EventFeed();
+    feed.record(history, n);
+    expect(headlines(feed, map).length).toBeGreaterThan(0);
+    resumed.handle({ type: 'quit' });
+  }, 300_000);
 });
