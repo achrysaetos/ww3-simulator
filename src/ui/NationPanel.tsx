@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { COMMAND_DOMAINS, type Command, type CommandDomain, type ItemId, type NationId } from '../core/types';
+import type { Command, CommandDomain, ItemId, NationId } from '../core/types';
 import type { SimClient } from './client';
 import type { Palette } from './colors';
 import type { EconomyView, HomeFrontView, NuclearAlertView, MunitionGroup, NationDetail, WarEntry, WarView } from './snapshot';
@@ -180,7 +180,7 @@ export function NationPanel({ client, palette, playAs, objectives, onCommand, on
       </Section>
 
       <Section title="Command authority">
-        {d && <Delegation d={d} onCommand={onCommand} />}
+        {d && <HeldByHand d={d} />}
         <label className="field">
           <span>Mobilization {mobTarget !== null && Math.abs(mobTarget - n.mobilization) > 0.01 ? `· now ${Math.round(n.mobilization * 100)}%, rising to ${Math.round(mobTarget * 100)}%` : `· now ${Math.round(n.mobilization * 100)}%`}</span>
           <div className="row">
@@ -253,41 +253,10 @@ function HomeFront({ h }: { h: HomeFrontView }) {
   );
 }
 
-function Delegation({ d, onCommand }: { d: NationDetail; onCommand: Props['onCommand'] }) {
-  // A change takes effect on the next tick; show it at once and drop the draft when the World agrees.
-  const [draft, setDraft] = useState<Partial<Record<CommandDomain, boolean>>>({});
-  const live = d.authority.ai;
-  const settled = COMMAND_DOMAINS.filter((k) => draft[k] !== undefined && draft[k] === live[k]);
-  if (settled.length) setDraft((x) => Object.fromEntries(Object.entries(x).filter(([k]) => !settled.includes(k as CommandDomain))));
-  const ai = Object.fromEntries(COMMAND_DOMAINS.map((k) => [k, draft[k] ?? live[k]])) as Record<CommandDomain, boolean>;
-  const all = COMMAND_DOMAINS.every((k) => ai[k]);
-  const none = COMMAND_DOMAINS.every((k) => !ai[k]);
-  const set = (domain: CommandDomain, on: boolean) => {
-    setDraft((x) => ({ ...x, [domain]: on }));
-    onCommand({ type: 'delegate', nation: d.id, domain, ai: on }, `${DOMAIN_LABEL[domain].name}: ${on ? 'delegated to the AI' : 'under your command'}`);
-  };
-  const setAll = (on: boolean) => COMMAND_DOMAINS.forEach((k) => {
-    if (ai[k] === on) return;
-    setDraft((x) => ({ ...x, [k]: on }));
-    onCommand({ type: 'delegate', nation: d.id, domain: k, ai: on }, on ? 'Everything delegated to the AI' : 'You command everything yourself');
-  });
-  return (
-    <div className="delegation" data-testid="delegation">
-      <div className="field-label">AI delegate <span className="muted">commands what you hand it, except formations you have ordered</span></div>
-      {COMMAND_DOMAINS.map((k) => (
-        <label key={k} className="chk deleg" title={`The AI decides ${DOMAIN_LABEL[k].what}`}>
-          <input type="checkbox" checked={ai[k]} onChange={(e) => set(k, e.target.checked)} data-testid={`delegate-${k}`} />
-          <span>{DOMAIN_LABEL[k].name}</span>
-          <span className={`deleg-who ${ai[k] ? 'ai' : 'you'}`}>{ai[k] ? 'AI' : 'You'}{draft[k] !== undefined ? ' · next tick' : ''}</span>
-        </label>
-      ))}
-      <div className="row gap">
-        <button disabled={all} onClick={() => setAll(true)} data-testid="delegate-all">Delegate all</button>
-        <button disabled={none} onClick={() => setAll(false)} data-testid="delegate-none">Command all myself</button>
-      </div>
-      {d.authority.held.length > 0 && <p className="muted small">{d.authority.held.length} formations under your personal command.</p>}
-    </div>
-  );
+/** Who runs which domain is set on the staff panel; the drawer only says what the player holds by hand. */
+function HeldByHand({ d }: { d: NationDetail }) {
+  if (!d.authority.held.length) return null;
+  return <p className="muted small" data-testid="held-by-hand">{d.authority.held.length} formations under your personal command. Your staff panel sets which domains the AI runs.</p>;
 }
 
 function NuclearAlert({ alert, nation, tick, dtHours, onCommand }: { alert: NuclearAlertView; nation: NationId; tick: number; dtHours: number; onCommand: Props['onCommand'] }) {
