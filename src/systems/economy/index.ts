@@ -379,7 +379,7 @@ function energyExportsLost(world: World, s: Scan): number {
 /** World energy price relative to normal: lost export capacity through a short-run elasticity. */
 const energyPrice = (lost: number) => Math.min(MAX_ENERGY_PRICE, Math.pow(Math.max(1e-3, 1 - lost), -1 / ENERGY_PRICE_ELASTICITY()));
 
-const flowOf = (r: Resource): FlowKind => (RESOURCE_SPECS[r].exportControlled ? 'controlled' : 'commodity');
+const flowOf = (r: Resource): FlowKind => (RESOURCE_SPECS[r].exportControlled ? 'controlled' : RESOURCE_SPECS[r].rationing ? 'rationed' : 'commodity');
 
 /** Share of the flow `buyer` lost to its cut-off `key` (a partner, or SEA) that its workaround ladder has won back, 0..1. */
 function ladderCover(world: World, s: Scan, buyer: NationId, key: string, flow: FlowKind): number {
@@ -453,7 +453,7 @@ function drawOil(world: World, s: Scan, n: Nation, e: NationEconomy, need: numbe
   const imported = clamp01(OIL_IMPORT_SHARE[n.id] ?? 1 - selfShare(n, 'energy'));
   const open = !s.cut.has(n.id) && !Object.hasOwn(RESOURCE_SPECS.energy.market, n.id);
   const { num, den } = open ? s.openMarket.get('energy')! : importFlow(world, s, n.id, 'energy');
-  const blocked = (world.theater.tradeBlocked[n.id] ?? 0) * (OIL_SEABORNE_SHARE[n.id] ?? DEFAULT_OIL_SEABORNE_SHARE) * (1 - ladderCover(world, s, n.id, SEA, 'commodity'));
+  const blocked = (world.theater.tradeBlocked[n.id] ?? 0) * (OIL_SEABORNE_SHARE[n.id] ?? DEFAULT_OIL_SEABORNE_SHARE) * (1 - ladderCover(world, s, n.id, SEA, flowOf('energy')));
   const raw = 1 - imported + imported * (den > 0 ? num / den : 1) * (1 - blocked);
   const oil = (e.oil ??= { months: oilStockMonths(n.id), supply: 1 });
   const shortfall = need - raw;
@@ -506,7 +506,7 @@ function climbLadders(world: World, s: Scan, dtMonths: number): EconomyState['ne
     const gdpOthers = s.worldGdp - (n.stats.gdp ?? 0);
     for (const [key, cut] of Object.entries(e.cuts)) {
       const lost = key === SEA ? sea : (world.nations[key as NationId]?.stats.gdp ?? 0) / gdpOthers;
-      ask += neutralAsk(cut) * lost * importsUsdB(n);
+      ask += neutralAsk(cut, hasLandBorder(s.map, id)) * lost * importsUsdB(n);
     }
   }
   return { offerUsdB: offer * neutralSpare(), askUsdB: ask };

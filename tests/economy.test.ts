@@ -130,8 +130,6 @@ describe('economy: industrial damage', () => {
 describe('economy: blockade', () => {
   it('starves import-dependent Japan of energy in steps as LNG, coal and then oil stocks run out, but barely touches the US', () => {
     const t = dailyWorld();
-    // The stocks alone, with no workaround trade: tests/ladder.test.ts covers what the ladder wins back.
-    t.world.params = { 'economy.ladder.rationBlockade': 0, 'economy.ladder.neutralBlockade': 0, 'economy.ladder.substituteBlockade': 0, 'economy.ladder.overlandBlockade': 0 };
     t.world.theater.tradeBlocked[JPN] = 0.8;
     t.world.theater.tradeBlocked[USA] = 0.8;
     // Stocks cover the first week; rationing trims non-priority use as LNG runs down.
