@@ -6,7 +6,7 @@ import {
   type OperationPhase, type RefusalCode, type World,
 } from '../../core/types';
 import { allied } from '../land/state';
-import { TERRAIN } from '../land/tables';
+import { RIVER_ASSAULT_COST, TERRAIN } from '../land/tables';
 import { answerCommand, type OperationCommand, type OrderOutcome } from '../orders';
 import { executeOperation } from './execute';
 import { ACTIVE, committedFormations, endOperation, holds, opsSlice, platforms, type OpsState } from './state';
@@ -31,11 +31,13 @@ const CODE_NAMES = [
 ] as const;
 
 /**
- * The staff's route through `stops` over land, cheapest by terrain, trimmed to start at the line of departure: the last
+ * The staff's route through `stops` over land, cheapest by terrain and river crossings (and by `resistance`, the believed defence of a cell
+ * in units of the attacker's formations, when the staff weighs it), trimmed to start at the line of departure: the last
  * friendly cell before the first one held by someone else. Undefined when no land route joins them.
  */
-export function routeAxis(world: World, map: GameMap, nation: NationId, stops: readonly NodeId[]): NodeId[] | undefined {
-  const cost = (_a: NodeId, b: NodeId, km: number) => (b < map.landCount ? km * TERRAIN[map.terrain[b]].moveCost : Infinity);
+export function routeAxis(world: World, map: GameMap, nation: NationId, stops: readonly NodeId[], resistance?: (n: NodeId) => number): NodeId[] | undefined {
+  const cost = (a: NodeId, b: NodeId, km: number) =>
+    b < map.landCount ? km * TERRAIN[map.terrain[b]].moveCost * (map.riverBetween(a, b) ? RIVER_ASSAULT_COST() : 1) * (resistance ? 1 + resistance(b) : 1) : Infinity;
   const route: NodeId[] = [stops[0]];
   for (let i = 1; i < stops.length; i++) {
     if (stops[i] === route[route.length - 1]) continue;

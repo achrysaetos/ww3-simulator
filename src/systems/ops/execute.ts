@@ -1,6 +1,6 @@
 import type { SimContext } from '../../core/engine';
 import { defineParam } from '../../core/params';
-import type { Formation, NodeId, Operation, Order, World } from '../../core/types';
+import type { Formation, FormationId, NodeId, Operation, Order, World } from '../../core/types';
 import { allied, cellDepthKm, landSlice } from '../land/state';
 import { endOperation, holds, platforms, type OpsState } from './state';
 
@@ -34,6 +34,8 @@ const ASSEMBLE_DAYS = 1.5;
 const RESEND_TICKS = 4;
 
 const MANOEUVRE: ReadonlySet<string> = new Set(['maneuver']);
+/** The fewest manoeuvre formations a spearhead keeps when it detaches guards for the ground behind it (judgment). */
+const MIN_SPEARHEAD = 4;
 
 function spent(s: OpsState, f: Formation): boolean {
   if (f.status === 'routed') return true;
@@ -65,10 +67,11 @@ function jumpOff(world: World, ctx: SimContext, op: Operation, bound: number): N
   return best;
 }
 
-/** How far along its axis an operation is: whole cells held, plus the share pushed across the cell being fought for. */
+/** How far along its axis an operation is: cells up to the furthest held, plus the share pushed across the cell being fought for. */
 function measure(world: World, ctx: SimContext, op: Operation): { bound: number; advance: number } {
-  let bound = 0;
-  while (bound < op.axis.length && holds(world, op.nation, op.axis[bound])) bound++;
+  // The bound is the cell past the furthest one held: ground the enemy retakes behind the spearhead is the line's to clear, not the spearhead's.
+  let bound = op.axis.length;
+  while (bound > 0 && !holds(world, op.nation, op.axis[bound - 1])) bound--;
   if (bound >= op.axis.length) return { bound, advance: bound };
   const c = landSlice(world).contest[op.axis[bound]];
   const share = c && allied(world, op.nation, c.by) ? Math.min(1, c.km / cellDepthKm(ctx.map, op.axis[bound])) : 0;
@@ -107,7 +110,7 @@ export function executeOperation(world: World, ctx: SimContext, s: OpsState, op:
     if (op.kind === 'raid') for (const f of alive) send(world, s, f, { posture: 'move', target: op.axis[0] });
     return endOperation(world, s, op, 'succeeded', op.kind === 'raid' ? 'objective reached; the raiders are coming back' : 'every objective taken');
   }
-  if (!alive.length) return endOperation(world, s, op, 'failed', 'every formation lost');
+  if (!alive.length) return endOperation(world, s, op, 'failed', pr.relieved.length ? 'every formation spent and pulled out' : 'every formation lost');
   if (pr.platformsAtLaunch > 0 && pr.platforms < SPENT_STRENGTH() * pr.platformsAtLaunch) return endOperation(world, s, op, 'failed', 'the force is spent');
   const idle = world.tick - pr.lastGainTick;
   if (idle >= FAIL_DAYS() * perDay) return endOperation(world, s, op, 'failed', `no ground gained in ${Math.round(idle / perDay)} days`);
@@ -130,6 +133,7 @@ export function executeOperation(world: World, ctx: SimContext, s: OpsState, op:
   }
   if (!fighting.length) return;
 
+  secureAxis(world, ctx, s, op, fighting, bound);
   const target = op.axis[Math.min(bound, op.axis.length - 1)];
   const base = jumpOff(world, ctx, op, bound);
   const since = s.boundSince[op.id];
@@ -138,17 +142,52 @@ export function executeOperation(world: World, ctx: SimContext, s: OpsState, op:
 
   const manoeuvre = fighting.filter((f) => MANOEUVRE.has(f.kind));
   const inBound = (f: Formation) => f.node === target;
-  const ready = (f: Formation) => inBound(f) || f.node === base;
+  const adjacent = new Set<number>(map.neighbors(target));
+  // Closed up: in the bound, at the jump-off, or on any held cell next to the bound.
+  const ready = (f: Formation) => inBound(f) || f.node === base || (adjacent.has(f.node) && holds(world, op.nation, f.node));
+  const assaultingNow = (f: Formation) => f.order.posture === 'attack' && f.order.target === target;
   const total = manoeuvre.reduce((t, f) => t + platforms(f), 0);
   const closed = manoeuvre.filter(ready).reduce((t, f) => t + platforms(f), 0);
   const assaulting = manoeuvre.some(inBound) || manoeuvre.some((f) => f.order.posture === 'attack' && f.order.target === target);
   const go = assaulting || base === undefined || closed >= ASSEMBLE_SHARE() * total || world.tick - sinceTick >= ASSEMBLE_DAYS * perDay;
   for (const f of manoeuvre) {
+    if (assaultingNow(f)) continue;
     if (inBound(f) || (go && ready(f)) || base === undefined) send(world, s, f, { posture: 'attack', target });
     else if (f.node !== base) send(world, s, f, { posture: 'move', target: base });
   }
   // Guns, air defence and supply move up to the jump-off: next to the bound, where artillery fires for the assault.
   for (const f of fighting) if (!MANOEUVRE.has(f.kind) && base !== undefined && f.node !== base) send(world, s, f, { posture: 'move', target: base });
+}
+
+/**
+ * Ground the spearhead has gone through stays held: an empty cell on the axis behind the jump-off that touches enemy
+ * ground gets the operation's weakest manoeuvre formation, detached to hold it, as long as the spearhead keeps
+ * MIN_SPEARHEAD formations (FM 3-90: follow-and-support forces secure the lines of communication).
+ */
+function secureAxis(world: World, ctx: SimContext, s: OpsState, op: Operation, fighting: Formation[], bound: number): void {
+  const { map } = ctx;
+  const occupied = new Set<number>();
+  for (const id in world.formations) {
+    const f = world.formations[id as FormationId];
+    if (f.status === 'active' && f.node < map.landCount && holds(world, op.nation, f.node) && f.nation === op.nation) occupied.add(f.node);
+  }
+  for (let i = 1; i < bound - 1; i++) {
+    const n = op.axis[i];
+    if (!holds(world, op.nation, n) || occupied.has(n)) continue;
+    let exposed = false;
+    for (const m of map.neighbors(n)) if (m < map.landCount && !holds(world, op.nation, m) && world.control[m]) exposed = true;
+    if (!exposed) continue;
+    const manoeuvre = fighting.filter((f) => MANOEUVRE.has(f.kind));
+    if (manoeuvre.length <= MIN_SPEARHEAD) return;
+    const guard = manoeuvre.reduce((a, b) => (platforms(b) < platforms(a) || (platforms(b) === platforms(a) && b.id < a.id) ? b : a));
+    fighting.splice(fighting.indexOf(guard), 1);
+    op.formations = op.formations.filter((id) => id !== guard.id);
+    op.progress.platformsAtLaunch -= s.base[guard.id] ?? platforms(guard);
+    delete s.base[guard.id];
+    send(world, s, guard, { posture: 'defend', target: n });
+    delete s.sent[guard.id];
+    occupied.add(n);
+  }
 }
 
 /** A defence spreads its formations evenly over the objectives it still holds. */
