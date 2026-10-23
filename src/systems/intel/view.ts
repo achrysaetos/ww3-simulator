@@ -50,15 +50,15 @@ export function friendsOf(world: World, nation: NationId): Set<NationId> {
 const live = (f: Formation) => f.status === 'active' || f.status === 'routed';
 
 /**
- * world.formations as a list, kept while no formation is added (formations are never removed,
- * only destroyed, and every one added in a run takes its id from newId, which advances nextId).
- * Object.values over a dictionary of thousands of ids costs about a millisecond, and every View
- * and belief would otherwise pay it.
+ * world.formations as a list, kept within a tick while no formation is added (formations are never
+ * removed, only destroyed, and every one added in a run takes its id from newId, which advances
+ * nextId). Object.values over a dictionary of thousands of ids costs about a millisecond, and every
+ * View, belief and AI planner would otherwise pay it. Shared: callers must not change it.
  */
-const lists = new WeakMap<World['formations'], { nextId: number; list: Formation[] }>();
-function formationList(world: World): Formation[] {
+const lists = new WeakMap<World['formations'], { tick: number; nextId: number; list: Formation[] }>();
+export function formationList(world: World): readonly Formation[] {
   let l = lists.get(world.formations);
-  if (!l || l.nextId !== world.nextId) lists.set(world.formations, (l = { nextId: world.nextId, list: Object.values(world.formations) }));
+  if (!l || l.tick !== world.tick || l.nextId !== world.nextId) lists.set(world.formations, (l = { tick: world.tick, nextId: world.nextId, list: Object.values(world.formations) }));
   return l.list;
 }
 

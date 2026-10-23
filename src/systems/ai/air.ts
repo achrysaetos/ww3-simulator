@@ -2,6 +2,7 @@ import type { Formation, FormationId, Munition, MunitionId, NodeId, PlatformClas
 import { ferryKm, tankerStretch, visibility } from '../air';
 import { dominant, issue } from './forces';
 import { arsenal, FireBudget, pickTarget, pkAgainst, SamCover, reachKm, strikeOptions, withinKm, type StrikeTarget, type TargetGrid } from './strikes';
+import { formationList } from '../intel/view';
 import type { Plan } from './types';
 
 type AirRole = 'fighter' | 'multirole' | 'strike' | 'support';
@@ -243,7 +244,7 @@ function rebasing(p: Plan, wings: Formation[], keys: NodeId[], targets: TargetGr
   const roomAt = () => {
     if (room) return room;
     room = new Map(airfields().map((n) => [n, map.airports[n] * BASING.aircraftPerAirfield]));
-    for (const f of Object.values(p.world.formations)) {
+    for (const f of formationList(p.world)) {
       if (f.kind !== 'air_wing' || f.status !== 'active') continue;
       const at = bound[f.id] ?? f.node;
       if (room.has(at)) room.set(at, room.get(at)! - size(f));
@@ -255,7 +256,7 @@ function rebasing(p: Plan, wings: Formation[], keys: NodeId[], targets: TargetGr
   let launchers: { node: NodeId; rounds: [number, number][] }[] | undefined;
   const threat = new Map<NodeId, number>();
   const threatAt = (at: NodeId) => {
-    launchers ??= Object.values(p.world.formations).filter((f) => f.kind === 'missile' && f.status === 'active' && p.enemies.has(f.nation))
+    launchers ??= formationList(p.world).filter((f) => f.kind === 'missile' && f.status === 'active' && p.enemies.has(f.nation))
       .map((f) => ({ node: f.node, rounds: Object.entries(f.magazine).map(([m, k]): [number, number] => [catalog.munition(m as MunitionId).rangeKm, k]) }));
     let t = threat.get(at);
     if (t === undefined) {

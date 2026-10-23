@@ -1,19 +1,29 @@
 import type { Catalog } from '../../core/catalog';
 import { platformCount } from '../../core/forces';
 import type { Formation, NationId, NodeId, Order, PlatformId, World } from '../../core/types';
-import { CURRENT_CONFIDENCE, type ContactView } from '../intel/view';
+import { CURRENT_CONFIDENCE, formationList, type ContactView, type View } from '../intel/view';
 import type { AiState, ForceIndex, Plan, SentOrder } from './types';
 
 /** An enemy formation as this nation's intelligence sees it: the believed formation, where it was fixed, how fresh the fix is (1 = this tick). */
 export interface Sighting { f: Formation; node: NodeId; confidence: number; contact: ContactView }
 
+/** Sightings by the index and the View they were read from, both fixed for a tick: naval, strike and air planning each ask. */
+const sightings = new WeakMap<ForceIndex, WeakMap<View, Map<NationId, readonly Sighting[]>>>();
+
 /** `e`'s formations that `p.nation` holds a current contact on (CURRENT_CONFIDENCE), at their believed positions. */
-export function sighted(p: Plan, e: NationId): Sighting[] {
-  const out: Sighting[] = [];
+export function sighted(p: Plan, e: NationId): readonly Sighting[] {
+  let byView = sightings.get(p.index);
+  if (!byView) sightings.set(p.index, (byView = new WeakMap()));
+  let byNation = byView.get(p.view);
+  if (!byNation) byView.set(p.view, (byNation = new Map()));
+  let out = byNation.get(e);
+  if (out) return out;
+  const found: Sighting[] = [];
   for (const f of p.index.byNation.get(e) ?? []) {
     const c = p.view.contacts.get(f.id);
-    if (c && c.confidence >= CURRENT_CONFIDENCE) out.push({ f, node: c.node, confidence: c.confidence, contact: c });
+    if (c && c.confidence >= CURRENT_CONFIDENCE) found.push({ f, node: c.node, confidence: c.confidence, contact: c });
   }
+  byNation.set(e, (out = found));
   return out;
 }
 
@@ -53,7 +63,7 @@ export function indexForces(world: World, catalog: Catalog): ForceIndex {
   const byNation = new Map<NationId, Formation[]>();
   const groundAt = new Map<number, Formation[]>();
   const memo = new Map<Formation, number>();
-  for (const f of Object.values(world.formations)) {
+  for (const f of formationList(world)) {
     if (f.status !== 'active' && f.status !== 'routed') continue;
     if (f.embarkedOn) continue;
     (byNation.get(f.nation) ?? byNation.set(f.nation, []).get(f.nation)!).push(f);

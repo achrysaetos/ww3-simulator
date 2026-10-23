@@ -11,6 +11,7 @@ import { ANTISHIP_KINDS } from '../naval/tables';
 import { dominant, isGround, issue, sighted } from './forces';
 import { enemyPowerAt, landMass } from './fronts';
 import { reachKm } from './strikes';
+import { formationList } from '../intel/view';
 import type { Plan } from './types';
 
 /** Nearest sea zone to a node, breadth-first; chokepoints often fall on a land cell at 1-degree resolution. */
@@ -204,9 +205,9 @@ function maritimeFocus(p: Plan, assault: Assault | undefined): { node: NodeId; e
     for (const { f, node } of sighted(p, e)) {
       // Boats ashore in a port cell (shore-launched USVs) are struck from the air, not hunted at sea.
       if (f.kind !== 'surface_group' || !map.isSea(node)) continue;
-      let reach = Infinity;
-      for (const b of bases) reach = Math.min(reach, map.distanceKm(node, b));
-      if (reach > FAR_SEAS_KM) continue;
+      let near = false;
+      for (const b of bases) if (map.distanceKm(node, b) <= FAR_SEAS_KM) { near = true; break; }
+      if (!near) continue;
       let value = 0;
       for (const [pid, n] of Object.entries(f.equipment)) value += n * p.ctx.catalog.platform(pid as PlatformId).unitCostUsdM;
       let d = Infinity;
@@ -246,13 +247,22 @@ const SURFACE_STANDOFF_KM = 400;
 /** Distance from each sea zone to the nearest coast cell held by an enemy of the planning nation; Infinity with none. */
 function shoreClearance(p: Plan): (z: NodeId) => number {
   const { map } = p.ctx;
-  const hostileShore = coast(map).filter((n) => p.enemies.has(p.world.control[n]));
+  // By latitude, so a search walks out from the zone's own latitude and stops where a degree (over 111 km) of it alone is farther than the nearest found.
+  const hostileShore = coast(map).filter((n) => p.enemies.has(p.world.control[n])).sort((a, b) => map.lat[a] - map.lat[b]);
   const memo = new Map<NodeId, number>();
   return (z) => {
     let d = memo.get(z);
     if (d === undefined) {
       d = Infinity;
-      for (const n of hostileShore) if (Math.abs(map.lat[n] - map.lat[z]) * 111 < d) d = Math.min(d, map.distanceKm(n, z));
+      const lat = map.lat[z];
+      let lo = 0, hi = hostileShore.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (map.lat[hostileShore[mid]] < lat) lo = mid + 1;
+        else hi = mid;
+      }
+      for (let i = lo; i < hostileShore.length && (map.lat[hostileShore[i]] - lat) * 111 < d; i++) d = Math.min(d, map.distanceKm(hostileShore[i], z));
+      for (let i = lo - 1; i >= 0 && (lat - map.lat[hostileShore[i]]) * 111 < d; i--) d = Math.min(d, map.distanceKm(hostileShore[i], z));
       memo.set(z, d);
     }
     return d;
@@ -314,7 +324,7 @@ function runAssault(p: Plan, a: Assault, lifts: Formation[]): void {
   const { world } = p;
   const portZone = geography(map).portZone.get(a.port);
   const aboard = new Map<FormationId, Formation[]>();
-  for (const f of Object.values(world.formations))
+  for (const f of formationList(world))
     if (f.nation === p.nation && f.status === 'embarked' && f.embarkedOn) (aboard.get(f.embarkedOn) ?? aboard.set(f.embarkedOn, []).get(f.embarkedOn)!).push(f);
 
   const mass = landMass(map);

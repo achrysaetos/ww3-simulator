@@ -1,4 +1,4 @@
-import { atWar } from '../../core/engine';
+import { atWar, hostility } from '../../core/engine';
 import type { GameMap } from '../../core/map';
 import { findPath } from '../../core/path';
 import type { Formation, NationId, NodeId, World } from '../../core/types';
@@ -73,6 +73,7 @@ export function seaRoutes(world: World, map: GameMap, nation: NationId, mines: M
   const passable = (n: number) => (map.isSea(n as NodeId) ? !mined.has(n) : geo.canalNodes.has(n));
   const open = (a: number, b: number) => !barred.has(a * map.size + b);
   let label: Int32Array | undefined;
+  const startsFrom = new Map<number, Set<number>>();
   const labels = () => {
     if (label) return label;
     label = new Int32Array(map.size).fill(-1);
@@ -94,9 +95,15 @@ export function seaRoutes(world: World, map: GameMap, nation: NationId, mines: M
       if (from === to) return true;
       if (!map.isSea(to) && !geo.canalNodes.has(to) && !geo.portZone.has(to)) return false;
       const l = labels();
-      const starts = new Set<number>();
-      for (const m of map.neighbors(from)) if (passable(m) && open(from, m)) starts.add(l[m]);
-      for (const u of map.neighbors(to)) if (open(u, to) && (u === from || (passable(u) && starts.has(l[u])))) return true;
+      let starts = startsFrom.get(from);
+      if (!starts) {
+        startsFrom.set(from, (starts = new Set()));
+        for (let k = map.adjStart[from]; k < map.adjStart[from + 1]; k++) if (passable(map.adj[k]) && open(from, map.adj[k])) starts.add(l[map.adj[k]]);
+      }
+      for (let k = map.adjStart[to]; k < map.adjStart[to + 1]; k++) {
+        const u = map.adj[k];
+        if (open(u, to) && (u === from || (passable(u) && starts.has(l[u])))) return true;
+      }
       return false;
     },
   };
@@ -111,16 +118,10 @@ export function straitBarred(world: World, s: GameMap['straits'][number], nation
   const holder = world.control[s.holder];
   if (!holder || holder === nation) return false;
   if (atWar(world, holder, nation)) return true;
-  let belligerent = false;
-  for (const [k, r] of Object.entries(world.relations)) {
-    if (!r.atWar) continue;
-    const [a, b] = k.split('|') as NationId[];
-    const enemy = a === nation ? b : b === nation ? a : undefined;
-    if (!enemy) continue;
-    belligerent = true;
-    if (atWar(world, holder, enemy)) return false;
-  }
-  return belligerent;
+  const enemies = hostility(world).foes.get(nation);
+  if (!enemies?.size) return false;
+  for (const enemy of enemies) if (atWar(world, holder, enemy)) return false;
+  return true;
 }
 
 /**

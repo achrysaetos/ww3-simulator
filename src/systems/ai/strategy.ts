@@ -10,6 +10,7 @@ import { CITY_POP_SHARE } from '../diplomacy/escalation';
 import type { Assessment, DiplomacyState, WarRecord } from '../diplomacy/types';
 import { rung } from '../diplomacy/wars';
 import { aiMayIssue, delegated } from '../orders';
+import { formationList } from '../intel/view';
 import type { LaunchWarning, ReleaseRequest } from '../strategic/state';
 import { launcherFor, nuclearLaunchers, targetList, type NuclearLauncher } from '../strategic/targeting';
 import { isGround } from './forces';
@@ -168,7 +169,7 @@ const THEATRE_KM = 2000;
 /** Share of the nation's land and air forces destroyed, measured against the platforms each formation had when first seen. */
 function forcesLost(p: Plan): number {
   let base = 0, lost = 0;
-  for (const f of Object.values(p.world.formations)) {
+  for (const f of formationList(p.world)) {
     if (f.nation !== p.nation || (!isGround(f) && f.kind !== 'air_wing')) continue;
     const now = platformCount(f);
     const b = (p.ai.baseStrength[f.id] ??= now);
@@ -182,7 +183,7 @@ function forcesLost(p: Plan): number {
 function navalLost(p: Plan, t: NonNullable<NuclearThreshold['navalLoss']>): number {
   const base = { ssbn: 0, ssn: 0 }, lost = { ssbn: 0, ssn: 0 };
   let cruisers = 0;
-  for (const f of Object.values(p.world.formations)) {
+  for (const f of formationList(p.world)) {
     if (f.nation !== p.nation || (f.kind !== 'submarine' && f.kind !== 'surface_group' && f.kind !== 'strategic')) continue;
     for (const [pid, now] of Object.entries(f.equipment) as [PlatformId, number][]) {
       const cls = p.ctx.catalog.platform(pid).class;
@@ -212,7 +213,7 @@ function strategicForcesHit(p: Plan, rec: WarRecord | undefined): boolean {
   if ((rec?.ssbnLost ?? 0) > 0) return true;
   let base = 0;
   let now = 0;
-  for (const f of Object.values(p.world.formations)) {
+  for (const f of formationList(p.world)) {
     if (f.nation !== p.nation || f.kind !== 'strategic') continue;
     const n = platformCount(f);
     base += p.ai.baseStrength[f.id] ??= n;

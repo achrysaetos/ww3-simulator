@@ -10,7 +10,7 @@ import { aimKey, ATTRITABLE_COST_USD_M, dailyRounds, effectPk, futileAim, PENETR
 import { ANTISHIP_KINDS } from '../naval';
 import type { HqLevel } from '../c2/state';
 import { isGround, issue, sighted } from './forces';
-import { CURRENT_CONFIDENCE } from '../intel/view';
+import { CURRENT_CONFIDENCE, formationList } from '../intel/view';
 import type { Plan } from './types';
 
 export interface StrikeTarget {
@@ -118,7 +118,7 @@ function hulls(p: Plan, f: Formation): number {
 /** Each enemy ship's embarked cargo, by cost. */
 function cargoUsdM(p: Plan): Map<FormationId, number> {
   const out = new Map<FormationId, number>();
-  for (const f of Object.values(p.world.formations))
+  for (const f of formationList(p.world))
     if (f.status === 'embarked' && f.embarkedOn && p.enemies.has(f.nation)) out.set(f.embarkedOn, (out.get(f.embarkedOn) ?? 0) + costUsdM(p, f));
   return out;
 }
@@ -214,7 +214,9 @@ export class TargetGrid {
     const idx: number[] = [];
     for (let r = this.row(lat - dLat); r <= this.row(lat + dLat); r++)
       for (let c = 0; c < cols; c++) for (const i of this.cells.get(r * COLS + ((c0 + c) % COLS)) ?? []) idx.push(i);
-    return idx.sort((a, b) => a - b).map((i) => this.targets[i]);
+    const out: StrikeTarget[] = [];
+    for (const i of Int32Array.from(idx).sort()) out.push(this.targets[i]);
+    return out;
   }
 }
 
