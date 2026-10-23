@@ -38,8 +38,9 @@ const FRAGILE: Record<string, number> = {
  * USA: 2022 NPR ("extreme circumstances to defend the vital interests of the US or its allies").
  * RUS: Fundamentals (Nov 2024) para. 11, 19: conventional aggression posing a "critical threat to
  *   sovereignty and/or territorial integrity" of Russia or Belarus; attack on sites whose loss would
- *   undermine nuclear response. forceLossShare from leaked 2008-14 General Staff training files
- *   (Financial Times, 28 Feb 2024): loss of 20% of SSBNs, 30% of SSNs, or three cruisers. The 2024
+ *   undermine nuclear response. navalLoss from leaked 2008-14 General Staff training files
+ *   (Financial Times, 28 Feb 2024): loss of 20% of SSBNs, 30% of SSNs, or three cruisers. forceLossShare
+ *   is an estimate. The 2024
  *   Kursk incursion (well under 1% of Russia's population) did not trigger use, hence 5%.
  * CHN: NFU; PLA "Science of Military Strategy" (2013) and Cunningham and Fravel (International
  *   Security, 2015) note conventional strikes on Chinese nuclear forces may be treated as nuclear.

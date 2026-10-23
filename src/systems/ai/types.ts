@@ -20,6 +20,8 @@ export interface NuclearLadder {
   warnedTick?: number;
   /** Nuclear strikes it has ordered in this war: the first is limited, later ones climb to the theatre and general rungs. */
   strikes?: number;
+  /** [day, share of land and air forces lost by then], daily, reaching back one collapse window (see recentForcesLost). */
+  lossMarks?: [number, number][];
   /** Warheads launched on warning since its last answer; the next answer counts them. */
   launchedOnWarning?: number;
   /**
