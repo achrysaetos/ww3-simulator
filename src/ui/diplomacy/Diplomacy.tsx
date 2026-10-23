@@ -9,7 +9,7 @@ import type { NationDetail } from '../snapshot';
 import type { FlagTarget, Needle } from './flags';
 import './diplomacy.css';
 
-const STANCE_WORD: Record<FlagTarget['stance'], string> = { enemy: 'at war with you', ally: 'fighting beside you', pending: 'deciding on its treaty call', neutral: 'not in the war' };
+const STANCE_WORD: Record<FlagTarget['stance'], string> = { enemy: 'at war with you', ally: 'fighting beside you', pending: 'deciding on its treaty call', friend: 'would help if asked', neutral: 'not in the war' };
 
 export function FlagRow({ row, detail, name, over, dragging }: { row: FlagTarget[]; detail: NationDetail; name(n: NationId): string; over: NationId | null; dragging: boolean }) {
   if (!row.length) return null;

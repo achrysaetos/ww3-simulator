@@ -9,6 +9,7 @@
 .ww-flagrow-flag.enemy { border-bottom-color: var(--ww-red); }
 .ww-flagrow-flag.ally { border-bottom-color: var(--ww-blue); }
 .ww-flagrow-flag.pending { border-bottom-color: rgba(74, 163, 255, 0.45); }
+.ww-flagrow-flag.friend { border-bottom-color: rgba(74, 163, 255, 0.45); border-bottom-style: dashed; }
 .ww-flagrow-flag.neutral { border-bottom-color: var(--ww-faint); opacity: 0.8; }
 .ww-flagrow.live .ww-flagrow-flag { outline: 1px dashed rgba(150, 195, 240, 0.3); }
 .ww-flagrow-flag.over { outline: 2px solid var(--ww-gold) !important; opacity: 1; }

@@ -241,6 +241,10 @@ export interface DiplomacyState {
   invoked: string[];
   /** Open extended-deterrence decisions. */
   umbrella: UmbrellaCase[];
+  /** `helper>covered` for every pair where the helper owes the covered state defence under a treaty in force: the treaty (help.ts pactsOf). */
+  pacts?: Record<string, string>;
+  /** The latest ask for help, keyed `asker>helper`: when, and what the helper gave (help.ts requestHelp). */
+  asks?: Record<string, { tick: number; give: 'join' | 'aid' | 'refuse' | 'undecided' }>;
 }
 
 declare module '../../core/types' {

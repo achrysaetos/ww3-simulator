@@ -60,7 +60,7 @@ export function grantAccess(world: World, s: DiplomacyState, partners: ReadonlyM
 }
 
 /** An AI-run donor covers each state it has pledged air defence to while that state is at war, unless the donor fights on the other side. */
-export function pledgeAid(world: World, s: DiplomacyState, pledges: readonly AirDefencePledge[]): void {
+export function pledgeAid(world: World, s: DiplomacyState, pledges: readonly Pick<AirDefencePledge, 'donor' | 'recipient'>[]): void {
   const want = new Map<NationId, NationId[]>();
   for (const p of pledges) {
     if (!world.nations[p.donor] || !world.nations[p.recipient] || !delegated(world, p.donor, 'strategic')) continue;

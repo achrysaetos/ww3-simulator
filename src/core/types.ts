@@ -418,6 +418,8 @@ export type Command =
   | { type: 'grant_access'; nation: NationId; target: NationId; on: boolean }
   /** `nation` helps the belligerent `target` without joining its war: its air defence covers `target`. */
   | { type: 'set_aid'; nation: NationId; target: NationId; on: boolean }
+  /** `nation` asks `target` for help in its war; an AI-run target answers at once (diplomacy/help.ts). Allies are asked, never commanded. */
+  | { type: 'request_help'; nation: NationId; target: NationId }
   /** Build access into a sector of `target`'s networks, fire the payload that access unlocks, or stand the intrusion down (nonkinetic). */
   | { type: 'cyber_op'; nation: NationId; target: NationId; sector: 'grid' | 'telecom' | 'satcom'; action: 'build' | 'attack' | 'stop' }
   /** Run, or end, a covert sabotage campaign against `target`'s rail, depots and plant (nonkinetic). */

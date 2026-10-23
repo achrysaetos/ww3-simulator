@@ -4,7 +4,7 @@ import type { EventFeed, LoggedEvent } from '../feed';
 
 /** What a news desk would run: wars, peace, nuclear moments, cities changing hands, warships hit, and politics. */
 const OFF: ReadonlySet<EventCategory> = new Set(['combat', 'economy']);
-const NEWSWORTHY_MESSAGE = /protest|arms aid|funding|warns|deterrence|offers peace|capitulat|surrender/i;
+const NEWSWORTHY_MESSAGE = /protest|arms aid|funding|warns|deterrence|offers peace|for help|capitulat|surrender/i;
 
 export interface Headline {
   seq: number;

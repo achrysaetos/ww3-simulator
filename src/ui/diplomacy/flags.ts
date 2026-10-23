@@ -1,33 +1,39 @@
 /**
  * The diplomacy drag's pure core: which nations' flags the player can drop their own flag on, what that drop asks of
  * each (one table by stance), the words of the pill and the commands release sends. Everything is read from the
- * player's own nation detail, whose peace answers the worker weighed on the player's beliefs with the engine's rule.
+ * player's own nation detail, whose peace and help answers the worker weighed on the player's beliefs with the engine's
+ * rules.
  */
 import type { Command, NationId } from '../../core/types';
-import type { NoDeal, PeaceAnswer, Terms } from '../../systems/diplomacy';
+import type { HelpAnswer, HelpBasis, NoDeal, PeaceAnswer, Terms } from '../../systems/diplomacy';
 import type { PillWords } from '../drag/Pill';
 import type { NationDetail, NationSummary } from '../snapshot';
 
-/** How a flag's nation stands to the player. */
-export type Stance = 'enemy' | 'ally' | 'pending' | 'neutral';
+/** How a flag's nation stands to the player; a friend is one outside the war that would help if asked. */
+export type Stance = 'enemy' | 'ally' | 'pending' | 'friend' | 'neutral';
 
-export interface FlagTarget { nation: NationId; stance: Stance; /** For a pending one: its treaty and the tick its decision is due. */ call?: { treaty: string; dueTick: number } }
+export interface FlagTarget { nation: NationId; stance: Stance }
 
 export type FlagVerb = 'peace' | 'ask';
 
 /** THE table: what dropping your flag on a nation of each stance asks of it. */
-export const VERB_OF: Record<Stance, FlagVerb> = { enemy: 'peace', ally: 'ask', pending: 'ask', neutral: 'ask' };
+export const VERB_OF: Record<Stance, FlagVerb> = { enemy: 'peace', ally: 'ask', pending: 'ask', friend: 'ask', neutral: 'ask' };
 
 /** The row stays one line in the top bar. */
 export const ROW_MAX = 9;
 /** Nuclear powers outside the war, the largest arsenals first. */
 const NEUTRALS_MAX = 4;
+/** States outside the war that would help if asked: those that would fight first, the largest economies first. */
+const FRIENDS_MAX = 3;
+/** Rank of each answer in the row: those that would fight, then those that would cover you, then those you asked this week. */
+const rank = (a: HelpAnswer) => (a.give === 'join' ? 0 : a.give === 'aid' ? 1 : a.give === 'none' && a.no.why === 'asked' ? 2 : undefined);
 
 /**
  * The nations that matter to the player: its enemies (the leaders it can make peace with first), the allies fighting
- * beside it, treaty members still deciding whether to join it, and the nuclear powers outside its wars.
+ * beside it, treaty members still deciding whether to join it, states outside the war that would help if asked, and
+ * the nuclear powers outside its wars.
  */
-export function flagRow(d: NationDetail, nations: ReadonlyMap<NationId, Pick<NationSummary, 'id' | 'status' | 'warheads'>>): FlagTarget[] {
+export function flagRow(d: NationDetail, nations: ReadonlyMap<NationId, Pick<NationSummary, 'id' | 'status' | 'warheads' | 'gdpUsdB'>>): FlagTarget[] {
   const me = d.id;
   const out: FlagTarget[] = [];
   const seen = new Set<NationId>([me]);
@@ -41,8 +47,11 @@ export function flagRow(d: NationDetail, nations: ReadonlyMap<NationId, Pick<Nat
   for (const w of d.wars) {
     const mine = w.sides[0].some((e) => e.nation === me) ? 0 : 1;
     for (const e of w.sides[mine]) add({ nation: e.nation, stance: 'ally' });
-    for (const j of w.pending) if (j.side === mine) add({ nation: j.nation, stance: 'pending', call: { treaty: j.treaty, dueTick: j.dueTick } });
+    for (const j of w.pending) if (j.side === mine) add({ nation: j.nation, stance: 'pending' });
   }
+  const gdp = (n: NationId) => nations.get(n)?.gdpUsdB ?? 0;
+  const friends = d.help.flatMap((h) => { const r = rank(h.answer); return r === undefined ? [] : [{ nation: h.nation, r }]; }).sort((a, b) => a.r - b.r || gdp(b.nation) - gdp(a.nation));
+  for (const h of friends.slice(0, FRIENDS_MAX)) add({ nation: h.nation, stance: 'friend' });
   const neutrals = [...nations.values()].filter((n) => n.warheads > 0 && n.status === 'peace').sort((a, b) => b.warheads - a.warheads);
   for (const n of neutrals.slice(0, NEUTRALS_MAX)) add({ nation: n.id, stance: 'neutral' });
   return out.slice(0, ROW_MAX);
@@ -98,21 +107,48 @@ function peaceAim(d: NationDetail, target: FlagTarget, c: FlagContext): FlagAim 
   return { target, words: { kicker: `Offer peace · ${who}`, primary: t.basis === 'human' ? 'Their call' : 'They refuse for now', secondary: `${termsWords(t, who)} · the offer stays on the table`, tone }, send };
 }
 
-/**
- * The engine has no command to ask another nation for help: allies join by treaty when it falls due (diplomacy
- * resolveJoins) and neutrals by their own choice (neutralEntry). So an ask is always refused, and says which.
- */
-function askAim(target: FlagTarget, c: FlagContext): FlagAim {
+function helpWhy(basis: HelpBasis, who: string, foe: string, treaty: string | undefined): string {
+  switch (basis) {
+    case 'treaty': return `bound to defend you by the ${treaty}`;
+    case 'friend': return `a close friend on ${foe}'s border`;
+    case 'offensive': return `the ${treaty} is defensive, and your side started this war`;
+    case 'committed': return `${who} is fighting a war of its own`;
+    case 'weary': return `${who}'s public would not back a war`;
+    case 'nuclear': return `${foe} is nuclear-armed and no treaty binds ${who} to you`;
+    case 'sympathy': return `friendly, but not enough to fight ${foe}`;
+    case 'other_side': return treaty ? `bound by the ${treaty} to ${foe}` : `${who} is closer to ${foe} than to you`;
+    case 'no_stake': return `${who} has no stake in your war with ${foe}`;
+    case 'human': return `${who} decides for itself`;
+  }
+}
+
+const ASK_WORDS: Record<'join' | 'aid' | 'undecided', Pick<PillWords, 'primary' | 'tone'>> = {
+  join: { primary: 'They join the war', tone: 'good' },
+  aid: { primary: 'Air defence, not troops', tone: 'even' },
+  undecided: { primary: 'Their call', tone: 'even' },
+};
+
+/** Asking for help: the answer the engine's rule (helpAnswer) gives now. Release sends the ask unless it would be refused or cannot be made. */
+function askAim(d: NationDetail, target: FlagTarget, c: FlagContext): FlagAim {
   const who = c.name(target.nation);
   const kicker = `Ask ${who} for help`;
-  if (target.stance === 'ally') return refuse(target, kicker, `${who} already fights beside you`);
-  if (target.stance === 'pending' && target.call)
-    return refuse(target, kicker, `${who} answers its ${target.call.treaty} call by D+${c.dayOf(target.call.dueTick)}`, 'a treaty call cannot be pressed sooner');
-  return refuse(target, kicker, `no way to ask: ${who} enters a war only by treaty or by its own choice`);
+  const answer = d.help.find((h) => h.nation === target.nation)?.answer;
+  if (!answer) return refuse(target, kicker, d.enemies.length ? `${who} is not in a position to help` : 'you are at war with no one');
+  if (answer.give === 'none') {
+    const no = answer.no;
+    if (no.why === 'asked') return refuse(target, kicker, `you asked ${who} this week`, `ask again from D+${c.dayOf(no.again)}`);
+    if (no.why === 'called') return refuse(target, kicker, `${who} answers its ${no.treaty} call by D+${c.dayOf(no.due)}`, 'a treaty call cannot be pressed sooner');
+    if (no.why === 'fighting') return refuse(target, kicker, `${who} already fights beside you against ${no.against.map(c.name).join(', ')}`);
+    return refuse(target, kicker, { spent: `${who} is out of the fight`, enemy: `${who} is at war with you` }[no.why]);
+  }
+  const why = helpWhy(answer.basis, who, c.name(answer.foe), answer.treaty);
+  if (answer.give === 'refuse') return refuse(target, kicker, 'They refuse', why);
+  const command: Command = { type: 'request_help', nation: d.id, target: target.nation };
+  return { target, words: { kicker, ...ASK_WORDS[answer.give], secondary: why }, send: { command, label: `${who} asked for help` } };
 }
 
 export function aimFlag(d: NationDetail, target: FlagTarget, c: FlagContext): FlagAim {
-  return VERB_OF[target.stance] === 'peace' ? peaceAim(d, target, c) : askAim(target, c);
+  return VERB_OF[target.stance] === 'peace' ? peaceAim(d, target, c) : askAim(d, target, c);
 }
 
 /**
