@@ -3,7 +3,7 @@ import type { GameMap } from '../../core/map';
 import type { Formation, FormationId, MunitionId, NationId, NodeId, PlatformClass, PlatformId } from '../../core/types';
 import { liftShare } from '../naval/amphibious';
 import { geography, sameWaters, seaNeighbour } from '../naval/geography';
-import { minedClosed, navalDestination, sailable, seaPath, straitBarred } from '../naval/movement';
+import { minedClosed, navalDestination, sailable, seaRoutes } from '../naval/movement';
 import { areaDefenseShare, boardable, mostlyDamaged, REARMED, SEAWORTHY } from '../naval/orders';
 import { isSealift } from '../naval/sealift';
 import { compose, fleetLosses } from '../naval/state';
@@ -396,20 +396,14 @@ export function planNaval(p: Plan): void {
   // fights where open water takes it; a station it cannot reach falls back to its home waters.
   // Open water joins the two, and once enemy minefields close some zones, a route around them does too.
   const minefields = p.view.minefields();
-  const closing = Object.keys(minefields).some((z) => minedClosed(p.world, Number(z), p.nation, minefields)) || map.straits.some((s) => straitBarred(p.world, s, p.nation));
-  const routes = new Map<string, boolean>();
+  const routes = seaRoutes(p.world, map, p.nation, minefields);
   // Only sweepers go into an enemy minefield: a station or chokepoint inside one is a minefield, not a patrol line
   // (NWP 3-15; in 1991 carriers and SSNs kept out of the northern Gulf until lanes were cleared).
   const sails = (g: Formation, n: NodeId, intoMines = false) => {
-    if (!sailable(p.world, map, g, n, minefields)) return false;
+    if (!sailable(p.world, map, g, n, routes)) return false;
     const dest = navalDestination(p.world, map, g.nation, n)!;
     if (!intoMines && minedClosed(p.world, dest, g.nation, minefields)) return false;
-    if (beyondCoastalReach(g, dest)) return false;
-    if (!closing) return true;
-    const key = `${g.node}|${dest}`;
-    let ok = routes.get(key);
-    if (ok === undefined) routes.set(key, (ok = seaPath(p.world, map, g.nation, g.node, dest, undefined, minefields) !== null));
-    return ok;
+    return !beyondCoastalReach(g, dest);
   };
   // Coastal craft (patrol boats and coast-guard cutters, corvettes, sweepers) carry no replenishment-at-sea rig and
   // stay within half their unrefuelled range of home: the China Coast Guard works the near seas.
