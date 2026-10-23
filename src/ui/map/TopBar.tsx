@@ -23,6 +23,7 @@ export interface TopBarProps {
   speed: number;
   speeds: readonly number[];
   onSpeed(speed: number): void;
+  /** Most important first: the last ones give way when the bar is narrow. */
   stats: TopBarStat[];
   /** 5 calm .. 1 nuclear use, shown as the nukes needle; null hides it. */
   defcon: number | null;
@@ -114,16 +115,16 @@ export function TopBar(p: TopBarProps) {
         </div>
       </div>
       <div className="ww-topbar-side ww-topbar-stats">
+        {p.defcon !== null && (
+          <Gauge label="Nukes" value={(5 - p.defcon) / 4} text={`Defcon ${p.defcon}`} tone={p.defcon <= 2 ? 'bad' : p.defcon <= 3 ? 'warn' : 'muted'} title={DEFCON_WORDS[p.defcon] ?? ''} testid="defcon" />
+        )}
+        {p.gauges}
         {p.stats.map((s) => (
           <div key={s.label} className="ww-stat">
             <span className="ww-label">{s.label}</span>
             <span className={`ww-mono ${s.tone ?? ''}`}>{s.value}</span>
           </div>
         ))}
-        {p.gauges}
-        {p.defcon !== null && (
-          <Gauge label="Nukes" value={(5 - p.defcon) / 4} text={`Defcon ${p.defcon}`} tone={p.defcon <= 2 ? 'bad' : p.defcon <= 3 ? 'warn' : 'muted'} title={DEFCON_WORDS[p.defcon] ?? ''} testid="defcon" />
-        )}
       </div>
       {p.row}
     </header>

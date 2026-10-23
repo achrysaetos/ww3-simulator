@@ -5,6 +5,7 @@
 - Pause and speeds in the top bar: `speed-0`, `speed-1`, `speed-5`, `speed-20`, in game hours per real second. Keys: Space toggles pause and 1 h/s, `1` to `3` pick 1, 5 and 20.
 - Step one turn: the `step` button or `.`. A turn is one engine tick, `world.dtHours` (6 game hours today).
 - The date and hour in `clock`. It advances hour by hour at a constant pace, not a tick at a time.
+- The top bar (`topbar`) is a three-track grid: your nation on the left, the clock centred in its own track, the figures on the right. The figures come most important first (nukes needle, peace needle, front, war support, economy, mobilised) and are laid right to left; a figure that does not fit the right track drops out whole, so nothing reaches the clock. At 1280 and 1440 px the right track holds the two needles and the front; at 1920 px all six. Below 1440 px the clock packs tighter.
 - Counters glide: a formation that stepped to a neighbouring node in the latest tick is drawn along that edge as the clock runs the tick's hours. New formations and jumps of more than one node snap. At the world zoom nothing glides.
 
 ## How it works
