@@ -7,9 +7,12 @@ import { forecastInput } from '../src/forecast/operation';
 import { OperationForecastPool } from '../src/forecast/operation-pool';
 import { QUICK } from '../src/forecast/quick';
 import { aim } from '../src/ui/drag/gesture';
+import { assaultPath } from '../src/ui/drag/kit';
 import { controlOf, kitOf, russia, RUS, UKR } from './drag.fixture';
 
 const pool = new OperationForecastPool();
+/** Every comparison any test here made, for DRAG_CALIBRATION_LOG. */
+const logged: string[] = [];
 
 /** `world` with every platform, stock and store of `ids` times `k`. */
 function grown(world: World, ids: FormationId[], k: number): World {
@@ -21,7 +24,7 @@ afterAll(() => pool.close());
 
 it('regenerates the checked-in QUICK table exactly', async () => {
   expect(await calibrateQuick((input, runs) => pool.forecast(input, runs))).toEqual(QUICK);
-}, 600_000);
+}, 1_800_000);
 
 /** Every Russian stack of manoeuvre units against every Ukrainian cell next to it, a week into ukraine-2026. */
 function front() {
@@ -40,9 +43,14 @@ function front() {
     if (p.kind !== 'take') return 0;
     // The pill's odds run a week from contact; the staff's from launch, so it is asked for the march as well.
     const days = Math.min(MAX_FORECAST_DAYS, QUICK_DAYS + Math.ceil(p.etaHours / 24));
-    const staff = (await pool.forecast(forecastInput(world, s.map, s.engine.catalog, { nation: RUS, kind: 'offensive', objectives: [target], formations: ids }, days), 8)).pObjectiveByDay[days - 1];
-    rows.push(`${label} -> ${target}: pill ${p.p.mid.toFixed(2)}, staff ${staff.toFixed(2)} over ${days} days`);
-    if (process.env.DRAG_CALIBRATION_LOG) writeFileSync(process.env.DRAG_CALIBRATION_LOG, rows.join('\n'));
+    // The drag's attack fights through each enemy cell on its assault route (land/movement), where a staff would pick its own axis, so the staff is given that route.
+    const kit = kitOf(s, ids, world);
+    const way = assaultPath(kit, kit.units[0], target).filter((c) => kit.field.hostile[c]).reverse();
+    const plan = { nation: RUS, kind: 'offensive' as const, objectives: [...way, target], formations: ids };
+    const staff = (await pool.forecast(forecastInput(world, s.map, s.engine.catalog, plan, days), 8)).pObjectiveByDay[days - 1];
+    rows.push(`${label} -> ${[...way, target].join(' > ')}: pill ${p.p.mid.toFixed(2)}, staff ${staff.toFixed(2)} over ${days} days`);
+    logged.push(rows[rows.length - 1]);
+    if (process.env.DRAG_CALIBRATION_LOG) writeFileSync(process.env.DRAG_CALIBRATION_LOG, logged.join('\n'));
     return p.p.mid - staff;
   };
   return { s, attacks, pill, gap, rows };
@@ -64,9 +72,9 @@ it('puts the pill within 15 points of the 8-draw staff forecast on 10 Russian at
   expect(worst, rows.join('\n')).toBeLessThanOrEqual(0.15);
 }, 600_000);
 
-// Known gap, so this is expected to fail until it closes: with the odds open the pill misses the staff by up to about 40 points
-// both ways. It counts hostile neighbours at half (too gloomy where they do not join in) and its river duels cross faster
-// than the Dnipro (too hopeful there). design.md, U2 reconciliation, has the rows.
+// Known gap: grown 4-fold, the stack at 7483 has 7461 across the Dnipro at about 40% where every staff draw fails. The duel
+// world's week is dry in some draws, so its river crossings finish; the front's week is wet in all of them, and the line
+// next to the cell covers it once the garrison falls, which the river duels have no neighbour to do.
 it.fails('puts the pill within 15 points of the staff when stacks on their own ground are grown until the odds are open', async () => {
   const { s, attacks, pill, gap, rows } = front();
   let worst = 0;

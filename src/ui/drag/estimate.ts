@@ -1,13 +1,16 @@
 /**
  * The pill's numbers: pure functions of the kit, so they read belief and public facts only. Ground outcomes are a
- * lookup into QUICK, which `runOperation` duels produced; strikes run the engine's own salvo math at its expectation.
+ * lookup into QUICK, which `runOperation` duels produced, by the numbers land/combat moves a line by: the local fire
+ * ratio, the share of the cell's front the attack fills and the share the defence mans. Strikes run the engine's own salvo math at its expectation.
  */
 import type { GameMap } from '../../core/map';
 import type { NodeId } from '../../core/types';
-import { QUICK, type QuickRow, type QuickTable } from '../../forecast/quick';
+import { QUICK, type QuickCell, type QuickTable, type QuickTables } from '../../forecast/quick';
 import { interceptSalvo, MEAN_RNG } from '../../systems/air/intercept';
+import { CELL_FRONT_KM, FRONTAGE_PLATFORMS, KILL_ZONE_COMMIT, KILL_ZONE_DENSITY, SCREEN_DENSITY, TERRAIN, URBAN_MANOEUVRE } from '../../systems/land/tables';
+import { cellDepthKm } from '../../systems/land/state';
 import type { PublicRefusal, Target } from './gesture';
-import { assaultPath, routeKm, type BeliefField, type DragKit, type SubjectUnit } from './kit';
+import { assaultPath, FORCE, LAND_TARGETS, routeKm, type BeliefField, type DragKit, type LandForce, type SubjectUnit } from './kit';
 
 /** A belief-driven range. lo/hi come from re-running the estimate at the edges of intel confidence. */
 export interface Band { lo: number; mid: number; hi: number }
@@ -45,29 +48,144 @@ const spread = (conf: number, ageH: number) => 1 - conf + Math.min(0.3, ageH / 2
 /** Believed enemy strength at the low, mid and high edges of `u`, in Band order of the outcome it gives the player (lo = enemy strongest). */
 const edges = (u: number) => [1 + u, 1, 1 / (1 + u)] as const;
 
-/** `rows` at force ratio `r`, interpolated in ln r and clamped to the table. */
-export function quickAt(r: number, rows: readonly QuickRow[] = QUICK.open.bare.rows): QuickRow {
-  if (!(r > rows[0].r)) return { ...rows[0], r };
-  const last = rows[rows.length - 1];
-  if (r >= last.r) return { ...last, r };
-  let i = 1;
-  while (rows[i].r < r) i++;
-  const a = rows[i - 1], b = rows[i];
-  return { ...mixRow(a, b, (Math.log(r) - Math.log(a.r)) / (Math.log(b.r) - Math.log(a.r))), r };
+const K = LAND_TARGETS.length;
+const platformsOf = (x: LandForce) => x[0] + x[1] + x[2];
+
+/** The fire `x` puts on `y`'s mix (land/combat fireRatio's numerator): direct fire only from the platforms that fit a front, unless the `whole` force counts. */
+function fireOn(x: LandForce, y: LandForce, whole: boolean): number {
+  const yt = platformsOf(y);
+  if (yt <= 0) return 0;
+  const inLine = whole ? 1 : Math.min(1, FRONTAGE_PLATFORMS() / Math.max(1, platformsOf(x)));
+  let v = 0;
+  for (let c = 0; c < K; c++) v += (x[K + c] * inLine + x[2 * K + c]) * (y[c] / yt);
+  return v;
 }
 
-/** `a` and `b` mixed `k` of the way to `b`; an Infinity days mixes as a step. */
-function mixRow(a: QuickRow, b: QuickRow, k: number): QuickRow {
-  const mix = (x: number, y: number) => (Number.isFinite(x) && Number.isFinite(y) ? x + (y - x) * k : k < 1 ? x : y);
-  return { r: mix(a.r, b.r), pTake: mix(a.pTake, b.pTake), days: mix(a.days, b.days), attLoss: mix(a.attLoss, b.attLoss) };
+/** The local force ratio an assault of `a` on `d` is fought at (land/combat fireRatio). */
+export const fireRatio = (a: LandForce, d: LandForce, whole = false): number => fireOn(a, d, whole) / Math.max(1e-9, fireOn(d, a, whole));
+
+/** Where an assault reads in the duel tables (estimate axesAt). */
+export interface Axes {
+  /** The local fire ratio over the terrain's defence, whose edge (land/combat defensiveEdge) cuts the attacker's kills and raises its losses. */
+  r: number;
+  /**
+   * land/combat sector, the share of the front the attacker's platforms fill once a manned belt keeps part of them out
+   * of its kill zone (without air control), carried to the duel cell: advanceKm moves the line by sector x pace /
+   * moveCost, a fifth of that in a city, and a deeper cell takes proportionally longer to cross.
+   */
+  s: number;
+  /** land/combat manned, the share of the front the defender's platforms hold: the gaps it leaves, and how soon fire destroys it. */
+  m: number;
 }
 
-/** The tables for enemy ground `n` at ratio `r` (Infinity: no defender), mixed from bare to fortified by its believed belt. */
-function takeAt(f: BeliefField, n: NodeId, r: number): QuickRow {
-  const ground = QUICK[f.river[n] ? 'river' : 'open'];
-  const at = (t: QuickTable) => (r === Infinity ? t.unopposed : quickAt(r, t.rows));
-  return { ...mixRow(at(ground.bare), at(ground.fortified), f.enemyDig[n]), r };
+/**
+ * Where `att` assaulting `def` in cell `n`, bare or behind a belt (`fort`), reads in the duel tables, fought on a plain
+ * cell `depthKm` deep. `pace` is the ground's pace at `n` over the duel cell's (weather groundFactorAt: mud and snow).
+ */
+export function axesAt(map: GameMap, n: NodeId, att: LandForce, def: LandForce, fort: number, pace = 1, depthKm = QUICK.depthKm): Axes {
+  const depth = cellDepthKm(map, n);
+  const front = (FRONTAGE_PLATFORMS() * depth) / CELL_FRONT_KM;
+  const prepared = fort * Math.min(1, platformsOf(def) / (KILL_ZONE_DENSITY() * depth));
+  const committed = 1 - (1 - KILL_ZONE_COMMIT()) * prepared;
+  const sector = Math.min(1, (platformsOf(att) * committed) / front);
+  const { defense, moveCost } = TERRAIN[map.terrain[n]];
+  const s = (sector * pace * (map.terrain[n] === 'urban' ? URBAN_MANOEUVRE() : 1) * depthKm) / (moveCost * depth);
+  return { r: fireRatio(att, def) / defense, s, m: platformsOf(def) / front };
 }
+
+/**
+ * Where crossing empty cell `n` under the fire of `cover`, the line next to it, reads in the covered tables, fought on a
+ * plain cell `depthKm` deep (land/combat advanceKm with no one holding the cell): the fire ratio counts every direct
+ * weapon of both sides, and the share of the front the attack fills has no kill zone holding part of it back.
+ */
+export function coverAxes(map: GameMap, n: NodeId, att: LandForce, cover: LandForce, pace = 1, depthKm = QUICK.depthKm): Pick<Axes, 'r' | 's'> {
+  const depth = cellDepthKm(map, n);
+  const sector = Math.min(1, platformsOf(att) / (SCREEN_DENSITY() * depth));
+  return { r: fireRatio(att, cover, true), s: (sector * pace * depthKm) / (TERRAIN[map.terrain[n]].moveCost * depth) };
+}
+
+/** `t` at `at`, interpolated in the log of each axis and clamped to the table. */
+export function quickAt(at: Axes, t: QuickTable = QUICK.open.bare, tables: QuickTables = QUICK): QuickCell {
+  const c = cornerOf(at, tables);
+  return { pTake: cellField(t, c, 'pTake'), days: cellField(t, c, 'days'), attLoss: cellField(t, c, 'attLoss') };
+}
+
+/** `t`'s covered table at `at`, interpolated as quickAt. */
+export function coveredAt(at: Pick<Axes, 'r' | 's'>, t: QuickTable = QUICK.open.bare, tables: QuickTables = QUICK): QuickCell {
+  const c = cornerOf({ ...at, m: 0 }, tables);
+  const field = (key: keyof QuickCell) => {
+    const v = (x: number, y: number) => t.covered[x][y][key];
+    return lerp(lerp(v(c.i, c.j), v(c.i, c.j + 1), c.kj), lerp(v(c.i + 1, c.j), v(c.i + 1, c.j + 1), c.kj), c.ki);
+  };
+  return { pTake: field('pTake'), days: field('days'), attLoss: field('attLoss') };
+}
+
+/** Where a reading falls on the table's axes: the index below it on each and how far it lies toward the next. */
+interface Corner { i: number; ki: number; j: number; kj: number; k: number; kk: number }
+
+function cornerOf(at: Axes, tables: QuickTables): Corner {
+  const [i, ki] = bracket(tables.ratios, at.r), [j, kj] = bracket(tables.shares, at.s), [k, kk] = bracket(tables.manned, at.m);
+  return { i, ki, j, kj, k, kk };
+}
+
+/** One field of `t`'s duel cells at `c`, by manned, then share, then ratio. */
+function cellField(t: QuickTable, c: Corner, key: keyof QuickCell): number {
+  const v = (x: number, y: number) => lerp(t.cells[x][y][c.k][key], t.cells[x][y][c.k + 1][key], c.kk);
+  return lerp(lerp(v(c.i, c.j), v(c.i, c.j + 1), c.kj), lerp(v(c.i + 1, c.j), v(c.i + 1, c.j + 1), c.kj), c.ki);
+}
+
+/** The index below `x` on the ascending `axis` and how far `x` lies toward the next, in ln x, clamped to the ends. */
+function bracket(axis: readonly number[], x: number): [number, number] {
+  const last = axis.length - 2;
+  if (!(x > axis[0])) return [0, 0];
+  if (x >= axis[last + 1]) return [last, 1];
+  let i = 0;
+  while (axis[i + 1] < x) i++;
+  return [i, Math.log(x / axis[i]) / Math.log(axis[i + 1] / axis[i])];
+}
+
+/** `x` and `y` mixed `k` of the way to `y`; an Infinity days mixes as a step. */
+const lerp = (x: number, y: number, k: number) => (Number.isFinite(x) && Number.isFinite(y) ? x + (y - x) * k : k < 1 ? x : y);
+
+/** `a` and `b` mixed `k` of the way to `b`, as lerp. */
+function mix(a: QuickCell, b: QuickCell, k: number): QuickCell {
+  return { pTake: lerp(a.pTake, b.pTake, k), days: lerp(a.days, b.days, k), attLoss: lerp(a.attLoss, b.attLoss, k) };
+}
+
+/** `out` plus `w` times the LandForce `src` holds for node `n`. */
+function addAt(out: LandForce, src: Float32Array, n: number, w = 1): LandForce {
+  const at = n * FORCE;
+  for (let i = 0; i < out.length; i++) out[i] += w * src[at + i];
+  return out;
+}
+
+/** `out` plus `src` at each land neighbour of `n` that is hostile, or with `hostile` false each that is not (where own guns may stand). */
+function addAround(out: LandForce, src: Float32Array, f: BeliefField, map: GameMap, n: NodeId, hostile = true): LandForce {
+  for (let k = map.adjStart[n]; k < map.adjStart[n + 1]; k++) {
+    const m = map.adj[k];
+    if (m < map.landCount && !!f.hostile[m] === hostile) addAt(out, src, m);
+  }
+  return out;
+}
+
+/** Who stands against an attack on a cell: its defenders, the line next to an empty cell, or no one. */
+type Defence = { held: LandForce } | { covered: LandForce } | null;
+
+/**
+ * `att` attacking cell `n`, on its side of a river or across one, mixed from bare to fortified by the believed belt:
+ * assaulting its defenders, or crossing it empty under the fire of the line next to it (land/combat advanceKm).
+ */
+function takeAt(f: BeliefField, map: GameMap, n: NodeId, att: LandForce, against: Defence): QuickCell {
+  const ground = QUICK[f.river[n] ? 'river' : 'open'], dig = f.enemyDig[n];
+  const pace = (t: QuickTable) => f.ground[n] / t.ground;
+  const both = (read: (t: QuickTable, fort: number) => QuickCell) => mix(read(ground.bare, 0), read(ground.fortified, 1), dig);
+  if (!against) return both((t) => t.unopposed);
+  if ('covered' in against) return both((t) => coveredAt(coverAxes(map, n, att, against.covered, pace(t)), t));
+  return both((t, fort) => quickAt(axesAt(map, n, att, against.held, fort, pace(t)), t));
+}
+
+/** `x` with every number times `k`: a force believed `k` times as large. */
+const times = (x: LandForce, k: number) => x.map((v) => v * k);
 
 /** Hours until the slowest of `going` stands at its cell, counting the order's trip down the chain of command. */
 function eta(kit: DragKit, going: SubjectUnit[], cellOf: (i: number) => NodeId, posture: 'attack' | 'move'): number {
@@ -81,22 +199,34 @@ function eta(kit: DragKit, going: SubjectUnit[], cellOf: (i: number) => NodeId, 
 
 const sum = (us: SubjectUnit[]) => us.reduce((s, u) => s + u.power, 0);
 
-/** The believed defence of enemy ground `n` against attacking power `A`: the cell in full and its hostile neighbours at half. */
-function oddsAt(f: BeliefField, map: GameMap, n: NodeId, A: number) {
-  let believed = f.enemyPower[n], conf = f.enemyPower[n] * f.enemyConf[n], age = f.enemyAgeH[n];
+/**
+ * The believed defence of enemy ground `n` against `att`, as land/combat fights a cell: the land forces in it, with the
+ * guns next to it on both sides joining in. An empty cell is crossed under the fire of the line next to it. Rows are
+ * in Band order.
+ */
+function oddsAt(f: BeliefField, map: GameMap, n: NodeId, att: LandForce) {
+  const held = addAt(new Float32Array(FORCE), f.enemyForce, n);
+  if (platformsOf(held) > 0) {
+    addAround(held, f.enemyGuns, f, map, n);
+    const own = addAround(att.slice(), f.ownGuns, f, map, n, false);
+    const u = spread(f.enemyConf[n], f.enemyAgeH[n]);
+    return { believed: f.enemyPower[n], age: f.enemyAgeH[n], rows: edges(u).map((k) => takeAt(f, map, n, own, { held: times(held, k) })) };
+  }
+  const cover = addAround(new Float32Array(FORCE), f.enemyLine, f, map, n);
+  let believed = 0, conf = 0, age = Infinity;
   for (let k = map.adjStart[n]; k < map.adjStart[n + 1]; k++) {
     const m = map.adj[k];
-    if (!f.hostile[m] || !f.enemyPower[m]) continue;
-    believed += 0.5 * f.enemyPower[m];
-    conf += 0.5 * f.enemyPower[m] * f.enemyConf[m];
+    if (m >= map.landCount || !f.hostile[m]) continue;
+    believed += f.enemyPower[m];
+    conf += f.enemyPower[m] * f.enemyConf[m];
     age = Math.min(age, f.enemyAgeH[m]);
   }
-  if (believed <= 0) {
-    const q = takeAt(f, n, Infinity);
-    return { believed, age, rows: [q, q, q] };
+  if (platformsOf(cover) <= 0) {
+    const q = takeAt(f, map, n, att, null);
+    return { believed: 0, age, rows: [q, q, q] };
   }
-  const D = believed * f.defense[n];
-  return { believed, age, rows: edges(spread(conf / believed, age)).map((s) => takeAt(f, n, A / (D * s))) };
+  const u = spread(believed > 0 ? conf / believed : 0, age);
+  return { believed: 0, age, rows: edges(u).map((k) => takeAt(f, map, n, att, { covered: times(cover, k) })) };
 }
 
 export const estimateTake: Estimator = (kit, going, t, _cells, map) => {
@@ -106,8 +236,9 @@ export const estimateTake: Estimator = (kit, going, t, _cells, map) => {
   if (etaHours > FAR_H) caveats.push('far');
   if (f.supply[n] < SUPPLY_FLOOR) caveats.push('out_of_supply');
   // A unit standing in enemy ground fights for that cell before it moves on (land/movement march), so it adds nothing elsewhere yet.
-  const A = going.reduce((sum, u) => sum + (u.node === n || !f.hostile[u.node] ? u.power : 0), 0);
-  if (A <= 0) return { kind: 'take', who: NOBODY, caveats, p: { lo: 0, mid: 0, hi: 0 }, loss: 0, etaHours };
+  const A = new Float32Array(FORCE);
+  for (const u of going) if (u.node === n || !f.hostile[u.node]) for (let i = 0; i < A.length; i++) A[i] += u.force[i];
+  if (platformsOf(A) <= 0) return { kind: 'take', who: NOBODY, caveats, p: { lo: 0, mid: 0, hi: 0 }, loss: 0, etaHours };
   const at = oddsAt(f, map, n, A);
   if (at.believed <= 0) caveats.push('nothing_seen');
   else if (at.age > OLD_FIX_H) caveats.push('intel_old');
@@ -121,30 +252,33 @@ export const estimateTake: Estimator = (kit, going, t, _cells, map) => {
 let stamp = new Uint32Array(0);
 let gen = 0;
 
-interface Threat { E: number; conf: number; age: number }
+/** Believed hostile power and land force within two rings of `n` (and the guns of ring 1), with the power's confidence and freshest fix. */
+interface Threat { E: number; force: LandForce; conf: number; age: number }
 
-/** Believed hostile power within two rings of `n`, ring 1 in full and ring 2 at half, with its confidence and freshest fix. */
-function threatAround(kit: DragKit, map: GameMap, n: NodeId): Threat {
+/** Believed hostile power within two rings of `n`, ring 1 in full and ring 2 at half, with its confidence and freshest fix, and its land force unless only the power is wanted. */
+function threatAround(kit: DragKit, map: GameMap, n: NodeId, withForce = true): Threat {
   if (stamp.length !== map.size) stamp = new Uint32Array(map.size);
   const near = ++gen, far = ++gen;
   const { adjStart, adj } = map;
-  const t: Threat = { E: 0, conf: 0, age: Infinity };
+  const t: Threat = { E: 0, force: new Float32Array(FORCE), conf: 0, age: Infinity };
   stamp[n] = near;
   for (let k = adjStart[n]; k < adjStart[n + 1]; k++) stamp[adj[k]] = near;
   for (let k = adjStart[n]; k < adjStart[n + 1]; k++) {
     const m = adj[k];
-    addThreat(t, kit.field, m, 1);
+    addThreat(t, kit.field, m, 1, withForce);
+    if (withForce && m < map.landCount) addAt(t.force, kit.field.enemyGuns, m);
     for (let j = adjStart[m]; j < adjStart[m + 1]; j++) {
       const x = adj[j];
       if (stamp[x] === near || stamp[x] === far) continue;
       stamp[x] = far;
-      addThreat(t, kit.field, x, 0.5);
+      addThreat(t, kit.field, x, 0.5, withForce);
     }
   }
   return t;
 }
 
-function addThreat(t: Threat, f: DragKit['field'], x: number, w: number): void {
+function addThreat(t: Threat, f: DragKit['field'], x: number, w: number, withForce: boolean): void {
+  if (withForce && x < f.enemyForce.length / FORCE) addAt(t.force, f.enemyForce, x, w);
   const p = f.enemyPower[x];
   if (!p) return;
   t.E += w * p;
@@ -152,20 +286,31 @@ function addThreat(t: Threat, f: DragKit['field'], x: number, w: number): void {
   if (f.enemyAgeH[x] < t.age) t.age = f.enemyAgeH[x];
 }
 
-/** Days until enemy power `E` likely takes a cell `O` holds: Infinity below the table's floor. */
-const daysAt = (E: number, O: number) => (O > 0 && E / O <= QUICK.open.bare.rows[0].r ? Infinity : quickAt(O > 0 ? E / O : Infinity).days);
+/** Days until the enemy `E` likely takes a cell `own` holds, read as if all of it assaulted at once over ground of `pace`. */
+function daysAt(map: GameMap, n: NodeId, E: LandForce, own: LandForce, pace: number): number {
+  const t = QUICK.open.bare;
+  if (platformsOf(own) <= 0) return t.unopposed.days;
+  return cellField(t, cornerOf(axesAt(map, n, E, own, 0, pace / t.ground), QUICK), 'days');
+}
 
-/** Days a cell with `own` power standing in it holds against the believed enemy within two rings, as a band. */
-function holdDays(kit: DragKit, map: GameMap, n: NodeId, own: number): { days: Band; old: boolean } {
-  const { E, conf, age } = threatAround(kit, map, n);
-  if (E <= 0) return { days: { lo: Infinity, mid: Infinity, hi: Infinity }, old: false };
-  const O = own * kit.field.defense[n];
-  const [lo, mid, hi] = edges(spread(conf / E, age));
-  return { days: { lo: daysAt(E * lo, O), mid: daysAt(E * mid, O), hi: daysAt(E * hi, O) }, old: age > OLD_FIX_H };
+/** Days a cell with `own` standing in it (and own guns next to it) holds against the believed enemy within two rings, as a band. */
+function holdDays(kit: DragKit, map: GameMap, n: NodeId, own: LandForce): { days: Band; old: boolean } {
+  const { E, force, conf, age } = threatAround(kit, map, n);
+  if (E <= 0 || platformsOf(force) <= 0) return { days: { lo: Infinity, mid: Infinity, hi: Infinity }, old: false };
+  const side = addAround(own.slice(), kit.field.ownGuns, kit.field, map, n, false);
+  const [lo, mid, hi] = edges(spread(conf / E, age)).map((k) => daysAt(map, n, times(force, k), side, kit.field.ground[n]));
+  return { days: { lo, mid, hi }, old: age > OLD_FIX_H };
+}
+
+/** What stands at `n` plus `going`, as one land force. */
+function ownAt(f: BeliefField, n: NodeId, going: SubjectUnit[]): LandForce {
+  const out = addAt(new Float32Array(FORCE), f.ownForce, n);
+  for (const u of going) for (let i = 0; i < out.length; i++) out[i] += u.force[i];
+  return out;
 }
 
 export const estimateHold: Estimator = (kit, going, t, _cells, map) => {
-  const h = holdDays(kit, map, t.node, kit.field.ownPower[t.node] + sum(going));
+  const h = holdDays(kit, map, t.node, ownAt(kit.field, t.node, going));
   const caveats: Caveat[] = h.old ? ['intel_old'] : [];
   const etaHours = eta(kit, going, () => t.node, 'move');
   if (etaHours > FAR_H) caveats.push('far');
@@ -175,8 +320,7 @@ export const estimateHold: Estimator = (kit, going, t, _cells, map) => {
 /** `slots` is the cell each going unit holds (frontSlots); the pill reports the weakest cell with what stands there plus who goes. */
 export const estimateFront: Estimator = (kit, going, _t, slots, map) => {
   const cells = [...new Set(slots)];
-  const own = cells.map((c) => kit.field.ownPower[c]);
-  going.forEach((u, i) => (own[cells.indexOf(slots[i])] += u.power));
+  const own = cells.map((c) => ownAt(kit.field, c, going.filter((_, i) => slots[i] === c)));
   let weakest: Band = { lo: Infinity, mid: Infinity, hi: Infinity };
   let old = false;
   cells.forEach((c, i) => {
@@ -192,7 +336,7 @@ export const estimateFront: Estimator = (kit, going, _t, slots, map) => {
 
 /** The cell each of `going` holds: units strongest first onto cells most threatened first, wrapping when there are more units than cells. */
 export function frontSlots(kit: DragKit, map: GameMap, going: SubjectUnit[], cells: NodeId[]): NodeId[] {
-  const threat = cells.map((c) => threatAround(kit, map, c).E);
+  const threat = cells.map((c) => threatAround(kit, map, c, false).E);
   const byThreat = cells.map((_, i) => i).sort((a, b) => threat[b] - threat[a]);
   const out: NodeId[] = new Array(going.length);
   going.map((_, i) => i).sort((a, b) => going[b].power - going[a].power).forEach((ui, rank) => (out[ui] = cells[byThreat[rank % cells.length]]));

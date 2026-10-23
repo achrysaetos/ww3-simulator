@@ -94,8 +94,6 @@ export function NationPanel({ client, palette, playAs, objectives, onCommand, on
   const eco = d?.economy;
   const sanctions = d?.sanctions ?? [];
   const sanctioned = target !== '' && sanctions.includes(target);
-  const myOffer = target !== '' && !!d?.peaceOffers.some((o) => o.from === n.id && o.to === target);
-  const theirOffer = target !== '' && !!d?.peaceOffers.some((o) => o.from === target && o.to === n.id);
   const letsIn = target !== '' && !!d?.access.includes(target);
   const letsUsIn = target !== '' && !!d?.accessFrom.includes(target);
   const aiding = target !== '' && !!d?.aid.includes(target);
@@ -236,7 +234,6 @@ export function NationPanel({ client, palette, playAs, objectives, onCommand, on
         </label>
         <div className="row gap">
           <button className="danger" disabled={!target || atWarWithTarget} onClick={() => target && onCommand({ type: 'declare_war', nation: n.id, target, reason: 'declared by national command authority' }, `War declared on ${name(target)}`)}>Declare war</button>
-          <button disabled={!target || !atWarWithTarget || myOffer} onClick={() => target && onCommand({ type: 'offer_peace', nation: n.id, target }, `Peace offered to ${name(target)}`)} data-testid="offer-peace">{myOffer ? 'Offer pending' : theirOffer ? 'Accept peace' : 'Offer peace'}</button>
           <button disabled={!target || atWarWithTarget} onClick={() => target && onCommand({ type: 'sanction', nation: n.id, target, on: !sanctioned }, `${sanctioned ? 'Sanctions lifted on' : 'Sanctions imposed on'} ${name(target)}`)} data-testid="sanction">{sanctioned ? 'Lift sanctions' : 'Sanction'}</button>
         </div>
         <div className="row gap">
@@ -258,8 +255,7 @@ export function NationPanel({ client, palette, playAs, objectives, onCommand, on
             {[letsIn && `${name(target)}'s troops may cross your land.`, letsUsIn && `${name(target)} lets your troops cross its land.`, aiding && `Your air defence covers ${name(target)}, short of joining its war.`].filter(Boolean).join(' ')}
           </p>
         )}
-        {target && myOffer && <p className="small tt-warn" data-testid="peace-status">{name(target)} has not accepted your offer. It stays on the table; they may take it if the war turns against them.</p>}
-        {target && theirOffer && <p className="small tt-hint">{name(target)} has offered peace. Accepting ends the war on current lines.</p>}
+        {target && atWarWithTarget && <p className="small muted">To offer {name(target)} peace, drag your flag onto theirs in the top bar.</p>}
         {target && sanctioned && <p className="small muted">Sanctions in force: most trade between you stops, a share leaks through third countries.</p>}
         <button className="nuke" disabled={n.deployed <= 0} onClick={onNuclear} data-testid="nuclear-release">
           ☢ Nuclear release…

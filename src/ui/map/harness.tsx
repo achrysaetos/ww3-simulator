@@ -50,6 +50,7 @@ function Harness() {
         speed={client.speed}
         speeds={SPEEDS}
         onSpeed={(s) => client.setSpeed(s)}
+        onCommand={(c) => client.command(c)}
         stats={n ? [
           { label: 'War support', value: `${Math.round(n.warSupport * 100)}%`, tone: n.warSupport < 0.4 ? 'bad' : undefined },
           { label: 'Mobilized', value: `${Math.round(n.mobilization * 100)}%`, tone: 'warn' },

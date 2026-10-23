@@ -27,5 +27,17 @@
 .ww-stat .good { color: var(--ww-green); }
 .ww-stat .warn { color: var(--ww-gold); }
 .ww-stat .bad { color: var(--ww-red); }
-.ww-defcon { height: 26px; }
+.ww-gauge { display: flex; align-items: center; gap: 6px; }
+.ww-gauge-words { display: flex; flex-direction: column; gap: 3px; white-space: nowrap; }
+.ww-gauge .ww-label { font-size: 10px; }
+.ww-gauge .ww-mono { font-size: 14px; font-weight: 600; color: var(--ww-text); }
+.ww-gauge-track { stroke: rgba(150, 195, 240, 0.18); }
+.ww-gauge-needle, .ww-gauge-needle-hub { stroke: var(--ww-text); fill: var(--ww-text); }
+.ww-gauge.good .ww-gauge-fill { stroke: var(--ww-green); }
+.ww-gauge.good .ww-mono { color: var(--ww-green); }
+.ww-gauge.warn .ww-gauge-fill { stroke: var(--ww-gold); }
+.ww-gauge.warn .ww-mono { color: var(--ww-gold); }
+.ww-gauge.bad .ww-gauge-fill { stroke: var(--ww-red); }
+.ww-gauge.bad .ww-mono { color: var(--ww-red); }
+.ww-gauge.muted .ww-mono { color: var(--ww-muted); }
 @media (max-width: 1100px) { .ww-topbar-side { min-width: 0; } .ww-topbar-stats .ww-stat:nth-child(n + 3) { display: none; } }

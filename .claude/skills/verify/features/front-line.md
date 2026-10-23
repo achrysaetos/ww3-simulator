@@ -21,6 +21,6 @@ Proof: two screenshots of one cell at the same camera, with the share read at ea
 
 ## Gotchas
 
-- The 2026 front is locked. An empty enemy cell next to a lone brigade, covered by fire from next door, is crawled through at a few hundredths of a km a day (the 42nd into 6501 made under 0.01 of the cell in ten days). The line does not visibly move there. Use an uncovered cell or watch a large push.
+- The 2026 front is locked. An empty enemy cell next to a lone brigade, covered by fire from next door, is crawled through at about a tenth of a km a day in January: the 42nd into 6501 (forest, covered by the 72nd Motor Rifle Division and the KPA force) made 0.033 of the cell in 14 days, against 0.013 before `land.SCREEN_DENSITY`. The bulge is just visible at front zoom. Use an uncovered cell or watch a large push for a clear move.
 - A push into an uncovered cell jumps by a third of the cell in one tick and can then stall when enemies come up next door. Frame the camera before the drag lands.
 - The mask is an eighth of a degree per texel. A half-degree cell is four texels across, so expect a smooth shift of the line, not a sharp salient.

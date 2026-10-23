@@ -23,6 +23,7 @@ import { isSealift } from '../systems/naval/sealift';
 import { airliftTonsPerDay, airPortable, airTons, awaitingLift, deckSlots, liftMode, overseas } from '../systems/land/strategic';
 import { authority, playerCommands } from '../systems/orders';
 import { members, sideOf } from '../systems/diplomacy/wars';
+import { peaceAnswer, type PeaceAnswer } from '../systems/diplomacy/support';
 import { deliveryReachKm, isLive } from '../systems/strategic/nuclear';
 import { hostedBy } from '../systems/civil/state';
 import type { ElectionResult, OpinionDrivers } from '../systems/politics/state';
@@ -256,6 +257,8 @@ export interface NationDetail {
   treatyCalls: TreatyCall[];
   /** Open peace offers between this nation and its enemies. */
   peaceOffers: { from: NationId; to: NationId }[];
+  /** What each enemy would answer an offer of peace from this nation now (diplomacy peaceAnswer), weighed on the viewer's beliefs; empty for any nation but the viewer. */
+  peace: { nation: NationId; answer: PeaceAnswer }[];
   /** Nations it has sanctions in force with. */
   sanctions: NationId[];
   /** Nations whose troops it lets cross its land, nations whose land its troops may cross, and belligerents its air defence covers. */
@@ -795,6 +798,7 @@ export class SnapshotEncoder {
         return a === id || b === id ? [{ from, to: from === a ? b : a }] : [];
       }),
       sanctions,
+      peace: diplomacy && (!view || view.nation === id) ? this.peace(view ? believedWorld(world, map, view.nation, catalog) : world, map, id) : [],
       access: diplomacy?.access[id] ?? [],
       accessFrom: Object.entries(diplomacy?.access ?? {}).flatMap(([host, guests]) => (guests.includes(id) ? [host as NationId] : [])),
       aid: diplomacy?.aid[id] ?? [],
@@ -837,6 +841,15 @@ export class SnapshotEncoder {
       if (lines[id] || !e.producers.includes(n.id)) continue;
       const ceiling = greenfieldCeilingPerMonth(n, e.unitCostUsdM, id);
       if (ceiling > 0) out[id] = ceiling;
+    }
+    return out;
+  }
+
+  private peace(world: World, map: GameMap, id: NationId): NationDetail['peace'] {
+    const out: NationDetail['peace'] = [];
+    for (const e of enemiesOf(world, id)) {
+      const answer = peaceAnswer(world, map, world.slices.diplomacy!, id, e);
+      if (answer) out.push({ nation: e, answer });
     }
     return out;
   }

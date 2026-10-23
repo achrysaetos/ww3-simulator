@@ -14,14 +14,15 @@ import { pkAgainst, threatCategory } from '../../systems/air/iads';
 import type { SalvoDefense, SalvoThreat } from '../../systems/air/intercept';
 import { dailyRounds, isStrikeMunition } from '../../systems/air/strike';
 import { coverageShare, engages, type ThreatCategory } from '../../systems/air/tables';
-import { orderDelayHours } from '../../systems/c2';
+import { c2FireFactor, orderDelayHours } from '../../systems/c2';
 import { believedWorld, viewOf } from '../../systems/intel/view';
-import { infiltrating, TERRAIN } from '../../systems/land/tables';
-import { acrossRiver } from '../../systems/land/combat';
+import { exposureOf, fireScaleOf, INDIRECT_FIRE, infiltrating, LAND_KINDS, targetClassOf } from '../../systems/land/tables';
+import { acrossRiver, ammoFactor, fuelFactor, quality } from '../../systems/land/combat';
 import { allied, openTo } from '../../systems/land/state';
 import { edgeKm, marchKmPerDay } from '../../systems/land/movement';
 import { supplyFactor } from '../../systems/logistics';
 import { geography } from '../../systems/naval/geography';
+import { groundFactorAt } from '../../systems/weather/effects';
 import { minedClosed, navalDestination, straitBarred } from '../../systems/naval/movement';
 
 export type SubjectClass = 'ground' | 'fires' | 'air' | 'fleet' | 'air_defense';
@@ -35,6 +36,35 @@ declare const BELIEF: unique symbol;
 export type Belief = World & { readonly [BELIEF]: true };
 export const beliefOf = (w: World, map: GameMap, n: NationId, c: Catalog): Belief => believedWorld(w, map, n, c) as Belief;
 
+/** The target classes a land platform counts as (land/tables TARGET_CLASS), so the only ones a land fire ratio weighs. */
+export const LAND_TARGETS = ['infantry', 'armor', 'soft'] as const;
+/** Floats in one LandForce. */
+export const FORCE = 3 * LAND_TARGETS.length;
+
+/**
+ * A land side as land/combat `summarize` totals it, flat: exposed platforms, then direct, then indirect kills per engaged
+ * hour, each by LAND_TARGETS. A field holds one per node, at node * FORCE.
+ */
+export type LandForce = Float32Array;
+
+/** The fire `f` keeps (land/combat fireModifier); a caller who can know its C2 multiplies that in. */
+export const fireOf = (f: Formation): number => (f.status === 'routed' ? 0 : quality(f) * ammoFactor(f) * fuelFactor(f));
+
+/** Adds `f` to the force at `out[at]`: its exposed platforms unless only its guns join the fight (`guns`, support from a neighbouring cell), and its fire times `m`. */
+export function addForce(out: Float32Array, at: number, catalog: Catalog, f: Formation, m: number, guns = false): void {
+  const K = LAND_TARGETS.length;
+  for (const [pid, n] of Object.entries(f.equipment) as [PlatformId, number][]) {
+    if (n <= 0) continue;
+    const p = catalog.platform(pid);
+    if (!guns) {
+      const c = LAND_TARGETS.indexOf(targetClassOf(p.class) as (typeof LAND_TARGETS)[number]);
+      if (c >= 0) out[at + c] += n * exposureOf(p.class);
+    }
+    const into = at + (INDIRECT_FIRE.has(p.class) ? 2 * K : K), k = n * m * fireScaleOf(p.class);
+    if (k) for (let c = 0; c < K; c++) out[into + c] += k * (p.firepower[LAND_TARGETS[c]] ?? 0);
+  }
+}
+
 /** How the player stands to a nation: indexed by `map.nationIds` position, as the snapshot's control array is. */
 export const SIDE = { own: 0, friend: 1, hostile: 2, neutral: 3 } as const;
 
@@ -46,6 +76,8 @@ export interface SubjectUnit {
   node: NodeId;
   /** combatPower for land subjects (ai/forces.ts); firepower x readiness for air and naval ones. */
   power: number;
+  /** The unit as a land side (empty for air and naval ones), C2 included: the attacker of a take estimate. */
+  force: LandForce;
   /** 0..1, operational platforms over operational plus damaged. */
   strength: number;
   /** Land march (land/movement marchKmPerDay) or sea speed, km a day; 0 when it does not march. */
@@ -65,22 +97,30 @@ export interface BeliefField {
   tick: number;
   /** Sum of combatPower of believed hostile ground at the node. */
   enemyPower: Float32Array;
+  /** Believed hostile land formations at each node as a LandForce (FORCE floats per node): who fights for the cell. */
+  enemyForce: Float32Array;
+  /** The fire of believed hostile artillery at each node (LandForce, no platforms): it joins fights in the cells next to it. */
+  enemyGuns: Float32Array;
+  /** Believed hostile manoeuvre formations at each node (LandForce): the line that covers the empty cells next to it (land/combat coveringFire). */
+  enemyLine: Float32Array;
   /** Power-weighted contact confidence, 0..1 (0 where nothing is seen). */
   enemyConf: Float32Array;
   /** Hours since the freshest fix at the node. */
   enemyAgeH: Float32Array;
   /** Believed entrenchment: the cell's standing fortifications, since belief fills unseen units in as freshly on the defence. */
   enemyDig: Float32Array;
-  /** TERRAIN defence multiplier: public geography. */
-  defense: Float32Array;
+  /** The pace mud and snow leave a march or an advance at the node, 0..1 (weather groundFactorAt): public weather. */
+  ground: Float32Array;
   /** 1 on enemy ground the player's side reaches only across a major river (land/combat acrossRiver), where the river duels apply. */
   river: Uint8Array;
   /** The player's supplyFactor at the node, in hundredths (logistics: 100 at home, about 50 in held ground, 25 across the contact line). */
   supply: Uint8Array;
   /** 1 where the holder is at war with the player. */
   hostile: Uint8Array;
-  /** Own ground power already standing at the node. */
-  ownPower: Float32Array;
+  /** Own land formations already standing at each node, as a LandForce with their C2. */
+  ownForce: Float32Array;
+  /** The fire of own artillery at each node, as enemyGuns. */
+  ownGuns: Float32Array;
 }
 
 /** A believed hostile formation, for target classification, contest ratios and the stale-fix caveat. */
@@ -209,16 +249,27 @@ function beliefField(belief: World, map: GameMap, catalog: Catalog, player: Nati
   const f: BeliefField = {
     tick: belief.tick,
     enemyPower: new Float32Array(size), enemyConf: new Float32Array(size), enemyAgeH: new Float32Array(size).fill(Infinity),
-    enemyDig: new Float32Array(size), defense: new Float32Array(size).fill(1), supply: new Uint8Array(size), hostile: new Uint8Array(size), river: new Uint8Array(size), ownPower: new Float32Array(size),
+    enemyForce: new Float32Array(map.landCount * FORCE), enemyGuns: new Float32Array(map.landCount * FORCE), enemyLine: new Float32Array(map.landCount * FORCE),
+    enemyDig: new Float32Array(size), ground: new Float32Array(size).fill(1), supply: new Uint8Array(size), hostile: new Uint8Array(size), river: new Uint8Array(size),
+    ownForce: new Float32Array(map.landCount * FORCE), ownGuns: new Float32Array(map.landCount * FORCE),
   };
   const view = viewOf(belief, map, player);
   const foes = hostility(belief).foes.get(player) ?? new Set<NationId>();
   for (const g of Object.values(belief.formations)) {
-    if ((g.status !== 'active' && g.status !== 'routed') || g.embarkedOn || !isGround(g) || g.node >= map.landCount) continue;
-    if (g.nation === player) f.ownPower[g.node] += combatPower(g, catalog);
-    else if (foes.has(g.nation)) {
+    if ((g.status !== 'active' && g.status !== 'routed') || g.embarkedOn || g.node >= map.landCount || !LAND_KINDS.has(g.kind)) continue;
+    const at = g.node * FORCE;
+    if (g.nation === player) {
+      const m = fireOf(g) * c2FireFactor(belief, g);
+      addForce(f.ownForce, at, catalog, g, m);
+      if (g.kind === 'artillery') addForce(f.ownGuns, at, catalog, g, m, true);
+    } else if (foes.has(g.nation)) {
       const c = view.contacts.get(g.id);
       if (!c) continue;
+      // The enemy's C2 is not seen.
+      addForce(f.enemyForce, at, catalog, g, fireOf(g));
+      if (g.kind === 'artillery') addForce(f.enemyGuns, at, catalog, g, fireOf(g), true);
+      if (g.kind === 'maneuver' && g.status === 'active') addForce(f.enemyLine, at, catalog, g, fireOf(g));
+      if (!isGround(g)) continue;
       const p = combatPower(g, catalog);
       f.enemyConf[g.node] += p * c.confidence;
       f.enemyPower[g.node] += p;
@@ -228,21 +279,21 @@ function beliefField(belief: World, map: GameMap, catalog: Catalog, player: Nati
   const fortified = belief.slices.land?.fortified ?? {};
   for (let n = 0; n < map.landCount; n++) {
     if (f.enemyPower[n] > 0) f.enemyConf[n] /= f.enemyPower[n];
-    f.defense[n] = TERRAIN[map.terrain[n]].defense;
     if (foes.has(belief.control[n])) {
       f.hostile[n] = 1;
       f.river[n] = acrossRiver(belief, map, n as NodeId, player) ? 1 : 0;
       f.enemyDig[n] = fortified[n] ?? 0;
     }
     f.supply[n] = Math.round(100 * supplyFactor(belief, map, n as NodeId, player));
+    f.ground[n] = groundFactorAt(belief, map, n as NodeId);
   }
   return f;
 }
 
 function copyField(f: BeliefField): BeliefField {
   return {
-    tick: f.tick, enemyPower: f.enemyPower.slice(), enemyConf: f.enemyConf.slice(), enemyAgeH: f.enemyAgeH.slice(), enemyDig: f.enemyDig.slice(),
-    defense: f.defense.slice(), supply: f.supply.slice(), hostile: f.hostile.slice(), river: f.river.slice(), ownPower: f.ownPower.slice(),
+    tick: f.tick, enemyPower: f.enemyPower.slice(), enemyForce: f.enemyForce.slice(), enemyGuns: f.enemyGuns.slice(), enemyLine: f.enemyLine.slice(), enemyConf: f.enemyConf.slice(), enemyAgeH: f.enemyAgeH.slice(), enemyDig: f.enemyDig.slice(),
+    ground: f.ground.slice(), supply: f.supply.slice(), hostile: f.hostile.slice(), river: f.river.slice(), ownForce: f.ownForce.slice(), ownGuns: f.ownGuns.slice(),
   };
 }
 
@@ -265,11 +316,14 @@ function subjectOf(belief: World, engine: Engine, f: Formation): SubjectUnit {
   let damaged = 0;
   for (const v of Object.values(f.damaged)) damaged += v;
   const strike = cls === 'fires' || cls === 'air' ? mainStrike(f, catalog) : undefined;
+  const force = new Float32Array(FORCE);
+  if (LAND_KINDS.has(f.kind)) addForce(force, 0, catalog, f, fireOf(f) * c2FireFactor(belief, f));
   let seaKph = Infinity;
   if (cls === 'fleet') for (const [pid, n] of Object.entries(f.equipment) as [PlatformId, number][]) if (n > 0) seaKph = Math.min(seaKph, catalog.platform(pid).mobility.speedKph);
   return {
     id: f.id, cls, kind: f.kind, node: f.node,
     power: powerOf(f, catalog),
+    force,
     strength: ops + damaged > 0 ? ops / (ops + damaged) : 0,
     kmPerDay: cls === 'fleet' ? (Number.isFinite(seaKph) ? seaKph * 24 : 0) : cls === 'air' ? 0 : marchKmPerDay(belief, catalog, f),
     strikeKm: cls === 'fires' || cls === 'air' ? maxReachKm(belief, f, true, engine) : 0,
