@@ -13,6 +13,7 @@
     "sim": "tsx src/cli/run.ts",
     "ensemble": "tsx src/cli/ensemble.ts",
     "validate": "tsx src/cli/validate.ts",
+    "calibrate:quick": "tsx scripts/calibrate-quick.ts",
     "perf": "PERF=1 vitest run",
     "realism": "REALISM=1 vitest run"
   },

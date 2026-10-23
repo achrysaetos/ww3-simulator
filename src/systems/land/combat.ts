@@ -467,7 +467,7 @@ export function fortifyStandingLines(world: World, map: GameMap): void {
 }
 
 /** Whether `nation`'s side reaches `node` only across a major river: it holds land next to the cell, and none of it joins the cell dry. */
-function acrossRiver(world: World, map: GameMap, node: NodeId, nation: NationId): boolean {
+export function acrossRiver(world: World, map: GameMap, node: NodeId, nation: NationId): boolean {
   let near = false;
   for (let k = map.adjStart[node]; k < map.adjStart[node + 1]; k++) {
     const m = map.adj[k], holder = world.control[m];

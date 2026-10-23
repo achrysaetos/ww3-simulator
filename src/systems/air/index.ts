@@ -174,7 +174,8 @@ const fliesTankers = (world: World, catalog: Catalog, nation: NationId) =>
   Object.values(world.formations).some((w) => w.nation === nation && w.kind === 'air_wing' && w.status === 'active'
     && Object.entries(w.equipment).some(([pid, n]) => n > 0 && catalog.platform(pid as PlatformId).class === 'tanker'));
 
-function maxReachKm(world: World, f: Formation, strike: boolean, ctx: SimContext): number {
+/** Best-case reach of a strike (or, with `strike` false, a counter-air sweep): tankers if the nation flies any, longest weapon aboard. */
+export function maxReachKm(world: World, f: Formation, strike: boolean, ctx: Pick<SimContext, 'catalog'>): number {
   let weapon = 0;
   if (strike)
     for (const [mid, n] of Object.entries(f.magazine)) {
