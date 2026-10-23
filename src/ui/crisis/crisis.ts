@@ -258,6 +258,17 @@ export function answered(crisis: Crisis, c: CrisisContext): Crisis {
 }
 
 /** The first card on the table that should stop the clock, if any, skipping those already shown. */
+/**
+ * The answer the staff gives on its own when the player has left decisions to it: the recommended option, if it is an
+ * order or a hold. Advice to look first or to wait leaves the decision on the table; a nuclear release is never the staff's.
+ */
+export function staffAnswer(c: Crisis): CrisisOption | null {
+  const o = c.options.find((x) => x.recommended);
+  if (!o || o.defer || o.action.kind === 'show') return null;
+  if (o.action.kind === 'command' && o.action.command.type === 'nuclear_release') return null;
+  return o;
+}
+
 export function nextCrisis(cards: readonly Card[], shown: ReadonlySet<string>, c: CrisisContext): Crisis | null {
   for (const card of cards) {
     if (shown.has(card.key)) continue;

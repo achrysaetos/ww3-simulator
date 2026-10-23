@@ -5,7 +5,7 @@ import type { Palette } from '../colors';
 import { Flag } from '../flags';
 import { LoadFileInput } from '../GameFlow';
 import { openingFocus } from '../MapView';
-import { crisesOn, setCrises } from '../prefs';
+import { autoAcceptOn, crisesOn, setAutoAccept, setCrises } from '../prefs';
 import { resetCoach } from '../coach/coach';
 import { COMMAND_ROLES, type RoleId } from '../staff/roles';
 import { fmtUsdB } from '../widgets';
@@ -42,9 +42,10 @@ function useStageScale(): number {
   const get = () => Math.min(window.innerWidth / 1440, window.innerHeight / 900);
   const [s, setS] = useState(get);
   useEffect(() => {
-    const on = () => setS(get());
-    window.addEventListener('resize', on);
-    return () => window.removeEventListener('resize', on);
+    // Observe the page, not just window resizes: a tab opened with no size yet gets its first real size without one.
+    const ro = new ResizeObserver(() => setS(get()));
+    ro.observe(document.documentElement);
+    return () => ro.disconnect();
   }, []);
   return s;
 }
@@ -59,6 +60,7 @@ export function StartScreen({ client, palette }: { client: SimClient; palette: P
   const [search, setSearch] = useState<string | null>(null);
   const [settings, setSettings] = useState(false);
   const [crises, setCrisesState] = useState(crisesOn);
+  const [autoAccept, setAutoAcceptState] = useState(autoAcceptOn);
   const [coachReset, setCoachReset] = useState(false);
   const file = useRef<HTMLInputElement>(null);
   const scale = useStageScale();
@@ -251,6 +253,10 @@ export function StartScreen({ client, palette }: { client: SimClient; palette: P
               <label className="st-toggle">
                 <input type="checkbox" checked={crises} onChange={(e) => { setCrises(e.target.checked); setCrisesState(e.target.checked); }} data-testid="setting-crises" />
                 <span><b>Crises stop the clock</b><small>A treaty call, a nuclear alert, a peace offer or a threat to your capital takes the screen. Off, they wait in the Daily Brief.</small></span>
+              </label>
+              <label className="st-toggle">
+                <input type="checkbox" checked={autoAccept} onChange={(e) => { setAutoAccept(e.target.checked); setAutoAcceptState(e.target.checked); }} data-testid="setting-auto-accept" />
+                <span><b>Auto-accept staff advice</b><small>Your staff answers crises and approves the Daily Brief on its own, so the clock never waits on you. Nuclear release stays yours.</small></span>
               </label>
               <button type="button" className="ww-btn" disabled={coachReset} onClick={() => { resetCoach(); setCoachReset(true); }} data-testid="setting-coach">{coachReset ? 'Tour will show next game' : 'Show the tour again'}</button>
             </div>

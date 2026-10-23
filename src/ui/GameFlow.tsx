@@ -1,15 +1,22 @@
-import { useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { Objective, Outcome } from './briefing';
 import type { SimClient } from './client';
 
 /** Save, load, briefing and quit, behind one button in the top bar. */
-export function GameMenu({ client, onBriefing, onQuit }: { client: SimClient; onBriefing(): void; onQuit(): void }) {
+export function GameMenu({ client, onBriefing, onQuit, autoAccept, onAutoAccept }: { client: SimClient; onBriefing(): void; onQuit(): void; autoAccept: boolean; onAutoAccept(on: boolean): void }) {
   const [open, setOpen] = useState(false);
   const file = useRef<HTMLInputElement>(null);
+  const root = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: PointerEvent) => { if (!root.current?.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener('pointerdown', away);
+    return () => document.removeEventListener('pointerdown', away);
+  }, [open]);
   const act = (f: () => void) => () => { setOpen(false); f(); };
   const slotDay = client.slot ? Math.floor((client.slot.tick * (client.meta?.dtHours ?? 6)) / 24) : 0;
   return (
-    <div className="game-menu">
+    <div className="game-menu" ref={root}>
       <button onClick={() => setOpen((o) => !o)} aria-expanded={open} data-testid="game-menu">Game ▾</button>
       {open && (
         <div className="game-menu-list" role="menu">
@@ -20,6 +27,10 @@ export function GameMenu({ client, onBriefing, onQuit }: { client: SimClient; on
             Load quick save{client.slot ? ` (${client.slot.scenario}, D+${slotDay})` : ''}
           </button>
           <button role="menuitem" onClick={act(() => file.current?.click())} data-testid="menu-load-file">Load save file…</button>
+          <label className="game-menu-toggle" role="menuitemcheckbox" aria-checked={autoAccept}>
+            <input type="checkbox" checked={autoAccept} onChange={(e) => onAutoAccept(e.target.checked)} data-testid="menu-auto-accept" />
+            Auto-accept staff advice
+          </label>
           <button role="menuitem" className="danger-text" onClick={act(onQuit)} data-testid="menu-quit">Quit to start screen…</button>
         </div>
       )}

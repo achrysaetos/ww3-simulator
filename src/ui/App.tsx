@@ -9,9 +9,9 @@ import { MomentOverlay } from './moments/MomentOverlay';
 import { momentsOf, type Moment } from './moments/moments';
 import { CoachMarks } from './coach/CoachMarks';
 import { CrisisScreen } from './crisis/CrisisScreen';
-import { answered, nextCrisis, type Crisis, type CrisisContext } from './crisis/crisis';
+import { answered, nextCrisis, staffAnswer, type Crisis, type CrisisContext } from './crisis/crisis';
 import { ConfirmDialog, EndDialog, GameMenu, type Confirmation } from './GameFlow';
-import { crisesOn } from './prefs';
+import { autoAcceptOn, crisesOn, setAutoAccept } from './prefs';
 import { EventLog } from './EventLog';
 import { humanizeReason } from './events';
 import { FormationList, FormationPanel, type Command as CommandHolder } from './FormationPanel';
@@ -31,7 +31,7 @@ import { openingFacts } from './start/openingFacts';
 import { StartScreen } from './start/StartScreen';
 import { shortName } from './start/scenarioInfo';
 import type { Overlays } from './renderer';
-import type { Action, Card, Drawer, Mark } from './staff/advice';
+import { staffApproves, type Action, type Card, type Drawer, type Mark } from './staff/advice';
 import { DailyBrief } from './staff/DailyBrief';
 import { BRIEF_CADENCES, type BriefCadence } from './staff/desk';
 import { operations } from './staff/operations';
@@ -105,6 +105,11 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
   const [delegating, setDelegating] = useState<Partial<Record<CommandDomain, boolean>>>(() => client.openingDelegation);
   const [toast, setToast] = useState<Toast | null>(null);
   const [crisis, setCrisis] = useState<{ c: Crisis; resume: number; chosen: number | null } | null>(null);
+  const [autoAccept, setAutoAcceptState] = useState(autoAcceptOn);
+  const toggleAutoAccept = (on: boolean) => {
+    setAutoAccept(on);
+    setAutoAcceptState(on);
+  };
   const shownCrises = useRef(new Set<string>());
   const [coach, setCoach] = useState(false);
   const [moment, setMoment] = useState<Moment | null>(null);
@@ -197,11 +202,20 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
   } : null;
 
   // A crisis stops the clock and takes the screen; otherwise the brief opens itself when a decision
-  // needs the player (or each morning, by the player's setting).
+  // needs the player (or each morning, by the player's setting). With auto-accept on, the staff answers
+  // both on the player's behalf and the clock never stops for them.
   useEffect(() => {
     if (brief || crisis || coach || briefingOpen || (endKey && endKey !== endSeen) || !client.state.date) return;
-    const ctx = crisesOn() ? crisisContext() : null;
+    const ctx = crisesOn() || autoAccept ? crisisContext() : null;
     const next = ctx && nextCrisis(desk.cards, shownCrises.current, ctx);
+    if (next && autoAccept) {
+      shownCrises.current.add(next.key);
+      desk.markBriefed(next.key);
+      const o = staffAnswer(next);
+      if (o) client.act(next.card, o.action);
+      client.announce(o ? `${next.headline}: your staff chose “${o.title}”.` : `${next.headline}: your staff left it in the War Room for you.`);
+      return;
+    }
     if (next) {
       shownCrises.current.add(next.key);
       desk.markBriefed(next.key);
@@ -214,8 +228,13 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
       coachOffered.current = true;
       if (coachDue()) return setCoach(true);
     }
-    if (desk.briefDue(new Date(client.state.date), cadence)) openBrief();
-  }, [client.state.tick, desk.version, brief, crisis, coach, briefingOpen, cadence]);
+    if (!desk.briefDue(new Date(client.state.date), cadence)) return;
+    if (!autoAccept) return openBrief();
+    const approved = desk.decisions.filter(staffApproves);
+    for (const c of approved) client.act(c, c.primary!);
+    desk.briefOpened();
+    if (approved.length) client.announce(`Your staff approved ${approved.length === 1 ? 'a recommendation' : `${approved.length} recommendations`} from the Daily Brief.`);
+  }, [client.state.tick, desk.version, brief, crisis, coach, briefingOpen, cadence, autoAccept]);
 
   const chooseCrisis = (i: number) => {
     if (!crisis) return;
@@ -471,7 +490,7 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
           </div>
         )}
       </div>
-      <GameMenu client={client} onBriefing={() => setOpening('card')} onQuit={quit} />
+      <GameMenu client={client} onBriefing={() => setOpening('card')} onQuit={quit} autoAccept={autoAccept} onAutoAccept={toggleAutoAccept} />
     </div>
   );
 

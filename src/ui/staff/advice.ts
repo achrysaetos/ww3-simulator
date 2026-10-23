@@ -58,6 +58,9 @@ export interface Card {
 
 export const isDecision = (c: Card): boolean => c.primary?.kind === 'command';
 
+/** A decision the staff may approve without the player: any command but a nuclear release, which only the player orders. */
+export const staffApproves = (c: Card): boolean => c.primary?.kind === 'command' && c.primary.command.type !== 'nuclear_release';
+
 export interface Situation {
   me: NationId;
   /** Opening wars already being fought when the scenario starts, as "aggressor>target": no news when declared at the first tick. */

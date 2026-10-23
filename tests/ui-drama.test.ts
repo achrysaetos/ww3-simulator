@@ -7,13 +7,13 @@ import { NUCLEAR_ALERT, profiles } from '../src/data/nations';
 import { authority } from '../src/systems/orders';
 import { coachDue, markCoachDone, resetCoach } from '../src/ui/coach/coach';
 import { SCENARIO_CARDS, SimHost } from '../src/ui/host';
-import { crisesOn, setCrises, type KeyValue } from '../src/ui/prefs';
+import { autoAcceptOn, crisesOn, setAutoAccept, setCrises, type KeyValue } from '../src/ui/prefs';
 import { nationCards, type FromWorker } from '../src/ui/snapshot';
 import { featuredNations, scenarioInfo, threatOf } from '../src/ui/start/scenarioInfo';
 import { COMMAND_ROLES } from '../src/ui/staff/roles';
 import { CrisisScreen } from '../src/ui/crisis/CrisisScreen';
-import { answered, crisisOf, nextCrisis, type CrisisContext } from '../src/ui/crisis/crisis';
-import type { Card } from '../src/ui/staff/advice';
+import { answered, crisisOf, nextCrisis, staffAnswer, type Crisis, type CrisisContext, type CrisisOption } from '../src/ui/crisis/crisis';
+import { staffApproves, type Card } from '../src/ui/staff/advice';
 import { momentsOf } from '../src/ui/moments/moments';
 import { playWithStaff } from './staff-mirror';
 
@@ -104,6 +104,53 @@ describe('settings that persist', () => {
     expect(crisesOn(store)).toBe(false);
     expect(crisesOn(broken)).toBe(true);
   });
+
+  it('auto-accept is off until the player turns it on, and stays off when storage is blocked', () => {
+    const store = memory();
+    expect(autoAcceptOn(store)).toBe(false);
+    setAutoAccept(true, store);
+    expect(autoAcceptOn(store)).toBe(true);
+    setAutoAccept(false, store);
+    expect(autoAcceptOn(store)).toBe(false);
+    expect(autoAcceptOn(broken)).toBe(false);
+  });
+});
+
+describe('auto-accept takes the staff advice without stopping the clock', () => {
+  const opt = (title: string, action: CrisisOption['action'], recommended: boolean, extra: Partial<CrisisOption> = {}): CrisisOption =>
+    ({ title, text: '', button: title, tone: 'gold', advisor: 'chief', quote: '', action, recommended, ...extra });
+  const crisis = (options: CrisisOption[]) => ({ options }) as unknown as Crisis;
+  const join = { kind: 'command', label: 'Go to war', command: { type: 'answer_treaty', nation: N('USA'), war: 'w', treaty: 't', join: true } } as CrisisOption['action'];
+  const hold = { kind: 'later', label: 'Hold' } as CrisisOption['action'];
+  const show = { kind: 'show', label: 'Show me', node: 0 as NodeId } as CrisisOption['action'];
+  const nuke = { kind: 'command', label: 'Launch', command: { type: 'nuclear_release', nation: N('USA') } } as unknown as CrisisOption['action'];
+
+  it('takes the recommended answer, a command or a hold', () => {
+    expect(staffAnswer(crisis([opt('Go to war', join, true), opt('Stand aside', hold, false)]))?.title).toBe('Go to war');
+    expect(staffAnswer(crisis([opt('Raise', join, false), opt('Hold', hold, true)]))?.title).toBe('Hold');
+  });
+
+  it('leaves the decision on the table when the advice is to look first or to wait', () => {
+    expect(staffAnswer(crisis([opt('Look first', show, true), opt('Hold', hold, false)]))).toBeNull();
+    expect(staffAnswer(crisis([opt('Wait', hold, true, { defer: true }), opt('Go', join, false)]))).toBeNull();
+  });
+
+  it('never releases a nuclear weapon on its own', () => {
+    expect(staffAnswer(crisis([opt('Launch', nuke, true), opt('Hold', hold, false)]))).toBeNull();
+    const card = (primary: Card['primary']) => ({ key: 'k', primary }) as Card;
+    expect(staffApproves(card(join as Card['primary']))).toBe(true);
+    expect(staffApproves(card(nuke as Card['primary']))).toBe(false);
+    expect(staffApproves(card({ kind: 'show', label: 'Show me', node: 0 as NodeId }))).toBe(false);
+  });
+
+  it('answers a real treaty call (ww3-2027 as the United States) with the staff advice', () => {
+    const g = play('ww3-2027', 'USA');
+    g.step();
+    const c = nextCrisis(g.desk.cards, new Set(), contextOf(g))!;
+    const pick = staffAnswer(c)!;
+    expect(pick).toBe(c.options.find((o) => o.recommended));
+    expect(pick.action).toMatchObject({ kind: 'command', command: { type: 'answer_treaty' } });
+  }, 300_000);
 });
 
 type Game = ReturnType<typeof playWithStaff>;

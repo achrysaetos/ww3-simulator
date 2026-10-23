@@ -207,6 +207,12 @@ export class SimClient {
     this.notify();
   }
 
+  /** A notice from the page itself, such as what the staff decided for the player. */
+  announce(text: string) {
+    this.say(text, 'info');
+    this.notify();
+  }
+
   private say(text: string, tone: Notice['tone']) {
     this.notice = { text, tone, seq: ++this.noticeSeq };
   }
