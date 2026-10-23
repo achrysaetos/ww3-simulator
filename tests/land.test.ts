@@ -3,6 +3,7 @@ import { platformCount } from '../src/core/forces';
 import type { Formation, NodeId, Order, PlatformId, SimEvent } from '../src/core/types';
 import { applyLandOrder, combatPower, landCombat, landMovement, terrainDefense } from '../src/systems/land';
 import { marchKmPerDay } from '../src/systems/land/movement';
+import { cellDepthKm } from '../src/systems/land/state';
 import { loadMap } from '../src/data/load';
 import type { System } from '../src/core/engine';
 import { diplomacy } from '../src/systems/diplomacy';
@@ -356,6 +357,45 @@ describe('the front', () => {
     expect(equal.km).toBeGreaterThan(0);
     expect(equal.km).toBeLessThan(30);
     expect(cross(0.2).control).toBe(RUS);
+  });
+
+  /** A brigade presses into PLAIN_UKR, empty but covered from EAST_UKR by `cover` brigades; `pulled` lists the ticks it spends back in PLAIN_RUS. */
+  function lull(cover: number, ticks: number, pulled: (tick: number) => boolean) {
+    const s = setup();
+    s.add({ nation: UKR, name: 'cover', kind: 'maneuver', echelon: 'brigade', node: EAST_UKR, equipment: brigade(cover) });
+    const att = s.add({ nation: RUS, name: 'att', kind: 'maneuver', echelon: 'brigade', node: PLAIN_RUS, equipment: brigade(1) });
+    const log: { km: number; inside: boolean; pressing: boolean; control: string }[] = [];
+    for (let tick = 0; tick < ticks; tick++) {
+      const posture = pulled(tick) ? 'move' : 'attack';
+      if (att.order.posture !== posture && s.world.control[PLAIN_UKR] === UKR) s.order(att, { posture, target: posture === 'move' ? PLAIN_RUS : PLAIN_UKR });
+      s.engine.run(s.world, 1);
+      const inside = att.node === PLAIN_UKR;
+      log.push({ km: s.world.slices.land.contest[PLAIN_UKR]?.km ?? 0, inside, pressing: inside && att.order.posture === 'attack', control: s.world.control[PLAIN_UKR] });
+    }
+    return log;
+  }
+
+  it('ground an attacker stops holding is not lost at once: it slips back half a km a day until the defender has it all', () => {
+    const perDay = 24 / testWorld().world.dtHours;
+    const log = lull(1, 120, (tick) => tick >= 40);
+    const left = log.findIndex((r, i) => i >= 40 && !r.inside);
+    const gained = log[left - 1].km;
+    expect(gained).toBeGreaterThan(2);
+    expect(log[left].km).toBeGreaterThan(gained - 0.5);
+    expect(log[left + perDay].km).toBeCloseTo(log[left].km - 0.5, 5);
+    expect(log.at(-1)!.km).toBe(0);
+    expect(log.every((r) => r.control === UKR)).toBe(true);
+  });
+
+  it('an attack resumed after a lull carries on from the ground it kept, and the cell falls only once the advance crosses it', () => {
+    const fresh = lull(0.2, 20, () => false);
+    const resumed = lull(0.2, 30, (tick) => tick >= 3 && tick < 7);
+    const pressingTicks = (log: typeof fresh) => log.slice(0, log.findIndex((r) => r.control === RUS) + 1).filter((r) => r.pressing).length;
+    const takenAt = resumed.findIndex((r) => r.control === RUS);
+    expect(takenAt).toBeGreaterThan(7);
+    expect(pressingTicks(resumed)).toBeLessThan(pressingTicks(fresh));
+    expect(resumed.slice(0, takenAt).every((r) => r.km < cellDepthKm(MAP, PLAIN_UKR))).toBe(true);
+    expect(resumed[takenAt].km).toBe(0);
   });
 });
 
