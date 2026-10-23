@@ -25,6 +25,7 @@ In a running game, press Space or a speed button and watch the hour advance in t
 ## Gotchas
 
 - `setSpeed` through `__client` is fine for getting somewhere fast, but a proof of the speed controls must click them.
-- Applying a tick costs the main thread a long task of about 0.3 to 0.4 s on ukraine-2026 (the game screen re-rendering), which shows as a short freeze of the glide each tick. At 5 h/s the clock measured 4.1 to 5.0 h/s. 20 h/s on ww3-2027 is bound by tick cost (about 0.5 s per tick).
+- Applying a tick redraws only the terrain the snapshot changed (`GlobeGL` keeps its buffer and stencils the damaged boxes); with a still camera the tick's frame stays near or under 50 ms on ukraine-2026 and ww3-2027 in headless Chromium, and 5 h/s holds about 4.9 h/s. A whole redraw (about 100 to 200 ms there, since Chromium composites WebGL in software and reads the canvas back) still follows a camera move, a tile arriving, or a tick that repaints whole countries, such as ww3-2027's opening war.
+- To measure a tick, stub `__map.flyTo` first: dramatic moments fly the camera and stream tiles, which costs whole redraws that are not the tick's.
 - The clock runs on `requestAnimationFrame`, so it stops while the tab is hidden.
 - Keyboard shortcuts are ignored while a crisis, opening or coach is open, and inside inputs.
