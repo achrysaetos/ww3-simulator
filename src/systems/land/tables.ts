@@ -237,7 +237,7 @@ export const POSITIONAL_INTENSITY = (): number => eraPositionalIntensity(POSITIO
 /**
  * The front law. Each pace below is a pace on the sector an attacker assaults, cited from the axes it was observed
  * on. The cell's advance, averaged over its width, is that pace times the share of the cell's front the attacker's
- * platforms in contact fill at FRONTAGE_PLATFORMS density (combat.ts `sector`): a force spread over many cells opens
+ * platforms in contact fill at FRONTAGE_PLATFORMS density, or SCREEN_DENSITY in an empty cell (combat.ts `sector`): a force spread over many cells opens
  * many narrow axes, not many full-width ones. A broken (routed) or absent defender confines nothing, so exploitation
  * runs the cell's full width. The fastest of three ways through a held line wins (combat.ts advanceKm):
  * - Attrition against a line that holds: ATTRITION_KM_PER_DAY per unit of ln(defender loss rate / attacker loss
@@ -307,6 +307,16 @@ export const exposureOf = (c: PlatformClass): number => EXPOSURE[c] ?? 1;
 export const KILL_ZONE_DENSITY = defineParam({ id: 'land.KILL_ZONE_DENSITY', value: 5, range: [3, 8], tag: 'estimated',
   source: 'FM 100-2-1 (1984): motor-rifle battalion defends up to 5 km; ~25-30 exposed platforms per battalion in this order of battle',
   affects: 'how thin a dug-in line can be and still hold an assault in its kill zone' });
+/**
+ * Exposed platforms per km of front a force needs to sweep an empty cell that the line next door covers with fire. No line
+ * holds the cell, so the attacker is not assaulting on FRONTAGE_PLATFORMS' ~30 per km: it clears the ground the way a
+ * brigade occupies its sector, ~10 km for a mechanised brigade (FM 3-90). A brigade here carries 112-123 exposed platforms,
+ * so ~12 per km, and a sweep stays above the KILL_ZONE_DENSITY a line needs just to watch its front. Kursk-2024 sits inside
+ * its band at 12 and its p50 reaches the band's top at 10; 8 overshoots it (npm run validate, seeds 1-4).
+ */
+export const SCREEN_DENSITY = defineParam({ id: 'land.SCREEN_DENSITY', value: 12, range: [8, 15], tag: 'estimated',
+  source: 'A mechanised brigade holds ~10 km (FM 3-90), at 112-123 exposed platforms per brigade in this order of battle',
+  affects: 'how fast a force crosses an empty cell the enemy line covers with fire' });
 /**
  * Extra fire an assaulting force draws, at full entrenchment, while it crosses
  * observed ground into prepared positions (minefields, pre-registered fires,
