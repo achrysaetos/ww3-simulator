@@ -7,20 +7,24 @@ import type { AiState, ForceIndex, Plan, SentOrder } from './types';
 /** An enemy formation as this nation's intelligence sees it: the believed formation, where it was fixed, how fresh the fix is (1 = this tick). */
 export interface Sighting { f: Formation; node: NodeId; confidence: number; contact: ContactView }
 
-/** Sightings by the index and the View they were read from, both fixed for a tick: naval, strike and air planning each ask. */
-const sightings = new WeakMap<ForceIndex, WeakMap<View, Map<NationId, readonly Sighting[]>>>();
+/**
+ * Sightings by the index and the contacts they were read from, both fixed for a tick: naval, strike and air planning
+ * each ask, and coalition partners with one picture share it.
+ */
+const sightings = new WeakMap<ForceIndex, WeakMap<View['contacts'], Map<NationId, readonly Sighting[]>>>();
 
 /** `e`'s formations that `p.nation` holds a current contact on (CURRENT_CONFIDENCE), at their believed positions. */
 export function sighted(p: Plan, e: NationId): readonly Sighting[] {
-  let byView = sightings.get(p.index);
-  if (!byView) sightings.set(p.index, (byView = new WeakMap()));
-  let byNation = byView.get(p.view);
-  if (!byNation) byView.set(p.view, (byNation = new Map()));
+  let byContacts = sightings.get(p.index);
+  if (!byContacts) sightings.set(p.index, (byContacts = new WeakMap()));
+  const contacts = p.view.contacts;
+  let byNation = byContacts.get(contacts);
+  if (!byNation) byContacts.set(contacts, (byNation = new Map()));
   let out = byNation.get(e);
   if (out) return out;
   const found: Sighting[] = [];
   for (const f of p.index.byNation.get(e) ?? []) {
-    const c = p.view.contacts.get(f.id);
+    const c = contacts.get(f.id);
     if (c && c.confidence >= CURRENT_CONFIDENCE) found.push({ f, node: c.node, confidence: c.confidence, contact: c });
   }
   byNation.set(e, (out = found));

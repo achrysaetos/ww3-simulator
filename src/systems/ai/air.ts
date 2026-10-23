@@ -113,9 +113,18 @@ export function planAir(p: Plan, targets: TargetGrid): void {
     const stock = arsenal(p, w);
     const vis = visibility(Math.min(...strikersOf(p, w).map((pl) => pl.protection.stealth)));
     const reach = weaponReach(w, radius, tanked);
+    // Every check below is a distance to the aim point within a reach, so the distance is measured once per target.
+    const reaches = stock.map(reach);
+    const longest = Math.max(radius, ...reaches);
+    const guns = new Map<TargetClass, boolean>();
     const canHit = (t: StrikeTarget) => {
-      for (const m of stock) if (pkAgainst(m, t) > 0 && withinKm(map, w.node, t.at ?? t.node, reach(m)) && sams.clear(w.node, t.node, m.rangeKm, vis)) return true;
-      return hasFirepower(p, w, t.cls) && withinKm(map, w.node, t.at ?? t.node, radius) && sams.clear(w.node, t.node, 0, vis);
+      const at = t.at ?? t.node;
+      if (Math.abs(map.lat[w.node] - map.lat[at]) * 111 > longest) return false;
+      const d = map.distanceKm(w.node, at);
+      for (let i = 0; i < stock.length; i++) if (d <= reaches[i] && pkAgainst(stock[i], t) > 0 && sams.clear(w.node, t.node, stock[i].rangeKm, vis)) return true;
+      let fire = guns.get(t.cls);
+      if (fire === undefined) guns.set(t.cls, (fire = hasFirepower(p, w, t.cls)));
+      return fire && d <= radius && sams.clear(w.node, t.node, 0, vis);
     };
     const t = pickTarget(targets.near(w.node, stock.reduce((best, m) => Math.max(best, reach(m)), radius)), (t) => (canHit(t) ? 1 : 0));
     if (!t) return false;

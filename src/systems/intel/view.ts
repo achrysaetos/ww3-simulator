@@ -93,6 +93,8 @@ export function viewOf(world: World, map: GameMap, nation: NationId): View {
 interface Truth {
   byId: Map<FormationId, ContactView>;
   atNode: Map<NodeId, ContactView[]>;
+  /** Contacts by friend set: coalition partners see the same formations. */
+  seenBy: Map<string, Map<FormationId, ContactView>>;
 }
 
 function truthOf(world: World): Truth {
@@ -107,7 +109,7 @@ function truthOf(world: World): Truth {
     byId.set(c.id, c);
     (atNode.get(c.node) ?? atNode.set(c.node, []).get(c.node)!).push(c);
   }
-  return { byId, atNode };
+  return { byId, atNode, seenBy: new Map() };
 }
 
 /** A world run without the intel system: perfect intelligence of every live formation. */
@@ -116,8 +118,12 @@ function truthView(world: World, nation: NationId, truth: () => Truth): View {
   let contacts: Map<FormationId, ContactView> | undefined;
   const all = () => {
     if (contacts) return contacts;
-    contacts = new Map();
-    for (const [id, c] of truth().byId) if (!friends.has(c.nation)) contacts.set(id, c);
+    const { byId, seenBy } = truth();
+    const key = [...friends].sort().join();
+    contacts = seenBy.get(key);
+    if (contacts) return contacts;
+    seenBy.set(key, (contacts = new Map()));
+    for (const [id, c] of byId) if (!friends.has(c.nation)) contacts.set(id, c);
     return contacts;
   };
   return assemble(world, nation, friends, all, (node) =>

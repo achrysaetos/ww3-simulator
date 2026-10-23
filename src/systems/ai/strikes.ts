@@ -11,7 +11,7 @@ import { ANTISHIP_KINDS } from '../naval';
 import type { HqLevel } from '../c2/state';
 import { isGround, issue, sighted } from './forces';
 import { CURRENT_CONFIDENCE, formationList } from '../intel/view';
-import type { Plan } from './types';
+import type { ForceIndex, Plan } from './types';
 
 export interface StrikeTarget {
   node: NodeId;
@@ -532,12 +532,45 @@ function interceptorReach(p: Plan, f: Formation): number {
   return km;
 }
 
-export class SamCover {
-  /** Widest envelope per node; several batteries at one site cover no more ground than the longest-ranged. */
-  private readonly reach = new Map<NodeId, number>();
+interface Envelopes {
   /** Sites sorted by latitude, so a query scans only the band an envelope can reach. */
-  private sams: { node: NodeId; km: number; lat: number }[] = [];
-  private maxKm = 0;
+  sams: { node: NodeId; km: number; lat: number }[];
+  maxKm: number;
+}
+
+/** Envelopes by the force index and the enemies they belong to: coalition partners face the same ones. */
+const envelopeCache = new WeakMap<ForceIndex, Map<string, Envelopes>>();
+
+function envelopesOf(p: Plan): Envelopes {
+  let byEnemies = envelopeCache.get(p.index);
+  if (!byEnemies) envelopeCache.set(p.index, (byEnemies = new Map()));
+  const key = [...p.enemies].sort().join();
+  let out = byEnemies.get(key);
+  if (out) return out;
+  // Widest envelope per node; several batteries at one site cover no more ground than the longest-ranged.
+  const reach = new Map<NodeId, number>();
+  const cover = (node: NodeId, km: number) => reach.set(node, Math.max(km, reach.get(node) ?? 0));
+  for (const e of p.enemies)
+    for (const f of p.index.byNation.get(e) ?? []) {
+      if (f.kind === 'air_wing') {
+        cover(f.node, AIRBASE_DEFENSE_KM);
+        continue;
+      }
+      if (f.kind !== 'air_defense' && f.kind !== 'surface_group') continue;
+      const km = interceptorReach(p, f);
+      if (km > 0) cover(f.node, km);
+    }
+  const { map } = p.ctx;
+  const sams = [...reach].map(([node, km]) => ({ node, km, lat: map.lat[node] })).sort((a, b) => a.lat - b.lat);
+  let maxKm = 0;
+  for (const s of sams) maxKm = Math.max(maxKm, s.km);
+  byEnemies.set(key, (out = { sams, maxKm }));
+  return out;
+}
+
+export class SamCover {
+  private readonly sams: Envelopes['sams'];
+  private readonly maxKm: number;
   /** Enemy-held cells touching a friendly front: the contact zone strike aviation may overfly. */
   private readonly contact = new Set<number>();
   /** Own front cells, and the enemies holding ground across from them. */
@@ -551,19 +584,7 @@ export class SamCover {
         this.across.add(p.world.control[n]);
       }
     }
-    for (const e of p.enemies)
-      for (const f of p.index.byNation.get(e) ?? []) {
-        if (f.kind === 'air_wing') {
-          this.cover(f.node, AIRBASE_DEFENSE_KM);
-          continue;
-        }
-        if (f.kind !== 'air_defense' && f.kind !== 'surface_group') continue;
-        const km = interceptorReach(p, f);
-        if (km > 0) this.cover(f.node, km);
-      }
-    const { map } = p.ctx;
-    this.sams = [...this.reach].map(([node, km]) => ({ node, km, lat: map.lat[node] })).sort((a, b) => a.lat - b.lat);
-    for (const s of this.sams) this.maxKm = Math.max(this.maxKm, s.km);
+    ({ sams: this.sams, maxKm: this.maxKm } = envelopesOf(p));
   }
 
   /** Whether some site's envelope, scaled by `visibility` and shrunk by `marginKm`, reaches `at`. */
@@ -583,10 +604,6 @@ export class SamCover {
       if (need > 0 && withinKm(map, s.node, at, need)) return true;
     }
     return false;
-  }
-
-  private cover(node: NodeId, km: number): void {
-    this.reach.set(node, Math.max(km, this.reach.get(node) ?? 0));
   }
 
   /**

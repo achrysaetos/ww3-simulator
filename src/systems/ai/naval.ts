@@ -468,22 +468,32 @@ export function planNaval(p: Plan): void {
   const mined = Object.values(minefields).some((laid) => Object.keys(laid).some((layer) => isAtWar(p.world, layer as NationId, p.nation)));
   // What keeps sweepers off a minefield: an enemy surface group or a submarine known to be about, or a shore battery
   // whose anti-ship missiles reach it (Gulf 1991: the sweepers waited on the Silkworm sites being hit).
-  const enemyArmed = [...p.enemies].flatMap((e) => (p.index.byNation.get(e) ?? []).filter((f) => f.status === 'active' && f.kind !== 'submarine'));
-  const shoreReach = new Map<Formation, number>();
-  for (const f of enemyArmed) {
-    if (f.kind === 'surface_group' || map.isSea(f.node)) continue;
-    let reach = 0;
-    for (const [id, n] of Object.entries(f.magazine)) {
-      const m = p.ctx.catalog.munition(id as MunitionId);
-      // A believed magazine is an estimate scaled by the fix's confidence: any rounds believed there are a threat.
-      if (n > 0 && ANTISHIP_KINDS.has(m.kind)) reach = Math.max(reach, m.rangeKm);
+  // Built on the first minefield a sweeper weighs: most plans have none.
+  let threats: { enemyArmed: Formation[]; shoreReach: Map<Formation, number> } | undefined;
+  const fieldThreats = () => {
+    if (threats) return threats;
+    const enemyArmed = [...p.enemies].flatMap((e) => (p.index.byNation.get(e) ?? []).filter((f) => f.status === 'active' && f.kind !== 'submarine'));
+    const shoreReach = new Map<Formation, number>();
+    for (const f of enemyArmed) {
+      if (f.kind === 'surface_group' || map.isSea(f.node)) continue;
+      let reach = 0;
+      for (const [id, n] of Object.entries(f.magazine)) {
+        const m = p.ctx.catalog.munition(id as MunitionId);
+        // A believed magazine is an estimate scaled by the fix's confidence: any rounds believed there are a threat.
+        if (n > 0 && ANTISHIP_KINDS.has(m.kind)) reach = Math.max(reach, m.rangeKm);
+      }
+      if (reach > 0) shoreReach.set(f, reach);
     }
-    if (reach > 0) shoreReach.set(f, reach);
-  }
-  const fieldGuarded = (n: number) =>
-    enemyArmed.some((f) => f.kind === 'surface_group' && km(f.node, n) <= MCM_STANDOFF_KM) ||
-    [...enemySubZones].some((z) => km(z, n) <= MCM_STANDOFF_KM) ||
-    [...shoreReach].some(([f, reach]) => km(f.node, n) <= reach);
+    return (threats = { enemyArmed, shoreReach });
+  };
+  const fieldGuarded = (n: number) => {
+    const { enemyArmed, shoreReach } = fieldThreats();
+    return (
+      enemyArmed.some((f) => f.kind === 'surface_group' && km(f.node, n) <= MCM_STANDOFF_KM) ||
+      [...enemySubZones].some((z) => km(z, n) <= MCM_STANDOFF_KM) ||
+      [...shoreReach].some(([f, reach]) => km(f.node, n) <= reach)
+    );
+  };
 
   const enemySubZones = new Set<NodeId>();
   for (const e of p.enemies) for (const { f, node } of sighted(p, e)) if (f.kind === 'submarine' && map.isSea(node)) enemySubZones.add(node);
