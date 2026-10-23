@@ -250,7 +250,7 @@ export function StartScreen({ client, palette }: { client: SimClient; palette: P
               <span className="ww-label">Settings</span>
               <label className="st-toggle">
                 <input type="checkbox" checked={crises} onChange={(e) => { setCrises(e.target.checked); setCrisesState(e.target.checked); }} data-testid="setting-crises" />
-                <span><b>Crises stop the clock</b><small>A treaty call, a nuclear alert, a peace offer or a threat to your capital takes the screen. Off, they wait in the Daily Brief.</small></span>
+                <span><b>Crises stop the clock</b><small>A treaty call, a nuclear alert, a peace offer or a threat to your capital takes the screen. Off, your staff answers each as it recommends and tells you what it chose.</small></span>
               </label>
               <button type="button" className="ww-btn" disabled={coachReset} onClick={() => { resetCoach(); setCoachReset(true); }} data-testid="setting-coach">{coachReset ? 'Tour will show next game' : 'Show the tour again'}</button>
             </div>

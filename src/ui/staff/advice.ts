@@ -41,17 +41,17 @@ export interface Card {
   tone: 'live' | 'advice' | 'report';
   title: string;
   text: string;
-  /** The recommendation in one sentence, for the brief. */
+  /** The recommendation in one sentence. */
   ask?: string;
   cost?: { label: 'Cost' | 'Risk'; text: string };
-  /** The brief's headline figure. */
+  /** The headline figure. */
   figure?: { value: string; unit?: string; caption: string };
   chip?: string;
   meter?: { value: number; tone: 'red' | 'blue' | 'gold' };
   node?: NodeId;
   primary?: Action;
   secondary?: Action;
-  /** Opens the Daily Brief at once rather than at the next morning. */
+  /** Cannot wait: skips the daily allowance and may stop the clock as a crisis. */
   urgent?: boolean;
   tick: number;
 }

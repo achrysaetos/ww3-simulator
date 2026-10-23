@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { chromium } from '/opt/node-tools/node_modules/playwright/index.mjs';
-import { closeBrief, newGame, runTo } from './e2e-start.mjs';
+import { newGame, runTo } from './e2e-start.mjs';
 
 const [, , url, out, play = 'ukraine-2026:UKR'] = process.argv;
 fs.mkdirSync(out, { recursive: true });
@@ -169,7 +169,6 @@ for (let i = 0; i < 6; i++) {
   const s = await page.evaluate((id) => window.__client.tracks.get(id)?.state, front.id);
   if (s === 'accepted' || s === 'refused') break;
 }
-await closeBrief(page);
 const answer = await page.evaluate((id) => window.__client.tracks.get(id), front.id);
 check(answer && (answer.state === 'accepted' || answer.state === 'refused' || answer.state === 'relayed'), `the engine's answer shows on the unit: ${answer?.state} ${answer?.reason ?? ''}`);
 await page.waitForTimeout(300);
@@ -238,7 +237,6 @@ const mineOp = ops.find((o) => o.phase === 'launched' || o.phase === 'stalled' |
 check(!!mineOp, 'the engine runs the launched operation');
 const result = await page.evaluate(() => window.__client.feed.newest(new Set(), window.__client.playing, 80).find((r) => r.event.type === 'command_result' && r.event.command === 'plan_operation'));
 check(!!result, `the plan's answer is in the feed: ${result?.text}`);
-check((await page.locator('[data-testid="planned-operation"]').count()) > 0, 'the operation is listed under Operations');
 await runTo(page, before + 10, { speed: 5 });
 const axis = await page.evaluate(() => window.__client.state.ops.find((o) => o.phase !== 'cancelled')?.axis ?? []);
 await frame(axis, 260);

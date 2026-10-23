@@ -6,7 +6,6 @@ import type { CommandResult, Formation, NationId, NodeId, SimEvent } from '../sr
 import { loadMap } from '../src/data/load';
 import { createSession } from '../src/scenarios';
 import { saveRun } from '../src/scenarios/save';
-import { PlaceNamer } from '../src/ui/events';
 import { SimHost } from '../src/ui/host';
 import { seenOnMap, type PlayerSight } from '../src/ui/map/feedback';
 import { orderOptions } from '../src/ui/orders/options';
@@ -14,8 +13,6 @@ import { draftOf, newDraft, planCommand } from '../src/ui/orders/plan';
 import { PlanPanel } from '../src/ui/orders/PlanPanel';
 import { OrderTracks, SHOW_ANSWER_TICKS } from '../src/ui/orders/tracks';
 import { applySnapshot, emptyClientState, type ClientState, type FromWorker } from '../src/ui/snapshot';
-import { operations } from '../src/ui/staff/operations';
-import { OperationsPanel } from '../src/ui/staff/OperationsPanel';
 
 const RUS = 'RUS' as NationId, UKR = 'UKR' as NationId;
 
@@ -87,19 +84,6 @@ describe('battle plan from the planner to the engine', () => {
     expect(op!.objectives).toEqual([objective]);
     expect(op!.phase).toBe('launched');
     expect(op).toEqual(p.world.slices.ops!.byId[op!.id]);
-
-    const places = new PlaceNamer(p.map);
-    const rows = operations({
-      me: RUS, map: p.map, nationIds: p.map.nationIds, control: p.state.control, contest: p.state.contest, formations: p.state.formations,
-      planned: p.state.ops, tick: p.state.tick, enemies: [UKR], places, commandOf: () => 'player',
-    });
-    const row = rows.find((r) => r.op === op!.id);
-    expect(row, 'the Operations panel lists it').toBeDefined();
-    const panel = renderToStaticMarkup(createElement(OperationsPanel, { ops: rows, inTransit: 0, onShow: () => {}, onOpen: () => {}, onForces: () => {} }));
-    expect(panel).toContain(op!.name);
-    expect(panel).toContain('Advancing');
-    // Its formations are the operation's, not an offensive of their own.
-    expect(rows.filter((r) => r.kind === 'offensive' && r.formations.some((f) => force.includes(f)))).toEqual([]);
 
     const planner = renderToStaticMarkup(createElement(PlanPanel, {
       planning: { stage: 'review', draft: draftOf(op!), forecast: { status: 'idle' } }, op, units: p.state.formations.filter((f) => force.includes(f.entry.id)),

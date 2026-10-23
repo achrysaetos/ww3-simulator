@@ -6,7 +6,6 @@ import type { Card } from '../staff/advice';
 import { advisorOf } from '../staff/advisors';
 import { Portrait } from '../staff/Portrait';
 import type { CommandRole } from '../staff/roles';
-import { TopicIcon } from '../staff/WarRoom';
 import type { OpeningFacts } from './openingFacts';
 import './opening.css';
 
@@ -17,6 +16,20 @@ const DOMAIN_NAME = { land: 'land', air: 'the air war', naval: 'the navy', homef
 
 /** The cinematic beat while the camera falls from orbit to the theatre: letterbox, place, date. */
 const HOLD_MS = 3000, OUT_MS = 600;
+
+const TOPIC_ICON: Record<Card['topic'], string> = {
+  threat: 'M8 1 L15 14 L1 14 Z M8 6 L8 10 M8 12 L8 12.5',
+  opportunity: 'M2 14 L2 2 L12 5 L2 8',
+  supply: 'M3 5 L8 2 L13 5 L13 11 L8 14 L3 11 Z M3 5 L8 8 L13 5 M8 8 L8 14',
+  diplomacy: 'M2 8 C2 4 5 2 8 2 C11 2 14 4 14 8 C14 12 11 14 8 14 C5 14 2 12 2 8 Z M2 8 L14 8 M8 2 C5.5 5 5.5 11 8 14 M8 2 C10.5 5 10.5 11 8 14',
+  nuclear: 'M8 8 m-1.6 0 a1.6 1.6 0 1 0 3.2 0 a1.6 1.6 0 1 0 -3.2 0 M8 6 L5 1.5 A7 7 0 0 1 11 1.5 Z M6.3 9 L1.3 9 A7 7 0 0 0 4.3 14.2 Z M9.7 9 L14.7 9 A7 7 0 0 1 11.7 14.2 Z',
+  command: 'M2 3 L14 3 L14 11 L8 11 L5 14 L5 11 L2 11 Z',
+  news: 'M2 8 C2 4 5 2 8 2 C11 2 14 4 14 8 C14 12 11 14 8 14 C5 14 2 12 2 8 Z M2 8 L14 8 M8 2 C5.5 5 5.5 11 8 14 M8 2 C10.5 5 10.5 11 8 14',
+};
+
+function TopicIcon({ topic }: { topic: Card['topic'] }) {
+  return <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" className="ww-topic-icon"><path d={TOPIC_ICON[topic]} fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" strokeLinecap="round" /></svg>;
+}
 
 export function OpeningTitle({ scenario, theatre, date, onDone }: { scenario: string; theatre: string; date: Date; onDone(): void }) {
   const [phase, setPhase] = useState<'wait' | 'in' | 'out'>('wait');
@@ -158,7 +171,7 @@ export function SituationCard(p: SituationProps) {
               <ul className="op-keys">
                 <li><span className="ww-kbd">Space</span>Run or stop the clock</li>
                 <li><span className="ww-kbd">Click</span>A counter to command it</li>
-                <li><span className="ww-kbd">B</span>Your staff's Daily Brief</li>
+                <li><span className="ww-kbd">N</span>Nation: hand a domain to your staff or take it back</li>
               </ul>
             </div>
             <p className="op-note ww-muted">{p.briefing.reminder}</p>

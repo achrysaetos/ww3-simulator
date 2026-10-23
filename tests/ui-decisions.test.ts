@@ -1,10 +1,7 @@
-import { createElement } from 'react';
-import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { NationId, NodeId } from '../src/core/types';
 import { loadMap } from '../src/data/load';
 import { advise, isDecision, type Card, type Situation } from '../src/ui/staff/advice';
-import { DailyBrief } from '../src/ui/staff/DailyBrief';
 import { NEW_DECISIONS_PER_DAY } from '../src/ui/staff/desk';
 import { playWithStaff } from './staff-mirror';
 
@@ -52,7 +49,6 @@ function expectPaced(found: { card: Card; tick: number }[], me: string) {
     if (card.primary?.kind === 'command') expect(card.primary.command.nation, card.key).toBe(me);
     expect(card.ask, `${card.key} says what it recommends`).toBeTruthy();
     expect(card.cost?.text, `${card.key} says what it costs`).toBeTruthy();
-    expect(card.node, `${card.key} has a place on the map for the brief's thumbnail (P1 M3)`).toBeDefined();
   }
   const perDay = new Map<number, number>();
   for (const { card, tick } of found) if (!card.urgent) perDay.set(Math.floor(tick / 4), (perDay.get(Math.floor(tick / 4)) ?? 0) + 1);
@@ -104,26 +100,6 @@ describe('initiative decisions read the player\'s view and their commands work',
     expect(g.world.slices.nonKinetic.sabotage['UKR>RUS']).toBeDefined();
     expect(g.state.focusNation!.covert.sabotage).toEqual(['RUS' as NationId]);
     expect(g.desk.answered.find((s) => s.card.key === 'sabotage|RUS')?.answer?.ok).toBe(true);
-  }, 120_000);
-});
-
-describe('the Daily Brief (P1 M3)', () => {
-  const brief = (g: Game, cards: Card[]) => renderToStaticMarkup(createElement(DailyBrief, {
-    me: g.desk.me, date: new Date(g.state.date), day: 3, cards, sent: new Map(), days: g.desk.days, world: [], reports: 0, cadence: 'daily',
-    map, control: g.state.control, controlVersion: 0, mine: map.nationIds.indexOf(g.desk.me), enemies: new Set<number>(), place: () => 'Kyiv',
-    onCadence: () => {}, onAct: () => {}, onShow: () => {}, onLog: () => {}, onClose: () => {},
-  }));
-
-  it('offers no lit approve-all button when there is nothing to approve, and names the window its overnight column covers', () => {
-    const g = start('ukraine-2026', 'UKR');
-    g.step(12);
-    const html = brief(g, []);
-    expect(html).not.toContain('brief-approve-all');
-    expect(html).not.toContain('Overnight');
-    expect(html).toMatch(/Since yesterday.*Day 3 → \d\d:00 today/);
-    const decision = g.desk.cards.find((c) => isDecision(c) && c.primary?.kind === 'command');
-    expect(decision, 'a decision on the desk by day 3').toBeDefined();
-    expect(brief(g, [decision!])).toContain('Approve the recommendation');
   }, 120_000);
 });
 

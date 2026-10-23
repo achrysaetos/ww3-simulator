@@ -72,6 +72,11 @@ input[type='range'] { flex: 1; accent-color: var(--accent); }
 
 .nation-head { display: flex; gap: 10px; align-items: center; padding: 14px 14px 10px; border-bottom: 1px solid var(--line); background: var(--panel-2); position: sticky; top: 0; z-index: 1; }
 .nation-name { font-size: 16px; font-weight: 700; }
+.nation-ai { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 8px 14px; border-bottom: 1px solid var(--line); }
+.nation-ai .ww-label { margin-right: 4px; font-size: 10.5px; }
+.nation-ai button { min-height: 24px; padding: 0 8px; font-size: 11.5px; text-transform: none; border: 1px solid var(--line-2); border-radius: 3px; background: transparent; color: var(--muted); cursor: pointer; }
+.nation-ai button.on { border-color: rgba(74, 163, 255, 0.7); color: #8fc6ff; background: rgba(74, 163, 255, 0.14); }
+.nation-ai button.waiting { animation: ww-pulse 1s ease-in-out infinite; }
 .nation-sub { color: var(--muted); font-size: 11px; text-transform: capitalize; }
 .swatch { width: 14px; height: 30px; border-radius: 2px; flex: none; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.2); }
 .swatch.sm { width: 8px; height: 22px; }

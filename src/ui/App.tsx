@@ -9,7 +9,7 @@ import { MomentOverlay } from './moments/MomentOverlay';
 import { momentsOf, type Moment } from './moments/moments';
 import { CoachMarks } from './coach/CoachMarks';
 import { CrisisScreen } from './crisis/CrisisScreen';
-import { answered, nextCrisis, type Crisis, type CrisisContext } from './crisis/crisis';
+import { answered, nextCrisis, returnsIn, staffChoice, type Crisis, type CrisisContext } from './crisis/crisis';
 import { ConfirmDialog, EndDialog, GameMenu, type Confirmation } from './GameFlow';
 import { crisesOn } from './prefs';
 import { EventLog } from './EventLog';
@@ -31,15 +31,9 @@ import { openingFacts } from './start/openingFacts';
 import { StartScreen } from './start/StartScreen';
 import { shortName } from './start/scenarioInfo';
 import type { Overlays } from './renderer';
-import type { Action, Card, Drawer, Mark } from './staff/advice';
-import { DailyBrief } from './staff/DailyBrief';
-import { BRIEF_CADENCES, type BriefCadence } from './staff/desk';
-import { operations } from './staff/operations';
-import { OperationsPanel } from './staff/OperationsPanel';
+import type { Drawer, Mark } from './staff/advice';
 import { roleOf } from './staff/roles';
-import { StaffPanel } from './staff/StaffPanel';
 import { headlines } from './staff/ticker';
-import { WarRoom } from './staff/WarRoom';
 import './staff/staff.css';
 
 const SPEEDS = [0, 1, 5, 20] as const;
@@ -54,22 +48,12 @@ const DRAWERS: { id: Drawer; label: string; key: string }[] = [
 ];
 const DRAWER_TITLE: Record<Drawer, string> = { forces: 'Forces', nation: 'Nation', log: 'Event log', cost: 'War cost' };
 const FORM_CONTROLS = new Set(['INPUT', 'SELECT', 'TEXTAREA']);
-const CADENCE_KEY = 'ww3.briefCadence';
 /** Postures whose target can lie far from the unit: picking one frames the map wide (BA-13). */
 const RANGED: ReadonlySet<Posture> = new Set(['strike', 'air_superiority', 'patrol', 'blockade', 'air_assault']);
 
 interface Toast { text: string; tone: 'info' | 'error' }
 /** Waiting on the engine's word about a nuclear release: the launch, or nothing. */
 interface Watch { untilTick: number; seenSeq: number; match(row: LoggedEvent): Toast | null; timeout?: Toast }
-
-function readCadence(): BriefCadence {
-  try {
-    const v = localStorage.getItem(CADENCE_KEY);
-    return BRIEF_CADENCES.includes(v as BriefCadence) ? (v as BriefCadence) : 'matters';
-  } catch {
-    return 'matters';
-  }
-}
 
 export function App({ client }: { client: SimClient }) {
   useSyncExternalStore(client.subscribe, client.getVersion);
@@ -98,14 +82,13 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
   const [nuclearPick, setNuclearPick] = useState(false);
   const [nuclearTarget, setNuclearTarget] = useState<NodeId | null>(null);
   const [drawer, setDrawer] = useState<Drawer | null>(null);
-  const [brief, setBrief] = useState<{ cards: Card[]; resume: number } | null>(null);
-  const [cadence, setCadence] = useState<BriefCadence>(readCadence);
   const [layersOpen, setLayersOpen] = useState(false);
   const [overlays, setOverlays] = useState<Overlays>(DEFAULT_OVERLAYS);
   const [delegating, setDelegating] = useState<Partial<Record<CommandDomain, boolean>>>(() => client.openingDelegation);
   const [toast, setToast] = useState<Toast | null>(null);
   const [crisis, setCrisis] = useState<{ c: Crisis; resume: number; chosen: number | null } | null>(null);
-  const shownCrises = useRef(new Set<string>());
+  /** Each crisis put to the player, with the tick it may come back: never once answered. */
+  const shownCrises = useRef(new Map<string, number>());
   const [coach, setCoach] = useState(false);
   const [moment, setMoment] = useState<Moment | null>(null);
   const [lastMoment, setLastMoment] = useState<Moment | null>(null);
@@ -174,18 +157,6 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
     if (endKey && endKey !== endSeen && client.ticksPerSec) client.setSpeed(0);
   }, [client, endKey, endSeen]);
 
-  const openBrief = useCallback(() => {
-    setBrief((b) => b ?? { cards: desk.decisions, resume: client.ticksPerSec });
-    desk.briefOpened();
-    client.setSpeed(0);
-  }, [client, desk]);
-  const closeBrief = useCallback(() => {
-    setBrief((b) => {
-      if (b?.resume) client.setSpeed(b.resume);
-      return null;
-    });
-  }, [client]);
-
   const crisisContext = (): CrisisContext | null => d ? {
     me: playAs, tick: client.state.tick, dtHours: client.meta?.dtHours ?? 6, d, nations: client.state.nations,
     name: (id) => shortName(id, client.nationCards),
@@ -196,30 +167,50 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
     },
   } : null;
 
-  // A crisis stops the clock and takes the screen; otherwise the brief opens itself when a decision
-  // needs the player (or each morning, by the player's setting).
+  // A crisis stops the clock and takes the screen. With crises off the staff takes its own
+  // recommendation, so a treaty call or a peace offer never lapses unseen.
   useEffect(() => {
-    if (brief || crisis || coach || briefingOpen || (endKey && endKey !== endSeen) || !client.state.date) return;
-    const ctx = crisesOn() ? crisisContext() : null;
-    const next = ctx && nextCrisis(desk.cards, shownCrises.current, ctx);
-    if (next) {
-      shownCrises.current.add(next.key);
-      desk.markBriefed(next.key);
-      setCrisis({ c: next, resume: client.ticksPerSec, chosen: null });
-      client.setSpeed(0);
-      if (next.node !== undefined) focusHandle.current?.(next.node, 'wide');
-      return;
+    if (crisis || coach || briefingOpen || (endKey && endKey !== endSeen) || !client.state.date) return;
+    const ctx = crisisContext();
+    if (!ctx) return;
+    const waiting = new Set([...shownCrises.current].filter(([, t]) => t > client.state.tick).map(([k]) => k));
+    if (!crisesOn()) {
+      const taken: string[] = [];
+      for (let c = nextCrisis(desk.cards, waiting, ctx); c; c = nextCrisis(desk.cards, waiting, ctx)) {
+        const o = staffChoice(c);
+        waiting.add(c.key);
+        shownCrises.current.set(c.key, Infinity);
+        client.act(c.card, o.action.kind === 'command' ? o.action : { kind: 'later', label: o.button });
+        taken.push(`${c.headline}: ${o.title}`);
+      }
+      if (taken.length) setToast({ tone: 'info', text: `Your staff decided. ${taken.join('. ')}.` });
+    } else {
+      const next = nextCrisis(desk.cards, waiting, ctx);
+      if (next) {
+        shownCrises.current.set(next.key, Infinity);
+        setCrisis({ c: next, resume: client.ticksPerSec, chosen: null });
+        client.setSpeed(0);
+        if (next.node !== undefined) focusHandle.current?.(next.node, 'wide');
+        return;
+      }
     }
     if (!coachOffered.current) {
       coachOffered.current = true;
-      if (coachDue()) return setCoach(true);
+      if (coachDue()) setCoach(true);
     }
-    if (desk.briefDue(new Date(client.state.date), cadence)) openBrief();
-  }, [client.state.tick, desk.version, brief, crisis, coach, briefingOpen, cadence]);
+  }, [client.state.tick, desk.version, crisis, coach, briefingOpen]);
+
+  useEffect(() => {
+    const [first, ...more] = desk.alerts;
+    if (!first) return;
+    const text = `${first.title}. ${first.text}${more.length ? ` (${more.length} more in the log)` : ''}`;
+    setToast((t) => (t?.tone === 'error' ? t : { tone: 'info', text }));
+  }, [desk.version]);
 
   const chooseCrisis = (i: number) => {
     if (!crisis) return;
     const o = crisis.c.options[i];
+    if (o.defer || o.action.kind === 'show') shownCrises.current.set(crisis.c.key, client.state.tick + returnsIn(crisis.c, o, client.meta?.dtHours ?? 6));
     if (o.defer) return closeCrisis();
     if (o.action.kind === 'show') {
       setCrisis(null);
@@ -256,19 +247,19 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
     moments.current.push(...found.filter((m) => !seen.has(m.key)).slice(0, 2));
   }, [client.state.latestEvents]);
   useEffect(() => {
-    if (moment || crisis || opening || brief || coach || !moments.current.length) return;
+    if (moment || crisis || opening || coach || !moments.current.length) return;
     const next = moments.current.shift()!;
     if (next.tick < client.state.tick - 8) return;
     setMoment(next);
     setLastMoment(next);
     focusHandle.current?.(next.node, 'wide');
-  }, [client.state.tick, moment, crisis, opening, brief, coach]);
+  }, [client.state.tick, moment, crisis, opening, coach]);
 
   const toggleDrawer = useCallback((id: Drawer) => setDrawer((cur) => (cur === id ? null : id)), []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (brief || opening || crisis || coach || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (opening || crisis || coach || e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key === 'Escape') {
         if (pending || nuclearPick) { setPending(null); setNuclearPick(false); setNuclearTarget(null); }
         else setDrawer(null);
@@ -279,7 +270,6 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
       if (e.key === ' ') { e.preventDefault(); client.setSpeed(client.ticksPerSec ? 0 : 1); }
       else if (e.key === '.') client.step();
       else if (k >= '1' && k <= '3') client.setSpeed(SPEEDS[Number(k)]);
-      else if (k === 'b') openBrief();
       else {
         const dr = DRAWERS.find((x) => x.key.toLowerCase() === k);
         if (dr) toggleDrawer(dr.id);
@@ -287,7 +277,7 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [client, brief, opening, crisis, coach, pending, nuclearPick, openBrief, toggleDrawer]);
+  }, [client, opening, crisis, coach, pending, nuclearPick, toggleDrawer]);
 
   const quit = () => setConfirm({
     title: 'Quit to the start screen?',
@@ -391,27 +381,12 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
     if (!client.ticksPerSec) setToast({ tone: 'info', text: 'Your staff takes the change when the clock runs.' });
   };
 
-  const act = (card: Card, action: Action) => {
-    if (action.kind === 'show') { focusHandle.current?.(action.node, action.marks ? 'wide' : 'close', action.marks); closeBrief(); }
-    else if (action.kind === 'unit') { selectFormation(action.formation); focusHandle.current?.(action.node, 'wide'); }
-    else if (action.kind === 'open') setDrawer(action.drawer);
-    client.act(card, action);
-  };
-
   const selectedView = selected ? client.state.formations.find((f) => f.entry.id === selected) : undefined;
   const targeting = nuclearPick ? 'nuclear' : pending ? 'order' : null;
   const want = { ...ai, ...delegating };
   const focusAt = useMemo(() => (client.meta ? openingFocus(client.map, client.meta.scenario, playAs) : null), [client, playAs]);
   const theatreName = focusAt === null ? '' : `${shortName(client.map.owner[focusAt] as NationId, client.nationCards)} · ${places.name(focusAt).replace(/^near /, '')}`;
   const n = client.state.nations.get(playAs);
-  const mineIdx = nationIds.indexOf(playAs);
-  const enemiesKey = d?.enemies.join(',') ?? '';
-  const enemyIdx = useMemo(() => new Set(enemiesKey ? enemiesKey.split(',').map((e) => nationIds.indexOf(e as NationId)) : []), [enemiesKey, nationIds]);
-
-  const ops = useMemo(() => operations({
-    me: playAs, map: client.map, nationIds, control: client.state.control, contest: client.state.contest, formations: client.state.formations,
-    planned: client.state.ops, tick: client.state.tick, enemies: d?.enemies ?? [], places, commandOf,
-  }), [client.state.tick, client.state.formations, client.state.ops, commandOf, enemiesKey]);
   const ongoing = useMemo(() => new Set(client.meta?.scenario.ongoing ?? []), [client.meta]);
   const news = useMemo(() => headlines(client.feed, client.map, ongoing), [client.feed.version, ongoing]);
   const pinned = lastMoment && lastMoment.tick >= client.state.tick - 8 ? lastMoment : null;
@@ -428,7 +403,6 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
     { label: 'Economy', value: d?.economy ? `${Math.round(d.economy.gdpIndex * 100)}%` : '—', tone: d?.economy && d.economy.gdpIndex < 0.85 ? 'warn' : undefined },
     { label: 'Mobilised', value: `${Math.round(n.mobilization * 100)}%` },
   ] : [];
-  const reportsSince = useMemo(() => client.feed.newest(new Set(), playAs, 400).filter((r) => r.event.tick >= client.state.tick - 24 / (client.meta?.dtHours ?? 6)).length, [brief]);
 
   const releaseNuclear = (c: Extract<Command, { type: 'nuclear_release' }>) => {
     const seenSeq = lastSeq();
@@ -460,7 +434,6 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
           {x.label}<span className="ww-kbd">{x.key}</span>
         </button>
       ))}
-      <button type="button" className="ww-dock-btn" onClick={openBrief} data-testid="open-brief">Brief<span className="ww-kbd">B</span>{desk.decisions.length > 0 && <i className="ww-dock-count">{desk.decisions.length}</i>}</button>
       <div className="ww-layers">
         <button type="button" className={`ww-dock-btn ${layersOpen ? 'on' : ''}`} aria-expanded={layersOpen} onClick={() => setLayersOpen((o) => !o)} data-testid="layers">Layers</button>
         {layersOpen && (
@@ -505,24 +478,6 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
       />
       {dock}
 
-      <div className="ww-hud-left">
-        <OperationsPanel
-          ops={ops}
-          inTransit={desk.inTransit.size}
-          onShow={(node) => focusHandle.current?.(node)}
-          onOpen={(id) => {
-            const op = client.state.ops.find((o) => o.id === id);
-            if (!op) return;
-            orders.openOperation(op);
-            focusHandle.current?.(op.objectives[0] ?? op.axis[0], 'wide');
-          }}
-          onForces={() => setDrawer('forces')}
-        />
-        <StaffPanel me={playAs} ai={ai} pending={delegating} formations={client.state.formations} onDelegate={delegate} />
-      </div>
-
-      <WarRoom cards={desk.cards} answered={desk.answered} me={playAs} paused={!speed} onAct={act} onDismiss={(k) => { desk.dismiss(k); client.touch(); }} />
-
       {drawer && (
         <aside className="ww-drawer ww-glass" aria-label={DRAWER_TITLE[drawer]} data-testid={`drawer-panel-${drawer}`}>
           <header className="ww-drawer-head">
@@ -531,7 +486,7 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
           </header>
           <div className="ww-drawer-body">
             {drawer === 'nation' && (
-              <NationPanel client={client} palette={palette} playAs={playAs} objectives={objectives} onCommand={sendCommand} onNuclear={() => { setPending(null); setNuclearPick(true); }} />
+              <NationPanel client={client} palette={palette} playAs={playAs} objectives={objectives} onCommand={sendCommand} onNuclear={() => { setPending(null); setNuclearPick(true); }} ai={ai} delegating={delegating} onDelegate={delegate} />
             )}
             {drawer === 'cost' && <OutputsPanel view={client.state.outputs} name={(id) => client.state.nations.get(id)?.name ?? client.namer.nation(id)} />}
             {drawer === 'log' && <EventLog client={client} playAs={playAs} logVersion={client.feed.version} onFocus={focusNode} />}
@@ -592,33 +547,6 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
       {toast && <div className={`ww-toast ww-glass ${toast.tone}`} data-testid="toast" role="status">{toast.text}</div>}
       {client.error && <div className="ww-toast ww-glass error">Simulation error: {client.error}</div>}
 
-      {brief && date && (
-        <DailyBrief
-          me={playAs}
-          date={date}
-          day={day}
-          cards={brief.cards.filter((c) => desk.answered.some((s) => s.card.key === c.key) || desk.cards.some((o) => o.key === c.key))}
-          sent={new Map(desk.answered.map((s) => [s.card.key, s]))}
-          days={desk.days}
-          world={news}
-          reports={reportsSince}
-          cadence={cadence}
-          map={client.map}
-          control={client.state.control}
-          controlVersion={client.state.controlVersion}
-          mine={mineIdx}
-          enemies={enemyIdx}
-          place={(node) => places.name(node)}
-          onCadence={(c) => {
-            setCadence(c);
-            try { localStorage.setItem(CADENCE_KEY, c); } catch { /* a private window keeps the default */ }
-          }}
-          onAct={act}
-          onShow={(node) => { closeBrief(); focusNode(node); }}
-          onLog={() => { closeBrief(); setDrawer('log'); }}
-          onClose={closeBrief}
-        />
-      )}
       {nuclearTarget !== null && (
         <NuclearDialog
           client={client}
@@ -650,7 +578,7 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
           onClose={() => setOpening(null)}
         />
       )}
-      {ending && endKey !== endSeen && !briefingOpen && !brief && !crisis && (
+      {ending && endKey !== endSeen && !briefingOpen && !crisis && (
         <EndDialog outcome={ending} objectives={objectives} onContinue={() => setEndSeen(endKey)} onQuit={() => client.quit()} />
       )}
       {moment && <MomentOverlay moment={moment} onDone={() => setMoment(null)} />}

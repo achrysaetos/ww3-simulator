@@ -12,7 +12,7 @@ import { nationCards, type FromWorker } from '../src/ui/snapshot';
 import { featuredNations, scenarioInfo, threatOf } from '../src/ui/start/scenarioInfo';
 import { COMMAND_ROLES } from '../src/ui/staff/roles';
 import { CrisisScreen } from '../src/ui/crisis/CrisisScreen';
-import { answered, crisisOf, nextCrisis, type CrisisContext } from '../src/ui/crisis/crisis';
+import { answered, crisisOf, nextCrisis, returnsIn, staffChoice, type CrisisContext } from '../src/ui/crisis/crisis';
 import type { Card } from '../src/ui/staff/advice';
 import { momentsOf } from '../src/ui/moments/moments';
 import { playWithStaff } from './staff-mirror';
@@ -174,13 +174,31 @@ describe('crises stop the clock with one decision', () => {
     expect(again?.key).not.toBe(c.key);
   }, 300_000);
 
-  it('Wait and consult leaves the call on the table to answer later', () => {
+  it('Wait and consult leaves the call on the table and asks again within a day, before the deadline', () => {
     const g = play('ww3-2027', 'USA');
     g.step();
     const c = nextCrisis(g.desk.cards, new Set(), contextOf(g))!;
     expect(c.options[1].defer).toBe(true);
     g.step();
     expect(g.desk.cards.some((x) => x.key === c.key), 'deferring sends nothing and keeps the card').toBe(true);
+    const back = returnsIn(c, c.options[1], 6);
+    expect(back).toBeGreaterThanOrEqual(1);
+    expect(back).toBeLessThanOrEqual(4);
+    expect(back * 6).toBeLessThan(c.hoursLeft!);
+    expect(returnsIn({ ...c, hoursLeft: 12 }, c.options[1], 6), 'with half a day left it asks on the next turn').toBe(1);
+  }, 300_000);
+
+  it('with crises off the staff answers a treaty call with its recommendation, so the call never lapses unanswered', () => {
+    const g = play('ww3-2027', 'USA');
+    g.step();
+    const c = nextCrisis(g.desk.cards, new Set(), contextOf(g))!;
+    const o = staffChoice(c);
+    expect(o.recommended).toBe(true);
+    expect(o.action).toMatchObject({ kind: 'command', command: { type: 'answer_treaty', nation: 'USA' } });
+    g.desk.act(c.card, o.action);
+    if (o.action.kind === 'command') g.send(o.action.command);
+    g.step();
+    expect(g.desk.answered.find((s) => s.card.key === c.key)!.answer).toMatchObject({ ok: true, final: true });
   }, 300_000);
 
   it('an enemy nuclear alert (south-asia-2027 as India): Raise the alert mates Indian warheads', () => {
@@ -269,17 +287,19 @@ describe('moments land only when the player would know them', () => {
   });
 });
 
-describe('the biggest events reach the War Room (P1 H5)', () => {
-  it('gulf-2027 as Iran: the United States entering the war is a live War Room card and a moment, not a line in the ticker only', () => {
+describe('the biggest events are raised as alerts (P1 H5)', () => {
+  it('gulf-2027 as Iran: the United States entering the war is raised once as an alert and is a moment, not a line in the ticker only', () => {
     const g = play('gulf-2027', 'IRN');
     let card: Card | undefined;
     const events: SimEvent[] = [];
     for (let i = 0; i < 28 && !card; i++) {
       g.step();
       events.push(...g.state.latestEvents);
-      card = g.desk.cards.find((c) => c.key.startsWith('wire|war|') && c.title.includes('United States'));
+      card = g.desk.alerts.find((c) => c.key.startsWith('wire|war|') && c.title.includes('United States'));
     }
-    expect(card, 'a war card for the United States entering').toMatchObject({ tone: 'live', topic: 'threat' });
+    expect(card, 'an alert for the United States entering').toMatchObject({ tone: 'live', topic: 'threat' });
+    g.step();
+    expect(g.desk.alerts.map((c) => c.key), 'raised once').not.toContain(card!.key);
     const opening = new Set(SCENARIO_CARDS.find((s) => s.id === 'gulf-2027')!.wars.map(([a, b]) => `${a}>${b}`));
     const capitalOf = (id: NationId) => map.data.nations[map.nationIds.indexOf(id)]?.capital?.cell as NodeId | undefined;
     const found = momentsOf(events, {
@@ -289,13 +309,13 @@ describe('the biggest events reach the War Room (P1 H5)', () => {
     expect(found.filter((m) => m.kind === 'war').map((m) => m.title)).toContain('United States declares war on us');
   }, 240_000);
 
-  it('ww3-2027 as the United States: a naval group hit in port is a live card that opens the unit', () => {
+  it('ww3-2027 as the United States: a naval group hit in port is raised as an alert', () => {
     const g = play('ww3-2027', 'USA');
     let card: Card | undefined;
     for (let i = 0; i < 24 && !card; i++) {
       g.step();
       for (const c of g.state.focusNation?.treatyCalls ?? []) g.send({ type: 'answer_treaty', nation: N('USA'), war: c.war, treaty: c.treaty, join: true });
-      card = g.desk.cards.find((c) => c.key.startsWith('shiphit|'));
+      card = g.desk.alerts.find((c) => c.key.startsWith('shiphit|'));
     }
     expect(card).toMatchObject({ tone: 'live', primary: { kind: 'unit' } });
     const id = card!.key.split('|')[1] as FormationId;
