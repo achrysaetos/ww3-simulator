@@ -410,6 +410,7 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
         speed={speed}
         speeds={SPEEDS}
         onSpeed={(s) => client.setSpeed(s)}
+        onCommand={sendCommand}
         stats={stats}
         defcon={defcon}
       />

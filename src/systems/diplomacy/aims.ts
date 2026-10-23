@@ -37,6 +37,9 @@ export const STALL_DAYS = defineParam({
  */
 const WALK_AWAY: Record<WarAim['kind'], number> = { punitive: 0.5, limited: 0.4, total: 0, regime_change: 0 };
 
+/** The leader's war support below which a side gives up the aim. */
+export const walkAway = (aim: WarAim) => WALK_AWAY[aim.kind];
+
 export const unbounded = (aim: WarAim) => aim.kind === 'total' || aim.kind === 'regime_change';
 
 /**
