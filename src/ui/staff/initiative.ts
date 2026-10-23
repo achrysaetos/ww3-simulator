@@ -10,7 +10,7 @@
  */
 import type { FormationId, NationId, NodeId, Operation } from '../../core/types';
 import { namePlaces } from '../events';
-import { GROUP_OF_KIND, type FormationView, type MunitionGroup } from '../snapshot';
+import { CONTEST_STRIDE, GROUP_OF_KIND, type FormationView, type MunitionGroup } from '../snapshot';
 import type { Action, Card, Situation } from './advice';
 
 const MANEUVER = 'maneuver';
@@ -195,7 +195,7 @@ function givingWay(s: Situation): Card[] {
   const mine = s.nationIds.indexOf(s.me);
   const enemyIdx = new Set(s.d.enemies.map((e) => s.nationIds.indexOf(e)));
   let worst: { node: NodeId; share: number; by: number } | null = null;
-  for (let i = 0; i < s.contest.length; i += 3) {
+  for (let i = 0; i < s.contest.length; i += CONTEST_STRIDE) {
     const node = s.contest[i] as NodeId, by = s.contest[i + 1], share = s.contest[i + 2];
     if (s.control[node] !== mine || !enemyIdx.has(by) || share < GIVING_WAY) continue;
     if (!worst || share > worst.share || (share === worst.share && node < worst.node)) worst = { node, share, by };

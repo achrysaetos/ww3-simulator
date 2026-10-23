@@ -69,6 +69,29 @@ describe('control mask', () => {
     expect(texel(mask, map.lat[kharkiv], map.lon[kharkiv])[1]).toBeGreaterThan(128);
     expect(ukr).toBeGreaterThanOrEqual(0);
   });
+
+  it('pushes the front into a contested cell as far as the attacker has got, from the side it attacks from', () => {
+    const mask = new ControlMask(map, ids);
+    const ctl = control();
+    const kharkiv = at(49.75, 36.25), north = at(50.25, 36.25);
+    ctl[north] = rus;
+    mask.update(ctl, rel);
+    // Rows down the middle of Kharkiv's cell, north to south, that read more enemy than friendly.
+    const enemyRows = () => Array.from({ length: 20 }, (_, k) => texel(mask, map.lat[kharkiv] + 0.24 - k * 0.025, map.lon[kharkiv])).filter(([f, e]) => e > f).length;
+    const pressed = (share: number) => Float32Array.from([kharkiv, rus, share, 0, -1]);
+    const before = enemyRows();
+    expect(mask.update(ctl, rel, pressed(0.25))).not.toBeNull();
+    const quarter = enemyRows();
+    mask.update(ctl, rel, pressed(0.75));
+    const most = enemyRows();
+    expect(quarter).toBeGreaterThan(before);
+    expect(most).toBeGreaterThan(quarter + 5);
+    expect(most).toBeLessThan(20);
+    expect(texel(mask, map.lat[kharkiv] - 0.24, map.lon[kharkiv])[0]).toBeGreaterThan(128);
+    expect(mask.update(ctl, rel, pressed(0.75))).toBeNull();
+    mask.update(ctl, rel);
+    expect(enemyRows()).toBe(before);
+  });
 });
 
 describe('terrain tiles', () => {

@@ -350,6 +350,13 @@ export const WITHDRAWAL_KM = defineParam({ id: 'land.WITHDRAWAL_KM', value: 3, r
   source: '2-5 km per withdrawal in 2023-25 (Avdiivka, Vuhledar)',
   affects: 'ground given per withdrawal' });
 /**
+ * Km a day an attacker's gain inside a cell slips back once no unit of its side stands there to hold it. Contest km is
+ * averaged over the cell's width, so 0.5 km is about 20 km2 a day of empty ground the defender's patrols walk back
+ * into, about the pace one brigade infiltrates a covered cell and far below an unopposed march. Judgment. A plain
+ * constant, so the validation sweep draws the same params as before.
+ */
+export const CONTEST_RECOVERY_KM_PER_DAY = 0.5;
+/**
  * Local superiority at which an attacker assaults along the whole cell; below
  * it, assault intensity scales down in proportion (attacks on a few axes, the
  * rest of the line held). The 3:1 planning ratio (FM 3-90; Mearsheimer 1989).

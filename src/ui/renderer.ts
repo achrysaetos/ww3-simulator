@@ -1,7 +1,7 @@
 /**
  * The map: a WebGL globe of pre-rendered relief with the war situation shaded
  * in (map/globe.ts), under a 2D canvas of the things that move or get clicked:
- * counters, labels, orders, contested cells and event flashes. The camera
+ * counters, labels, orders and event flashes. The camera
  * flies; it never jumps, so motion on the map always means something happened.
  */
 import type { GameMap } from '../core/map';
@@ -124,7 +124,7 @@ export class MapRenderer {
   private readonly overlay: OverlayRaster;
   private rel: Uint8Array = new Uint8Array(0);
   private relKey = '';
-  private maskFor = -1;
+  private maskFor: { control: number; contest: Float32Array | null } = { control: -1, contest: null };
   private overlayFor: { state: ClientState | null; air: unknown; infra: unknown; fallout: unknown; weather: unknown; sea: unknown; overlays: Overlays | null } = { state: null, air: null, infra: null, fallout: null, weather: null, sea: null, overlays: null };
   private weatherFor: { packed: Uint8Array | null; pairs: Float32Array } = { packed: null, pairs: new Float32Array(0) };
   private flashes: Flash[] = [];
@@ -315,10 +315,10 @@ export class MapRenderer {
       this.relKey = key;
       relChanged = true;
     }
-    if (relChanged || this.maskFor !== state.controlVersion) {
-      const dirty = this.mask.update(state.control, this.rel);
+    if (relChanged || this.maskFor.control !== state.controlVersion || this.maskFor.contest !== state.contest) {
+      const dirty = this.mask.update(state.control, this.rel, state.contest);
       if (dirty) this.globe.setMask(this.mask.data, dirty);
-      this.maskFor = state.controlVersion;
+      this.maskFor = { control: state.controlVersion, contest: state.contest };
       this.globeDirty = true;
     }
     const o = this.overlayFor;
@@ -368,8 +368,6 @@ export class MapRenderer {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    const band = this.band;
-    if (band !== 'world') this.drawContest(input);
     this.drawHover(input);
     this.drawMarks(input);
     this.drawOrders(input);
@@ -433,55 +431,6 @@ export class MapRenderer {
     ctx.strokeStyle = nuclear ? '#ff4d4f' : GOLD;
     ctx.lineWidth = 1.5;
     ctx.stroke();
-  }
-
-  /**
-   * Fronts moving inside a cell: the share an attacker has pushed across it,
-   * filled from the side its own cells border, with the cell outlined in the
-   * attacker's side colour while it is contested.
-   */
-  private drawContest(input: RenderInput) {
-    const { state, nationIds } = input, v = state.contest, ctx = this.ctx, m = this.map;
-    for (let i = 0; i < v.length; i += 3) {
-      const n = v[i], by = v[i + 1], share = v[i + 2];
-      const q = this.cellQuad(n);
-      if (!q || q.every(([x, y]) => x < 0 || y < 0 || x > this.vp.width || y > this.vp.height)) continue;
-      const side = this.sideOf(undefined, nationIds[by] ?? '', nationIds);
-      const color = side === 'friend' ? '74,163,255' : side === 'enemy' ? '255,77,79' : '255,181,71';
-      const c = this.screenOf(n as NodeId);
-      if (!c) continue;
-      let dx = 0, dy = 0;
-      for (const nb of m.neighbors(n as NodeId)) {
-        if (state.control[nb] !== by) continue;
-        const p = this.screenOf(nb);
-        if (p) { dx += p[0] - c[0]; dy += p[1] - c[1]; }
-      }
-      const cell = new Path2D();
-      q.forEach(([x, y], k) => (k ? cell.lineTo(x, y) : cell.moveTo(x, y)));
-      cell.closePath();
-      ctx.save();
-      ctx.clip(cell);
-      ctx.fillStyle = `rgba(${color},0.32)`;
-      const len = Math.hypot(dx, dy);
-      if (len === 0) {
-        ctx.globalAlpha = 0.3 + 0.6 * share;
-        ctx.fill(cell);
-      } else {
-        const ux = dx / len, uy = dy / len;
-        let r = 0;
-        for (const [x, y] of q) r = Math.max(r, Math.abs((x - c[0]) * ux + (y - c[1]) * uy));
-        const s0 = r * (1 - 2 * share), w = 2 * r;
-        const at = (s: number, t: number): [number, number] => [c[0] + ux * s - uy * t, c[1] + uy * s + ux * t];
-        ctx.beginPath();
-        ctx.moveTo(...at(s0, -w));
-        ctx.lineTo(...at(r * 1.5, -w));
-        ctx.lineTo(...at(r * 1.5, w));
-        ctx.lineTo(...at(s0, w));
-        ctx.closePath();
-        ctx.fill();
-      }
-      ctx.restore();
-    }
   }
 
   private label(text: string, font: string, color: string, track: number): Label {

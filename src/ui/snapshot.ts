@@ -14,7 +14,7 @@ import { greenfieldCeilingPerMonth } from '../systems/economy';
 import { NUCLEAR_ALERT } from '../data/nations';
 import { BMD_SYSTEMS } from '../systems/strategic/tables';
 import { supplyFactor } from '../systems/logistics';
-import { cellDepthKm } from '../systems/land/state';
+import { allied, cellDepthKm } from '../systems/land/state';
 import { geography } from '../systems/naval/geography';
 import { compose } from '../systems/naval/state';
 import { liftShare } from '../systems/naval/amphibious';
@@ -40,6 +40,8 @@ import type {
 } from '../core/types';
 
 export const NO_NATION = 0xffff;
+/** Floats per record of Snapshot.contest. */
+export const CONTEST_STRIDE = 5;
 export const NO_NODE = 0xffff;
 /** fPosture of a formation known only from intelligence: enemy orders are never sent. */
 export const NO_POSTURE = 0xff;
@@ -415,7 +417,11 @@ export interface Snapshot {
   /** Flat (node, value) pairs for nodes with infrastructure < 1. */
   infra: Float32Array;
   fallout: Float32Array;
-  /** Flat (node, nationIndex, share) triples: cells an enemy is pushing into, and how far across it has got, 0..1. */
+  /**
+   * Flat CONTEST_STRIDE records (node, nationIndex, share, east, north) for the cells an enemy is pushing into that the
+   * viewer takes part in or watches (watchedBy): how far across the attacker has got, 0..1, and the unit vector its
+   * advance moves along, from the cells its side holds next door (0, 0 when it holds none).
+   */
   contest: Float32Array;
   /** Today's weather per region (weather/effects.ts packWeather), sent when the day changes. */
   weather?: Uint8Array;
@@ -539,7 +545,7 @@ export class SnapshotEncoder {
       sea: this.sparseControl(world.theater.seaControl),
       infra: sparseBelow(world.theater.infrastructure, 1),
       fallout: sparseRecord(world.theater.fallout),
-      contest: this.contested(world, map),
+      contest: this.contested(world, map, view),
     };
     this.events = [];
     this.dropped = 0;
@@ -666,15 +672,21 @@ export class SnapshotEncoder {
     return out;
   }
 
-  private contested(world: World, map: GameMap): Float32Array {
+  private contested(world: World, map: GameMap, view: View | undefined): Float32Array {
     const rec = world.slices.land?.contest ?? {};
-    const keys = Object.keys(rec);
-    const out = new Float32Array(keys.length * 3);
-    keys.forEach((k, i) => {
-      const c = rec[+k];
-      out[i * 3] = +k;
-      out[i * 3 + 1] = this.nationIndex.get(c.by) ?? NO_NATION;
-      out[i * 3 + 2] = Math.min(1, c.km / cellDepthKm(map, +k as NodeId));
+    const seen = Object.keys(rec).map(Number).filter((n) => !view || view.friends.has(rec[n].by) || watchedBy(world, map, view, n as NodeId));
+    const out = new Float32Array(seen.length * CONTEST_STRIDE);
+    seen.forEach((n, i) => {
+      const c = rec[n], o = i * CONTEST_STRIDE;
+      let east = 0, north = 0;
+      for (const m of map.neighbors(n as NodeId)) {
+        const holder = world.control[m];
+        if (m >= map.landCount || !holder || !allied(world, c.by, holder)) continue;
+        east += (((map.lon[n] - map.lon[m] + 540) % 360) - 180) * Math.cos((map.lat[n] * Math.PI) / 180);
+        north += map.lat[n] - map.lat[m];
+      }
+      const len = Math.hypot(east, north) || 1;
+      out.set([n, this.nationIndex.get(c.by) ?? NO_NATION, Math.min(1, c.km / cellDepthKm(map, n as NodeId)), east / len, north / len], o);
     });
     return out;
   }
@@ -981,6 +993,14 @@ function formationDetail(world: World, map: GameMap, catalog: Catalog, f: Format
   };
 }
 
+/** Whether `view`'s side watches `node`: it holds the cell or one next to it, or its intelligence holds a contact there. */
+function watchedBy(world: World, map: GameMap, view: View, node: NodeId): boolean {
+  const holder = world.control[node];
+  if (holder && view.friends.has(holder)) return true;
+  for (const n of map.neighbors(node)) if (n < map.landCount && world.control[n] && view.friends.has(world.control[n])) return true;
+  return view.contactsAt(node).length > 0;
+}
+
 /**
  * Whether `view`'s nation learns of an event. Wars, peace, escalation, captures (the control map is public) and
  * nuclear detonations are public. A battle, strike or loss reaches it when its side took part, or when it happened on
@@ -988,20 +1008,14 @@ function formationDetail(world: World, map: GameMap, catalog: Catalog, f: Format
  */
 export function knownTo(world: World, map: GameMap, view: View, e: SimEvent): boolean {
   const { friends } = view;
-  const watched = (node: NodeId) => {
-    const holder = world.control[node];
-    if (holder && friends.has(holder)) return true;
-    for (const n of map.neighbors(node)) if (n < map.landCount && world.control[n] && friends.has(world.control[n])) return true;
-    return view.contactsAt(node).length > 0;
-  };
   switch (e.type) {
     case 'battle':
-      return friends.has(e.attacker) || friends.has(e.defender) || watched(e.node);
+      return friends.has(e.attacker) || friends.has(e.defender) || watchedBy(world, map, view, e.node);
     case 'strike':
-      return friends.has(e.by) || e.effects.some((x) => x.kind === 'ship_hits' && friends.has(world.formations[x.formation]?.nation)) || watched(e.target);
+      return friends.has(e.by) || e.effects.some((x) => x.kind === 'ship_hits' && friends.has(world.formations[x.formation]?.nation)) || watchedBy(world, map, view, e.target);
     case 'formation_destroyed': {
       const f = world.formations[e.formation];
-      return friends.has(e.nation) || (!!f && watched(f.node));
+      return friends.has(e.nation) || (!!f && watchedBy(world, map, view, f.node));
     }
     case 'production':
     case 'shortage':
