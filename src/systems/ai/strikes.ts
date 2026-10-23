@@ -186,24 +186,42 @@ export function battleAreaOf(p: Plan): Set<number> {
 
 const CELL_DEG = 10;
 const ROWS = 180 / CELL_DEG, COLS = 360 / CELL_DEG;
+const FEW_CELLS = 4;
 
-/** Strike targets bucketed by 10-degree cells, so each shooter only looks at what is near it. */
+/**
+ * Strike targets by 10-degree cell, so each shooter only looks at what is near it. A query walks the targets in value
+ * order and yields those in its cells, so a caller that stops at the first worth taking (pickTarget) reads few.
+ */
 export class TargetGrid {
-  private readonly cells = new Map<number, number[]>();
+  private readonly rows: Uint8Array;
+  private readonly cols: Uint8Array;
+  private cellLists?: Map<number, number[]>;
 
   /** `targets` must be sorted by value, descending. */
   constructor(readonly targets: StrikeTarget[], private readonly map: GameMap) {
-    targets.forEach((t, i) => {
-      const k = this.row(map.lat[t.node]) * COLS + this.col(map.lon[t.node]);
-      (this.cells.get(k) ?? this.cells.set(k, []).get(k)!).push(i);
-    });
+    this.rows = new Uint8Array(targets.length);
+    this.cols = new Uint8Array(targets.length);
+    for (let i = 0; i < targets.length; i++) {
+      this.rows[i] = this.row(map.lat[targets[i].node]);
+      this.cols[i] = this.col(map.lon[targets[i].node]);
+    }
+  }
+
+  private get cells(): Map<number, number[]> {
+    if (this.cellLists) return this.cellLists;
+    this.cellLists = new Map();
+    for (let i = 0; i < this.targets.length; i++) {
+      const k = this.rows[i] * COLS + this.cols[i];
+      (this.cellLists.get(k) ?? this.cellLists.set(k, []).get(k)!).push(i);
+    }
+    return this.cellLists;
   }
 
   private row(lat: number) { return Math.min(ROWS - 1, Math.max(0, Math.floor((lat + 90) / CELL_DEG))); }
   private col(lon: number) { return ((Math.floor((lon + 180) / CELL_DEG) % COLS) + COLS) % COLS; }
 
   /** Targets in the cells overlapping a `km` radius around `node`, still sorted by value. */
-  near(node: NodeId, km: number): StrikeTarget[] {
+  *near(node: NodeId, km: number): Generator<StrikeTarget, void, undefined> {
     const lat = this.map.lat[node], lon = this.map.lon[node];
     const dLat = km / 111;
     const worstLat = Math.min(89, Math.max(Math.abs(lat - dLat), Math.abs(lat + dLat)));
@@ -211,12 +229,16 @@ export class TargetGrid {
     const wide = dLon >= 180;
     const cols = wide ? COLS : Math.min(COLS, Math.floor((lon + dLon + 180) / CELL_DEG) - Math.floor((lon - dLon + 180) / CELL_DEG) + 1);
     const c0 = wide ? 0 : this.col(lon - dLon);
-    const idx: number[] = [];
-    for (let r = this.row(lat - dLat); r <= this.row(lat + dLat); r++)
-      for (let c = 0; c < cols; c++) for (const i of this.cells.get(r * COLS + ((c0 + c) % COLS)) ?? []) idx.push(i);
-    const out: StrikeTarget[] = [];
-    for (const i of Int32Array.from(idx).sort()) out.push(this.targets[i]);
-    return out;
+    const r0 = this.row(lat - dLat), r1 = this.row(lat + dLat);
+    // A short reach reads its few cells' lists; a long one scans the whole list in order.
+    if ((r1 - r0 + 1) * cols <= FEW_CELLS) {
+      const idx: number[] = [];
+      for (let r = r0; r <= r1; r++) for (let c = 0; c < cols; c++) for (const i of this.cells.get(r * COLS + ((c0 + c) % COLS)) ?? []) idx.push(i);
+      for (const i of Int32Array.from(idx).sort()) yield this.targets[i];
+      return;
+    }
+    for (let i = 0; i < this.targets.length; i++)
+      if (this.rows[i] >= r0 && this.rows[i] <= r1 && (this.cols[i] - c0 + COLS) % COLS < cols) yield this.targets[i];
   }
 }
 
@@ -666,7 +688,7 @@ export function reachKm(p: Plan, f: Formation): number {
  * is sorted by value and effect is at most 1, so the scan stops once no later target could beat the
  * best found.
  */
-export function pickTarget(targets: StrikeTarget[], effect: (t: StrikeTarget) => number): StrikeTarget | undefined {
+export function pickTarget(targets: Iterable<StrikeTarget>, effect: (t: StrikeTarget) => number): StrikeTarget | undefined {
   let best: StrikeTarget | undefined, bestScore = 0;
   for (const t of targets) {
     if (t.value <= bestScore) break;

@@ -114,7 +114,13 @@ function truthOf(world: World): Truth {
 function truthView(world: World, nation: NationId, truth: () => Truth): View {
   const friends = friendsOf(world, nation);
   let contacts: Map<FormationId, ContactView> | undefined;
-  return assemble(world, nation, friends, () => (contacts ??= new Map([...truth().byId].filter(([, c]) => !friends.has(c.nation)))), (node) =>
+  const all = () => {
+    if (contacts) return contacts;
+    contacts = new Map();
+    for (const [id, c] of truth().byId) if (!friends.has(c.nation)) contacts.set(id, c);
+    return contacts;
+  };
+  return assemble(world, nation, friends, all, (node) =>
     (truth().atNode.get(node) ?? []).filter((c) => !friends.has(c.nation)),
   );
 }

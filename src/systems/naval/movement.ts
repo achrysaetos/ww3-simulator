@@ -58,6 +58,10 @@ export interface SeaRoutes {
   joins(from: NodeId, to: NodeId): boolean;
 }
 
+const labelCache = new WeakMap<GameMap, Map<string, Int32Array>>();
+/** Sets of closures whose labelling is kept; past this many (mines laid and swept over a long war) the cache starts again. */
+const LABELS_KEPT = 16;
+
 /**
  * Answers seaPath's "is there a route" from one labelling of the zones a ship may pass through
  * (open sea and canals), instead of a search per query. A route's last hop may also enter a mined
@@ -76,7 +80,13 @@ export function seaRoutes(world: World, map: GameMap, nation: NationId, mines: M
   const startsFrom = new Map<number, Set<number>>();
   const labels = () => {
     if (label) return label;
-    label = new Int32Array(map.size).fill(-1);
+    // Coalition partners plan against the same closures: label each set of closures once.
+    const key = `${[...barred].join()}|${[...mined].join()}`;
+    let cache = labelCache.get(map);
+    if (!cache || cache.size > LABELS_KEPT) labelCache.set(map, (cache = new Map()));
+    label = cache.get(key);
+    if (label) return label;
+    cache.set(key, (label = new Int32Array(map.size).fill(-1)));
     for (let s = 0, id = 0; s < map.size; s++, id++) {
       if (label[s] !== -1 || !passable(s)) continue;
       label[s] = id;

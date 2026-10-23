@@ -200,14 +200,25 @@ function maritimeFocus(p: Plan, assault: Assault | undefined): { node: NodeId; e
   const capitals = [...p.friends].map((n) => p.world.nations[n].capital);
   const bases = new Set<NodeId>(capitals);
   for (const f of p.index.byNation.get(p.nation) ?? []) if (f.kind === 'surface_group' || f.kind === 'submarine') bases.add(f.home);
+  // By latitude: a base more than FAR_SEAS_KM / 111 degrees north or south is farther than FAR_SEAS_KM.
+  const byLat = [...bases].sort((a, b) => map.lat[a] - map.lat[b]);
+  const nearBase = (node: NodeId) => {
+    const lat = map.lat[node], band = FAR_SEAS_KM / 111;
+    let lo = 0, hi = byLat.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (map.lat[byLat[mid]] < lat - band) lo = mid + 1;
+      else hi = mid;
+    }
+    for (let i = lo; i < byLat.length && map.lat[byLat[i]] <= lat + band; i++) if (map.distanceKm(node, byLat[i]) <= FAR_SEAS_KM) return true;
+    return false;
+  };
   let best: NodeId | undefined, bestScore = 0;
   for (const e of p.enemies)
     for (const { f, node } of sighted(p, e)) {
       // Boats ashore in a port cell (shore-launched USVs) are struck from the air, not hunted at sea.
       if (f.kind !== 'surface_group' || !map.isSea(node)) continue;
-      let near = false;
-      for (const b of bases) if (map.distanceKm(node, b) <= FAR_SEAS_KM) { near = true; break; }
-      if (!near) continue;
+      if (!nearBase(node)) continue;
       let value = 0;
       for (const [pid, n] of Object.entries(f.equipment)) value += n * p.ctx.catalog.platform(pid as PlatformId).unitCostUsdM;
       let d = Infinity;
@@ -409,8 +420,13 @@ export function planNaval(p: Plan): void {
   const routes = seaRoutes(p.world, map, p.nation, minefields);
   // Only sweepers go into an enemy minefield: a station or chokepoint inside one is a minefield, not a patrol line
   // (NWP 3-15; in 1991 carriers and SSNs kept out of the northern Gulf until lanes were cleared).
+  // Every group planned here is the nation's own, so whether one can sail from a cell to a target holds for all of them.
+  const reachable = new Map<number, boolean>();
   const sails = (g: Formation, n: NodeId, intoMines = false) => {
-    if (!sailable(p.world, map, g, n, routes)) return false;
+    const key = g.node * map.size + n;
+    let ok = reachable.get(key);
+    if (ok === undefined) reachable.set(key, (ok = sailable(p.world, map, g, n, routes)));
+    if (!ok) return false;
     const dest = navalDestination(p.world, map, g.nation, n)!;
     if (!intoMines && minedClosed(p.world, dest, g.nation, minefields)) return false;
     return !beyondCoastalReach(g, dest);
