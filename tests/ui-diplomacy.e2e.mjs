@@ -1,5 +1,6 @@
 // Diplomacy by dragging, as a player does: press your own flag in the top bar, drag it onto an enemy's flag (offer
-// peace) and onto an ally's or neutral's (ask for help), read the pill, let go; then the engine's answer and the needle.
+// peace) and onto an ally's, a friend's or a neutral's (ask for help), read the pill, let go; then the engine's answer
+// and the needle.
 //   PORT=4661 VERIFY_STATE=/tmp/ww3-verify/state-decide .claude/skills/verify/scripts/launch.sh
 //   node tests/ui-diplomacy.e2e.mjs http://localhost:4661/ [run name, default decide] [scenario:NATION ...]
 import fs from 'node:fs';
@@ -73,7 +74,8 @@ for (const play of plays.length ? plays : ['ukraine-2026:UKR', 'ww3-2027:USA']) 
     check(!!enemy, `${play}: an enemy flag is in the row`);
     if (enemy) {
       const cancelled = await drag(enemy.nation, 'pill-cancel.png', false);
-      check(!!cancelled && (await sent()).length === 0, `${play}: Esc drops the drag and sends nothing`);
+      const leaked = await sent();
+      check(!!cancelled && leaked.length === 0, `${play}: Esc drops the drag and sends nothing${leaked.length ? `: ${JSON.stringify(leaked)}` : ''}`);
       const p = await drag(enemy.nation, 'pill-peace.png', true);
       facts.peacePill = p;
       check(!!p && /Offer peace|Accept peace|Cannot offer peace/.test(p.text), `${play}: the pill over ${enemy.nation} reads "${p?.text}" (${p?.tone})`);
@@ -101,13 +103,30 @@ for (const play of plays.length ? plays : ['ukraine-2026:UKR', 'ww3-2027:USA']) 
       }
     }
 
-    const friend = row.find((r) => r.stance === 'ally') ?? row.find((r) => r.stance === 'pending') ?? row.find((r) => r.stance === 'neutral');
-    check(!!friend, `${play}: an ally or neutral flag is in the row`);
+    const bound = row.find((r) => r.stance === 'ally') ?? row.find((r) => r.stance === 'pending');
+    if (bound) {
+      const before = (await sent()).length;
+      const p = await drag(bound.nation, 'pill-ally.png', true);
+      facts.allyPill = { nation: bound.nation, stance: bound.stance, ...p };
+      check(p?.tone === 'refused' && (await sent()).length === before, `${play}: dropping on ${bound.nation} (${bound.stance}) explains and sends nothing ("${p?.text}")`);
+    }
+
+    const friend = row.find((r) => r.stance === 'friend');
+    check(!!friend || play !== 'ukraine-2026:UKR', `${play}: a friend who would help is in the row${friend ? ` (${friend.nation})` : ''}`);
     if (friend) {
       const before = (await sent()).length;
-      const p = await drag(friend.nation, 'pill-ally.png', true);
-      facts.allyPill = { nation: friend.nation, stance: friend.stance, ...p };
-      check(p?.tone === 'refused' && (await sent()).length === before, `${play}: dropping on ${friend.nation} (${friend.stance}) explains and sends nothing ("${p?.text}")`);
+      const p = await drag(friend.nation, 'pill-friend.png', true);
+      facts.friendPill = { nation: friend.nation, ...p };
+      check(!!p && /^Ask .+ for help(They join the war|Air defence, not troops|Their call)/.test(p.text), `${play}: the pill over ${friend.nation} reads "${p?.text}" (${p?.tone})`);
+      const asked = (await sent()).slice(before);
+      check(asked.length === 1 && asked[0].type === 'request_help' && asked[0].target === friend.nation, `${play}: release sent ${JSON.stringify(asked)}`);
+      await page.evaluate(() => window.__client.step());
+      await page.waitForTimeout(1500);
+      const joined = await page.evaluate((f) => window.__client.state.wars.some(([a, b]) => a === f || b === f), friend.nation);
+      facts.friendJoined = joined;
+      check(joined === /They join the war/.test(p?.text ?? ''), `${play}: the engine did what the pill said (${friend.nation} ${joined ? 'is at war' : 'stays out of the war'})`);
+      const again = await drag(friend.nation, 'pill-friend-again.png', true);
+      check(again?.tone === 'refused' && /this week/.test(again.text) && (await sent()).length === before + 1, `${play}: asking again within the week is refused and sends nothing ("${again?.text}")`);
     }
     facts.errors = s.errors;
     check(s.errors.length === 0, `${play}: no page errors${s.errors.length ? `: ${s.errors.slice(0, 3).join(' | ')}` : ''}`);
