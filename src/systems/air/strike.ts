@@ -19,6 +19,7 @@ import { measureEffect } from '../adaptation';
 import { jammedHits } from '../c2';
 import { strikeChokepoint } from '../logistics/chokepoints';
 import { conditionsAt, pgmFactor } from '../weather/effects';
+import { keepPlayer } from '../orders';
 import { AIR_DEFENSE_CLASSES, AIRFRAME, ATTRITABLE_COST_USD_M, DEEP_FIRE_CLASSES, DEEP_FIRE_MISSIONS_PER_DAY, DRONE_SITE_LAUNCHES_PER_DAY, isRoundOnRail, LAUNCHER, MOBILE_TARGETS, NON_STRIKE_KINDS, PENETRATOR_VISIBILITY, RAMP_LETHAL_RADIUS_M, STRIKE_ROLES, TARGET_OF_CLASS, TERMINAL_SEEKER_KINDS, TUNING } from './tables';
 
 export interface AirSlice {
@@ -447,7 +448,7 @@ function engageLandings(world: World, ctx: SimContext, pic: AirPicture): void {
       const d = nodeDistance(ctx, f.node, at);
       if (d <= bestKm) { bestKm = d; best = g; }
     }
-    if (best) f.order = { posture: 'strike', target: best.node, targetClass: 'ship', targetFormation: best.id, issuedTick: world.tick };
+    if (best) f.order = { posture: 'strike', target: best.node, targetClass: 'ship', targetFormation: best.id, issuedTick: world.tick, ...keepPlayer(f.order) };
   }
 }
 
