@@ -81,6 +81,14 @@ function coast(map: GameMap): NodeId[] {
   return c;
 }
 
+const coastByLat = new WeakMap<GameMap, NodeId[]>();
+/** coast(map) sorted by latitude. */
+function coastNorthward(map: GameMap): NodeId[] {
+  let c = coastByLat.get(map);
+  if (!c) coastByLat.set(map, (c = [...coast(map)].sort((a, b) => map.lat[a] - map.lat[b])));
+  return c;
+}
+
 type NavalRole = 'ssbn' | 'submarine' | 'capital' | 'lift' | 'escort' | 'raider' | 'mcm';
 const NAVAL_ROLE: Partial<Record<PlatformClass, NavalRole>> = {
   ssbn: 'ssbn',
@@ -259,7 +267,7 @@ const SURFACE_STANDOFF_KM = 400;
 function shoreClearance(p: Plan): (z: NodeId) => number {
   const { map } = p.ctx;
   // By latitude, so a search walks out from the zone's own latitude and stops where a degree (over 111 km) of it alone is farther than the nearest found.
-  const hostileShore = coast(map).filter((n) => p.enemies.has(p.world.control[n])).sort((a, b) => map.lat[a] - map.lat[b]);
+  const hostileShore = coastNorthward(map).filter((n) => p.enemies.has(p.world.control[n]));
   const memo = new Map<NodeId, number>();
   return (z) => {
     let d = memo.get(z);
