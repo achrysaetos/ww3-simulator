@@ -252,6 +252,7 @@ export function strikeTargets(p: Plan, battleArea: Set<number>): TargetGrid {
     const usd = (costUsdM(p, f) + (cargo.get(f.id) ?? 0)) / (f.kind === 'surface_group' ? Math.max(1, hulls(p, f)) : 1);
     return Math.min(WORTH.max, Math.max(WORTH.min, Math.sqrt(usd / ref)));
   };
+  let fields: NodeId[] | undefined;
   // Aimed where intelligence last fixed each formation, worth less as the fix goes stale.
   for (const e of p.enemies)
     for (const { f, node, confidence, contact } of sighted(p, e)) {
@@ -262,7 +263,7 @@ export function strikeTargets(p: Plan, battleArea: Set<number>): TargetGrid {
       if (!map.isSea(node) && holder && !p.enemies.has(holder) && !p.friends.has(holder) && f.kind !== 'air_wing' && !isBomberForce(p, f)) continue;
       const v = VALUE_BY_KIND[f.kind] ?? (isBomberForce(p, f) ? VALUE_BY_KIND.air_wing : isGround(f) && battleArea.has(node) ? FRONT_FORCES : undefined);
       if (!v) continue;
-      const base = f.kind === 'missile' && reachesHome(p, f, node) ? TEL_HUNT : f.kind === 'missile' && guardsMinefield(p, f, node) ? MINE_GUARD : v.value;
+      const base = f.kind === 'missile' && reachesHome(p, f, node) ? TEL_HUNT : f.kind === 'missile' && guardsMinefield(p, f, node, (fields ??= enemyMinefields(p))) ? MINE_GUARD : v.value;
       const value = base * worth(f) * confidence;
       if (f.kind !== 'surface_group') out.push({ node, cls: v.cls, value, formation: f.id, assigned: 0 });
       else {
@@ -310,16 +311,23 @@ export function strikeTargets(p: Plan, battleArea: Set<number>): TargetGrid {
  */
 const MINE_GUARD = VALUE_BY_KIND.air_defense!.value;
 
-function guardsMinefield(p: Plan, f: Formation, node: NodeId): boolean {
+function guardsMinefield(p: Plan, f: Formation, node: NodeId, fields: readonly NodeId[]): boolean {
+  if (!fields.length) return false;
   let reach = 0;
   for (const [id, n] of Object.entries(f.magazine)) {
     const m = p.ctx.catalog.munition(id as MunitionId);
     if (n > 0 && ANTISHIP_KINDS.has(m.kind)) reach = Math.max(reach, m.rangeKm);
   }
   if (!reach) return false;
-  for (const [z, laid] of Object.entries(p.view.minefields()))
-    if (Object.keys(laid).some((layer) => p.enemies.has(layer as NationId)) && p.ctx.map.distanceKm(node, Number(z) as NodeId) <= reach) return true;
+  for (const z of fields) if (p.ctx.map.distanceKm(node, z) <= reach) return true;
   return false;
+}
+
+/** Charted minefields an enemy of the planner laid. */
+function enemyMinefields(p: Plan): NodeId[] {
+  const out: NodeId[] = [];
+  for (const [z, laid] of Object.entries(p.view.minefields())) if (Object.keys(laid).some((layer) => p.enemies.has(layer as NationId))) out.push(Number(z) as NodeId);
+  return out;
 }
 
 /** Whether a missile `f`'s launchers carry reaches the planner's capital from `node`. */

@@ -385,9 +385,15 @@ function landPicture(p: Plan): LandPicture | undefined {
     }
     return false;
   };
+  const fitness = new Map<Formation, boolean>();
   const fit = (f: Formation) => {
-    const cap = f.supplyCapacity.fuel + f.supplyCapacity.ammo;
-    return f.kind === 'maneuver' && strength(p.ai, f) >= FIT_TO_ATTACK.strength && (cap <= 0 || (f.supply.fuel + f.supply.ammo) / cap >= FIT_TO_ATTACK.supply);
+    let ok = fitness.get(f);
+    if (ok === undefined) {
+      const cap = f.supplyCapacity.fuel + f.supplyCapacity.ammo;
+      ok = f.kind === 'maneuver' && strength(p.ai, f) >= FIT_TO_ATTACK.strength && (cap <= 0 || (f.supply.fuel + f.supply.ammo) / cap >= FIT_TO_ATTACK.supply);
+      fitness.set(f, ok);
+    }
+    return ok;
   };
   const friendlyPowerAt = (n: number) => {
     let v = 0;
