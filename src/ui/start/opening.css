@@ -40,14 +40,6 @@
 .op-tile.blue .op-tile-v { color: #8fc6ff; }
 .op-tile.gold .op-tile-v { color: #ffc56b; }
 .op-tile-c { font-size: 12px; color: #b9c8da; }
-.op-first { display: flex; flex-direction: column; gap: 10px; }
-.op-first .ww-label { font-size: 11px; }
-.op-item { display: flex; gap: 12px; align-items: flex-start; padding: 10px 12px; border-left: 2px solid rgba(255, 181, 71, 0.6); background: rgba(255, 181, 71, 0.04); font-size: 13px; }
-.op-item .ww-topic-icon { flex: none; width: 22px; height: 22px; color: #ff8f90; }
-.op-item > div { display: flex; flex-direction: column; gap: 3px; }
-.op-item b { font-family: var(--ww-title); font-weight: 700; font-size: 17px; letter-spacing: 0.05em; text-transform: uppercase; }
-.op-item span { color: #c9d5e3; }
-.op-item em { font-style: normal; color: var(--ww-muted); }
 .op-side { border-left: 1px solid var(--ww-line); padding: 22px; display: flex; flex-direction: column; gap: 18px; }
 .op-obj { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: 13.5px; }
 .op-obj li { display: flex; gap: 10px; align-items: center; }

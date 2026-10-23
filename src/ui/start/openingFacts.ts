@@ -5,7 +5,7 @@
  */
 import type { NationId } from '../../core/types';
 import { DOMAIN_OF_KIND } from '../../systems/orders';
-import type { ClientState, NationDetail } from '../snapshot';
+import { CONTEST_STRIDE, type ClientState, type NationDetail } from '../snapshot';
 
 export interface OpeningFacts {
   enemies: NationId[];
@@ -40,7 +40,7 @@ export function openingFacts(state: ClientState, me: NationId, d: NationDetail |
     enemies,
     own,
     contacts,
-    contested: state.contest.length / 3,
+    contested: state.contest.length / CONTEST_STRIDE,
     warSupport: n?.warSupport ?? 0,
     mobilised: n?.mobilization ?? 0,
     warheads: n?.warheads ?? 0,

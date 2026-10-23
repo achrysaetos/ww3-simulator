@@ -4,7 +4,7 @@
 
 - Scenario list (eight cards, `scenario-<id>`), nation picks on each card (`pick-<NATION>`), and a search for any other nation (`nation-search-open`, `nation-search`, `search-<NATION>`).
 - Command role: `start-role-cinc` (AI runs the war), `start-role-marshal`, `start-role-brigade` (player runs every domain).
-- `start`, then the opening: a title beat (`opening-title`), the situation report (`briefing`, closed by `briefing-close`).
+- `start`, then the opening: a title beat (`opening-title`), the situation report (`briefing`, closed by `briefing-close`): the chief of staff's summary, four tiles (at war with, our forces, enemy contacts, war support), objectives and how you command. It lists no staff advice; the staff speaks through crises and alerts only.
 - The coach tour on a first session (`coach`, `coach-skip`), remembered in `localStorage['ww3.coach']`.
 
 ## How to get to it (user POV)

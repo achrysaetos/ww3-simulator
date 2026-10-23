@@ -278,7 +278,7 @@ export function MapView(props: MapViewProps) {
   const flyToBand = (b: ZoomBand) => {
     const r = rendererRef.current;
     if (!r) return;
-    r.flyTo(r.bandCamera(b));
+    r.flyTo(r.viewCamera(b, propsRef.current.client.state.contest));
     dirty.current = true;
   };
 

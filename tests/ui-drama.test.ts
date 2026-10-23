@@ -216,14 +216,14 @@ describe('crises stop the clock with one decision', () => {
   it('an armistice offer becomes a crisis with Accept issuing offer_peace', () => {
     const g = play('ukraine-2026', 'UKR');
     g.step();
-    const card: Card = { key: 'peace|RUS', topic: 'diplomacy', role: 'foreign', tone: 'advice', tick: g.state.tick, title: '', text: '', primary: { kind: 'later', label: 'Fight on' } };
+    const card: Card = { key: 'peace|RUS', topic: 'diplomacy', tone: 'advice', tick: g.state.tick, title: '', text: '', primary: { kind: 'later', label: 'Fight on' } };
     const c = crisisOf(card, contextOf(g))!;
     expect(c.kind).toBe('peace');
     expect(c.options[0].action).toEqual({ kind: 'command', label: 'Accept peace', command: { type: 'offer_peace', nation: 'UKR', target: 'RUS' } });
     expect(c.options[1]).toMatchObject({ title: 'Fight on', recommended: true });
   }, 300_000);
 
-  it('ordinary advice never stops the clock', () => {
+  it('alerts never stop the clock', () => {
     const g = play('ukraine-2026', 'UKR');
     g.step(4);
     const routine = g.desk.cards.filter((c) => !/^(treaty|nalert|peace|capital)\|/.test(c.key));
