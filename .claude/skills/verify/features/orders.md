@@ -26,5 +26,5 @@ Proof: the pill text before release (`pill-attack.png`), the order track reachin
 - Wait for `!__map.animating` after any camera move before computing screen positions. The drag itself never moves the camera.
 - Press in the middle of the screen: the top bar, the dock and an open drawer sit over the map's edges and swallow the press.
 - At front zoom a coastal land cell covers the water near it. Zoom out (`flyTo(node, -1.5)`) to drop on a sea zone.
-- The 2026 Ukrainian front is locked: an empty enemy cell next to a lone brigade is crawled through over weeks, so the attack (and its stamp) runs on. Weak attacks on defended cells end soonest, beaten off.
+- The 2026 Ukrainian front is locked: an empty enemy cell next to a lone brigade is crawled through over months, so the attack (and its stamp) runs on. Weak attacks on defended cells end soonest, beaten off.
 - `window.__drag.maxAimMs` is usually the first, unwarmed call or a GC pause; `lastAimMs` and `totalAimMs / aims` are the steady cost.
