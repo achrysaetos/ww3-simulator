@@ -85,7 +85,7 @@ function addMember(world: World, s: DiplomacyState, war: War, n: NationId, side:
 }
 
 /** Put `n` on `side` of `war` and open hostilities with every member of the other side. */
-function joinSide(world: World, ctx: SimContext, s: DiplomacyState, war: War, n: NationId, side: 0 | 1, reason: string, mode: keyof typeof RALLY, via: string, defends?: NationId): void {
+export function joinSide(world: World, ctx: SimContext, s: DiplomacyState, war: War, n: NationId, side: 0 | 1, reason: string, mode: keyof typeof RALLY, via: string, defends?: NationId): void {
   addMember(world, s, war, n, side, via, defends);
   enterWar(world, s, n, mode);
   for (const e of members(war.sides[1 - side])) {

@@ -259,6 +259,8 @@ const MESSAGES: Rule[] = [
   [/^([A-Z]{3}) warns (its enemies|[A-Z]{3}(?:, [A-Z]{3})*) that (.+)$/, (m, n) => `${nation(m[1], n)} warns ${m[2] === 'its enemies' ? m[2] : m[2].split(', ').map((x) => nation(x, n)).join(', ')} that ${m[3]}`],
   [/^(.+) landed at node (\d+), losing (\d+)% in the assault$/, (m, n) => `${m[1]} landed ${n.place.at(+m[2] as NodeId)}, losing ${m[3]}% in the assault`],
   [/^([A-Z]{3}) offers peace to ([A-Z]{3})$/, (m, n) => `${nation(m[1], n)} offers peace to ${nation(m[2], n)}, which has not accepted`],
+  [/^([A-Z]{3}) asks ([A-Z]{3}) for help: \2 (.+)$/, (m, n) => `${nation(m[1], n)} asks ${nation(m[2], n)} for help: ${nation(m[2], n)} ${m[3]}`],
+  [/^([A-Z]{3}) asks ([A-Z]{3}) for help in its war with ([A-Z]{3})$/, (m, n) => `${nation(m[1], n)} asks ${nation(m[2], n)} for help in its war with ${nation(m[3], n)}`],
   [/^([A-Z]{3}) declines to honour (\S+) for ([A-Z]{3})$/, (m, n) => `${nation(m[1], n)} declines to honour the ${treatyName(m[2])} for ${nation(m[3], n)}`],
   [/^([A-Z]{3}) let the (\S+) deadline pass without answering ([A-Z]{3})$/, (m, n) => `${nation(m[1], n)} let the deadline pass on the ${treatyName(m[2])} call from ${nation(m[3], n)} and stays out`],
   [/^([A-Z]{3}) has no industry to build (\S+)$/, (m, n) => `${nation(m[1], n)} has no industry to build ${n.item(m[2])}`],
@@ -298,7 +300,7 @@ export function etaText(hours: number): string {
 export const COMMAND_LABEL: Record<CommandResult['command'], string> = {
   order: 'Order', declare_war: 'Declaration of war', offer_peace: 'Peace offer', sanction: 'Sanctions', set_mobilization: 'Mobilisation',
   produce: 'Production order', nuclear_release: 'Nuclear release', nuclear_alert: 'Nuclear alert', delegate: 'Delegation', hold: 'Command change',
-  answer_treaty: 'Treaty answer', grant_access: 'Right of passage', set_aid: 'Aid', raise_formation: 'New formation',
+  answer_treaty: 'Treaty answer', grant_access: 'Right of passage', set_aid: 'Aid', request_help: 'Request for help', raise_formation: 'New formation',
   cyber_op: 'Cyber operation', sabotage: 'Sabotage campaign', cut_cable: 'Cable cut',
   plan_operation: 'Operation plan', launch_operation: 'Launch', cancel_operation: 'Cancellation', adjust_operation: 'Re-plan',
 };
