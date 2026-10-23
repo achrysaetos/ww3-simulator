@@ -403,6 +403,7 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
         overlays={overlays}
         onSelectFormation={selectFormation}
         onTarget={onTarget}
+        onCommand={sendCommand}
         focusHandle={focusHandle}
       />
       <LiveTopBar

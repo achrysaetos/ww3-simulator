@@ -14,6 +14,7 @@ import { seenOnMap } from './map/feedback';
 import { along, gliders } from './glide';
 import type { OrderTrack } from './orders/tracks';
 import type { DragOverlay } from './drag/useDrag';
+import { PRIORITY_KM } from '../systems/logistics/tables';
 import { GlobeGL } from './map/globe';
 import { ControlMask, OverlayRaster, Rel, relations } from './map/situation';
 import { cityName } from './placeNames';
@@ -47,6 +48,8 @@ export interface RenderInput {
   overlays: Overlays;
   /** The order being dragged: arrow, frontage and strike reach. */
   drag: DragOverlay | null;
+  /** The cell the supply handle is being dragged over, whose priority sector is drawn. */
+  supplyAim: NodeId | null;
   /** The player's orders on their way to their units, or just answered. */
   tracks: readonly OrderTrack[];
   dtHours: number;
@@ -389,6 +392,7 @@ export class MapRenderer {
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     this.drawHover(input);
+    this.drawSupply(input);
     this.drawMarks(input);
     this.drawOrders(input);
     this.drawOperations(input);
@@ -710,18 +714,8 @@ export class MapRenderer {
         ctx.stroke();
       }
     if (d.ringKm > 0) {
-      const m = this.map, lat0 = m.lat[d.ringAt], lon0 = m.lon[d.ringAt];
       ctx.save();
-      ctx.beginPath();
-      let started = false;
-      for (let i = 0; i <= 72; i++) {
-        const a = (i / 72) * Math.PI * 2, dLat = (d.ringKm / 111.2) * Math.cos(a);
-        const p = project(this.cam, this.vp, lon0 + ((d.ringKm / 111.2) * Math.sin(a)) / Math.max(0.05, Math.cos(((lat0 + dLat) * Math.PI) / 180)), lat0 + dLat);
-        if (!p) { started = false; continue; }
-        if (started) ctx.lineTo(p[0], p[1]);
-        else ctx.moveTo(p[0], p[1]);
-        started = true;
-      }
+      this.ringPath(d.ringAt, d.ringKm);
       ctx.setLineDash([5, 5]);
       ctx.strokeStyle = 'rgba(255,107,94,0.75)';
       ctx.lineWidth = 1.4;
@@ -745,6 +739,40 @@ export class MapRenderer {
       ctx.restore();
     }
     if (Math.hypot(d.end[0] - d.start[0], d.end[1] - d.start[1]) > 8) this.battleArrow([d.start, d.end], 0, color, true, d.tone === 'refused');
+  }
+
+  /** A circle of `km` around `at` on the globe, as the current path. */
+  private ringPath(at: NodeId, km: number) {
+    const ctx = this.ctx, lat0 = this.map.lat[at], lon0 = this.map.lon[at];
+    ctx.beginPath();
+    let started = false;
+    for (let i = 0; i <= 72; i++) {
+      const a = (i / 72) * Math.PI * 2, dLat = (km / 111.2) * Math.cos(a);
+      const p = project(this.cam, this.vp, lon0 + ((km / 111.2) * Math.sin(a)) / Math.max(0.05, Math.cos(((lat0 + dLat) * Math.PI) / 180)), lat0 + dLat);
+      if (!p) { started = false; continue; }
+      if (started) ctx.lineTo(p[0], p[1]);
+      else ctx.moveTo(p[0], p[1]);
+      started = true;
+    }
+  }
+
+  /** The player's supply priority sector, a faint gold ring, and the one the supply handle is being dragged over, brighter. */
+  private drawSupply(input: RenderInput) {
+    const ctx = this.ctx;
+    for (const [at, alpha] of [[input.state.supplyPriority, 0.45], [input.supplyAim, 0.9]] as const) {
+      if (at === null || this.band === 'world') continue;
+      ctx.save();
+      this.ringPath(at, PRIORITY_KM);
+      ctx.globalAlpha = alpha * 0.12;
+      ctx.fillStyle = GOLD;
+      ctx.fill();
+      ctx.globalAlpha = alpha;
+      ctx.setLineDash([2, 4]);
+      ctx.strokeStyle = GOLD;
+      ctx.lineWidth = 1.4;
+      ctx.stroke();
+      ctx.restore();
+    }
   }
 
   /** Fights the player knows of in the last few turns: crossed swords on the cell. */

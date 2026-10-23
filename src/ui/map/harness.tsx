@@ -41,7 +41,7 @@ function Harness() {
     <div style={{ position: 'fixed', inset: 0, background: '#04070c' }}>
       <MapView
         client={client} palette={palette} places={client.places} playAs={nation} selected={selected} targeting={null} overlays={OVERLAYS}
-        onSelectFormation={setSelected} onTarget={() => {}} focusHandle={focus}
+        onSelectFormation={setSelected} onTarget={() => {}} onCommand={(c) => client.command(c)} focusHandle={focus}
       />
       <LiveTopBar
         client={client}

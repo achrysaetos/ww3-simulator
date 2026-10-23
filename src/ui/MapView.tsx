@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { GameMap } from '../core/map';
-import type { FormationId, NationId, NodeId } from '../core/types';
+import type { Command, FormationId, NationId, NodeId } from '../core/types';
 import type { SimClient } from './client';
 import type { Palette } from './colors';
 import type { PlaceNamer } from './events';
@@ -8,7 +8,8 @@ import type { Manifest } from './map/tiles';
 import { ZoomControl } from './map/ZoomControl';
 import { fixAge } from './map/contacts';
 import { MapRenderer, type Mark, type Overlays } from './renderer';
-import { Pill } from './drag/Pill';
+import { Pill, PillCard } from './drag/Pill';
+import { SupplyHandle, useSupplyDrag } from './drag/useSupplyDrag';
 import { useDrag } from './drag/useDrag';
 import { NO_NATION, type ScenarioCard } from './snapshot';
 import { BAND_PRESET, pinTo, unproject, zoomForPxPerDeg, type ZoomBand } from './view';
@@ -25,6 +26,8 @@ export interface MapViewProps {
   overlays: Overlays;
   onSelectFormation(id: FormationId | null): void;
   onTarget(node: NodeId): void;
+  /** Send a command; `label` is what the toast says was done. */
+  onCommand(c: Command, label: string): void;
   /**
    * Filled by the map so panels can fly to a node. 'close' zooms in to at least the theatre;
    * 'wide' zooms out to it if closer, so a target far from the unit stays on screen.
@@ -143,6 +146,7 @@ export function MapView(props: MapViewProps) {
           targeting: p.targeting,
           overlays: p.overlays,
           drag: dragRef.current.overlay.current,
+          supplyAim: supplyRef.current.aim.current,
           tracks: client.tracks.list(),
           dtHours: client.meta?.dtHours ?? 6,
           glide: { from: client.glides, t },
@@ -190,6 +194,9 @@ export function MapView(props: MapViewProps) {
   const drag = useDrag({ client: props.client, renderer: rendererRef, places: props.places, playAs: props.playAs, selected: props.selected, hitAt, invalidate: () => (dirty.current = true) });
   const dragRef = useRef(drag);
   dragRef.current = drag;
+  const supply = useSupplyDrag({ client: props.client, renderer: rendererRef, canvas: canvasRef, places: props.places, playAs: props.playAs, onCommand: props.onCommand, invalidate: () => (dirty.current = true) });
+  const supplyRef = useRef(supply);
+  supplyRef.current = supply;
 
   const onPointerDown = (e: React.PointerEvent) => {
     const r = rendererRef.current;
@@ -293,7 +300,7 @@ export function MapView(props: MapViewProps) {
     }
     return null;
   };
-  const hoverInfo = hover && !press.current?.moved && !drag.view && (() => {
+  const hoverInfo = hover && !press.current?.moved && !drag.view && !supply.view && (() => {
     const owner = client.state.control[hover.node];
     const ids = client.meta?.nationIds ?? client.map.nationIds;
     const holder = owner === NO_NATION ? null : client.state.nations.get(ids[owner]);
@@ -340,8 +347,10 @@ export function MapView(props: MapViewProps) {
       <div className="ww-scan" />
       <div className="ww-vig" />
       <ZoomControl band={hud.band} kmPerPx={hud.km} onBand={flyToBand} />
+      {props.playAs && <SupplyHandle priority={client.state.supplyPriority} place={client.state.supplyPriority === null ? null : places.name(client.state.supplyPriority).replace(/^near /, '')} grip={supply.grip} clear={supply.clear} />}
       {failed && <div className="map-failed ww-glass">The map could not start: {failed}</div>}
       {hoverInfo}
+      {supply.view && <PillCard words={supply.view.words} x={supply.view.x} y={supply.view.y} width={canvasRef.current?.clientWidth ?? 0} height={canvasRef.current?.clientHeight ?? 0} />}
       {drag.view && <Pill aim={drag.view.aim} x={drag.view.x} y={drag.view.y} width={canvasRef.current?.clientWidth ?? 0} height={canvasRef.current?.clientHeight ?? 0} />}
     </div>
   );

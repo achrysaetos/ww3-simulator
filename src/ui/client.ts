@@ -3,6 +3,7 @@ import { COMMAND_DOMAINS, type Command, type FormationId, type NationId, type No
 import type { OperationForecast, OperationForecastInput, OperationPlan } from '../forecast/operation';
 import { FORECAST_RUNS, Forecaster, type DrawWorker } from './orders/forecaster';
 import type { DragKit } from './drag/kit';
+import type { PriorityEffect } from '../systems/logistics';
 import { OrderTracks } from './orders/tracks';
 import { GameClock } from './clock';
 import { describeResult, humanizeReason, PlaceNamer, type Namer } from './events';
@@ -115,6 +116,9 @@ export class SimClient {
         break;
       case 'drag_kit':
         this.settle(msg.seq, msg.kit);
+        return;
+      case 'supply_effect':
+        this.settle(msg.seq, msg.effect);
         return;
       case 'forecast_input':
         if (msg.input) this.settle(msg.seq, msg.input);
@@ -239,6 +243,11 @@ export class SimClient {
   /** What a drag of `formations` aims with, from the player's picture of the war; null when none of them can be dragged. */
   dragKit(formations: readonly FormationId[]): Promise<DragKit | null> {
     return this.ask((seq) => ({ type: 'drag_kit', seq, formations: [...formations] }));
+  }
+
+  /** What giving `node` the player's supply priority would move; null when the player does not hold it. */
+  supplyEffect(node: NodeId): Promise<PriorityEffect | null> {
+    return this.ask((seq) => ({ type: 'supply_effect', seq, node }));
   }
 
   /** The staff's forecast for a plan, from the player's picture of the war. */

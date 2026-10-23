@@ -13,7 +13,7 @@ import type { Catalog } from '../core/catalog';
 import { greenfieldCeilingPerMonth } from '../systems/economy';
 import { NUCLEAR_ALERT } from '../data/nations';
 import { BMD_SYSTEMS } from '../systems/strategic/tables';
-import { supplyFactor } from '../systems/logistics';
+import { supplyFactor, type PriorityEffect } from '../systems/logistics';
 import { allied, cellDepthKm } from '../systems/land/state';
 import { geography } from '../systems/naval/geography';
 import { compose } from '../systems/naval/state';
@@ -96,7 +96,9 @@ export type ToWorker =
   /** What the page needs to aim a drag of these formations, from the player's beliefs; answered with 'drag_kit'. */
   | { type: 'drag_kit'; seq: number; formations: FormationId[] }
   /** Build the staff forecast's input for a battle plan, from the player's picture of the war; answered with 'forecast_input'. */
-  | { type: 'forecast'; seq: number; plan: OperationPlan; days: number };
+  | { type: 'forecast'; seq: number; plan: OperationPlan; days: number }
+  /** What giving this cell supply priority would move; answered with 'supply_effect'. */
+  | { type: 'supply_effect'; seq: number; node: NodeId };
 
 export type FromWorker =
   | { type: 'hello'; scenarios: ScenarioCard[]; nations: NationCard[] }
@@ -111,6 +113,8 @@ export type FromWorker =
   | { type: 'drag_kit'; seq: number; kit: DragKit | null; reason?: string }
   /** The input to run the forecast on, or why the plan cannot be forecast. */
   | { type: 'forecast_input'; seq: number; input: OperationForecastInput | null; reason?: string }
+  /** The player's supply priority moved to that cell (logistics priorityEffect), or null when the player does not hold it. */
+  | { type: 'supply_effect'; seq: number; effect: PriorityEffect | null }
   | { type: 'error'; message: string };
 
 export interface SessionMeta {
@@ -436,6 +440,8 @@ export interface Snapshot {
   outputs?: OutputsView;
   /** The viewer's operations (ops/state.ts), ended ones while the engine keeps them; sent when any changed. Never another nation's. */
   ops?: Operation[];
+  /** The cell the viewer has given supply priority (logistics), if any. Never another nation's. */
+  supplyPriority?: NodeId;
 }
 
 /** What the viewer's intelligence holds on a foreign formation: never its orders, supply or magazines. */
@@ -624,6 +630,8 @@ export class SnapshotEncoder {
         this.opsKey = key;
         snap.ops = structuredClone(ops);
       }
+      const priority = world.slices.logistics?.priority?.[viewer];
+      if (priority !== undefined) snap.supplyPriority = priority;
     }
 
     if (focus.nation && world.nations[focus.nation]) snap.focusNation = this.nationDetail(world, map, focus.nation, view);
@@ -1116,6 +1124,7 @@ export interface ClientState {
   focusNation?: NationDetail;
   focusFormation?: FormationDetail;
   focusContact?: ContactDetail;
+  supplyPriority: NodeId | null;
   /** The latest War Cost reading; it arrives once a day. */
   outputs?: OutputsView;
   /** Events from the latest snapshot only. */
@@ -1133,6 +1142,7 @@ export function emptyClientState(size: number): ClientState {
     air: new Float32Array(0), sea: new Float32Array(0), infra: new Float32Array(0), fallout: new Float32Array(0), contest: new Float32Array(0), weather: new Uint8Array(0),
     latestEvents: [],
     ops: [],
+    supplyPriority: null,
     packed: {
       fNode: new Uint16Array(0), fStrength: new Uint8Array(0), fPosture: new Uint8Array(0), fStatus: new Uint8Array(0), fTarget: new Uint16Array(0),
       cConfidence: new Uint8Array(0), cAgeHours: new Uint16Array(0), cErrorKm: new Uint16Array(0), nations: new Float32Array(0),
@@ -1203,6 +1213,7 @@ export function applySnapshot(state: ClientState, snap: Snapshot, nationIds: rea
   state.focusNation = snap.focusNation;
   state.focusFormation = snap.focusFormation;
   state.focusContact = snap.focusContact;
+  state.supplyPriority = snap.supplyPriority ?? null;
   if (snap.outputs) state.outputs = snap.outputs;
   if (snap.ops) state.ops = snap.ops;
   state.latestEvents = snap.events;

@@ -1,4 +1,4 @@
-import type { Command, CommandResult, FormationId, NationId, SimEvent, World } from '../core/types';
+import type { Command, CommandResult, FormationId, NationId, NodeId, SimEvent, World } from '../core/types';
 import { loadMap } from '../data/load';
 import { profiles } from '../data/nations';
 import { createSession, SCENARIOS } from '../scenarios';
@@ -7,6 +7,7 @@ import { authority, isOperationCommand } from '../systems/orders';
 import { checkCommand } from './commands';
 import { COMMAND_LABEL } from './events';
 import { forecastInput } from '../forecast/operation';
+import { priorityEffect } from '../systems/logistics';
 import { beliefOf, buildKit, buffersOf, type Belief } from './drag/kit';
 import { delegateCommands, roleById } from './staff/roles';
 import { nationCards, sessionMeta, SnapshotEncoder, type FromWorker, type ScenarioCard, type ToWorker } from './snapshot';
@@ -102,6 +103,8 @@ export class SimHost {
         return this.dragKit(msg.seq, msg.formations);
       case 'forecast':
         return this.forecast(msg.seq, msg.plan, msg.days);
+      case 'supply_effect':
+        return this.supplyEffect(msg.seq, msg.node);
     }
   }
 
@@ -120,6 +123,14 @@ export class SimHost {
     if (this.belief?.tick !== world.tick) this.belief = { tick: world.tick, world: beliefOf(world, session.map, player, session.catalog) };
     const kit = buildKit(this.belief.world, session.engine, player, own);
     this.post({ type: 'drag_kit', seq, kit, ...(kit ? {} : { reason: 'nothing there can be dragged' }) }, kit ? buffersOf(kit) : []);
+  }
+
+  /** What a supply priority at `raw` would move for the player's own forces; null for a cell the player does not hold. */
+  private supplyEffect(seq: unknown, raw: unknown): void {
+    const { session, player } = this;
+    if (!session || !player || typeof seq !== 'number') return;
+    const ok = typeof raw === 'number' && Number.isInteger(raw) && raw >= 0 && raw < session.map.landCount && session.world.control[raw] === player;
+    this.post({ type: 'supply_effect', seq, effect: ok ? priorityEffect(session.world, session.map, player, raw as NodeId) : null });
   }
 
   /** The plan, checked at the command boundary like any order, cut into the forecast's input from the player's beliefs. */
