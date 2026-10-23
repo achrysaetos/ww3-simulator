@@ -43,9 +43,9 @@ export const FERRY_FACTOR = 2.5;
  * the way they stretch a raid (TUNING.maxTankerExtension) when its nation flies any. USAF Coronet moves cross the
  * Pacific in legs of 4,000-6,000 km (CONUS-Hawaii-Guam-Japan) behind KC-135s and KC-46s.
  */
-export function ferryKm(world: World, catalog: Catalog, f: Formation): number {
+export function ferryKm(world: World, catalog: Catalog, f: Formation, tankers = fliesTankers(world, catalog, f.nation)): number {
   const own = Math.min(...Object.keys(f.equipment).map((pid) => catalog.platform(pid as PlatformId).mobility.rangeKm)) * FERRY_FACTOR;
-  return fliesTankers(world, catalog, f.nation) ? own * (1 + TUNING.maxTankerExtension) : own;
+  return tankers ? own * (1 + TUNING.maxTankerExtension) : own;
 }
 
 export const airWar: System = {
@@ -170,7 +170,8 @@ function hostileAt(world: World, nation: NationId, target: NodeId, aimed: Format
   return false;
 }
 
-const fliesTankers = (world: World, catalog: Catalog, nation: NationId) =>
+/** Whether `nation` has an active wing flying tankers. */
+export const fliesTankers = (world: World, catalog: Catalog, nation: NationId) =>
   Object.values(world.formations).some((w) => w.nation === nation && w.kind === 'air_wing' && w.status === 'active'
     && Object.entries(w.equipment).some(([pid, n]) => n > 0 && catalog.platform(pid as PlatformId).class === 'tanker'));
 

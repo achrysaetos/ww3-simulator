@@ -1,5 +1,5 @@
 import type { Formation, FormationId, Munition, MunitionId, NodeId, PlatformClass, PlatformId, TargetClass } from '../../core/types';
-import { ferryKm, tankerStretch, visibility } from '../air';
+import { ferryKm, fliesTankers, tankerStretch, visibility } from '../air';
 import { dominant, issue } from './forces';
 import { arsenal, FireBudget, pickTarget, pkAgainst, SamCover, reachKm, strikeOptions, withinKm, type StrikeTarget, type TargetGrid } from './strikes';
 import { formationList } from '../intel/view';
@@ -301,10 +301,15 @@ function rebasing(p: Plan, wings: Formation[], keys: NodeId[], targets: TargetGr
   };
 }
 
+/** Whether a plan's nation flies tankers, which stretch its wings' ferry range; the formations do not change while it plans. */
+const tankerFleets = new WeakMap<Plan, boolean>();
+
 /** The airfield a wing flies to on its way to `base`: the base itself in ferry range, else the field in range nearest it. */
 function stage(p: Plan, w: Formation, base: NodeId, fields: NodeId[]): NodeId | undefined {
   const { map } = p.ctx;
-  const ferry = ferryKm(p.world, p.ctx.catalog, w);
+  let tankers = tankerFleets.get(p);
+  if (tankers === undefined) tankerFleets.set(p, (tankers = fliesTankers(p.world, p.ctx.catalog, p.nation)));
+  const ferry = ferryKm(p.world, p.ctx.catalog, w, tankers);
   if (map.distanceKm(w.node, base) <= ferry) return base;
   let hop: NodeId | undefined, left = map.distanceKm(w.node, base);
   for (const n of fields) {

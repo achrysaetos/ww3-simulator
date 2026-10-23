@@ -131,7 +131,7 @@ export function relationMut(world: World, a: NationId, b: NationId): Relation {
 export function setAtWar(world: World, a: NationId, b: NationId, on: boolean): Relation {
   const r = relationMut(world, a, b);
   r.atWar = on;
-  if (stepping?.world === world) stepping.hostility = undefined;
+  if (steppingRelations(world)) stepping!.hostility = undefined;
   return r;
 }
 
@@ -139,7 +139,7 @@ export function setAtWar(world: World, a: NationId, b: NationId, on: boolean): R
 export function setSanctions(world: World, a: NationId, b: NationId, on: boolean): Relation {
   const r = relationMut(world, a, b);
   r.sanctions = on;
-  if (stepping?.world === world) stepping.hostility = undefined;
+  if (steppingRelations(world)) stepping!.hostility = undefined;
   return r;
 }
 
@@ -158,9 +158,12 @@ export interface Hostility {
  */
 let stepping: { world: World; hostility?: Hostility } | undefined;
 
+/** Whether `world` reads the stepped world's relations: the world itself, or a nation's believed copy of it (intel/view.ts). */
+const steppingRelations = (world: World) => stepping?.world.relations === world.relations;
+
 export function hostility(world: World): Hostility {
-  if (stepping?.world !== world) return indexHostility(world);
-  return (stepping.hostility ??= indexHostility(world));
+  if (!steppingRelations(world)) return indexHostility(world);
+  return (stepping!.hostility ??= indexHostility(world));
 }
 
 function indexHostility(world: World): Hostility {
@@ -180,7 +183,7 @@ function indexHostility(world: World): Hostility {
 
 export function atWar(world: World, a: NationId, b: NationId): boolean {
   if (a === b) return false;
-  if (stepping?.world === world) return (stepping.hostility ??= indexHostility(world)).foes.get(a)?.has(b) ?? false;
+  if (steppingRelations(world)) return (stepping!.hostility ??= indexHostility(world)).foes.get(a)?.has(b) ?? false;
   return relation(world, a, b).atWar;
 }
 

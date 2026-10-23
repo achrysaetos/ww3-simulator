@@ -204,20 +204,30 @@ export function believedWorld(world: World, map: GameMap, nation: NationId, cata
   const pic = world.slices.intel.pictures[nation] ?? {};
   // Null-prototype: a dictionary of thousands of ids builds several times faster.
   const formations: World['formations'] = Object.create(null);
+  const list: Formation[] = [];
+  // Object.values lists keys in insertion order unless one reads as an array index, which goes first.
+  let inOrder = true;
+  const put = (b: Formation) => {
+    formations[b.id] = b;
+    list.push(b);
+    const c = b.id.charCodeAt(0);
+    if (c >= 48 && c <= 57) inOrder = false;
+  };
   for (const f of formationList(world)) {
-    if (view.friends.has(f.nation)) formations[f.id] = f;
+    if (view.friends.has(f.nation)) put(f);
     else {
       const c = view.contacts.get(f.id);
       if (!c) continue;
-      if (c.confidence < 1) formations[f.id] = believedFormation(catalog, f, c);
+      if (c.confidence < 1) put(believedFormation(catalog, f, c));
       else {
         const fix = pic[f.id];
         let b = settled.get(fix);
         if (!b) settled.set(fix, (b = believedFormation(catalog, f, c)));
-        formations[f.id] = b;
+        put(b);
       }
     }
   }
+  if (inOrder) lists.set(formations, { tick: world.tick, nextId: world.nextId, list });
   believedWorlds.set(view, (out = { ...world, formations }));
   return out;
 }

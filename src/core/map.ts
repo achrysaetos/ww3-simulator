@@ -256,11 +256,19 @@ export class GameMap {
     return out;
   }
 
+  /** Land cells `nation` owns, ascending. */
   nodesOf(nation: NationId): NodeId[] {
-    const out: NodeId[] = [];
-    for (let n = 0; n < this.landCount; n++) if (this.owner[n] === nation) out.push(n as NodeId);
-    return out;
+    if (!this.landByNation) {
+      this.landByNation = new Map();
+      for (let n = 0; n < this.landCount; n++) {
+        const o = this.owner[n];
+        (this.landByNation.get(o) ?? this.landByNation.set(o, []).get(o)!).push(n as NodeId);
+      }
+    }
+    // A copy: callers sort it.
+    return [...(this.landByNation.get(nation) ?? [])];
   }
+  private landByNation?: Map<NationId, NodeId[]>;
 }
 
 const TO_RAD = Math.PI / 180;
