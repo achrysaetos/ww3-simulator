@@ -58,7 +58,6 @@
 .ww-shell .map-zoom-bands button { min-height: 32px; border: 1px solid rgba(150, 195, 240, 0.28); border-radius: 3px; background: rgba(20, 32, 50, 0.6); color: var(--ww-muted); font-size: 13px; letter-spacing: 0.08em; }
 .ww-shell .map-zoom-bands button.on { border-color: var(--ww-gold); color: #ffc56b; background: rgba(255, 181, 71, 0.12); box-shadow: none; }
 .ww-shell .map-zoom-bands button:hover:not(.on) { color: var(--ww-text); border-color: rgba(150, 195, 240, 0.5); background: rgba(30, 46, 70, 0.7); }
-.ww-topic-icon { flex: none; color: var(--ww-muted); }
 .ww-answer { display: flex; align-items: center; gap: 8px; font-size: 12.5px; line-height: 1.35; color: #c9d5e3; padding-top: 2px; animation: ww-in 0.2s ease-out; }
 .ww-answer .ww-chip { height: 18px; font-size: 10px; flex: none; }
 .ww-answer.waiting { color: #ffc56b; }

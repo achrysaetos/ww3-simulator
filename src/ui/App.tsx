@@ -27,7 +27,7 @@ import { openingFacts } from './start/openingFacts';
 import { StartScreen } from './start/StartScreen';
 import { shortName } from './start/scenarioInfo';
 import type { Overlays } from './renderer';
-import type { Drawer, Mark } from './staff/advice';
+import type { Mark } from './staff/advice';
 import { roleOf } from './staff/roles';
 import { headlines } from './staff/ticker';
 import './staff/staff.css';
@@ -37,6 +37,7 @@ const SPEEDS = [0, 1, 5, 20] as const;
 const OVERLAY_LABELS: Record<keyof Overlays, string> = { air: 'Air control', sea: 'Sea control', infra: 'Infrastructure damage', fallout: 'Fallout', weather: 'Weather', cities: 'Cities', seaZones: 'Sea zones' };
 /** Air, sea and weather draw as blocky squares at theatre zoom, so they start off. */
 const DEFAULT_OVERLAYS: Overlays = { air: false, sea: false, infra: true, fallout: true, weather: false, cities: true, seaZones: false };
+type Drawer = 'forces' | 'nation' | 'log' | 'cost';
 const DRAWERS: { id: Drawer; label: string; key: string }[] = [
   { id: 'forces', label: 'Forces', key: 'F' },
   { id: 'nation', label: 'Nation', key: 'N' },
@@ -494,7 +495,6 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
           role={roleOf(want)}
           youRun={domainNames(COMMAND_DOMAINS.filter((k) => !want[k]))}
           staffRuns={domainNames(COMMAND_DOMAINS.filter((k) => want[k]))}
-          cards={desk.cards}
           onClose={() => setOpening(null)}
         />
       )}

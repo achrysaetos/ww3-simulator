@@ -6,7 +6,7 @@
 import type { GameMap } from '../../core/map';
 import type { FormationId, MunitionKind, NationId, SimEvent } from '../../core/types';
 import type { Namer } from '../events';
-import type { ClientState, MunitionGroup, NationDetail, SessionMeta } from '../snapshot';
+import type { ClientState, NationDetail, SessionMeta } from '../snapshot';
 import { advise, answerOf, isDecision, RECENT_TICKS, type Action, type Answer, type Card, type CommandAction, type Situation } from './advice';
 
 /** One game day, as the staff saw it. */
@@ -14,9 +14,6 @@ export interface Day {
   day: number;
   /** Land cells held at the latest tick of the day. */
   held: number;
-  ammo: number;
-  /** Rounds held per munition family (warehoused and loaded) at the latest tick of the day. */
-  stock: Partial<Record<MunitionGroup, number>>;
 }
 
 /** What became of a card the player acted on. */
@@ -35,12 +32,12 @@ const ANSWER_TICKS = 3;
 /** Ticks an answered card stays on the table before it folds away. */
 const SHOW_ANSWER_TICKS = 4;
 /** New decisions put in front of the player per game day, at most; the rest wait their turn. Urgent ones never wait. */
-export const NEW_DECISIONS_PER_DAY = 2;
-/** Days before the staff raises the same subject again (the key's first two parts: "opstall|op12"). */
-export const SUBJECT_REST_DAYS = 3;
+const NEW_DECISIONS_PER_DAY = 2;
+/** Days before the staff raises the same subject again (the key's first two parts: "peace|RUS"). */
+const SUBJECT_REST_DAYS = 3;
 const subjectOf = (key: string) => key.split('|').slice(0, 2).join('|');
 /** Which waiting decisions take the day's allowance first: a threat before a chance. Stable sort keeps the staff's order within a topic. */
-const FIRST: Record<Card['topic'], number> = { nuclear: 0, threat: 1, diplomacy: 2, command: 3, supply: 4, opportunity: 5, news: 6 };
+const FIRST: Record<Card['topic'], number> = { nuclear: 0, threat: 1, diplomacy: 2 };
 
 const KEPT: ReadonlySet<SimEvent['type']> = new Set(['strike', 'nuclear_detonation', 'nuclear_alert', 'node_captured', 'command_result', 'war_declared', 'peace', 'capitulation', 'message', 'shortage', 'formation_destroyed']);
 
@@ -88,10 +85,8 @@ export class StaffDesk {
     this.record(state, d);
     const situation: Situation = {
       me: this.me, ongoing: this.ongoing, tick: state.tick, dtHours: this.meta.dtHours, map: this.map, nationIds: this.meta.nationIds, control: state.control,
-      formations: state.formations, nations: state.nations, d, recent: this.recent, namer: this.namer, ammoPerDay: this.ammoPerDay(), burnPerDay: this.burnPerDay(),
-      ops: state.ops, contest: state.contest, known: this.known(),
+      formations: state.formations, nations: state.nations, d, recent: this.recent, namer: this.namer,
       munitionKind: (id) => this.meta.munitions[id]?.kind as MunitionKind | undefined,
-      unitCostUsdM: (id) => this.meta.munitions[id]?.costUsdM ?? this.meta.platforms[id]?.costUsdM ?? 0,
     };
     this.pool = this.allow(advise(situation), state.tick);
     this.alerts = this.pool.filter((c) => c.tone === 'live' && state.tick - c.tick <= 1 && !this.alerted.has(c.key));
@@ -128,30 +123,11 @@ export class StaffDesk {
     const day = Math.floor((state.tick * this.meta.dtHours) / 24);
     let rec = this.days[this.days.length - 1];
     if (!rec || rec.day !== day) {
-      rec = { day, held: d.nodesHeld, ammo: 0, stock: {} };
+      rec = { day, held: d.nodesHeld };
       this.days.push(rec);
       if (this.days.length > DAYS_KEPT) this.days.shift();
     }
     rec.held = d.nodesHeld;
-    rec.ammo = d.bulk?.ammo ?? 0;
-    rec.stock = Object.fromEntries(d.munitions.map((m) => [m.group, (m.warehoused ?? 0) + m.loaded]));
-  }
-
-  /** Net national ammunition used per day over the last full days on record. */
-  private ammoPerDay(): number | null {
-    const full = this.days.slice(0, -1).slice(-4);
-    if (full.length < 2) return null;
-    return (full[0].ammo - full[full.length - 1].ammo) / (full.length - 1);
-  }
-
-  /** Rounds of each munition family used per day over the last full days on record, net of what was made. */
-  private burnPerDay(): Partial<Record<MunitionGroup, number>> {
-    const full = this.days.slice(0, -1).slice(-4);
-    if (full.length < 2) return {};
-    const [first, last] = [full[0], full[full.length - 1]];
-    const out: Partial<Record<MunitionGroup, number>> = {};
-    for (const g of Object.keys(first.stock) as MunitionGroup[]) out[g] = ((first.stock[g] ?? 0) - (last.stock[g] ?? 0)) / (full.length - 1);
-    return out;
   }
 
   /**
@@ -191,11 +167,6 @@ export class StaffDesk {
   /** Cards on the table: fresh ones the player has not dismissed or acted on. */
   get cards(): Card[] {
     return this.pool.filter((c) => !this.dismissed.has(c.key) && !this.sent.has(c.key) && !this.done.has(c.key));
-  }
-
-  private known(): Situation['known'] {
-    const table = new Set(this.pool.map((c) => c.key));
-    return (key) => (this.dismissed.has(key) || this.sent.has(key) || this.done.has(key) ? 'done' : table.has(key) ? 'table' : undefined);
   }
 
   /** Cards the player acted on, newest first, with the engine's answer once it comes. */
