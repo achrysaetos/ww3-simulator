@@ -138,7 +138,8 @@ function askAim(d: NationDetail, target: FlagTarget, c: FlagContext): FlagAim {
     const no = answer.no;
     if (no.why === 'asked') return refuse(target, kicker, `you asked ${who} this week`, `ask again from D+${c.dayOf(no.again)}`);
     if (no.why === 'called') return refuse(target, kicker, `${who} answers its ${no.treaty} call by D+${c.dayOf(no.due)}`, 'a treaty call cannot be pressed sooner');
-    return refuse(target, kicker, { fighting: `${who} already fights beside you`, spent: `${who} is out of the fight`, enemy: `${who} is at war with you` }[no.why]);
+    if (no.why === 'fighting') return refuse(target, kicker, `${who} already fights beside you against ${no.against.map(c.name).join(', ')}`);
+    return refuse(target, kicker, { spent: `${who} is out of the fight`, enemy: `${who} is at war with you` }[no.why]);
   }
   const why = helpWhy(answer.basis, who, c.name(answer.foe), answer.treaty);
   if (answer.give === 'refuse') return refuse(target, kicker, 'They refuse', why);

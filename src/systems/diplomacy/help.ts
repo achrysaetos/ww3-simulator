@@ -41,11 +41,11 @@ const JOIN_LEAN = 100;
 export type HelpBasis = 'treaty' | 'friend' | 'offensive' | 'committed' | 'weary' | 'nuclear' | 'sympathy' | 'other_side' | 'no_stake' | 'human';
 
 /**
- * Why `helper` cannot be asked: it is your enemy, already fights all your enemies, is out of the fight, was asked within
- * the week (`again` is the tick it can be asked), or is deciding on a treaty call to your side, which an ask cannot
+ * Why `helper` cannot be asked: it is your enemy, already fights beside you (`against` the enemies of yours it
+ * fights), is out of the fight, was asked within the week (`again` is the tick it can be asked), or is deciding on a treaty call to your side, which an ask cannot
  * hasten (`due` is the tick its answer falls due).
  */
-export type NoAsk = { why: 'enemy' | 'fighting' | 'spent' } | { why: 'asked'; again: number } | { why: 'called'; treaty: string; due: number };
+export type NoAsk = { why: 'enemy' | 'spent' } | { why: 'fighting'; against: NationId[] } | { why: 'asked'; again: number } | { why: 'called'; treaty: string; due: number };
 
 export type HelpAnswer =
   | { give: 'none'; no: NoAsk }
@@ -72,7 +72,8 @@ export function helpAnswer(world: World, map: GameMap, s: DiplomacyState, asker:
   if (!foes.length || asker === helper) return undefined;
   const h = world.nations[helper];
   if (foes.includes(helper)) return { give: 'none', no: { why: 'enemy' } };
-  if (foes.every((f) => atWar(world, helper, f))) return { give: 'none', no: { why: 'fighting' } };
+  const fought = foes.filter((f) => atWar(world, helper, f));
+  if (fought.length) return { give: 'none', no: { why: 'fighting', against: fought } };
   if (h.status === 'capitulated' || h.status === 'collapsed') return { give: 'none', no: { why: 'spent' } };
   const asked = s.asks?.[askKey(asker, helper)];
   const again = asked === undefined ? 0 : asked.tick + Math.ceil((ASK_COOLDOWN_DAYS * 24) / world.dtHours);

@@ -101,11 +101,22 @@ describe('asking for help', () => {
     expect(answer(t, UKR, DEU)).toMatchObject({ give: 'refuse' });
   });
 
+  it('cannot ask a state already fighting beside you in another of your wars, and says against whom', () => {
+    const t = war(BLR, POL, { opinions: friendly(POL) });
+    t.world.pending.push({ type: 'declare_war', nation: RUS, target: UKR });
+    t.engine.step(t.world);
+    t.world.pending.push({ type: 'declare_war', nation: UKR, target: BLR });
+    t.engine.step(t.world);
+    expect(atWar(t.world, POL, RUS)).toBe(false);
+    expect(answer(t, UKR, POL)).toEqual({ give: 'none', no: { why: 'fighting', against: [BLR] } });
+    expect(ask(t, UKR, POL).said).toEqual([]);
+  });
+
   it('cannot ask an enemy, a co-belligerent, or anyone at peace', () => {
     const t = war(RUS, UKR, { alliances: [pact('UKR-POL', UKR, POL)], opinions: friendly(POL) });
     ask(t, UKR, POL);
     expect(answer(t, UKR, RUS)).toEqual({ give: 'none', no: { why: 'enemy' } });
-    expect(answer(t, UKR, POL)).toEqual({ give: 'none', no: { why: 'fighting' } });
+    expect(answer(t, UKR, POL)).toEqual({ give: 'none', no: { why: 'fighting', against: [RUS] } });
     expect(answer(t, ROU, FRA)).toBeUndefined();
   });
 

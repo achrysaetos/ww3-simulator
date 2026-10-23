@@ -127,7 +127,7 @@ describe('the flag drag', () => {
       expect(a.send).toBeNull();
       return a.words.primary;
     };
-    expect(words(USA, 'ally')).toBe('<USA> already fights beside you');
+    expect(words(USA, 'ally')).toBe('<USA> already fights beside you against <RUS>');
     expect(words(N('DEU'), 'pending')).toMatch(/^<DEU> answers its NATO call by D\+\d+$/);
     expect(aimFlag(detailOf(testWorld([createDiplomacy()]), UKR), { nation: USA, stance: 'neutral' }, ctx).words).toMatchObject({ primary: 'you are at war with no one', tone: 'refused' });
   });
