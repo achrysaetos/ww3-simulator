@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { atWar, type System } from '../src/core/engine';
+import { atWar, relationMut, type System } from '../src/core/engine';
 import type { NationId } from '../src/core/types';
 import { createDiplomacy, peaceAnswer, type AllianceTreaty } from '../src/systems/diplomacy';
 import { id, testWorld } from '../src/testkit';
-import { aimFlag, flagRow, peaceNeedle, VERB_OF, type FlagContext, type FlagTarget, type Stance } from '../src/ui/diplomacy/flags';
+import { aimFlag, flagRow, peaceNeedle, VERB_OF, type FlagContext, type Stance } from '../src/ui/diplomacy/flags';
 import { SnapshotEncoder, type NationDetail } from '../src/ui/snapshot';
 
 const N = id.nation;
@@ -25,7 +25,7 @@ function detailOf(t: ReturnType<typeof testWorld>, me: NationId): NationDetail {
   return enc.encode(t.world, t.map, { nation: me }, me).focusNation!;
 }
 
-const nationsOf = (t: ReturnType<typeof testWorld>) => new Map(Object.values(t.world.nations).map((n) => [n.id, { id: n.id, status: n.status, warheads: n.nuclear.warheads }]));
+const nationsOf = (t: ReturnType<typeof testWorld>) => new Map(Object.values(t.world.nations).map((n) => [n.id, { id: n.id, status: n.status, warheads: n.nuclear.warheads, gdpUsdB: 0 }]));
 
 describe('peace answers', () => {
   it.each([0.9, 0.2])('say what offering peace then does (RUS baseline %s)', (baseline) => {
@@ -95,18 +95,41 @@ describe('the flag drag', () => {
     expect(a.words).toMatchObject({ primary: 'you cannot make a separate peace while your allies fight on', tone: 'refused' });
   });
 
-  it.each(['ally', 'pending', 'neutral'] as Stance[])('asks a %s for help only to explain why it cannot, and sends nothing', (stance) => {
+  it('asks a friend outside the war for help, shows the engine’s answer, and the engine gives it on release', () => {
     const t = war(0.9);
-    const target: FlagTarget = { nation: USA, stance, ...(stance === 'pending' ? { call: { treaty: 'NATO', dueTick: 48 } } : {}) };
-    const a = aimFlag(detailOf(t, UKR), target, ctx);
-    expect(VERB_OF[stance]).toBe('ask');
-    expect(a.send).toBeNull();
-    expect(a.words.tone).toBe('refused');
-    expect(a.words.primary).toBe({
-      ally: '<USA> already fights beside you',
-      pending: '<USA> answers its NATO call by D+12',
-      neutral: 'no way to ask: <USA> enters a war only by treaty or by its own choice',
-    }[stance as 'ally' | 'pending' | 'neutral']);
+    t.world.nations[RUS].nuclear.warheads = 1500;
+    relationMut(t.world, USA, UKR).opinion = 70;
+    relationMut(t.world, USA, RUS).opinion = -40;
+    t.engine.step(t.world);
+    const d = detailOf(t, UKR);
+    expect(flagRow(d, nationsOf(t))).toContainEqual({ nation: USA, stance: 'friend' });
+    const a = aimFlag(d, { nation: USA, stance: 'friend' }, ctx);
+    expect(VERB_OF.friend).toBe('ask');
+    expect(a.words).toEqual({ kicker: 'Ask <USA> for help', primary: 'Air defence, not troops', secondary: '<RUS> is nuclear-armed and no treaty binds <USA> to you', tone: 'even' });
+    t.world.pending.push(a.send!.command);
+    t.engine.step(t.world);
+    expect(t.world.slices.diplomacy.aid[USA]).toContain(UKR);
+    expect(atWar(t.world, USA, RUS)).toBe(false);
+    const again = aimFlag(detailOf(t, UKR), { nation: USA, stance: 'friend' }, ctx);
+    expect(again.send).toBeNull();
+    expect(again.words).toMatchObject({ primary: 'you asked <USA> this week', tone: 'refused' });
+  });
+
+  it('cannot ask a co-belligerent, presses no treaty call, and sends nothing at peace', () => {
+    const NATO: AllianceTreaty = { id: 'NATO', kind: 'collective_defense', triggers: ['territory', 'forces'], members: { [POL]: { role: 'mutual', reliability: 1, delayDays: 0 }, [USA]: { role: 'mutual', reliability: 1, delayDays: 0 }, [N('DEU')]: { role: 'mutual', reliability: 1, delayDays: 3 } } };
+    const assault: System = { id: 'assault', step: (w, c) => atWar(w, RUS, POL) && c.emit({ type: 'battle', tick: w.tick, node: w.nations[POL].capital, attacker: RUS, defender: POL, losses: {}, casualties: {} }) };
+    const t = testWorld([assault, createDiplomacy({ alliances: [NATO] })]);
+    t.world.pending.push({ type: 'declare_war', nation: RUS, target: POL });
+    t.engine.run(t.world, 2);
+    const d = detailOf(t, POL);
+    const words = (nation: NationId, stance: Stance) => {
+      const a = aimFlag(d, { nation, stance }, ctx);
+      expect(a.send).toBeNull();
+      return a.words.primary;
+    };
+    expect(words(USA, 'ally')).toBe('<USA> already fights beside you');
+    expect(words(N('DEU'), 'pending')).toMatch(/^<DEU> answers its NATO call by D\+\d+$/);
+    expect(aimFlag(detailOf(testWorld([createDiplomacy()]), UKR), { nation: USA, stance: 'neutral' }, ctx).words).toMatchObject({ primary: 'you are at war with no one', tone: 'refused' });
   });
 
   it('moves the peace needle toward peace as the enemy’s war support falls, full once it would take terms', () => {

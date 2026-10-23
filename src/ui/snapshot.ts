@@ -23,6 +23,7 @@ import { isSealift } from '../systems/naval/sealift';
 import { airliftTonsPerDay, airPortable, airTons, awaitingLift, deckSlots, liftMode, overseas } from '../systems/land/strategic';
 import { authority, playerCommands } from '../systems/orders';
 import { members, sideOf } from '../systems/diplomacy/wars';
+import { helpAnswer, type HelpAnswer } from '../systems/diplomacy/help';
 import { peaceAnswer, type PeaceAnswer } from '../systems/diplomacy/support';
 import { deliveryReachKm, isLive } from '../systems/strategic/nuclear';
 import { hostedBy } from '../systems/civil/state';
@@ -259,6 +260,8 @@ export interface NationDetail {
   peaceOffers: { from: NationId; to: NationId }[];
   /** What each enemy would answer an offer of peace from this nation now (diplomacy peaceAnswer), weighed on the viewer's beliefs; empty for any nation but the viewer. */
   peace: { nation: NationId; answer: PeaceAnswer }[];
+  /** What each nation not at war with this one would answer its ask for help now (diplomacy helpAnswer), weighed as `peace` is; empty at peace. */
+  help: { nation: NationId; answer: HelpAnswer }[];
   /** Nations it has sanctions in force with. */
   sanctions: NationId[];
   /** Nations whose troops it lets cross its land, nations whose land its troops may cross, and belligerents its air defence covers. */
@@ -780,6 +783,7 @@ export class SnapshotEncoder {
     const strategic = world.slices.strategic;
     const space = strategic?.space[id];
     const diplomacy = world.slices.diplomacy;
+    const weighedOn = diplomacy && (!view || view.nation === id) ? (view ? believedWorld(world, map, view.nation, catalog) : world) : undefined;
     const auth = authority(world, id);
     const sanctions: NationId[] = [];
     for (const [k, r] of Object.entries(world.relations)) {
@@ -798,7 +802,8 @@ export class SnapshotEncoder {
         return a === id || b === id ? [{ from, to: from === a ? b : a }] : [];
       }),
       sanctions,
-      peace: diplomacy && (!view || view.nation === id) ? this.peace(view ? believedWorld(world, map, view.nation, catalog) : world, map, id) : [],
+      peace: weighedOn ? this.peace(weighedOn, map, id) : [],
+      help: weighedOn ? this.help(weighedOn, map, id) : [],
       access: diplomacy?.access[id] ?? [],
       accessFrom: Object.entries(diplomacy?.access ?? {}).flatMap(([host, guests]) => (guests.includes(id) ? [host as NationId] : [])),
       aid: diplomacy?.aid[id] ?? [],
@@ -850,6 +855,15 @@ export class SnapshotEncoder {
     for (const e of enemiesOf(world, id)) {
       const answer = peaceAnswer(world, map, world.slices.diplomacy!, id, e);
       if (answer) out.push({ nation: e, answer });
+    }
+    return out;
+  }
+
+  private help(world: World, map: GameMap, id: NationId): NationDetail['help'] {
+    const out: NationDetail['help'] = [];
+    for (const n of Object.keys(world.nations) as NationId[]) {
+      const answer = helpAnswer(world, map, world.slices.diplomacy!, id, n);
+      if (answer && !(answer.give === 'none' && answer.no.why === 'enemy')) out.push({ nation: n, answer });
     }
     return out;
   }
