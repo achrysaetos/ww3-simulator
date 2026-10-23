@@ -68,7 +68,7 @@ npm run perf                                      # PERF=1 timing budgets
 
 ## Evidence
 
-A proof is the before and after of a player action on the real path: start a game from the start screen, act with mouse or keyboard, then screenshot and read the resulting state from `__client` (the formation's order track, the tick, control of the cell). Calling `__client` command methods directly proves the engine, not the UI. Capture `summary.json` with `errors`; a run with page errors is a failed proof even when the screenshot looks right. For engine changes, keep the CLI output (`--report`) or the vitest summary in the run directory. Name the run after the feature (`--run drag-attack`) and cite its path in the PR.
+A proof is the before and after of a player action on the real path: start a game from the start screen, act with mouse or keyboard, then screenshot and read the resulting state from `__client` (the formation's order track, the tick, control of the cell). Calling `__client` command methods directly proves the engine, not the UI. Capture `summary.json` with `errors`; a run with page errors is a failed proof even when the screenshot looks right. For engine changes, keep the CLI output (`--report`) or the vitest summary in the run directory. Name the run after the feature (`--run drag-attack`) and cite its path in the PR. Reusing a run name replaces that directory.
 
 ## Cleanup
 

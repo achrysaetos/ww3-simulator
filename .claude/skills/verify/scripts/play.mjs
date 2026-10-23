@@ -12,6 +12,7 @@ export const RUNS = '/tmp/ww3-verify/runs';
 
 export async function open({ url = 'http://localhost:4650/', play = 'ukraine-2026:UKR', role = 'cinc', run = `run-${Date.now()}` } = {}) {
   const out = path.join(RUNS, run);
+  fs.rmSync(out, { recursive: true, force: true });
   fs.mkdirSync(out, { recursive: true });
   const [scenario, nation] = play.split(':');
   const browser = await chromium.launch({
