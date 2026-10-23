@@ -9,7 +9,7 @@
 
 ## How it works
 
-The page's clock is the master (`src/ui/clock.ts`, `GameClock`). It runs the hours of the latest tick, from the tick before it up to it, and asks the worker for the next tick (`{ type: 'step' }`) only when the shown time reaches the latest tick. If the worker has not delivered, the clock holds there. So the shown time is never past the engine and never more than one tick behind it. The worker steps only on request; there is no worker-side pacer.
+The page's clock is the master (`src/ui/clock.ts`, `GameClock`). It runs the hours of the latest applied tick, from the tick before it up to it. One real second (`LEAD_MS`) before it gets there, it asks the worker for the next tick (`{ type: 'step' }`). The client holds that snapshot, and any sent after it, until the shown time reaches the tick it extends, then applies them together. If the worker is late, the clock holds at the tick. The shown time is never past an applied snapshot, and the engine is at most one tick past the applied one, so at most two ticks past the shown time. Paused, nothing new is applied and nothing is asked; a step asks one more tick and shows it with anything held. Focus details and command answers that arrive behind a held tick are shown at once. The worker steps only on request; there is no worker-side pacer.
 
 ## How to get to it (user POV)
 
@@ -17,7 +17,7 @@ In a running game, press Space or a speed button and watch the hour advance in t
 
 ## Driving it with Playwright
 
-- `s.runTo(tick, speed)` sets the speed, waits for the tick, then pauses. The default speed is `Infinity`, which steps the engine as fast as it goes. The engine can end one tick past `tick`, because the next tick was already asked for.
+- `s.runTo(tick, speed)` sets the speed, waits for the tick, then pauses. The default speed is `Infinity`, which steps the engine as fast as it goes. The shown tick ends at `tick`; the engine may have one more computed and held, so a command given then lands two ticks on, after a step.
 - `window.__client.clock` is the clock: `shown` (hours since tick 0 on screen), `tick`, `rate`, `fraction` (0 to 1 through the latest tick). `window.__client.glides` maps each gliding formation to the node it left. `__client.speed` is hours a second; `__client.ticksPerSec` is the same in ticks.
 - To prove the pace, click `speed-1` and sample `__client.clock.shown` and the `clock` text over 5 s: expect about 5 game hours. Then click `speed-0` and assert `shown` holds.
 - To catch a glide, wait for `clock.fraction < 0.15` with `glides.size > 0`, pause, fly to the glider with `__map.bandCamera('front', …)`, then run to fractions like 0.35 and 0.8 and read the glider's box from `__map.hits`.
@@ -25,6 +25,6 @@ In a running game, press Space or a speed button and watch the hour advance in t
 ## Gotchas
 
 - `setSpeed` through `__client` is fine for getting somewhere fast, but a proof of the speed controls must click them.
-- Each tick holds the clock for the worker's step time. That is barely visible at 1 h/s, but at 5 h/s on ukraine-2026 the clock reached about 4 h/s, and 20 h/s on ww3-2027 is bound by tick cost (about 0.5 s per tick).
+- Applying a tick costs the main thread a long task of about 0.3 to 0.4 s on ukraine-2026 (the game screen re-rendering), which shows as a short freeze of the glide each tick. At 5 h/s the clock measured 4.1 to 5.0 h/s. 20 h/s on ww3-2027 is bound by tick cost (about 0.5 s per tick).
 - The clock runs on `requestAnimationFrame`, so it stops while the tab is hidden.
 - Keyboard shortcuts are ignored while a crisis, opening or coach is open, and inside inputs.

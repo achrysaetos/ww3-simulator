@@ -7,100 +7,126 @@ import { along, gliders, glidesFrom, nodesOf } from '../src/ui/glide';
 import { dtHoursIn } from '../src/ui/slot';
 import type { FormationView } from '../src/ui/snapshot';
 
-/** A worker that takes `latencyMs` per tick, driven by 16 ms frames: what the page's clock sees. */
-function play(clock: GameClock, latencyMs: number, seconds: number, onFrame?: (now: number, enginePending: boolean) => void) {
-  let due: number | null = null, asked = 0;
-  for (let now = 0; now <= seconds * 1000; now += 16) {
+/** A worker that takes `latencyMs` per tick, driven by 16 ms frames from `from`: what the page's clock sees. */
+function play(clock: GameClock, latencyMs: number, seconds: number, onFrame?: (engine: number) => void, from = 0) {
+  let due: number | null = null, engine = clock.tick, asks = 0;
+  for (let now = from; now <= from + seconds * 1000; now += 16) {
     if (due !== null && now >= due) {
-      clock.delivered(clock.tick + 1);
+      expect(clock.arrived(++engine)).toBe(true);
       due = null;
     }
-    if (clock.advance(now)) {
+    for (let a = clock.advance(now); a; a = clock.advance(now)) {
+      if (a === 'apply') continue;
       expect(due, 'one tick in flight at a time').toBeNull();
       due = now + latencyMs;
-      asked++;
+      asks++;
     }
-    onFrame?.(now, due !== null);
+    onFrame?.(engine + (due === null ? 0 : 1));
   }
-  return asked;
+  return asks;
 }
 
 describe('the game clock', () => {
-  it('runs one game hour a real second at 1x, holding at the tick until the engine delivers the next', () => {
+  it('runs one game hour a real second at 1x without holding when the engine keeps up', () => {
     const c = new GameClock(6, 0, 0);
     c.setRate(1, 0);
-    expect(c.advance(0), 'asks for the first tick at once').toBe(true);
-    expect(c.advance(4000), 'one request, however long the engine takes').toBe(false);
-    expect(c.shown, 'holds at tick 0 while it computes').toBe(0);
-    c.delivered(1);
-    c.advance(7000);
-    expect(c.shown).toBeCloseTo(3);
-    expect(c.fraction).toBeCloseTo(0.5);
-    expect(c.advance(9999)).toBe(false);
-    expect(c.advance(10_000), 'asks for tick 2 when the shown time reaches tick 1').toBe(true);
-    expect(c.shown).toBe(6);
-    c.advance(30_000);
-    expect(c.shown, 'never passes the engine').toBe(6);
+    play(c, 300, 60);
+    // Only the first tick is waited for; after that each is asked a second early and lands before it is needed.
+    expect(c.shown, "a hold on every tick would show about 57 h").toBeGreaterThan(59.5);
+    expect(c.shown).toBeLessThanOrEqual(60);
+    const fast = new GameClock(6, 0, 0);
+    fast.setRate(5, 0);
+    play(fast, 300, 12);
+    expect(fast.shown, "a hold on every tick would show about 45 h").toBeGreaterThan(57.5);
   });
 
-  it('keeps the shown time within one tick behind the engine, never ahead, at every frame', () => {
-    for (const [rate, latency] of [[1, 120], [5, 400], [20, 700], [20, 5]] as const) {
+  it('asks for the next tick a second of real time before the shown time reaches the latest', () => {
+    const c = new GameClock(6, 0, 0);
+    c.setRate(1, 0);
+    expect(c.advance(0)).toBe('ask');
+    expect(c.advance(0)).toBeNull();
+    c.arrived(1);
+    expect(c.advance(0), 'the first tick is shown as soon as it lands').toBe('apply');
+    expect(c.fraction).toBe(0);
+    expect(c.advance(4900)).toBeNull();
+    expect(c.shown).toBeCloseTo(4.9);
+    expect(c.advance(5000)).toBe('ask');
+    c.arrived(2);
+    expect(c.advance(5500), 'held until the shown time reaches tick 1').toBeNull();
+    expect(c.tick).toBe(1);
+    expect(c.advance(6000)).toBe('apply');
+    expect(c.tick).toBe(2);
+    expect(c.fraction).toBe(0);
+  });
+
+  it('holds at the latest tick when the engine is late, never running past it', () => {
+    const c = new GameClock(6, 0, 0);
+    c.setRate(1, 0);
+    play(c, 2500, 60, (engine) => {
+      expect(c.shown).toBeLessThanOrEqual(c.tick * 6);
+      expect(engine - c.tick).toBeLessThanOrEqual(1);
+    });
+    // Each 6 h tick takes 2.5 s against a 1 s lead: a 1.5 s hold every 7.5 s.
+    expect(c.shown).toBeLessThan(52);
+  });
+
+  it('keeps the shown time within two ticks of the engine and never past an applied tick, at every frame', () => {
+    for (const [rate, latency] of [[1, 120], [5, 400], [20, 700], [20, 5], [1, 3000]] as const) {
       const c = new GameClock(6, 0, 0);
       c.setRate(rate, 0);
-      play(c, latency, 30, () => {
-        const behind = c.tick * 6 - c.shown;
-        expect(behind).toBeGreaterThanOrEqual(0);
-        expect(behind).toBeLessThanOrEqual(6);
+      play(c, latency, 30, (engine) => {
+        expect(c.shown).toBeLessThanOrEqual(c.tick * 6);
+        expect(c.shown).toBeGreaterThanOrEqual((c.tick - 1) * 6);
+        expect(engine * 6 - c.shown).toBeLessThanOrEqual(12);
       });
     }
   });
 
-  it('paces at the set rate less only the holds, so a quick engine reads as a constant clock', () => {
+  it('pauses at once, lets the engine finish at most the one tick it was asked, and resumes from where it stopped', () => {
     const c = new GameClock(6, 0, 0);
-    c.setRate(1, 0);
-    play(c, 100, 60);
-    // Ten ticks of 6 h each hold about 0.1 s: 60 s shows a little under 60 h.
-    expect(c.shown).toBeGreaterThan(58);
-    expect(c.shown).toBeLessThanOrEqual(60);
-    const fast = new GameClock(6, 0, 0);
-    fast.setRate(5, 0);
-    play(fast, 20, 12);
-    expect(fast.shown).toBeGreaterThan(57);
-    expect(fast.shown).toBeLessThanOrEqual(60);
-  });
-
-  it('pauses at once and resumes from where it stopped', () => {
-    const c = new GameClock(6, 4, 0);
-    c.delivered(5);
     c.setRate(5, 0);
-    c.advance(400);
-    c.setRate(0, 500);
+    play(c, 200, 3.3);
+    c.setRate(0, 3300);
     const at = c.shown;
-    expect(at).toBeCloseTo(26.5);
-    expect(c.advance(60_000)).toBe(false);
+    let most = 0;
+    expect(play(c, 200, 10, (engine) => (most = Math.max(most, engine - c.tick)), 3316), 'no tick asked while paused').toBe(0);
+    expect(most).toBeLessThanOrEqual(1);
     expect(c.shown).toBe(at);
-    c.setRate(1, 60_000);
-    c.advance(61_000);
-    expect(c.shown).toBeCloseTo(at + 1);
+    c.setRate(1, 20_000);
+    c.advance(21_000);
+    expect(c.shown).toBeCloseTo(Math.min(at + 1, c.tick * 6));
   });
 
-  it('ignores snapshots that repeat the latest tick, which keep its request open', () => {
+  it('ignores snapshots that repeat a tick it has', () => {
     const c = new GameClock(6, 0, 0);
     c.setRate(1, 0);
-    expect(c.advance(0)).toBe(true);
-    expect(c.delivered(0), 'a focus change re-sends tick 0').toBe(false);
-    expect(c.advance(100)).toBe(false);
-    expect(c.delivered(1)).toBe(true);
+    expect(c.advance(0)).toBe('ask');
+    expect(c.arrived(0), 'a focus change re-sends tick 0').toBe(false);
+    expect(c.advance(100)).toBeNull();
+    expect(c.arrived(1)).toBe(true);
+    expect(c.arrived(1), 'a refusal re-sends the held tick').toBe(false);
   });
 
-  it('steps one tick on demand only while paused, shown at once', () => {
+  it('steps one more tick on demand while paused, shown at once with anything held before it', () => {
     const c = new GameClock(6, 2, 0);
     expect(c.step()).toBe(true);
-    expect(c.step(), 'nothing more while one is on its way').toBe(false);
-    c.delivered(3);
+    expect(c.step(), 'one on its way serves').toBe(false);
+    c.arrived(3);
+    expect(c.advance(0)).toBe('apply');
     expect(c.shown).toBe(18);
-    expect(c.fraction).toBe(1);
+    expect(c.advance(0)).toBeNull();
     c.setRate(1, 0);
+    expect(c.advance(0)).toBe('ask');
+    c.setRate(0, 10);
+    c.arrived(4);
+    expect(c.advance(20), 'paused, a tick that lands waits').toBeNull();
+    expect(c.step(), 'a step asks one past it').toBe(true);
+    c.arrived(5);
+    expect(c.advance(30)).toBe('apply');
+    expect(c.advance(30)).toBe('apply');
+    expect(c.advance(30)).toBeNull();
+    expect(c.shown).toBe(30);
+    c.setRate(1, 40);
     expect(c.step(), 'not while the clock runs').toBe(false);
   });
 
@@ -108,7 +134,6 @@ describe('the game clock', () => {
     const c = new GameClock(6, 0, 0);
     c.setRate(Infinity, 0);
     expect(play(c, 30, 3)).toBeGreaterThan(90);
-    expect(c.tick * 6 - c.shown).toBeLessThanOrEqual(6);
   });
 });
 

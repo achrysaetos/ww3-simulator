@@ -14,7 +14,7 @@ import type { Action, Card } from './staff/advice';
 import { StaffDesk } from './staff/desk';
 import { roleById, type Delegation, type RoleId } from './staff/roles';
 import {
-  applySnapshot, emptyClientState, type ClientState, type FromWorker, type NationCard, type ScenarioCard, type SessionMeta, type ToWorker,
+  applySnapshot, emptyClientState, type ClientState, type FromWorker, type NationCard, type ScenarioCard, type SessionMeta, type Snapshot, type ToWorker,
 } from './snapshot';
 
 export interface Notice { text: string; tone: 'info' | 'error'; seq: number }
@@ -24,7 +24,7 @@ const forecastWorkers = () => Math.max(1, Math.min(3, (navigator.hardwareConcurr
 
 /**
  * Main-thread handle on the simulation worker. Holds the decoded mirror of the
- * World and notifies React and the map renderer when a snapshot lands. Its clock
+ * World and notifies React and the map renderer when a tick is shown. Its clock
  * paces the game: the worker steps only when the clock asks for the next tick.
  */
 export class SimClient {
@@ -69,6 +69,9 @@ export class SimClient {
   private asked = 0;
   private readonly waiting = new Map<number, { resolve(v: never): void; reject(e: Error): void }>();
   private forecaster: Forecaster | null = null;
+  /** Snapshots from the engine's prefetched tick on, not yet shown. */
+  private queued: Snapshot[] = [];
+  private readonly answered = new WeakSet<Snapshot>();
   private readonly clockListeners = new Set<() => void>();
   private frame = 0;
 
@@ -118,31 +121,64 @@ export class SimClient {
         else this.settle(msg.seq, new Error(msg.reason ?? 'the staff cannot forecast this plan'));
         return;
       case 'ready':
-      case 'snapshot': {
-        if (msg.type === 'ready') {
-          this.reset();
-          this.sessionId++;
-          this.meta = msg.meta;
-          this.playing = msg.playing;
-          this.starting = false;
-          this.desk = new StaffDesk(this.map, msg.meta, msg.playing, this.namer);
-          this.clock = new GameClock(msg.meta.dtHours, msg.snapshot.tick, performance.now());
-        }
-        const before = nodesOf(this.state.formations);
-        applySnapshot(this.state, msg.snapshot, this.meta!.nationIds, this.nationCards);
-        if (msg.type === 'ready') this.openingDelegation = this.pendingDelegation();
-        if (this.clock?.delivered(msg.snapshot.tick)) {
-          this.glides = glidesFrom(before, this.state.formations, this.map);
-          this.run(performance.now());
-        }
-        if (msg.snapshot.history) this.record(msg.snapshot.history);
-        this.record(msg.snapshot.events);
-        this.answer(msg.snapshot.events);
-        this.tracks.observe(msg.snapshot.events, this.state.tick, (r) => humanizeReason(r, this.namer));
-        this.desk?.observe(this.state, msg.snapshot.events, this.state.focusNation?.id === this.playing ? this.state.focusNation : undefined);
+        this.reset();
+        this.sessionId++;
+        this.meta = msg.meta;
+        this.playing = msg.playing;
+        this.starting = false;
+        this.desk = new StaffDesk(this.map, msg.meta, msg.playing, this.namer);
+        this.clock = new GameClock(msg.meta.dtHours, msg.snapshot.tick, performance.now());
+        this.apply(msg.snapshot);
+        this.openingDelegation = this.pendingDelegation();
         break;
-      }
+      case 'snapshot':
+        // Snapshots are diffs, so a new tick waits with everything sent after it until the clock reaches the tick it extends.
+        if (this.clock?.arrived(msg.snapshot.tick)) {
+          this.queued.push(msg.snapshot);
+          this.run(performance.now());
+          return;
+        }
+        if (this.queued.length) {
+          this.queued.push(msg.snapshot);
+          this.answerEarly(msg.snapshot);
+          break;
+        }
+        this.apply(msg.snapshot);
+        break;
     }
+    this.notify();
+  }
+
+  /**
+   * A focus change or a refusal sent while a tick waits answers at once, even paused: the focus
+   * details are whole values rather than diffs, so they can go ahead of the tick they came with.
+   */
+  private answerEarly(snap: Snapshot) {
+    this.state.focusNation = snap.focusNation;
+    this.state.focusFormation = snap.focusFormation;
+    this.state.focusContact = snap.focusContact;
+    this.answer(snap.events);
+    this.tracks.observe(snap.events, this.state.tick, (r) => humanizeReason(r, this.namer));
+    this.answered.add(snap);
+  }
+
+  private apply(snap: Snapshot) {
+    applySnapshot(this.state, snap, this.meta!.nationIds, this.nationCards);
+    if (snap.history) this.record(snap.history);
+    this.record(snap.events);
+    if (!this.answered.delete(snap)) {
+      this.answer(snap.events);
+      this.tracks.observe(snap.events, this.state.tick, (r) => humanizeReason(r, this.namer));
+    }
+    this.desk?.observe(this.state, snap.events, this.state.focusNation?.id === this.playing ? this.state.focusNation : undefined);
+  }
+
+  /** The next held tick, with the snapshots that came after it at the same tick, and which formations glide in it. */
+  private applyTick() {
+    const before = nodesOf(this.state.formations);
+    this.apply(this.queued.shift()!);
+    while (this.queued[0]?.tick === this.state.tick) this.apply(this.queued.shift()!);
+    this.glides = glidesFrom(before, this.state.formations, this.map);
     this.notify();
   }
 
@@ -235,6 +271,7 @@ export class SimClient {
     this.playing = null;
     this.clock = null;
     this.glides = new Map();
+    this.queued = [];
     cancelAnimationFrame(this.frame);
     this.frame = 0;
     this.error = null;
@@ -332,7 +369,9 @@ export class SimClient {
   }
 
   step() {
-    if (this.clock?.step()) this.send({ type: 'step' });
+    if (!this.clock) return;
+    if (this.clock.step()) this.send({ type: 'step' });
+    this.run(performance.now());
   }
 
   /** The clock's whole hours since tick 0, which change far more often than snapshots land. */
@@ -349,7 +388,10 @@ export class SimClient {
     const c = this.clock;
     if (!c) return;
     const hour = this.shownHour();
-    if (c.advance(now)) this.send({ type: 'step' });
+    for (let due = c.advance(now); due; due = c.advance(now)) {
+      if (due === 'ask') this.send({ type: 'step' });
+      else this.applyTick();
+    }
     if (this.shownHour() !== hour) for (const l of this.clockListeners) l();
     if (c.rate && !this.frame) this.frame = requestAnimationFrame(this.run);
   };
