@@ -172,6 +172,7 @@ describe('pill wording', () => {
     [{ kind: 'hold', who, caveats: [], days: { lo: 14, mid: 21, hi: 28 }, etaHours: 0, cells: 1 }, { primary: 'likely holds 2-4 weeks', secondary: 'goes at once', tone: 'good' }],
     [{ kind: 'hold', who, caveats: [], days: { lo: Infinity, mid: Infinity, hi: Infinity }, etaHours: 50, cells: 1 }, { primary: 'no threat seen nearby', secondary: 'there in ~2 days', tone: 'good' }],
     [{ kind: 'hold', who, caveats: [], days: { lo: 3, mid: 5, hi: 40 }, etaHours: 50, cells: 6 }, { primary: 'holds 6 cells · weakest 3 days to a month or more', secondary: 'there in ~2 days', tone: 'even' }],
+    [{ kind: 'hold', who, caveats: [], days: { lo: Infinity, mid: Infinity, hi: Infinity }, etaHours: 50, cells: 2 }, { primary: 'holds 2 cells · no threat seen nearby', secondary: 'there in ~2 days', tone: 'good' }],
     [{ kind: 'strike', who, caveats: ['moving_target_old_fix'], through: { lo: 7, mid: 7, hi: 7.4 }, of: 12 }, { primary: '7 of 12 get through', secondary: 'the target may have moved', tone: 'even' }],
     [{ kind: 'strike', who, caveats: [], through: { lo: 2, mid: 5, hi: 9 }, of: 12 }, { primary: '2-9 of 12 get through', tone: 'even' }],
     [{ kind: 'contest', who, caveats: [], ratio: { lo: 0.4, mid: 0.5, hi: 0.6 }, seen: 3 }, { primary: 'outgunned about 1:2', secondary: '3 enemy groups seen', tone: 'bad' }],

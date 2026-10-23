@@ -34,7 +34,7 @@ import { OutputsRecorder } from '../outputs';
 import { nationName } from './placeNames';
 import { outputsView, type OutputsView } from './outputs/view';
 import type { OperationForecastInput, OperationPlan } from '../forecast/operation';
-import type { OptionsResult } from './orders/options';
+import type { DragKit } from './drag/kit';
 import type {
   Command, CommandDomain, Echelon, Formation, FormationId, FormationKind, ItemId, MunitionId, MunitionKind, Nation, NationId, NodeId, Operation, PlatformId, Posture, SimEvent, World,
 } from '../core/types';
@@ -92,8 +92,8 @@ export type ToWorker =
   | { type: 'command'; command: Command }
   | { type: 'play_as'; nation: NationId }
   | { type: 'focus'; nation?: NationId; formation?: FormationId }
-  /** Which orders the selection (or, with none, the staff's nearest units) can be given at `node`; answered with 'options'. */
-  | { type: 'options'; seq: number; formations: FormationId[]; node: NodeId }
+  /** What the page needs to aim a drag of these formations, from the player's beliefs; answered with 'drag_kit'. */
+  | { type: 'drag_kit'; seq: number; formations: FormationId[] }
   /** Build the staff forecast's input for a battle plan, from the player's picture of the war; answered with 'forecast_input'. */
   | { type: 'forecast'; seq: number; plan: OperationPlan; days: number };
 
@@ -113,7 +113,8 @@ export type FromWorker =
   /** A command the boundary rejected, and why. */
   | { type: 'refused'; reason: string }
   | { type: 'snapshot'; snapshot: Snapshot; stats: RunStats }
-  | { type: 'options'; seq: number; tick: number; result: OptionsResult }
+  /** The drag kit, its typed arrays transferred; null when none of the formations asked about can be dragged. */
+  | { type: 'drag_kit'; seq: number; kit: DragKit | null; reason?: string }
   /** The input to run the forecast on, or why the plan cannot be forecast. */
   | { type: 'forecast_input'; seq: number; input: OperationForecastInput | null; reason?: string }
   | { type: 'error'; message: string };

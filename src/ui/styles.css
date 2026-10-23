@@ -111,7 +111,6 @@ input[type='range'] { flex: 1; accent-color: var(--accent); }
 .row.end { justify-content: flex-end; }
 .row.end > button { flex: none; }
 .w4 { width: 40px; text-align: right; color: var(--text); }
-.posture-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 5px; }
 .hint { color: var(--amber); font-size: 12px; margin: 8px 0 0; }
 
 .oob { list-style: none; margin: 0; padding: 0; }
@@ -127,7 +126,6 @@ input[type='range'] { flex: 1; accent-color: var(--accent); }
 .map-gl, .map-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .map-canvas { cursor: grab; touch-action: none; }
 .map-canvas:active { cursor: grabbing; }
-.map-canvas.targeting-order { cursor: crosshair; }
 .map-canvas.targeting-nuclear { cursor: crosshair; }
 .map-tooltip { position: absolute; z-index: 4; pointer-events: none; padding: 8px 11px; font-size: 11.5px; text-transform: capitalize; max-width: 260px; }
 .tt-title { font-family: var(--ww-title); font-weight: 600; font-size: 14px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ww-text); }
@@ -157,8 +155,6 @@ input[type='range'] { flex: 1; accent-color: var(--accent); }
 .lg-mud { background: rgba(150,105,55,0.6); }
 .lg-snow { background: rgba(240,245,255,0.5); }
 .lg-sea { background: rgba(70,90,200,0.55); }
-.target-banner { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); padding: 6px 14px; border-radius: 4px; background: rgba(15,58,82,0.92); border: 1px solid var(--accent); font-weight: 600; }
-.target-banner.nuclear { background: rgba(58,48,8,0.95); border-color: var(--nuke); color: var(--nuke); }
 .toast { position: absolute; bottom: 40px; left: 50%; transform: translateX(-50%); background: rgba(10,18,28,0.95); border: 1px solid var(--line-2); padding: 8px 14px; border-radius: 4px; max-width: min(560px, calc(100% - 32px)); width: max-content; z-index: 4; }
 .toast.error { border-color: var(--red); color: #ffb3a6; white-space: pre-wrap; }
 
@@ -323,7 +319,6 @@ button.primary { background: #0f3a52; border-color: var(--accent); color: #fff; 
 .modal.end.victory h2 { color: var(--green); }
 .modal.end.defeat h2 { color: var(--red); }
 .deploy-tbl td { vertical-align: middle; }
-.deploy-tbl button.active { outline: 2px solid var(--accent); }
 .legend .lg-contest { background: repeating-linear-gradient(90deg, rgba(220,90,70,0.8) 0 6px, transparent 6px 8px); border: 1px dashed #dc5a46; }
 
 .oob-search { width: 100%; margin: 0 0 8px; padding: 6px 8px; background: var(--panel-2); border: 1px solid var(--line-2); color: var(--text); border-radius: 4px; }

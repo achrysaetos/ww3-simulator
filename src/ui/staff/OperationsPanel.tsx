@@ -5,7 +5,7 @@ interface Props {
   ops: readonly Operation[];
   inTransit: number;
   onShow(node: NodeId): void;
-  /** Opens a battle plan in the planner. */
+  /** Flies to a battle plan on the map. */
   onOpen(op: OperationId): void;
   onForces(): void;
 }
@@ -16,7 +16,7 @@ export function OperationsPanel({ ops, inTransit, onShow, onOpen, onForces }: Pr
     <section className="ww-glass ww-corners ww-panel ww-ops" aria-label="Operations" data-testid="operations">
       <div className="ww-panel-head">
         <span className="ww-label">Operations</span>
-        <span className="ww-op-keys"><span className="ww-kbd">RMB</span> orders <span className="ww-kbd">P</span> plan</span>
+        <span className="ww-op-keys">Drag a unit to order it</span>
       </div>
       {ops.map((o) => (
         <button key={o.key} type="button" className={`ww-op ${o.kind}`} onClick={() => (o.op ? onOpen(o.op) : onShow(o.node))} data-testid={o.op ? 'planned-operation' : 'operation'}>

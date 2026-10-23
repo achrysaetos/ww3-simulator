@@ -64,7 +64,7 @@ await page.mouse.move(canvas.x + canvas.width - 20, canvas.y + canvas.height - 6
 await page.waitForTimeout(600);
 const fix = await page.locator('[data-testid="contact-fix"]').innerText();
 check(/Last fixed \d+[hd] ago/.test(fix) && /km of that fix/.test(fix), `${tag}: the panel gives the fix age and error: ${fix}`);
-check(!(await page.locator('[data-testid^="posture-"]').count()), `${tag}: no orders offered for an enemy contact`);
+check(!(await page.locator('[data-testid="command-line"], [data-testid="drag-hint"]').count()), `${tag}: no orders offered for an enemy contact`);
 await page.screenshot({ path: path.join(out, `contact-${tag}.png`) });
 check(errors.length === 0, `${tag}: no page errors ${errors.join(' | ')}`);
 await browser.close();

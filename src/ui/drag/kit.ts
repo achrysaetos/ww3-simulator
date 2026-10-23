@@ -140,6 +140,18 @@ export function assaultPath(kit: DragKit, u: SubjectUnit, node: NodeId): NodeId[
   return out;
 }
 
+/** Every buffer under the kit's typed arrays, once each, for the worker's transfer list. */
+export function buffersOf(kit: DragKit): ArrayBuffer[] {
+  const out = new Set<ArrayBuffer>();
+  const add = (v: unknown) => {
+    if (ArrayBuffer.isView(v) && v.buffer instanceof ArrayBuffer) out.add(v.buffer);
+  };
+  add(kit.sides);
+  for (const v of Object.values(kit.field)) add(v);
+  for (const r of kit.routes) for (const v of Object.values(r)) add(v);
+  return [...out];
+}
+
 const fields = new WeakMap<Belief, Map<NationId, BeliefField>>();
 
 /** Worker side. The field is cached per belief (one per tick); routes are searched per press. */

@@ -8,7 +8,8 @@ import type { Manifest } from './map/tiles';
 import { ZoomControl } from './map/ZoomControl';
 import { fixAge } from './map/contacts';
 import { MapRenderer, type Mark, type Overlays } from './renderer';
-import type { OrdersOverlay } from './orders/useOrders';
+import { Pill } from './drag/Pill';
+import { useDrag } from './drag/useDrag';
 import { NO_NATION, type ScenarioCard } from './snapshot';
 import { BAND_PRESET, pinTo, unproject, zoomForPxPerDeg, type ZoomBand } from './view';
 import './theme/kit.css';
@@ -19,15 +20,11 @@ export interface MapViewProps {
   places: PlaceNamer;
   playAs: string | null;
   selected: FormationId | null;
-  targeting: 'order' | 'nuclear' | null;
+  /** Picking the nuclear aim point: the next click on the map is it. */
+  targeting: 'nuclear' | null;
   overlays: Overlays;
-  /** The battle plan being drawn, if any: left clicks then go to onPlanClick. */
-  orders: OrdersOverlay | null;
   onSelectFormation(id: FormationId | null): void;
   onTarget(node: NodeId): void;
-  /** A right-click: the cell, the counters under the cursor, and where on screen. */
-  onContext(node: NodeId, ids: readonly FormationId[], x: number, y: number): void;
-  onPlanClick(node: NodeId, ids: readonly FormationId[], shift: boolean): void;
   /**
    * Filled by the map so panels can fly to a node. 'close' zooms in to at least the theatre;
    * 'wide' zooms out to it if closer, so a target far from the unit stays on screen.
@@ -140,9 +137,9 @@ export function MapView(props: MapViewProps) {
           playAs: p.playAs,
           selected: p.selected,
           hoverNode: hoverRef.current,
-          targeting: p.targeting ?? (p.orders?.plan?.drawing ? 'order' : null),
+          targeting: p.targeting,
           overlays: p.overlays,
-          orders: p.orders,
+          drag: dragRef.current.overlay.current,
           tracks: client.tracks.list(),
           dtHours: client.meta?.dtHours ?? 6,
         }, now, changed);
@@ -165,9 +162,10 @@ export function MapView(props: MapViewProps) {
 
   useEffect(() => {
     dirty.current = true;
-  }, [props.playAs, props.selected, props.targeting, props.overlays, props.orders, hover?.node]);
+  }, [props.playAs, props.selected, props.targeting, props.overlays, hover?.node]);
 
-  const drag = useRef<{ x: number; y: number; grab: [number, number] | null; last: [number, number]; moved: boolean } | null>(null);
+  /** The press in progress: a pan, or (order) a drag that useDrag owns. */
+  const press = useRef<{ x: number; y: number; grab: [number, number] | null; last: [number, number]; moved: boolean; order: boolean } | null>(null);
 
   const local = (e: { clientX: number; clientY: number }) => {
     const rect = canvasRef.current!.getBoundingClientRect();
@@ -185,21 +183,31 @@ export function MapView(props: MapViewProps) {
     return [];
   };
 
+  const drag = useDrag({ client: props.client, renderer: rendererRef, places: props.places, playAs: props.playAs, selected: props.selected, hitAt, invalidate: () => (dirty.current = true) });
+  const dragRef = useRef(drag);
+  dragRef.current = drag;
+
   const onPointerDown = (e: React.PointerEvent) => {
     const r = rendererRef.current;
     if (!r || e.button !== 0) return;
     const [x, y] = local(e);
-    drag.current = { x, y, grab: unproject(r.cam, r.vp, x, y), last: [x, y], moved: false };
+    const order = !propsRef.current.targeting && drag.down(x, y);
+    press.current = { x, y, grab: unproject(r.cam, r.vp, x, y), last: [x, y], moved: false, order };
     canvasRef.current!.setPointerCapture(e.pointerId);
+    if (order) setHover(null);
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
     const r = rendererRef.current;
     if (!r) return;
     const [x, y] = local(e);
-    const d = drag.current;
+    const d = press.current;
     if (d) {
       if (Math.hypot(x - d.x, y - d.y) > 4) d.moved = true;
+      if (d.order) {
+        drag.move(x, y);
+        return;
+      }
       if (d.moved) {
         // Keep the grabbed ground under the cursor; off the globe, rotate by the motion instead.
         r.setCamera(d.grab ? pinTo(r.cam, r.vp, d.grab[0], d.grab[1], x, y) : { ...r.cam, lon: r.cam.lon - (x - d.last[0]) * 0.3, lat: r.cam.lat + (y - d.last[1]) * 0.3 });
@@ -213,17 +221,13 @@ export function MapView(props: MapViewProps) {
   };
 
   const onPointerUp = (e: React.PointerEvent) => {
-    const d = drag.current;
-    drag.current = null;
+    const d = press.current;
+    press.current = null;
     const r = rendererRef.current;
+    if (d?.order && drag.up()) return;
     if (!d || d.moved || !r) return;
     const [x, y] = local(e);
     const p = propsRef.current;
-    if (p.orders?.plan && !p.targeting) {
-      const node = r.pick(x, y);
-      if (node !== null) p.onPlanClick(node, hitAt(x, y), e.shiftKey);
-      return;
-    }
     if (p.targeting) {
       const node = r.pick(x, y);
       if (node !== null) p.onTarget(node);
@@ -245,14 +249,9 @@ export function MapView(props: MapViewProps) {
     p.onSelectFormation(null);
   };
 
-  const onContextMenu = (e: React.MouseEvent) => {
-    e.preventDefault();
-    const r = rendererRef.current;
-    const p = propsRef.current;
-    if (!r || p.targeting) return;
-    const [x, y] = local(e);
-    const node = r.pick(x, y);
-    if (node !== null) p.onContext(node, hitAt(x, y), e.clientX, e.clientY);
+  const onPointerCancel = () => {
+    press.current = null;
+    drag.cancel();
   };
 
   const onWheel = (e: React.WheelEvent) => {
@@ -290,7 +289,7 @@ export function MapView(props: MapViewProps) {
     }
     return null;
   };
-  const hoverInfo = hover && !drag.current?.moved && (() => {
+  const hoverInfo = hover && !press.current?.moved && !drag.view && (() => {
     const owner = client.state.control[hover.node];
     const ids = client.meta?.nationIds ?? client.map.nationIds;
     const holder = owner === NO_NATION ? null : client.state.nations.get(ids[owner]);
@@ -312,9 +311,8 @@ export function MapView(props: MapViewProps) {
             {here.length > 6 && <li className="ww-muted">+{here.length - 6} more</li>}
           </ul>
         )}
-        {props.targeting ? <div className="tt-hint">Click to set target</div>
-          : props.orders?.plan ? <div className="tt-hint">{props.orders.plan.drawing ? 'Click: objective · Shift-click: route through · Click a unit of yours: add or drop it' : 'Click a unit of yours to add or drop it · Click a cell to move the objective'}</div>
-            : <div className="tt-hint tt-quiet">Right-click for orders</div>}
+        {props.targeting ? <div className="tt-hint">Click to set the aim point · Esc cancels</div>
+          : here.some((f) => f.entry.nation === props.playAs) ? <div className="tt-hint tt-quiet">Drag your counter onto a target to order it</div> : null}
       </div>
     );
   })();
@@ -324,21 +322,23 @@ export function MapView(props: MapViewProps) {
       <canvas ref={glRef} className="map-gl" aria-hidden="true" />
       <canvas
         ref={canvasRef}
-        className={`map-canvas ${props.targeting ? `targeting-${props.targeting}` : ''}`}
+        className={`map-canvas ${props.targeting ? `targeting-${props.targeting}` : ''} ${drag.view ? 'dragging' : ''}`}
         data-testid="map"
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
+        onPointerCancel={onPointerCancel}
         onPointerLeave={() => setHover(null)}
         onWheel={onWheel}
         onDoubleClick={onDoubleClick}
-        onContextMenu={onContextMenu}
+        onContextMenu={(e) => e.preventDefault()}
       />
       <div className="ww-scan" />
       <div className="ww-vig" />
       <ZoomControl band={hud.band} kmPerPx={hud.km} onBand={flyToBand} />
       {failed && <div className="map-failed ww-glass">The map could not start: {failed}</div>}
       {hoverInfo}
+      {drag.view && <Pill aim={drag.view.aim} x={drag.view.x} y={drag.view.y} width={canvasRef.current?.clientWidth ?? 0} height={canvasRef.current?.clientHeight ?? 0} />}
     </div>
   );
 }

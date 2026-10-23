@@ -53,7 +53,10 @@ export interface IntentSpec {
 const LAND_ROUTED: ReadonlySet<FormationKind> = new Set(['maneuver', 'logistics', 'artillery']);
 
 const route = (posture: 'attack' | 'move'): PublicCheck => (kit, u, t, map) => {
-  if (!LAND_ROUTED.has(u.kind) || routeKm(kit, u, t.node, posture) !== Infinity) return null;
+  if (!LAND_ROUTED.has(u.kind)) return null;
+  // The land handler lifts a move overseas but never an attack: troops land under fire only from an amphibious group.
+  if (posture === 'attack' && overseas(map, u.node, t.node)) return { code: 'no_route', reason: 'across the sea: troops land under fire only from amphibious lift' };
+  if (routeKm(kit, u, t.node, posture) !== Infinity) return null;
   // With no land route a move still deploys by lift overseas or between theatres (land/movement.ts); an attack does not.
   if (posture === 'move' && (overseas(map, u.node, t.node) || map.distanceKm(u.node, t.node) >= THEATRE_KM)) return null;
   return { code: 'no_route', reason: `no land route there` };

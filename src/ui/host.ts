@@ -1,4 +1,4 @@
-import type { Command, CommandResult, FormationId, NationId, NodeId, SimEvent, World } from '../core/types';
+import type { Command, CommandResult, FormationId, NationId, SimEvent, World } from '../core/types';
 import { loadMap } from '../data/load';
 import { profiles } from '../data/nations';
 import { createSession, SCENARIOS } from '../scenarios';
@@ -8,7 +8,7 @@ import { checkCommand } from './commands';
 import { COMMAND_LABEL } from './events';
 import { Pacer } from './pacer';
 import { forecastInput } from '../forecast/operation';
-import { orderOptions } from './orders/options';
+import { beliefOf, buildKit, buffersOf, type Belief } from './drag/kit';
 import { delegateCommands, roleById } from './staff/roles';
 import { nationCards, sessionMeta, SnapshotEncoder, type FromWorker, type ScenarioCard, type ToWorker } from './snapshot';
 
@@ -21,8 +21,8 @@ export const SCENARIO_CARDS: ScenarioCard[] = SCENARIOS.map((s) => {
   return { id: s.id, name: s.name, summary: s.summary, startDate: s.startDate, suggestedNation: s.suggestedNation as NationId, belligerents: [...belligerents], wars, ongoing };
 });
 
-/** Most formations one radial menu works out orders for. */
-const MAX_SELECTION = 24;
+/** Most formations one drag carries. */
+const MAX_DRAG = 24;
 /** Longest forecast the staff runs: two weeks covers an operation's first bounds (A2b's checks use 7 days). */
 export const MAX_FORECAST_DAYS = 14;
 
@@ -40,13 +40,15 @@ export class SimHost {
   private encoder: SnapshotEncoder | null = null;
   private player: NationId | null = null;
   private focus: { nation?: NationId; formation?: FormationId } = {};
+  /** The player's believed world as of one tick: every press in that tick aims from it, and the kit's field is cached on it. */
+  private belief: { tick: number; world: Belief } | null = null;
   private readonly pacer = new Pacer(() => {
     if (!this.session || !this.encoder) return;
     this.encoder.collect(this.session.engine.step(this.session.world).filter((e) => this.forPlayer(e)), this.session.world, this.session.engine.map);
     this.send();
   });
 
-  constructor(private readonly post: (m: FromWorker) => void) {
+  constructor(private readonly post: (m: FromWorker, transfer?: Transferable[]) => void) {
     post({ type: 'hello', scenarios: SCENARIO_CARDS, nations: nationCards(loadMap(), profiles) });
   }
 
@@ -111,16 +113,28 @@ export class SimHost {
         this.focus = { nation: msg.nation, formation: msg.formation };
         this.send();
         return;
-      case 'options': {
-        const { session, player } = this;
-        if (!session || !player || !Number.isInteger(msg.node) || msg.node < 0 || msg.node >= session.map.size || !Array.isArray(msg.formations)) return;
-        const own = msg.formations.filter((id): id is FormationId => typeof id === 'string' && session.world.formations[id as FormationId]?.nation === player).slice(0, MAX_SELECTION);
-        this.post({ type: 'options', seq: msg.seq, tick: session.world.tick, result: orderOptions(session.world, session.engine, player, own, msg.node as NodeId) });
-        return;
-      }
+      case 'drag_kit':
+        return this.dragKit(msg.seq, msg.formations);
       case 'forecast':
         return this.forecast(msg.seq, msg.plan, msg.days);
     }
+  }
+
+  /** The kit for a drag of the player's own active formations, built from what the player believes and transferred, not copied. */
+  private dragKit(seq: unknown, raw: unknown): void {
+    const { session, player } = this;
+    if (!session || !player || typeof seq !== 'number') return;
+    const { world } = session;
+    const own = (Array.isArray(raw) ? raw : [])
+      .filter((id): id is FormationId => typeof id === 'string' && Object.hasOwn(world.formations, id) && world.formations[id as FormationId].nation === player && world.formations[id as FormationId].status === 'active')
+      .slice(0, MAX_DRAG);
+    if (!own.length) {
+      this.post({ type: 'drag_kit', seq, kit: null, reason: 'none of those formations is yours to order' });
+      return;
+    }
+    if (this.belief?.tick !== world.tick) this.belief = { tick: world.tick, world: beliefOf(world, session.map, player, session.catalog) };
+    const kit = buildKit(this.belief.world, session.engine, player, own);
+    this.post({ type: 'drag_kit', seq, kit, ...(kit ? {} : { reason: 'nothing there can be dragged' }) }, kit ? buffersOf(kit) : []);
   }
 
   /** The plan, checked at the command boundary like any order, cut into the forecast's input from the player's beliefs. */
@@ -172,6 +186,7 @@ export class SimHost {
     this.pacer.setSpeed(0);
     this.session = session;
     this.player = nation;
+    this.belief = null;
     const { world, engine, scenario } = session;
     this.encoder = new SnapshotEncoder(engine.map.nationIds, engine.catalog, engine.map.size);
     this.focus = { nation };

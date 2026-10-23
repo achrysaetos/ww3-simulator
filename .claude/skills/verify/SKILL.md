@@ -5,7 +5,7 @@ description: Builds, launches and plays the ww3-simulator browser game (Vite + R
 
 # Verify ww3-simulator
 
-The player surface is the browser game: a start screen, then a world map with a top bar, a dock of drawers and order menus. A second surface is the headless CLI and test suites, which prove simulation behaviour without a browser. Prove UI changes on the game and engine changes headlessly, and run both when a change crosses the worker boundary.
+The player surface is the browser game: a start screen, then a world map with a top bar, a dock of drawers, and orders given by dragging your counters. A second surface is the headless CLI and test suites, which prove simulation behaviour without a browser. Prove UI changes on the game and engine changes headlessly, and run both when a change crosses the worker boundary.
 
 Paths below are relative to the repo root. Evidence goes to `/tmp/ww3-verify/runs/<run>/` and survives cleanup. Instance state (pid, logs) lives in `/tmp/ww3-verify/state/`; set `VERIFY_STATE` to run a second instance with its own `PORT`.
 
@@ -44,17 +44,19 @@ import { open } from './.claude/skills/verify/scripts/play.mjs';
 const s = await open({ play: 'ukraine-2026:UKR', role: 'brigade', run: 'orders' });
 await s.runTo(8);              // ticks are 6 game hours; closes each Daily Brief that pauses the clock
 await s.flyTo(node, -0.5);     // waits for the camera to settle
-const p = await s.at(node);    // page coordinates of a map node
-await s.page.mouse.click(p.x, p.y, { button: 'right' });
-await s.shot('wheel.png');
+const a = await s.at(unitNode), b = await s.at(targetNode);   // page coordinates of map nodes
+await s.page.mouse.move(a.x, a.y); await s.page.mouse.down();  // press on your own counter
+await s.page.mouse.move(b.x, b.y, { steps: 12 });                // drag: the pill (data-testid="pill") follows the cursor
+await s.shot('pill.png');
+await s.page.mouse.up();                                         // release sends the order
 await s.close();
 ```
 
 The Daily Brief opens by itself whenever an urgent decision arrives, even with the clock stopped. `newGame` installs a Playwright locator handler that closes it before any click, but keyboard shortcuts are ignored under it: call `s.closeBrief()` before `page.keyboard.press`.
 
-Handles: every control has a `data-testid` (grep `data-testid` in `src/ui`). The page exposes `window.__client` (the sim client: `state`, `meta.nationIds`, `setSpeed`, `step`, `options(ids, node)`, `tracks`) and `window.__map` (the renderer: `flyTo`, `screenOf`, `hits`, `animating`, `cam`, `map`). Read state through these; give orders only through clicks, drags and keys. The feature map in `features/` names the handles and gotchas per feature.
+Handles: every control has a `data-testid` (grep `data-testid` in `src/ui`). The page exposes `window.__client` (the sim client: `state`, `meta.nationIds`, `setSpeed`, `step`, `dragKit(ids)`, `tracks`), `window.__map` (the renderer: `flyTo`, `screenOf`, `hits`, `animating`, `cam`, `map`, `pick`) and `window.__drag` (`lastAimMs`, `maxAimMs`, `totalAimMs`, `aims`: the pure aim per pointer move). Read state through these; give orders only through clicks, drags and keys. The feature map in `features/` names the handles and gotchas per feature.
 
-The older suites in `tests/*.e2e.mjs` still run: `node tests/ui-orders.e2e.mjs http://localhost:4650/ /tmp/ww3-verify/runs/orders [scenario:NATION]` (also ui-shell, ui-contacts, ui-drama, ui-outputs; `TICKS=n` sets the run length).
+Drag orders have their own drive: `node tests/ui-drag.e2e.mjs http://localhost:4650/ drag` (evidence in `/tmp/ww3-verify/runs/drag/`). The older suites in `tests/*.e2e.mjs` still run: `node tests/ui-orders.e2e.mjs http://localhost:4650/ /tmp/ww3-verify/runs/orders [scenario:NATION]` (also ui-shell, ui-contacts, ui-drama, ui-outputs; `TICKS=n` sets the run length).
 
 Headless checks need no server:
 

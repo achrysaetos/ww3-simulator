@@ -4,7 +4,6 @@ import { geography } from '../src/systems/naval/geography';
 import { id, testWorld } from '../src/testkit';
 import { describeEvent, humanizeMessage, PlaceNamer, type Namer } from '../src/ui/events';
 import { EventFeed } from '../src/ui/feed';
-import { Routes } from '../src/ui/routes';
 import { SnapshotEncoder } from '../src/ui/snapshot';
 
 const N = id.nation;
@@ -18,7 +17,7 @@ const namer: Namer = {
   known: (i) => (i === 'f16v' ? 'F-16V' : undefined),
   place: new PlaceNamer(t.map),
 };
-const kyiv = t.nodeAt(50.45, 30.52), warsaw = t.map.cities.find((c) => c.name === 'Warsaw')!.node, besideWarsaw = t.nodeAt(52.2, 21), elPaso = t.nodeAt(31.8, -106.4);
+const kyiv = t.nodeAt(50.45, 30.52), warsaw = t.map.cities.find((c) => c.name === 'Warsaw')!.node, besideWarsaw = t.nodeAt(52.2, 21);
 const battle = (over: Partial<Extract<SimEvent, { type: 'battle' }>>): SimEvent => ({
   type: 'battle', tick: 4, node: kyiv, attacker: N('RUS'), defender: N('UKR'), losses: {}, casualties: {}, ...over,
 });
@@ -88,22 +87,6 @@ describe('event feed', () => {
     const newest = feed.newest(new Set(), null, 5);
     expect(newest.map((r) => r.seq)).toEqual([...newest.map((r) => r.seq)].sort((a, b) => b - a));
     expect(feed.newest(new Set(['combat']), null, 5).map((r) => r.event.type)).toEqual(['war_declared']);
-  });
-});
-
-describe('order planning', () => {
-  const routes = new Routes(t.map);
-
-  it('knows a ground move from Texas to Warsaw crosses the sea and one from Kiev does not', () => {
-    expect(routes.overseas(elPaso, warsaw)).toBe(true);
-    expect(routes.overseas(kyiv, warsaw)).toBe(false);
-  });
-
-  it('finds the nearest port on the same land mass', () => {
-    const port = routes.nearestPort(elPaso, (p) => t.map.owner[p] === 'USA')!;
-    expect(geography(t.map).portZone.has(port)).toBe(true);
-    expect(t.map.owner[port]).toBe('USA');
-    expect(routes.overseas(elPaso, port)).toBe(false);
   });
 });
 

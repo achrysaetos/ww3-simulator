@@ -54,7 +54,7 @@ for (const play of plays.length ? plays : ['ukraine-2026:UKR', 'ww3-2027:USA', '
   check(await has('[data-testid="drawer-panel-forces"] [data-testid="oob-item"]'), `${tag}: F opens the order of battle`);
   await page.locator('[data-testid="oob-item"]').first().click();
   await page.waitForSelector('[data-testid="formation-name"]', { timeout: 10_000 }).catch(() => {});
-  check(await has('[data-testid="formation-name"]') && await has('[data-testid^="posture-"]'), `${tag}: picking a unit shows its orders`);
+  check(await has('[data-testid="formation-name"]') && await has('[data-testid="command-line"]') && await has('[data-testid="drag-hint"]'), `${tag}: picking a unit shows who commands it and how to order it`);
   await closeBrief(page);
   await page.keyboard.press('n');
   check(await has('[data-testid="nation-panel"]') && !(await has('[data-testid^="delegate-"]')) && await has('[data-testid="staff-land"]'), `${tag}: N opens the nation drawer; delegation lives only on the staff panel`);

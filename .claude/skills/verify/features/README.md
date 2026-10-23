@@ -6,6 +6,6 @@ One file per player-facing feature. Each says what the feature is, how a player 
 |---|---|---|
 | Start a game: scenario, nation, role, opening | `start-game.md` | `tests/ui-drama.e2e.mjs` |
 | The clock: pause, step, speeds, Daily Brief stops | `clock.md` | `tests/ui-shell.e2e.mjs` |
-| Orders: selecting units, the radial wheel, battle plans | `orders.md` | `tests/ui-orders.e2e.mjs` |
+| Orders: selecting units, drag orders and the pill, order tracking | `orders.md` | `tests/ui-drag.e2e.mjs` |
 | Drawers and panels: forces, nation, log, war cost, brief, contacts, menus | `drawers-and-panels.md` | `tests/ui-shell.e2e.mjs`, `ui-outputs`, `ui-contacts` |
 | Headless simulation checks | `headless-checks.md` | `npm test`, `realism`, `validate`, `perf` |

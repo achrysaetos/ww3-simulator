@@ -11,7 +11,7 @@ import { eventNode } from './events';
 import { contactLabel, contactRing, isStale, type ContactInfo } from './map/contacts';
 import { seenOnMap } from './map/feedback';
 import type { OrderTrack } from './orders/tracks';
-import type { OrdersOverlay } from './orders/useOrders';
+import type { DragOverlay } from './drag/useDrag';
 import { GlobeGL } from './map/globe';
 import { ControlMask, OverlayRaster, Rel, relations } from './map/situation';
 import { cityName } from './placeNames';
@@ -41,10 +41,10 @@ export interface RenderInput {
   playAs: string | null;
   selected: FormationId | null;
   hoverNode: NodeId | null;
-  targeting: 'order' | 'nuclear' | null;
+  targeting: 'nuclear' | null;
   overlays: Overlays;
-  /** The plan being drawn and the operation open in the planner. */
-  orders: OrdersOverlay | null;
+  /** The order being dragged: arrow, frontage and strike reach. */
+  drag: DragOverlay | null;
   /** The player's orders on their way to their units, or just answered. */
   tracks: readonly OrderTrack[];
   dtHours: number;
@@ -107,6 +107,7 @@ interface Label {
 }
 
 const GOLD = '#ffb547';
+const DRAG_TONE: Record<DragOverlay['tone'], string> = { good: '#3fd98a', even: GOLD, bad: '#ff6b5e', refused: '#8a97a8' };
 
 export class MapRenderer {
   cam: Camera = { lon: 30, lat: 48, zoom: 9 };
@@ -366,10 +367,9 @@ export class MapRenderer {
     this.drawMarks(input);
     this.drawOrders(input);
     this.drawOperations(input);
-    this.drawPlan(input);
     const counters = this.drawFormations(input);
     if (input.overlays.cities) this.drawCities(counters);
-    this.drawPlanForce(input);
+    this.drawDrag(input);
     for (const t of this.opTags.splice(0)) this.tag(t.lines, t.x, t.y, t.border);
     this.drawTracks(input);
     this.drawFlashes(now);
@@ -680,11 +680,8 @@ export class MapRenderer {
 
   /** The player's operations along their axes: phase and progress, and why one has stalled. */
   private drawOperations(input: RenderInput) {
-    const focus = input.orders?.focusOp ?? null;
     for (const op of input.state.ops) {
       if (!LIVE_PHASES.has(op.phase) || op.axis.length < 2) continue;
-      // The planner draws the operation it has open as the plan.
-      if (op.id === focus && input.orders?.plan) continue;
       const pts = this.route(op.axis);
       if (!pts || pts.length < 2) continue;
       const stalled = op.phase === 'stalled', draft = op.phase === 'draft';
@@ -715,56 +712,63 @@ export class MapRenderer {
     }
   }
 
-  /** The battle plan being drawn: from the force through the waypoints to the cursor, or along the staff's axis once forecast. */
-  private drawPlan(input: RenderInput) {
-    const plan = input.orders?.plan;
-    if (!plan) return;
-    const start = plan.formations.map((id) => input.state.formations.find((f) => f.entry.id === id)).find((f) => f && f.status !== 'destroyed');
-    let nodes: NodeId[];
-    if (plan.axis && !plan.drawing) nodes = plan.axis;
-    else {
-      const end = plan.objective ?? (plan.drawing ? input.hoverNode : null);
-      nodes = [...(start ? [start.node] : []), ...plan.waypoints, ...(end !== null ? [end] : [])];
-    }
-    const pts = this.route(nodes);
-    if (pts && pts.length >= 2) this.battleArrow(pts, 0, GOLD, true, plan.drawing);
-    const ctx = this.ctx;
-    for (const w of plan.waypoints) {
-      const p = this.screenOf(w);
-      if (!p) continue;
-      ctx.beginPath();
-      ctx.arc(p[0], p[1], 4, 0, Math.PI * 2);
-      ctx.fillStyle = '#0b0f18';
-      ctx.fill();
-      ctx.strokeStyle = GOLD;
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-    }
-    const obj = plan.objective === null ? null : this.screenOf(plan.objective);
-    if (obj) {
-      const [x, y] = obj;
-      ctx.save();
-      ctx.strokeStyle = '#ffd27f';
-      ctx.lineWidth = 2;
-      ctx.shadowColor = 'rgba(255,181,71,0.9)';
-      ctx.shadowBlur = 8;
-      ctx.beginPath();
-      ctx.arc(x, y, 13, 0, Math.PI * 2);
-      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-        ctx.moveTo(x + dx * 8, y + dy * 8);
-        ctx.lineTo(x + dx * 19, y + dy * 19);
+  /**
+   * The order being dragged, over the counters: frontage cells for a held front, the strike reach, and an arrow
+   * from each unit going to the target, in the pill's tone.
+   */
+  private drawDrag(input: RenderInput) {
+    const d = input.drag;
+    if (!d) return;
+    const ctx = this.ctx, color = DRAG_TONE[d.tone];
+    if (d.aim.intent === 'hold_front')
+      for (const c of d.aim.cells) {
+        const q = this.cellQuad(c);
+        if (!q) continue;
+        ctx.beginPath();
+        q.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(74,163,255,0.22)';
+        ctx.fill();
+        ctx.strokeStyle = '#8fc6ff';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
       }
+    if (d.ringKm > 0) {
+      const m = this.map, lat0 = m.lat[d.ringAt], lon0 = m.lon[d.ringAt];
+      ctx.save();
+      ctx.beginPath();
+      let started = false;
+      for (let i = 0; i <= 72; i++) {
+        const a = (i / 72) * Math.PI * 2, dLat = (d.ringKm / 111.2) * Math.cos(a);
+        const p = project(this.cam, this.vp, lon0 + ((d.ringKm / 111.2) * Math.sin(a)) / Math.max(0.05, Math.cos(((lat0 + dLat) * Math.PI) / 180)), lat0 + dLat);
+        if (!p) { started = false; continue; }
+        if (started) ctx.lineTo(p[0], p[1]);
+        else ctx.moveTo(p[0], p[1]);
+        started = true;
+      }
+      ctx.setLineDash([5, 5]);
+      ctx.strokeStyle = 'rgba(255,107,94,0.75)';
+      ctx.lineWidth = 1.4;
       ctx.stroke();
       ctx.restore();
     }
-  }
-
-  /** Gold brackets on every unit the plan has been given. */
-  private drawPlanForce(input: RenderInput) {
-    const plan = input.orders?.plan;
-    if (!plan) return;
-    const want = new Set(plan.formations);
-    for (const h of this.hits) if (h.ids.some((id) => want.has(id))) this.drawSelection(h);
+    const t = d.aim.target.node;
+    const q = t < this.map.landCount && d.aim.intent !== 'hold_front' ? this.cellQuad(t) : null;
+    if (q) {
+      ctx.save();
+      ctx.beginPath();
+      q.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+      ctx.closePath();
+      ctx.globalAlpha = 0.18;
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.restore();
+    }
+    if (Math.hypot(d.end[0] - d.start[0], d.end[1] - d.start[1]) > 8) this.battleArrow([d.start, d.end], 0, color, true, d.tone === 'refused');
   }
 
   /** Fights the player knows of in the last few turns: crossed swords on the cell. */

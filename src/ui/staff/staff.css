@@ -156,11 +156,8 @@
 .ww-ticker .ww-chip { height: 18px; font-size: 10px; flex: none; }
 .ww-ticker .fresh { color: var(--ww-text); animation: ww-in 0.4s ease-out; }
 .ww-ticker i { font-style: normal; }
-.ww-target-banner { position: absolute; top: 84px; left: 50%; transform: translateX(-50%); z-index: 6; display: flex; align-items: center; gap: 14px; padding: 8px 10px 8px 16px; font-family: var(--ww-title); font-weight: 600; font-size: 15px; letter-spacing: 0.08em; text-transform: uppercase; color: #ffc56b; border-color: rgba(255, 181, 71, 0.5); animation: ww-in 0.15s ease-out; }
-.ww-target-banner.nuclear { color: #ff8f90; border-color: rgba(255, 77, 79, 0.6); }
 .ww-toast { position: absolute; top: 84px; left: 50%; transform: translateX(-50%); z-index: 7; max-width: min(620px, calc(100vw - 32px)); padding: 10px 16px; font-size: 13px; line-height: 1.4; animation: ww-in 0.2s ease-out; border-left: 3px solid var(--ww-blue); }
 .ww-toast.error { border-left-color: var(--ww-red); color: #ffd0d0; }
-.ww-shell.targeting .ww-toast { top: 136px; }
 
 /* ---------------------------------------------------------------- the daily brief */
 .ww-brief-back { position: absolute; inset: 0; z-index: 9; background: radial-gradient(ellipse at 50% 45%, rgba(4, 7, 12, 0.72), rgba(2, 4, 8, 0.92)); backdrop-filter: blur(3px); display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 70px 20px 24px; box-sizing: border-box; animation: ww-in 0.25s ease-out; }
@@ -265,3 +262,9 @@
 /* A crisis or the opening report has the screen: the HUD steps back so only the map shows behind it. */
 .ww-shell.hud-off .ww-hud-left, .ww-shell.hud-off .ww-warroom, .ww-shell.hud-off .ww-topbar, .ww-shell.hud-off .ww-dock,
 .ww-shell.hud-off .ww-ticker, .ww-shell.hud-off .map-zoom, .ww-shell.hud-off .ww-toast { opacity: 0; pointer-events: none; transition: opacity 0.3s; }
+
+.ww-blue { color: #8fc6ff; }
+.ww-gold { color: #ffc56b; }
+.ww-op.planned .ww-op-sub.red { color: #ffb0a8; }
+.tt-quiet { color: var(--ww-faint); }
+.ww-op-keys { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--ww-faint); }

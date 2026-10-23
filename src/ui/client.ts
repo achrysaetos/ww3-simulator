@@ -1,8 +1,8 @@
 import { loadMap } from '../data/load';
-import { COMMAND_DOMAINS, type Command, type FormationId, type NationId, type NodeId, type SimEvent } from '../core/types';
+import { COMMAND_DOMAINS, type Command, type FormationId, type NationId, type SimEvent } from '../core/types';
 import type { OperationForecast, OperationForecastInput, OperationPlan } from '../forecast/operation';
 import { FORECAST_RUNS, Forecaster, type DrawWorker } from './orders/forecaster';
-import type { OptionsResult } from './orders/options';
+import type { DragKit } from './drag/kit';
 import { OrderTracks } from './orders/tracks';
 import { describeResult, humanizeReason, PlaceNamer, type Namer } from './events';
 import { EventFeed } from './feed';
@@ -104,8 +104,8 @@ export class SimClient {
       case 'closed':
         this.reset();
         break;
-      case 'options':
-        this.settle(msg.seq, msg.result);
+      case 'drag_kit':
+        this.settle(msg.seq, msg.kit);
         return;
       case 'forecast_input':
         if (msg.input) this.settle(msg.seq, msg.input);
@@ -188,9 +188,9 @@ export class SimClient {
     });
   }
 
-  /** The orders `formations` can take at `node` (with none, what the staff's nearest units can), as the engine would answer them. */
-  options(formations: readonly FormationId[], node: NodeId): Promise<OptionsResult> {
-    return this.ask((seq) => ({ type: 'options', seq, formations: [...formations], node }));
+  /** What a drag of `formations` aims with, from the player's picture of the war; null when none of them can be dragged. */
+  dragKit(formations: readonly FormationId[]): Promise<DragKit | null> {
+    return this.ask((seq) => ({ type: 'drag_kit', seq, formations: [...formations] }));
   }
 
   /** The staff's forecast for a plan, from the player's picture of the war. */

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { COMMAND_DOMAINS, type Command, type CommandDomain, type FormationId, type FormationKind, type NationId, type NodeId, type Order, type Posture, type TargetClass } from '../core/types';
+import { COMMAND_DOMAINS, type Command, type CommandDomain, type FormationId, type FormationKind, type NationId, type NodeId } from '../core/types';
 import { DEFAULT_DELEGATION, DOMAIN_OF_KIND } from '../systems/orders';
 import type { SimClient } from './client';
 import { Palette } from './colors';
@@ -13,18 +13,13 @@ import { answered, nextCrisis, type Crisis, type CrisisContext } from './crisis/
 import { ConfirmDialog, EndDialog, GameMenu, type Confirmation } from './GameFlow';
 import { crisesOn } from './prefs';
 import { EventLog } from './EventLog';
-import { humanizeReason } from './events';
 import { FormationList, FormationPanel, type Command as CommandHolder } from './FormationPanel';
-import { GROUND_KINDS, postureLabel } from './orders/postures';
-import { useOrders } from './orders/useOrders';
-import './orders/orders.css';
 import { MapView, openingFocus } from './MapView';
 import { frontStat, TopBar, type TopBarStat } from './map/TopBar';
 import { ContactPanel } from './map/ContactPanel';
 import { DOMAIN_LABEL, NationPanel } from './NationPanel';
 import { NuclearDialog } from './NuclearDialog';
 import { OutputsPanel } from './outputs/OutputsPanel';
-import { Routes } from './routes';
 import type { LoggedEvent } from './feed';
 import { domainNames, OpeningTitle, SituationCard } from './start/Opening';
 import { openingFacts } from './start/openingFacts';
@@ -55,8 +50,6 @@ const DRAWERS: { id: Drawer; label: string; key: string }[] = [
 const DRAWER_TITLE: Record<Drawer, string> = { forces: 'Forces', nation: 'Nation', log: 'Event log', cost: 'War cost' };
 const FORM_CONTROLS = new Set(['INPUT', 'SELECT', 'TEXTAREA']);
 const CADENCE_KEY = 'ww3.briefCadence';
-/** Postures whose target can lie far from the unit: picking one frames the map wide (BA-13). */
-const RANGED: ReadonlySet<Posture> = new Set(['strike', 'air_superiority', 'patrol', 'blockade', 'air_assault']);
 
 interface Toast { text: string; tone: 'info' | 'error' }
 /** Waiting on the engine's word about a nuclear release: the launch, or nothing. */
@@ -81,11 +74,9 @@ export function App({ client }: { client: SimClient }) {
 function Command({ client, palette, playAs }: { client: SimClient; palette: Palette; playAs: NationId }) {
   const places = client.places;
   const desk = client.desk!;
-  const routes = useMemo(() => new Routes(client.map), [client]);
   const focusHandle = useRef<((n: NodeId, frame?: 'close' | 'wide', marks?: readonly Mark[]) => void) | null>(null);
 
   const [selected, setSelected] = useState<FormationId | null>(null);
-  const [pending, setPending] = useState<{ posture: Posture; targetClass?: TargetClass; lift?: 'air' | 'sea' } | null>(null);
   const [confirm, setConfirm] = useState<Confirmation | null>(null);
   // A new game opens on the cinematic title, then the situation report; a loaded one on the report.
   const [opening, setOpening] = useState<'title' | 'card' | null>(() => (client.state.tick === 0 ? 'title' : 'card'));
@@ -270,7 +261,7 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
     const onKey = (e: KeyboardEvent) => {
       if (brief || opening || crisis || coach || e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key === 'Escape') {
-        if (pending || nuclearPick) { setPending(null); setNuclearPick(false); setNuclearTarget(null); }
+        if (nuclearPick) { setNuclearPick(false); setNuclearTarget(null); }
         else setDrawer(null);
         return;
       }
@@ -287,7 +278,7 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [client, brief, opening, crisis, coach, pending, nuclearPick, openBrief, toggleDrawer]);
+  }, [client, brief, opening, crisis, coach, nuclearPick, openBrief, toggleDrawer]);
 
   const quit = () => setConfirm({
     title: 'Quit to the start screen?',
@@ -298,7 +289,6 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
 
   const selectFormation = useCallback((id: FormationId | null) => {
     setSelected(id);
-    setPending(null);
     if (id) setDrawer('forces');
   }, []);
   const focusNode = useCallback((n: NodeId) => focusHandle.current?.(n), []);
@@ -309,68 +299,16 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
 
   const date = client.state.date ? new Date(client.state.date) : null;
   const day = date && client.meta ? Math.max(0, Math.floor((date.getTime() - new Date(client.meta.scenario.startDate).getTime()) / 864e5)) : 0;
-  const orders = useOrders({
-    client, playAs, places, selected, enemies: d?.enemies ?? [],
-    dayOf: (n) => `D+${day + n}`,
-    select: (id) => { setSelected(id); setPending(null); },
-    pickTarget: (posture, targetClass) => {
-      setNuclearPick(false);
-      setPending({ posture, targetClass });
-      if (selectedView && (RANGED.has(posture) || selectedView.entry.kind === 'air_wing')) focusHandle.current?.(selectedView.node, 'wide');
-    },
-    toast: (text, tone) => setToast({ text, tone }),
-  });
-
   const sendCommand = (c: Command, label: string) => {
     client.command(c);
     setToast({ tone: 'info', text: `${label}. ${client.ticksPerSec ? 'Takes effect next tick.' : 'Takes effect when the clock runs.'}` });
   };
 
-  /** The engine answers next tick (client.answer): accepted, the order takes the formation from the AI delegate; refused, the delegate keeps it. */
-  const sendOrder = (formation: FormationId, order: Omit<Order, 'issuedTick'>, label: string) => {
-    client.order({ type: 'order', nation: playAs, formation, order }, label);
-    setToast({ tone: 'info', text: `${label}. ${client.ticksPerSec ? 'Awaiting acknowledgement next tick.' : 'Acknowledged when the clock runs.'}` });
-  };
-
-  /** Asks the engine first: a target it would refuse keeps the picker open and says why. */
-  const sendChecked = (formation: FormationId, order: Omit<Order, 'issuedTick'>, label: string, node: NodeId) => {
-    void client.options([formation], node).then((r) => {
-      const o = r.options.find((x) => x.key === order.posture);
-      const no = o && !o.ok.length ? o.refused.find((x) => x.formation === formation) : undefined;
-      if (no) {
-        setToast({ tone: 'error', text: `${places.name(node)}: ${humanizeReason(no.reason, client.namer)}. Pick another target, or Esc.` });
-        return;
-      }
-      sendOrder(formation, order, label);
-      setPending(null);
-    });
-  };
-
+  /** The map click after arming a nuclear release is its aim point. */
   const onTarget = (node: NodeId) => {
-    if (nuclearPick) {
-      setNuclearPick(false);
-      setNuclearTarget(node);
-      return;
-    }
-    if (!pending || !selected) return;
-    const f = client.state.formations.find((x) => x.entry.id === selected);
-    const across = !!f && GROUND_KINDS.has(f.entry.kind) && f.status === 'active' && routes.overseas(f.node, node);
-    if (across && pending.posture === 'attack') {
-      setToast({
-        tone: 'error',
-        text: `${f!.entry.name} cannot attack ${places.name(node)} overland: it lies across the sea. Give it a Move order to deploy there by air or cargo ship, or embark it on amphibious lift to land under fire.`,
-      });
-      setPending(null);
-      return;
-    }
-    if (across && pending.posture === 'move') {
-      const how = pending.lift === 'sea' ? 'by sealift' : pending.lift === 'air' ? 'by airlift' : 'by air if it can fly, otherwise by sea';
-      sendOrder(selected, { posture: 'move', target: node, ...(pending.lift ? { lift: pending.lift } : {}) }, `Deploying ${f!.entry.name} to ${places.to(node)} ${how}`);
-      setPending(null);
-      return;
-    }
-    const what = f ? postureLabel(f.entry.kind, pending.posture) : pending.posture.replace(/_/g, ' ');
-    sendChecked(selected, { posture: pending.posture, target: node, targetClass: pending.targetClass }, `${what} → ${places.name(node)}`, node);
+    if (!nuclearPick) return;
+    setNuclearPick(false);
+    setNuclearTarget(node);
   };
 
   const releaseAll = () => {
@@ -399,7 +337,7 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
   };
 
   const selectedView = selected ? client.state.formations.find((f) => f.entry.id === selected) : undefined;
-  const targeting = nuclearPick ? 'nuclear' : pending ? 'order' : null;
+  const targeting = nuclearPick ? 'nuclear' : null;
   const want = { ...ai, ...delegating };
   const focusAt = useMemo(() => (client.meta ? openingFocus(client.map, client.meta.scenario, playAs) : null), [client, playAs]);
   const theatreName = focusAt === null ? '' : `${shortName(client.map.owner[focusAt] as NationId, client.nationCards)} · ${places.name(focusAt).replace(/^near /, '')}`;
@@ -476,7 +414,7 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
   );
 
   return (
-    <div className={`ww-shell ${drawer ? 'drawer-open' : ''} ${targeting ? 'targeting' : ''} ${orders.planning ? 'planning' : ''} ${crisis || opening === 'title' ? 'hud-off' : ''}`} data-testid="shell">
+    <div className={`ww-shell ${drawer ? 'drawer-open' : ''} ${targeting ? 'targeting' : ''} ${crisis || opening === 'title' ? 'hud-off' : ''}`} data-testid="shell">
       <MapView
         client={client}
         palette={palette}
@@ -485,11 +423,8 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
         selected={selected}
         targeting={targeting}
         overlays={overlays}
-        orders={orders.overlay}
         onSelectFormation={selectFormation}
         onTarget={onTarget}
-        onContext={orders.openRadial}
-        onPlanClick={orders.planClick}
         focusHandle={focusHandle}
       />
       <TopBar
@@ -512,9 +447,7 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
           onShow={(node) => focusHandle.current?.(node)}
           onOpen={(id) => {
             const op = client.state.ops.find((o) => o.id === id);
-            if (!op) return;
-            orders.openOperation(op);
-            focusHandle.current?.(op.objectives[0] ?? op.axis[0], 'wide');
+            if (op) focusHandle.current?.(op.objectives[0] ?? op.axis[0], 'wide');
           }}
           onForces={() => setDrawer('forces')}
         />
@@ -531,7 +464,7 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
           </header>
           <div className="ww-drawer-body">
             {drawer === 'nation' && (
-              <NationPanel client={client} palette={palette} playAs={playAs} objectives={objectives} onCommand={sendCommand} onNuclear={() => { setPending(null); setNuclearPick(true); }} />
+              <NationPanel client={client} palette={palette} playAs={playAs} objectives={objectives} onCommand={sendCommand} onNuclear={() => { setNuclearPick(true); setToast({ tone: 'info', text: 'Click the nuclear aim point on the map. Esc cancels.' }); }} />
             )}
             {drawer === 'cost' && <OutputsPanel view={client.state.outputs} name={(id) => client.state.nations.get(id)?.name ?? client.namer.nation(id)} />}
             {drawer === 'log' && <EventLog client={client} playAs={playAs} logVersion={client.feed.version} onFocus={focusNode} />}
@@ -549,19 +482,9 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
                 client={client}
                 palette={palette}
                 places={places}
-                routes={routes}
                 playAs={playAs}
                 command={commandOf(selectedView.entry.id, selectedView.entry.kind)}
                 domainLabel={DOMAIN_LABEL[DOMAIN_OF_KIND[selectedView.entry.kind]].what}
-                pending={pending?.posture ?? null}
-                onPickPosture={(p, targetClass, lift) => {
-                  setNuclearPick(false);
-                  setPending(p ? { posture: p, targetClass, lift } : null);
-                  if (p && (RANGED.has(p) || lift || selectedView.entry.kind === 'air_wing')) focusHandle.current?.(selectedView.node, 'wide');
-                }}
-                pendingLift={pending?.lift ?? null}
-                onImmediate={(p) => { sendOrder(selected, { posture: p }, `${p.replace(/_/g, ' ')} order sent`); setPending(null); }}
-                onOrder={sendOrder}
                 onHold={(h) => sendCommand({ type: 'hold', nation: playAs, formations: [selected], held: h }, h ? `${selectedView.entry.name} taken under your command` : `${selectedView.entry.name} handed to the AI delegate`)}
                 onClose={() => selectFormation(null)}
                 onFocus={focusNode}
@@ -581,14 +504,6 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
         {!news.length && <span className="ww-muted">No news from the wider world.</span>}
       </footer>
 
-      {targeting && (
-        <div className={`ww-target-banner ww-glass ${targeting}`} data-testid="target-banner">
-          <span>{targeting === 'nuclear' ? 'Select the nuclear aim point' : pending?.lift ? `Select the destination overseas: deploy by ${pending.lift === 'air' ? 'airlift' : 'sealift'}` : `Select the target: ${pending?.posture.replace(/_/g, ' ')}`}</span>
-          <button type="button" className="ww-btn small" onClick={() => { setPending(null); setNuclearPick(false); }} data-testid="cancel-target">Cancel <span className="ww-kbd">Esc</span></button>
-        </div>
-      )}
-      {orders.panel}
-      {orders.radial}
       {toast && <div className={`ww-toast ww-glass ${toast.tone}`} data-testid="toast" role="status">{toast.text}</div>}
       {client.error && <div className="ww-toast ww-glass error">Simulation error: {client.error}</div>}
 

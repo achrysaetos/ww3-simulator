@@ -309,7 +309,7 @@ export function pillText(p: Pill): { primary: string; secondary?: string; tone: 
     }
     case 'hold': {
       const words = holdWords(p.days);
-      const primary = p.cells > 1 ? `holds ${p.cells} cells · weakest ${words.replace(/^likely holds /, '')}` : words;
+      const primary = p.cells <= 1 ? words : p.days.lo === Infinity ? `holds ${p.cells} cells · ${words}` : `holds ${p.cells} cells · weakest ${words.replace(/^likely holds /, '')}`;
       return done(primary, p.days.mid >= 14 ? 'good' : p.days.mid >= 5 ? 'even' : 'bad', [etaWords(p.etaHours)]);
     }
     case 'strike': {
