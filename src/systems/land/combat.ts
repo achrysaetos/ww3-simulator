@@ -11,9 +11,9 @@ import { c2FireFactor } from '../c2';
 import { contactShare } from '../diplomacy/aims';
 import { groundFactorAt } from '../weather/effects';
 import {
-  AIR_SUPPRESSION, AMMO_DAYS_INTENSE, ATTRITION_KM_PER_DAY, ATTRITION_MAX_KM_PER_DAY, BREAKTHROUGH_KM_PER_DAY, COVERED_KM_PER_DAY, HOSTILE_GROUND_COST,
+  AIR_SUPPRESSION, AMMO_DAYS_INTENSE, ATTRITION_KM_PER_DAY, ATTRITION_MAX_KM_PER_DAY, BREAKTHROUGH_KM_PER_DAY, CONTEST_RECOVERY_KM_PER_DAY, COVERED_KM_PER_DAY, HOSTILE_GROUND_COST,
   ASSAULT_EXPOSURE, BELT_DRAG, DELIBERATE_ASSAULT_RATIO, FRONTAGE_PLATFORMS, WITHDRAWAL_KM, POSITIONAL_INTENSITY, AMMO_RATION_BELOW, AREA_FIRE_REF_DENSITY, CAS_BONUS, DIRECT_DENSITY_EXP, COMBAT_FUEL_DUTY, COMBINED_ARMS,
-  CELL_FRONT_KM, ENGAGED_HOURS_PER_DAY, HASTY_BARRIER, ENTRENCH_MAX_BONUS, KILL_ZONE_COMMIT, KILL_ZONE_DENSITY, MASSED_ASSAULT_RATIO, NEXT_LINE_ENTRENCHMENT, NO_FUEL_SPEED, EXPERIENCE_PER_COMBAT_DAY, FATIGUE_COMBAT_PER_DAY, INDIRECT_FIRE, RETREAT_LOSS, fireScaleOf,
+  CELL_FRONT_KM, ENGAGED_HOURS_PER_DAY, HASTY_BARRIER, ENTRENCH_MAX_BONUS, KILL_ZONE_COMMIT, KILL_ZONE_DENSITY, MASSED_ASSAULT_RATIO, NEXT_LINE_ENTRENCHMENT, SCREEN_DENSITY, NO_FUEL_SPEED, EXPERIENCE_PER_COMBAT_DAY, FATIGUE_COMBAT_PER_DAY, INDIRECT_FIRE, RETREAT_LOSS, fireScaleOf,
   RETREAT_MORALE, RIVER_DEFENSE, RIVER_TEMPO, ROUT_ABANDON, ROUT_MORALE, SHELL_TONS, SHELLS_PER_TUBE_DAY, TERRAIN, TUBE_ARTILLERY, URBAN_MANOEUVRE, exposureOf, infiltrating, targetClassOf,
 } from './tables';
 
@@ -467,7 +467,7 @@ export function fortifyStandingLines(world: World, map: GameMap): void {
 }
 
 /** Whether `nation`'s side reaches `node` only across a major river: it holds land next to the cell, and none of it joins the cell dry. */
-function acrossRiver(world: World, map: GameMap, node: NodeId, nation: NationId): boolean {
+export function acrossRiver(world: World, map: GameMap, node: NodeId, nation: NationId): boolean {
   let near = false;
   for (let k = map.adjStart[node]; k < map.adjStart[node + 1]; k++) {
     const m = map.adj[k], holder = world.control[m];
@@ -515,7 +515,7 @@ function advanceKm(world: World, ctx: SimContext, node: NodeId, attackers: Forma
     const side = (fs: Formation[]) => summarize(world, ctx.catalog, { nation: fs[0].nation, fighters: fs, support: [] }, node, closed);
     const mine = side(movers);
     const ratio = fireRatio(mine, side(cover), true);
-    const sector = Math.min(1, mine.total / frontPlatforms(ctx.map, node));
+    const sector = Math.min(1, mine.total / (SCREEN_DENSITY() * cellDepthKm(ctx.map, node)));
     // Infiltration moves only the sector the force fills. Cover too weak to matter is no cover: from the deliberate-assault ratio to
     // the massed one the pace climbs to the road march across the whole cell.
     const exploit = Math.min(1, Math.max(0, (ratio - DELIBERATE_ASSAULT_RATIO()) / (MASSED_ASSAULT_RATIO() - DELIBERATE_ASSAULT_RATIO())));
@@ -624,9 +624,15 @@ export const landCombat: System = {
       const invaders = holder ? (byNode.get(node) ?? []).filter((f) => atWar(world, f.nation, holder) && !infiltrating(f)) : [];
       if (invaders.length) contestCell(world, ctx, node as NodeId, invaders, byNode, firing, engaged);
     }
+    const recovered = (CONTEST_RECOVERY_KM_PER_DAY * world.dtHours) / 24;
     for (const key of Object.keys(slice.contest)) {
-      const node = Number(key), c = slice.contest[node];
-      if (!(byNode.get(node) ?? []).some((f) => allied(world, c.by, f.nation) && atWar(world, f.nation, world.control[node]) && !infiltrating(f))) delete slice.contest[node];
+      const node = Number(key), c = slice.contest[node], holder = world.control[node];
+      if (!holder || !atWar(world, c.by, holder)) {
+        delete slice.contest[node];
+        continue;
+      }
+      const held = (byNode.get(node) ?? []).some((f) => allied(world, c.by, f.nation) && atWar(world, f.nation, holder) && !infiltrating(f));
+      if (!held && (c.km -= recovered) <= 0) delete slice.contest[node];
     }
     lineOfContact(world, ctx, byNode, firing, engaged);
     for (const id of Object.keys(slice.baseline) as FormationId[]) if (!engaged.has(id)) delete slice.baseline[id];

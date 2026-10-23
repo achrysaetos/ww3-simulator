@@ -192,7 +192,8 @@ export const ukr = [
   // Long-range one-way attack drones on Russian refineries, airbases and depots. Ukraine launched
   // several hundred a month in 2025 (Russian MoD daily claims; ISW; Ukrainian General Staff), mostly
   // FP-1/Lyutyi with older UJ-26 Bober. Launch sites x 5 launches a day at readiness 0.6 gives about
-  // 500 a month; stocks cover roughly a month at that pace (judgement call).
+  // 500 a month; stocks cover roughly a month at that pace (judgement call), and the line in
+  // src/data/industry/lines.ts refills them.
   u('Unmanned Systems Forces long-range strike group (FP-1 / Lyutyi)', 'missile', 'brigade', base('Dispersed launch sites, Poltava', 49.59, 34.55), { lyutyi_launcher: 4, truck: 20 }, { ...WAR, extraMagazine: { lyutyi: 360 } }),
   u('GUR / SBU long-range drone units (Lyutyi, UJ-26 Bober)', 'missile', 'battalion', base('Dispersed launch sites, Sumy', 50.91, 34.8), { lyutyi_launcher: 1, bober_launcher: 2, truck: 10 }, { ...WAR, extraMagazine: { lyutyi: 80, bober: 120 } }),
 

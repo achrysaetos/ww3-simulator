@@ -10,12 +10,13 @@ import { SimClient } from '../client';
 import { Palette } from '../colors';
 import { MapView } from '../MapView';
 import type { Overlays } from '../renderer';
-import { TopBar } from './TopBar';
+import { LiveTopBar } from './LiveTopBar';
 import '../styles.css';
 
 const q = new URLSearchParams(location.search);
 const scenario = q.get('scenario') ?? 'ukraine-2026';
 const nation = (q.get('nation') ?? 'UKR') as NationId;
+/** Game hours a real second, paused first. */
 const SPEEDS = [0, 1, 5, 20] as const;
 const OVERLAYS: Overlays = { air: false, sea: false, infra: false, fallout: true, weather: false, cities: true, seaZones: false };
 
@@ -35,24 +36,21 @@ function Harness() {
   const focus = useRef<((n: NodeId) => void) | null>(null);
   if (!client.meta) return <div style={{ color: '#8fa6c0', padding: 40, fontFamily: 'Inter' }}>Starting {scenario}…</div>;
   const n = client.state.nations.get(nation);
-  const date = client.state.date ? new Date(client.state.date) : null;
-  const start = new Date(client.meta.scenario.startDate);
-  const day = date ? Math.max(0, Math.floor((date.getTime() - start.getTime()) / 864e5)) : 0;
   const atWar = client.state.wars.some(([a, b]) => a === nation || b === nation);
   return (
     <div style={{ position: 'fixed', inset: 0, background: '#04070c' }}>
       <MapView
         client={client} palette={palette} places={client.places} playAs={nation} selected={selected} targeting={null} overlays={OVERLAYS}
-        orders={null} onSelectFormation={setSelected} onTarget={() => {}} onContext={() => {}} onPlanClick={() => {}} focusHandle={focus}
+        onSelectFormation={setSelected} onTarget={() => {}} onCommand={(c) => client.command(c)} focusHandle={focus}
       />
-      <TopBar
+      <LiveTopBar
+        client={client}
         nation={{ id: nation, name: n?.name ?? nation }}
         subtitle={`Supreme Commander · ${client.meta.scenario.name}`}
-        date={date}
-        day={day}
-        speed={client.ticksPerSec}
+        speed={client.speed}
         speeds={SPEEDS}
         onSpeed={(s) => client.setSpeed(s)}
+        onCommand={(c) => client.command(c)}
         stats={n ? [
           { label: 'War support', value: `${Math.round(n.warSupport * 100)}%`, tone: n.warSupport < 0.4 ? 'bad' : undefined },
           { label: 'Mobilized', value: `${Math.round(n.mobilization * 100)}%`, tone: 'warn' },

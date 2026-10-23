@@ -30,7 +30,7 @@ async function open({ seen = true, crises = true } = {}) {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   await ctx.addInitScript(([s, c]) => {
     if (s) localStorage.setItem('ww3.coach', 'done');
-    if (!c) localStorage.setItem('ww3.crises', 'off');
+    if (!c) localStorage.setItem('ww3.autoAccept', 'on');
   }, [seen, crises]);
   const page = await ctx.newPage();
   const errors = [];
@@ -151,15 +151,20 @@ async function begin(page) {
   await close();
 }
 
-// 3. Crises off: the same call waits in the Daily Brief instead.
+// 3. Crises off: the staff answers the same call with its recommendation and says so.
 {
-  const { page, close } = await open({ crises: false });
+  const { page, errors, close } = await open({ crises: false });
   await pick(page, 'ww3-2027', 'USA', 'cinc');
   await begin(page);
   await page.waitForSelector('[data-testid="briefing"]', { timeout: 30_000 });
   await page.click('[data-testid="briefing-close"]');
-  await page.waitForSelector('[data-testid="daily-brief"]', { timeout: 60_000 });
-  check(await page.locator('[data-testid="crisis"]').count() === 0, 'setting: with crises off the treaty call opens the Daily Brief');
+  const toast = await page.waitForFunction(() => document.querySelector('[data-testid="toast"]')?.textContent.match(/^Your staff decided\..*/)?.[0], null, { timeout: 60_000 }).then((h) => h.jsonValue(), () => null);
+  check(!!toast && /Treaty invoked|Call for help/.test(toast), `setting: with crises off a toast says what the staff chose (${toast})`);
+  check(await page.locator('[data-testid="crisis"]').count() === 0, 'setting: with crises off no crisis takes the screen');
+  await page.click('[data-testid="step"]');
+  const settled = await page.waitForFunction(() => window.__client.desk.answered.some((s) => s.card.key.startsWith('treaty|') && s.answer?.final), null, { timeout: 60_000 }).then(() => true, () => false);
+  check(settled, 'setting: the engine took the staff\'s answer to the treaty call');
+  check(!errors.length, `setting: no page errors${errors.length ? `: ${errors.join(' | ')}` : ''}`);
   await close();
 }
 

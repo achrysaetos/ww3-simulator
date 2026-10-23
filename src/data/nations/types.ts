@@ -101,7 +101,7 @@ export interface NuclearThreshold {
   firstUse: boolean;
   /** Share of national population/industry (popShare) under enemy control that triggers use. */
   coreLossShare: number | null;
-  /** Share of the nation's conventional forces destroyed that triggers use. */
+  /** Share of the nation's land and air forces destroyed within a month (a collapse, not attrition) that triggers use. */
   forceLossShare: number | null;
   /** Share of national output (the economy's GDP index) lost to blockade, strikes and occupation that triggers use. */
   economicLossShare: number | null;

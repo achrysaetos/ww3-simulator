@@ -5,7 +5,6 @@ import { applyLandOrder, landCombat, landMovement, landSlice } from '../src/syst
 import { logistics } from '../src/systems/logistics';
 import { createOrderRouter } from '../src/systems/orders';
 import { id, testWorld } from '../src/testkit';
-import { posturesOf } from '../src/ui/FormationPanel';
 
 const N = id.nation, P = id.platform, Node = id.node;
 type T = ReturnType<typeof testWorld>;
@@ -188,14 +187,5 @@ describe('airborne planning', () => {
     t.world.pending.push({ type: 'hold', nation: N('UKR'), formations: line, held: true });
     for (let d = 0; d < 10; d++) t.day();
     expect(landSlice(t.world).airheads).toEqual({});
-  });
-});
-
-describe('player orders', () => {
-  it('offers an air assault to airborne formations only', () => {
-    const t = setup();
-    const legs = t.add({ nation: N('RUS'), name: 'Motor rifle brigade', kind: 'maneuver', echelon: 'brigade', node: t.airfield, equipment: { [P('t_inf')]: 100 } });
-    expect(posturesOf(t.paras)).toContain('air_assault');
-    expect(posturesOf(legs)).not.toContain('air_assault');
   });
 });

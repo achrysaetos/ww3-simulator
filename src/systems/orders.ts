@@ -1,5 +1,5 @@
 import type { SimContext, System } from '../core/engine';
-import type { Command, CommandDomain, CommandResult, FormationId, FormationKind, NationId, OperationId, RefusalCode, World } from '../core/types';
+import type { Command, CommandDomain, CommandResult, Formation, FormationId, FormationKind, NationId, OperationId, Order, RefusalCode, World } from '../core/types';
 import { holdOrder, orderDelayHours } from './c2';
 import { aimRefusal, widen } from './diplomacy/aims';
 import { operationOf } from './ops/state';
@@ -14,13 +14,13 @@ export type OrderHandler = (world: World, cmd: OrderCommand, ctx: SimContext) =>
 
 /**
  * What a human nation lets its AI delegate do. AI nations have no entry: their AI does everything.
- * A formation the player has ordered is held; the delegate commands every other formation of a
- * delegated domain.
+ * The delegate commands every formation of a delegated domain that the player does not (playerCommands).
  */
 export interface Authority {
   ai: Record<CommandDomain, boolean>;
+  /** Formations the player took under their own command until handed back. */
   held: Record<FormationId, true>;
-  /** Held only until the player's order in transit is answered: a refusal hands the formation back. */
+  /** The player's order to these is in transit down the chain of command; the delegate keeps off until it is answered. */
   taking?: Record<FormationId, true>;
   /** The player's answers to treaty calls, keyed `${war}|${treaty}`, until diplomacy acts on them. */
   answers: Record<string, boolean>;
@@ -62,6 +62,18 @@ function authorityMut(world: World, n: NationId): Authority {
   return (world.slices.command[n] ??= { ai: { ...DEFAULT_DELEGATION }, held: {}, answers: {} });
 }
 
+/**
+ * Whether the player commands `f` rather than the delegate: taken under the player's command, the player's order on its
+ * way down the chain, or the player's order still standing. The engine ending that order hands the formation back.
+ */
+export function playerCommands(world: World, f: Formation): boolean {
+  const a = authority(world, f.nation);
+  return !!(a.held[f.id] || a.taking?.[f.id] || f.order.byPlayer);
+}
+
+/** Carries the player's stamp onto an order the engine writes to carry the player's order on. */
+export const keepPlayer = (o: Pick<Order, 'byPlayer'>): Pick<Order, 'byPlayer'> => (o.byPlayer ? { byPlayer: true } : {});
+
 /** Whether the AI decides `domain` for `n`: always for an AI nation, by delegation for a human one. */
 export function delegated(world: World, n: NationId, domain: CommandDomain): boolean {
   return world.nations[n]?.controlledBy !== 'human' || authority(world, n).ai[domain];
@@ -76,7 +88,7 @@ export function clearTreatyAnswer(world: World, n: NationId, war: string, treaty
   delete world.slices.command?.[n]?.answers[`${war}|${treaty}`];
 }
 
-const STRATEGIC: ReadonlySet<Command['type']> = new Set(['declare_war', 'offer_peace', 'nuclear_release', 'nuclear_alert', 'sanction', 'cyber_op', 'sabotage', 'cut_cable']);
+const STRATEGIC: ReadonlySet<Command['type']> = new Set(['declare_war', 'offer_peace', 'request_help', 'nuclear_release', 'nuclear_alert', 'sanction', 'cyber_op', 'sabotage', 'cut_cable']);
 const HOME_FRONT: ReadonlySet<Command['type']> = new Set(['set_mobilization', 'produce', 'raise_formation']);
 export type OperationCommand = Extract<Command, { type: 'plan_operation' | 'launch_operation' | 'cancel_operation' | 'adjust_operation' }>;
 const OPERATION_COMMANDS: ReadonlySet<Command['type']> = new Set<OperationCommand['type']>(['plan_operation', 'launch_operation', 'cancel_operation', 'adjust_operation']);
@@ -92,12 +104,13 @@ export function aiMayIssue(world: World, cmd: Command): boolean {
   if (world.nations[cmd.nation]?.controlledBy !== 'human') return true;
   if (cmd.type === 'order') {
     const f = world.formations[cmd.formation];
-    return !!f && delegated(world, cmd.nation, DOMAIN_OF_KIND[f.kind]) && !authority(world, cmd.nation).held[cmd.formation];
+    return !!f && delegated(world, cmd.nation, DOMAIN_OF_KIND[f.kind]) && !playerCommands(world, f);
   }
   if (isOperationCommand(cmd)) {
     if (!delegated(world, cmd.nation, 'land')) return false;
-    if (cmd.type === 'plan_operation') return cmd.formations.every((id) => !authority(world, cmd.nation).held[id]);
-    if (cmd.type === 'adjust_operation' && cmd.formations?.some((id) => authority(world, cmd.nation).held[id])) return false;
+    const mine = (id: FormationId) => !!world.formations[id] && playerCommands(world, world.formations[id]);
+    if (cmd.type === 'plan_operation') return !cmd.formations.some(mine);
+    if (cmd.type === 'adjust_operation' && cmd.formations?.some(mine)) return false;
     return world.slices.ops?.byId[cmd.operation]?.planner === 'ai';
   }
   if (STRATEGIC.has(cmd.type)) return delegated(world, cmd.nation, 'strategic');
@@ -128,7 +141,10 @@ export function createOrderRouter(handlers: readonly OrderHandler[]): System {
           for (const id of cmd.formations) {
             if (foreign.includes(id)) continue;
             if (cmd.held) auth.held[id] = true;
-            else delete auth.held[id];
+            else {
+              delete auth.held[id];
+              delete world.formations[id]?.order.byPlayer;
+            }
             if (auth.taking) delete auth.taking[id];
           }
           const formation = cmd.formations.length === 1 ? cmd.formations[0] : undefined;
@@ -151,37 +167,35 @@ export function createOrderRouter(handlers: readonly OrderHandler[]): System {
 /**
  * The player's order takes the formation from the delegate at once, so the delegate cannot
  * overrule it while it travels down the chain; if the order is then refused the delegate has it back.
+ * Accepted, the order carries the player's stamp, and the formation is the player's until the engine ends that order.
  * The war aims bind the AI (diplomacy/aims.ts aimRefusal, the rules of engagement): it is refused
  * an order that would carry the war past them. A player is the government and sets its own aims,
  * so its order goes ahead and the war grows with it.
  */
-function applyOrder(world: World, cmd: OrderCommand, ctx: SimContext, handlers: readonly OrderHandler[]): CommandResult {
+function applyOrder(world: World, given: OrderCommand, ctx: SimContext, handlers: readonly OrderHandler[]): CommandResult {
+  const { byPlayer: _stamp, ...order } = given.order;
+  const cmd: OrderCommand = { ...given, order: given.byPlayer ? { ...order, byPlayer: true } : order };
   const f = world.formations[cmd.formation];
   if (!f) return answer(world, cmd, { ok: false, code: 'unknown_formation', reason: 'no such formation' });
   if (f.nation !== cmd.nation) return answer(world, cmd, { ok: false, code: 'not_yours', reason: `${f.name} belongs to ${f.nation}` });
   if (f.status === 'destroyed') return answer(world, cmd, { ok: false, code: 'destroyed', reason: `${f.name} has been destroyed` });
   const beyond = aimRefusal(world, ctx.map, f, cmd.order);
   if (beyond) {
-    const player = cmd.byPlayer || (world.nations[cmd.nation].controlledBy === 'human' && authority(world, cmd.nation).held[f.id]);
+    const player = cmd.byPlayer || (world.nations[cmd.nation].controlledBy === 'human' && playerCommands(world, f));
     if (!player) return answer(world, cmd, { ok: false, code: 'beyond_war_aims', reason: beyond.why });
     widen(world, ctx, beyond.war, `${cmd.nation} ordered ${f.name} past its war aims`);
   }
-  const auth = cmd.byPlayer ? authorityMut(world, cmd.nation) : undefined;
-  if (auth && !auth.held[f.id]) {
-    auth.held[f.id] = true;
-    (auth.taking ??= {})[f.id] = true;
+  if (holdOrder(world, cmd)) {
+    if (cmd.byPlayer) (authorityMut(world, cmd.nation).taking ??= {})[f.id] = true;
+    return answer(world, cmd, { ok: true }, 'relayed down a degraded chain of command', undefined, orderDelayHours(world, f.id));
   }
-  if (holdOrder(world, cmd)) return answer(world, cmd, { ok: true }, 'relayed down a degraded chain of command', undefined, orderDelayHours(world, f.id));
   let outcome: OrderOutcome | undefined;
   for (const h of handlers) if ((outcome = h(world, cmd, ctx))) break;
   if (!outcome) {
     f.order = { ...cmd.order, issuedTick: world.tick };
     outcome = { ok: true };
   }
-  if (auth?.taking?.[f.id]) {
-    if (!outcome.ok) delete auth.held[f.id];
-    delete auth.taking[f.id];
-  }
+  if (cmd.byPlayer) delete world.slices.command?.[cmd.nation]?.taking?.[f.id];
   return answer(world, cmd, outcome);
 }
 

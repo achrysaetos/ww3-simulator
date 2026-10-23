@@ -1,9 +1,9 @@
-// Starts a game the way a returning player does: tour already taken, crises left to the Daily Brief.
+// Starts a game the way a returning player does: tour already taken, crises left to the staff's recommendation.
 export async function newGame(browser, url, scenario, nation, { role = 'cinc' } = {}) {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   await page.addInitScript(() => {
     localStorage.setItem('ww3.coach', 'done');
-    localStorage.setItem('ww3.crises', 'off');
+    localStorage.setItem('ww3.autoAccept', 'on');
   });
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
@@ -21,4 +21,13 @@ export async function newGame(browser, url, scenario, nation, { role = 'cinc' } 
   await page.waitForSelector('[data-testid="shell"]', { timeout: 120_000 });
   await page.click('[data-testid="briefing-close"]', { timeout: 60_000 });
   return { page, errors };
+}
+
+/** Runs the clock to `tick` and pauses. Speed is game hours a second; the default steps the engine as fast as it goes. */
+export async function runTo(page, tick, { speed = Infinity } = {}) {
+  if ((await page.evaluate(() => window.__client.state.tick)) < tick) {
+    await page.evaluate((v) => window.__client.setSpeed(v), speed);
+    await page.waitForFunction((t) => window.__client.state.tick >= t, tick, { timeout: 900_000 });
+  }
+  await page.evaluate(() => window.__client.setSpeed(0));
 }

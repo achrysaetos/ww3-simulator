@@ -1,23 +1,26 @@
 /**
  * The map: a WebGL globe of pre-rendered relief with the war situation shaded
  * in (map/globe.ts), under a 2D canvas of the things that move or get clicked:
- * counters, labels, orders, contested cells and event flashes. The camera
+ * counters, labels, orders and event flashes. The camera
  * flies; it never jumps, so motion on the map always means something happened.
  */
 import type { GameMap } from '../core/map';
 import type { FormationId, NodeId, Operation, SimEvent } from '../core/types';
 import type { Palette } from './colors';
 import { eventNode } from './events';
-import { contactLabel, contactRing, isStale, type ContactInfo } from './map/contacts';
+import { contactAlpha, contactLabel, contactRing, isStale, type ContactInfo } from './map/contacts';
+import { fightToShow } from './map/fighting';
 import { seenOnMap } from './map/feedback';
+import { along, gliders } from './glide';
 import type { OrderTrack } from './orders/tracks';
-import type { OrdersOverlay } from './orders/useOrders';
+import type { DragOverlay } from './drag/useDrag';
+import { PRIORITY_KM } from '../systems/logistics/tables';
 import { GlobeGL } from './map/globe';
 import { ControlMask, OverlayRaster, Rel, relations } from './map/situation';
 import { cityName } from './placeNames';
 import type { Manifest } from './map/tiles';
 import { weatherLayer } from '../systems/weather/effects';
-import type { ClientState, FormationView } from './snapshot';
+import { CONTEST_STRIDE, type ClientState, type FormationView } from './snapshot';
 import { clusterStacks, fanRows, gridSize, indexByNode, type Stack } from './stacks';
 import { CounterSprites, ECHELON_W, LOOK, type CounterBox, type Side } from './symbols';
 import {
@@ -41,13 +44,17 @@ export interface RenderInput {
   playAs: string | null;
   selected: FormationId | null;
   hoverNode: NodeId | null;
-  targeting: 'order' | 'nuclear' | null;
+  targeting: 'nuclear' | null;
   overlays: Overlays;
-  /** The plan being drawn and the operation open in the planner. */
-  orders: OrdersOverlay | null;
+  /** The order being dragged: arrow, frontage and strike reach. */
+  drag: DragOverlay | null;
+  /** The cell the supply handle is being dragged over, whose priority sector is drawn. */
+  supplyAim: NodeId | null;
   /** The player's orders on their way to their units, or just answered. */
   tracks: readonly OrderTrack[];
   dtHours: number;
+  /** Formations that stepped to a neighbouring node in the latest tick, by the node they left, and how far through the tick the clock is. */
+  glide: { from: ReadonlyMap<FormationId, NodeId>; t: number } | null;
 }
 
 /** A place a staff card points at: where something landed, from where it came, or a site to look at. */
@@ -107,6 +114,7 @@ interface Label {
 }
 
 const GOLD = '#ffb547';
+const DRAG_TONE: Record<DragOverlay['tone'], string> = { good: '#3fd98a', even: GOLD, bad: '#ff6b5e', refused: '#8a97a8' };
 
 export class MapRenderer {
   cam: Camera = { lon: 30, lat: 48, zoom: 9 };
@@ -120,7 +128,7 @@ export class MapRenderer {
   private readonly overlay: OverlayRaster;
   private rel: Uint8Array = new Uint8Array(0);
   private relKey = '';
-  private maskFor = -1;
+  private maskFor: { control: number; contest: Float32Array | null } = { control: -1, contest: null };
   private overlayFor: { state: ClientState | null; air: unknown; infra: unknown; fallout: unknown; weather: unknown; sea: unknown; overlays: Overlays | null } = { state: null, air: null, infra: null, fallout: null, weather: null, sea: null, overlays: null };
   private weatherFor: { packed: Uint8Array | null; pairs: Float32Array } = { packed: null, pairs: new Float32Array(0) };
   private flashes: Flash[] = [];
@@ -142,6 +150,10 @@ export class MapRenderer {
   private tilesPending = false;
   private byNode = new Map<NodeId, FormationView[]>();
   private indexedFrom: readonly FormationView[] | null = null;
+  private indexedGlides: ReadonlyMap<FormationId, NodeId> | null = null;
+  /** Formations standing at a node; while a tick plays, the gliding ones are drawn on their way instead. */
+  private standing = new Map<NodeId, FormationView[]>();
+  private gliding = new Map<Stack, NodeId>();
   private stacks: Stack[] = [];
   private stacksGrid = -1;
   private readonly labels = new Map<string, Label>();
@@ -232,6 +244,21 @@ export class MapRenderer {
     return { lon: at.lon, lat: band === 'world' ? Math.max(-30, Math.min(50, at.lat)) : at.lat, zoom };
   }
 
+  /**
+   * Where a View button flies. World stays over where you look. Theatre and Front stay too when a
+   * land cell the player sees being fought over (`contest`) lies within that view; otherwise they
+   * go to the nearest one. Air and sea battles do not count: they are not a front.
+   */
+  viewCamera(band: ZoomBand, contest: Float32Array): Camera {
+    const here = this.bandCamera(band);
+    if (band === 'world') return here;
+    const fights: NodeId[] = [];
+    for (let i = 0; i < contest.length; i += CONTEST_STRIDE) fights.push(contest[i] as NodeId);
+    const reachKm = (kmPerPx(here) * Math.min(this.vp.width, this.vp.height)) / 2;
+    const n = fightToShow(this.map, fights, this.cam, reachKm);
+    return n === null ? here : this.bandCamera(band, { lon: this.map.lon[n], lat: this.map.lat[n] });
+  }
+
   get band(): ZoomBand {
     return bandOf(this.cam);
   }
@@ -307,25 +334,29 @@ export class MapRenderer {
       this.relKey = key;
       relChanged = true;
     }
-    if (relChanged || this.maskFor !== state.controlVersion) {
-      const dirty = this.mask.update(state.control, this.rel);
-      if (dirty) this.globe.setMask(this.mask.data, dirty);
-      this.maskFor = state.controlVersion;
-      this.globeDirty = true;
+    if (relChanged || this.maskFor.control !== state.controlVersion || this.maskFor.contest !== state.contest) {
+      const dirty = this.mask.update(state.control, this.rel, state.contest);
+      if (dirty.length) {
+        this.globe.setMask(this.mask.data, dirty);
+        this.globeDirty = true;
+      }
+      this.maskFor = { control: state.controlVersion, contest: state.contest };
     }
     const o = this.overlayFor;
     if (relChanged || o.overlays !== overlays || o.air !== state.air || o.sea !== state.sea || o.infra !== state.infra || o.fallout !== state.fallout || o.weather !== state.weather) {
       if (this.weatherFor.packed !== state.weather) this.weatherFor = { packed: state.weather, pairs: state.weather.length ? weatherLayer(this.map, state.weather) : new Float32Array(0) };
-      this.overlay.paint({
+      const dirty = this.overlay.paint({
         air: overlays.air ? state.air : null,
         sea: overlays.sea ? state.sea : null,
         infra: overlays.infra ? state.infra : null,
         fallout: overlays.fallout ? state.fallout : null,
         weather: overlays.weather ? this.weatherFor.pairs : null,
       }, this.rel);
-      this.globe.setOverlay(this.overlay.data);
+      if (dirty.length) {
+        this.globe.setOverlay(this.overlay.data, dirty);
+        this.globeDirty = true;
+      }
       this.overlayFor = { state, air: state.air, sea: state.sea, infra: state.infra, fallout: state.fallout, weather: state.weather, overlays };
-      this.globeDirty = true;
     }
   }
 
@@ -360,16 +391,14 @@ export class MapRenderer {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    const band = this.band;
-    if (band !== 'world') this.drawContest(input);
     this.drawHover(input);
+    this.drawSupply(input);
     this.drawMarks(input);
     this.drawOrders(input);
     this.drawOperations(input);
-    this.drawPlan(input);
     const counters = this.drawFormations(input);
     if (input.overlays.cities) this.drawCities(counters);
-    this.drawPlanForce(input);
+    this.drawDrag(input);
     for (const t of this.opTags.splice(0)) this.tag(t.lines, t.x, t.y, t.border);
     this.drawTracks(input);
     this.drawFlashes(now);
@@ -426,55 +455,6 @@ export class MapRenderer {
     ctx.strokeStyle = nuclear ? '#ff4d4f' : GOLD;
     ctx.lineWidth = 1.5;
     ctx.stroke();
-  }
-
-  /**
-   * Fronts moving inside a cell: the share an attacker has pushed across it,
-   * filled from the side its own cells border, with the cell outlined in the
-   * attacker's side colour while it is contested.
-   */
-  private drawContest(input: RenderInput) {
-    const { state, nationIds } = input, v = state.contest, ctx = this.ctx, m = this.map;
-    for (let i = 0; i < v.length; i += 3) {
-      const n = v[i], by = v[i + 1], share = v[i + 2];
-      const q = this.cellQuad(n);
-      if (!q || q.every(([x, y]) => x < 0 || y < 0 || x > this.vp.width || y > this.vp.height)) continue;
-      const side = this.sideOf(undefined, nationIds[by] ?? '', nationIds);
-      const color = side === 'friend' ? '74,163,255' : side === 'enemy' ? '255,77,79' : '255,181,71';
-      const c = this.screenOf(n as NodeId);
-      if (!c) continue;
-      let dx = 0, dy = 0;
-      for (const nb of m.neighbors(n as NodeId)) {
-        if (state.control[nb] !== by) continue;
-        const p = this.screenOf(nb);
-        if (p) { dx += p[0] - c[0]; dy += p[1] - c[1]; }
-      }
-      const cell = new Path2D();
-      q.forEach(([x, y], k) => (k ? cell.lineTo(x, y) : cell.moveTo(x, y)));
-      cell.closePath();
-      ctx.save();
-      ctx.clip(cell);
-      ctx.fillStyle = `rgba(${color},0.32)`;
-      const len = Math.hypot(dx, dy);
-      if (len === 0) {
-        ctx.globalAlpha = 0.3 + 0.6 * share;
-        ctx.fill(cell);
-      } else {
-        const ux = dx / len, uy = dy / len;
-        let r = 0;
-        for (const [x, y] of q) r = Math.max(r, Math.abs((x - c[0]) * ux + (y - c[1]) * uy));
-        const s0 = r * (1 - 2 * share), w = 2 * r;
-        const at = (s: number, t: number): [number, number] => [c[0] + ux * s - uy * t, c[1] + uy * s + ux * t];
-        ctx.beginPath();
-        ctx.moveTo(...at(s0, -w));
-        ctx.lineTo(...at(r * 1.5, -w));
-        ctx.lineTo(...at(r * 1.5, w));
-        ctx.lineTo(...at(s0, w));
-        ctx.closePath();
-        ctx.fill();
-      }
-      ctx.restore();
-    }
   }
 
   private label(text: string, font: string, color: string, track: number): Label {
@@ -680,11 +660,8 @@ export class MapRenderer {
 
   /** The player's operations along their axes: phase and progress, and why one has stalled. */
   private drawOperations(input: RenderInput) {
-    const focus = input.orders?.focusOp ?? null;
     for (const op of input.state.ops) {
       if (!LIVE_PHASES.has(op.phase) || op.axis.length < 2) continue;
-      // The planner draws the operation it has open as the plan.
-      if (op.id === focus && input.orders?.plan) continue;
       const pts = this.route(op.axis);
       if (!pts || pts.length < 2) continue;
       const stalled = op.phase === 'stalled', draft = op.phase === 'draft';
@@ -715,56 +692,87 @@ export class MapRenderer {
     }
   }
 
-  /** The battle plan being drawn: from the force through the waypoints to the cursor, or along the staff's axis once forecast. */
-  private drawPlan(input: RenderInput) {
-    const plan = input.orders?.plan;
-    if (!plan) return;
-    const start = plan.formations.map((id) => input.state.formations.find((f) => f.entry.id === id)).find((f) => f && f.status !== 'destroyed');
-    let nodes: NodeId[];
-    if (plan.axis && !plan.drawing) nodes = plan.axis;
-    else {
-      const end = plan.objective ?? (plan.drawing ? input.hoverNode : null);
-      nodes = [...(start ? [start.node] : []), ...plan.waypoints, ...(end !== null ? [end] : [])];
-    }
-    const pts = this.route(nodes);
-    if (pts && pts.length >= 2) this.battleArrow(pts, 0, GOLD, true, plan.drawing);
-    const ctx = this.ctx;
-    for (const w of plan.waypoints) {
-      const p = this.screenOf(w);
-      if (!p) continue;
-      ctx.beginPath();
-      ctx.arc(p[0], p[1], 4, 0, Math.PI * 2);
-      ctx.fillStyle = '#0b0f18';
-      ctx.fill();
-      ctx.strokeStyle = GOLD;
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-    }
-    const obj = plan.objective === null ? null : this.screenOf(plan.objective);
-    if (obj) {
-      const [x, y] = obj;
-      ctx.save();
-      ctx.strokeStyle = '#ffd27f';
-      ctx.lineWidth = 2;
-      ctx.shadowColor = 'rgba(255,181,71,0.9)';
-      ctx.shadowBlur = 8;
-      ctx.beginPath();
-      ctx.arc(x, y, 13, 0, Math.PI * 2);
-      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-        ctx.moveTo(x + dx * 8, y + dy * 8);
-        ctx.lineTo(x + dx * 19, y + dy * 19);
+  /**
+   * The order being dragged, over the counters: frontage cells for a held front, the strike reach, and an arrow
+   * from each unit going to the target, in the pill's tone.
+   */
+  private drawDrag(input: RenderInput) {
+    const d = input.drag;
+    if (!d) return;
+    const ctx = this.ctx, color = DRAG_TONE[d.tone];
+    if (d.aim.intent === 'hold_front')
+      for (const c of d.aim.cells) {
+        const q = this.cellQuad(c);
+        if (!q) continue;
+        ctx.beginPath();
+        q.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(74,163,255,0.22)';
+        ctx.fill();
+        ctx.strokeStyle = '#8fc6ff';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
       }
+    if (d.ringKm > 0) {
+      ctx.save();
+      this.ringPath(d.ringAt, d.ringKm);
+      ctx.setLineDash([5, 5]);
+      ctx.strokeStyle = 'rgba(255,107,94,0.75)';
+      ctx.lineWidth = 1.4;
       ctx.stroke();
       ctx.restore();
     }
+    const t = d.aim.target.node;
+    const q = t < this.map.landCount && d.aim.intent !== 'hold_front' ? this.cellQuad(t) : null;
+    if (q) {
+      ctx.save();
+      ctx.beginPath();
+      q.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+      ctx.closePath();
+      ctx.globalAlpha = 0.18;
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.restore();
+    }
+    if (Math.hypot(d.end[0] - d.start[0], d.end[1] - d.start[1]) > 8) this.battleArrow([d.start, d.end], 0, color, true, d.tone === 'refused');
   }
 
-  /** Gold brackets on every unit the plan has been given. */
-  private drawPlanForce(input: RenderInput) {
-    const plan = input.orders?.plan;
-    if (!plan) return;
-    const want = new Set(plan.formations);
-    for (const h of this.hits) if (h.ids.some((id) => want.has(id))) this.drawSelection(h);
+  /** A circle of `km` around `at` on the globe, as the current path. */
+  private ringPath(at: NodeId, km: number) {
+    const ctx = this.ctx, lat0 = this.map.lat[at], lon0 = this.map.lon[at];
+    ctx.beginPath();
+    let started = false;
+    for (let i = 0; i <= 72; i++) {
+      const a = (i / 72) * Math.PI * 2, dLat = (km / 111.2) * Math.cos(a);
+      const p = project(this.cam, this.vp, lon0 + ((km / 111.2) * Math.sin(a)) / Math.max(0.05, Math.cos(((lat0 + dLat) * Math.PI) / 180)), lat0 + dLat);
+      if (!p) { started = false; continue; }
+      if (started) ctx.lineTo(p[0], p[1]);
+      else ctx.moveTo(p[0], p[1]);
+      started = true;
+    }
+  }
+
+  /** The player's supply priority sector, a faint gold ring, and the one the supply handle is being dragged over, brighter. */
+  private drawSupply(input: RenderInput) {
+    const ctx = this.ctx;
+    for (const [at, alpha] of [[input.state.supplyPriority, 0.45], [input.supplyAim, 0.9]] as const) {
+      if (at === null || this.band === 'world') continue;
+      ctx.save();
+      this.ringPath(at, PRIORITY_KM);
+      ctx.globalAlpha = alpha * 0.12;
+      ctx.fillStyle = GOLD;
+      ctx.fill();
+      ctx.globalAlpha = alpha;
+      ctx.setLineDash([2, 4]);
+      ctx.strokeStyle = GOLD;
+      ctx.lineWidth = 1.4;
+      ctx.stroke();
+      ctx.restore();
+    }
   }
 
   /** Fights the player knows of in the last few turns: crossed swords on the cell. */
@@ -861,15 +869,21 @@ export class MapRenderer {
     const placed: [number, number, number, number][] = [];
     const { ctx, cam } = this;
     const { nationIds } = input;
-    if (input.state.formations !== this.indexedFrom) {
-      this.indexedFrom = input.state.formations;
-      this.byNode = indexByNode(input.state.formations);
+    const band = this.band, ppd = pxPerDeg(cam);
+    // At the world zoom a stack spans many nodes: gliding there would only pull counters out of their stacks.
+    const glide = band !== 'world' && input.glide && input.glide.t < 1 && input.glide.from.size ? input.glide : null;
+    const { formations } = input.state;
+    if (formations !== this.indexedFrom || (glide?.from ?? null) !== this.indexedGlides) {
+      if (formations !== this.indexedFrom) this.byNode = indexByNode(formations);
+      this.indexedFrom = formations;
+      this.indexedGlides = glide?.from ?? null;
+      this.standing = glide ? indexByNode(formations.filter((f) => !glide.from.has(f.entry.id))) : this.byNode;
+      this.gliding = glide ? gliders(formations, glide.from) : new Map();
       this.stacksGrid = -1;
     }
-    const band = this.band, ppd = pxPerDeg(cam);
     const grid = gridSize(CELL_PX[band], ppd);
     if (grid !== this.stacksGrid) {
-      this.stacks = clusterStacks(this.byNode, (n) => [this.map.lon[n], -this.map.lat[n]], grid);
+      this.stacks = clusterStacks(this.standing, (n) => [this.map.lon[n], -this.map.lat[n]], grid);
       this.stacksGrid = grid;
     }
     const scale = COUNTER_SCALE[band];
@@ -881,7 +895,7 @@ export class MapRenderer {
     });
     const own = (s: Stack) => this.sideOf(s.members[0], s.nation, nationIds) === 'friend';
     // Enemies under friends, so the player's own counters are never hidden.
-    const order = [...this.stacks].sort((a, b) => Number(own(a)) - Number(own(b)));
+    const order = [...this.stacks, ...this.gliding.keys()].sort((a, b) => Number(own(a)) - Number(own(b)));
     this.hits = [];
     let selectedBox: CounterBox | null = null;
     let focusRing: { c: ContactInfo; x: number; y: number } | null = null;
@@ -890,7 +904,8 @@ export class MapRenderer {
     /** Designator numbers drawn beside counters, kept clear of the age tags. */
     const marks: [number, number, number, number][] = [];
     for (const stack of order) {
-      const p = this.screenOf(stack.node);
+      const from = this.gliding.get(stack);
+      const p = from === undefined ? this.screenOf(stack.node) : project(cam, this.vp, ...along(this.map, from, stack.node, glide?.t ?? 1));
       if (!p) continue;
       const [cx, cy] = p;
       if (cx < -80 || cy < -80 || cx > this.vp.width + 80 || cy > this.vp.height + 80) continue;
@@ -898,8 +913,10 @@ export class MapRenderer {
       const side = this.sideOf(lead, stack.nation, nationIds);
       // Far out, only the sides at war; forces of nations out of it appear from the front zoom in.
       if (side === 'neutral' && band !== 'front') continue;
-      const nth = atNode.get(stack.node) ?? 0;
-      atNode.set(stack.node, nth + 1);
+      const nth = from === undefined ? atNode.get(stack.node) ?? 0 : 0;
+      if (from === undefined) atNode.set(stack.node, nth + 1);
+      // A foreign counter is a ghost of its last fix: the older the fix, the fainter.
+      ctx.globalAlpha = lead.contact ? contactAlpha(lead.contact) : 1;
       const nodePx = 2 * this.map.halfDeg[stack.node] * ppd;
       if (side !== 'friend') {
         const picked = input.selected ? stack.members.find((f) => f.entry.id === input.selected && f.contact) : undefined;
@@ -918,6 +935,7 @@ export class MapRenderer {
         shown.forEach((f, i) => {
           const [x, y] = at(i);
           const s = this.sideOf(f, stack.nation, nationIds);
+          ctx.globalAlpha = f.contact ? contactAlpha(f.contact) : 1;
           const box = this.sprites.draw(ctx, x, y, ECHELON_W[f.entry.echelon] * scale * 0.85, f.entry.kind, f.entry.echelon, s, f.strength, f.status === 'routed');
           this.hits.push({ ...box, ids: [f.entry.id], node: stack.node, zoomTo: null });
           const mark = this.designator(f, x + box.w / 2 + 1, y, s);
@@ -948,6 +966,7 @@ export class MapRenderer {
       }
       else if (band !== 'world') labelled.push({ stack, box, side });
     }
+    ctx.globalAlpha = 1;
     for (const b of this.hits) placed.push([b.x, b.y, b.x + b.w, b.y + b.h]);
     placed.push(...marks);
     for (const l of labelled) this.stackLabel(l.stack, l.box, l.side, placed);
@@ -1077,9 +1096,10 @@ export class MapRenderer {
     if (members.length === 1) return this.sprites.draw(ctx, x, y, w, lead.entry.kind, lead.entry.echelon, side, lead.strength, lead.status === 'routed');
     let strength = 0;
     for (const f of members) strength += f.strength;
-    ctx.globalAlpha = 0.55;
+    const alpha = ctx.globalAlpha;
+    ctx.globalAlpha = alpha * 0.55;
     this.sprites.draw(ctx, x + 3, y - 3, w, lead.entry.kind, lead.entry.echelon, side, 0, false);
-    ctx.globalAlpha = 1;
+    ctx.globalAlpha = alpha;
     const box = this.sprites.draw(ctx, x, y, w, lead.entry.kind, lead.entry.echelon, side, strength / members.length, false);
     const label = members.length > 999 ? '999+' : String(members.length);
     const bw = 7 + label.length * 6, bx = x + w / 2 - 3, by = y - CounterSprites.half(w, side) - 8;

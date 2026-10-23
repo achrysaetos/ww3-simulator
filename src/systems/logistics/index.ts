@@ -10,8 +10,8 @@ import { repairChokepoints } from './chokepoints';
 import type { NetworkSearch } from './network';
 import { refreshNetworks, searchesOf, snapshotInputs, type NetworkState } from './refresh';
 import {
-  FOOD_TONS_PER_PERSON_DAY, BEACH_CAPACITY, CAPTURED_INFRASTRUCTURE, CAPTURED_REPAIR_SHARE, FRONT_REPAIR_SHARE, INFRA_REPAIR_PER_DAY, LIFT_TONS_PER_TROOP, LIFT_TONS_PER_VEHICLE, MAX_REFILL_FRACTION_PER_DAY, NODE_TONS_PER_DAY,
-  MIN_BRIGADE_PERSONNEL, PEACETIME_READINESS_HOURS_PER_DAY, RAISE_EVERY_DAYS, RAISE_TRAINING_DAYS, READINESS_HOURS_PER_DAY, REARM_PER_DAY, REARMS_IN_PORT_ONLY, RESERVE_BUFFER_SHARE, SEALIFT_CLASSES, RAISED_KINDS, RECONSTITUTE_DAYS, RECONSTITUTE_MIN_STRENGTH, REGENERATED_CLASSES,
+  FOOD_TONS_PER_PERSON_DAY, BEACH_CAPACITY, CAPTURED_INFRASTRUCTURE, CAPTURED_REPAIR_SHARE, FRONT_REPAIR_SHARE, INFRA_REPAIR_PER_DAY, LIFT_TONS_PER_TROOP, LIFT_TONS_PER_VEHICLE, MAX_REFILL_FRACTION_PER_DAY, NODE_TONS_PER_DAY, PRIORITY_BOOST, PRIORITY_DIVERT, PRIORITY_KM,
+  LAND_KINDS, MIN_BRIGADE_PERSONNEL, PEACETIME_READINESS_HOURS_PER_DAY, RAISE_EVERY_DAYS, RAISE_TRAINING_DAYS, READINESS_HOURS_PER_DAY, REARM_PER_DAY, REARMS_IN_PORT_ONLY, RESERVE_BUFFER_SHARE, SEALIFT_CLASSES, RAISED_KINDS, RECONSTITUTE_DAYS, RECONSTITUTE_MIN_STRENGTH, REGENERATED_CLASSES,
   REPAIR_FRACTION_PER_DAY, REPLACE_FRACTION_PER_DAY, RESERVE_REPLACE_MULTIPLIER, SUPPLY_CLASSES, type SupplyClass,
 } from './tables';
 
@@ -40,6 +40,8 @@ export interface LogisticsState extends NetworkState {
   raising: Raising[];
   /** Fuel tons a day each nation's fielded forces burn at peacetime readiness: what its peacetime budget must buy. */
   peaceBurn: Record<NationId, number>;
+  /** The cell each nation has given supply priority (`supply_priority`): its land forces near it draw first on the nation's transport. */
+  priority: Record<NationId, NodeId>;
 }
 
 /** A formation being raised: manned and equipped, taking the field at tick `ready`. */
@@ -75,13 +77,14 @@ function forcesFactor(s: LogisticsState, search: NetworkSearch, node: NodeId, na
 }
 
 const initialState = (world: World): LogisticsState => ({
-  networks: {}, networkOf: {}, seen: snapshotInputs(world), establishment: {}, fallen: {}, lift: {}, short: {}, raised: {}, raising: [], captured: {}, peaceBurn: {},
+  networks: {}, networkOf: {}, seen: snapshotInputs(world), establishment: {}, fallen: {}, lift: {}, short: {}, raised: {}, raising: [], captured: {}, peaceBurn: {}, priority: {},
 });
 
 export const logistics: System = {
   id: 'logistics',
-  commands: ['raise_formation'],
+  commands: ['raise_formation', 'supply_priority'],
   apply(world, cmd, ctx) {
+    if (cmd.type === 'supply_priority') return setPriority(world, ctx, cmd.nation, cmd.node);
     if (cmd.type !== 'raise_formation') return;
     const r = raiseFormation(world, ctx, cmd.nation, cmd.template);
     if (typeof r === 'string') ctx.emit({ type: 'message', tick: world.tick, nation: cmd.nation, text: `${cmd.nation} cannot raise a formation: ${r}` });
@@ -231,6 +234,11 @@ function sustain(world: World, ctx: SimContext, s: LogisticsState, forces: Forma
     for (let c = 0; c < 3; c++) want[i * 3 + c] *= ration;
     if (ashore[i]) beachTons.set(f.nation, (beachTons.get(f.nation) ?? 0) + want[i * 3] + want[i * 3 + 1] + want[i * 3 + 2]);
   }
+  for (const id in s.priority) {
+    const nation = id as NationId, at = s.priority[nation];
+    if (world.control[at] !== nation) delete s.priority[nation];
+    else prioritize(ctx.map, forces, factor, ashore, want, refill, nation, at);
+  }
   for (const f of forces) nodeTons[f.node] = nodeFactor[f.node] = 0;
   const beachRation = new Map<NationId, number>();
   for (const [id, tons] of beachTons) {
@@ -269,6 +277,93 @@ function sustain(world: World, ctx: SimContext, s: LogisticsState, forces: Forma
     replace(world, ctx, upkeep, f, s.establishment[f.id], phi * REPLACE_FRACTION_PER_DAY * dtDays * (f.order.posture === 'reserve' ? RESERVE_REPLACE_MULTIPLIER : 1));
   }
   rearm(world, ctx, upkeep, forces, factor, dtDays);
+}
+
+/** Gives `node` supply priority for `nation`, or clears it with null; refused for a cell the nation does not hold. */
+function setPriority(world: World, ctx: SimContext, nation: NationId, node: NodeId | null): void {
+  const s = world.slices.logistics;
+  if (!s) return;
+  s.priority ??= {};
+  if (node === null) delete s.priority[nation];
+  else if (node < ctx.map.landCount && world.control[node] === nation) s.priority[nation] = node;
+  else ctx.emit({ type: 'message', tick: world.tick, nation, text: `${nation} cannot give supply priority to a cell it does not hold` });
+}
+
+/**
+ * Re-asks `nation`'s land formations not ashore with the push ceilings its supply priority at `at` sets
+ * (`priorityScale`), keeping the node ration each was given: the ones within PRIORITY_KM ask more, the rest less.
+ */
+function prioritize(map: GameMap, forces: Formation[], factor: Float64Array, ashore: Uint8Array, want: Float64Array, refill: number, nation: NationId, at: NodeId): void {
+  const here: number[] = [], rest: number[] = [];
+  const ceiling: number[] = [];
+  for (let i = 0; i < forces.length; i++) {
+    const f = forces[i];
+    if (f.nation !== nation || factor[i] <= 0 || ashore[i] || !LAND_KINDS.has(f.kind)) continue;
+    (map.distanceKm(f.node, at) <= PRIORITY_KM ? here : rest).push(i);
+    const cap = f.supplyCapacity;
+    ceiling[i] = (cap.fuel + cap.ammo + cap.food) * refill * factor[i];
+  }
+  const scale = priorityScale(ceiling, here, rest);
+  for (const [list, m] of [[here, scale.here], [rest, scale.rest]] as const)
+    for (const i of list) {
+      const f = forces[i];
+      for (let c = 0; c < 3; c++) {
+        const cls = SUPPLY_CLASSES[c], cap = f.supplyCapacity[cls], deficit = Math.max(0, cap - f.supply[cls]);
+        const base = Math.min(deficit, cap * refill * factor[i]);
+        if (base > 0) want[i * 3 + c] *= Math.min(deficit, cap * refill * factor[i] * m) / base;
+      }
+    }
+}
+
+/**
+ * The supply priority's arithmetic: multipliers on the tons a day the chain can push to each formation (`ceiling`,
+ * by formation index). The sector `here` gets up to PRIORITY_BOOST times its ceiling, out of the `rest`'s, which
+ * gives up at most PRIORITY_DIVERT of its own. The nation's total ceiling does not change.
+ */
+export function priorityScale(ceiling: readonly number[], here: readonly number[], rest: readonly number[]): { here: number; rest: number } {
+  let h = 0, r = 0;
+  for (const i of here) h += ceiling[i];
+  for (const i of rest) r += ceiling[i];
+  const moved = Math.min(PRIORITY_DIVERT * r, (PRIORITY_BOOST - 1) * h);
+  return { here: h > 0 ? 1 + moved / h : 1, rest: r > 0 ? 1 - moved / r : 1 };
+}
+
+/**
+ * What a supply priority at `at` would do for `nation` today: how many of its land formations are near it and
+ * elsewhere, the tons they are short near it, the tons a day they would get there before and after, and the share
+ * of their supply rate the formations elsewhere would lose. Node and beach limits are left out.
+ */
+export function priorityEffect(world: World, map: GameMap, nation: NationId, at: NodeId): PriorityEffect {
+  const forces = Object.values(world.formations).filter((f) => f.nation === nation && f.status !== 'destroyed' && f.status !== 'embarked' && LAND_KINDS.has(f.kind));
+  const here: number[] = [], rest: number[] = [], ceiling: number[] = [], phi: number[] = [];
+  let short = 0;
+  for (let i = 0; i < forces.length; i++) {
+    const f = forces[i], cap = f.supplyCapacity;
+    phi[i] = supplyFactor(world, map, f.node, nation);
+    if (phi[i] <= 0) continue;
+    ceiling[i] = (cap.fuel + cap.ammo + cap.food) * MAX_REFILL_FRACTION_PER_DAY * phi[i];
+    if (map.distanceKm(f.node, at) > PRIORITY_KM) rest.push(i);
+    else {
+      here.push(i);
+      for (const cls of SUPPLY_CLASSES) short += Math.max(0, cap[cls] - f.supply[cls]);
+    }
+  }
+  const scale = priorityScale(ceiling, here, rest);
+  const tons = (m: number) => {
+    let t = 0;
+    for (const i of here) for (const cls of SUPPLY_CLASSES) t += Math.min(Math.max(0, forces[i].supplyCapacity[cls] - forces[i].supply[cls]), forces[i].supplyCapacity[cls] * MAX_REFILL_FRACTION_PER_DAY * phi[i] * m);
+    return t;
+  };
+  return { here: here.length, rest: rest.length, short, before: tons(1), after: tons(scale.here), restCut: 1 - scale.rest };
+}
+
+export interface PriorityEffect {
+  here: number;
+  rest: number;
+  short: number;
+  before: number;
+  after: number;
+  restCut: number;
 }
 
 /** In port: a port cell, or the sea zone off a home base whose quay the map's coastline puts offshore (Rota, Norfolk). */

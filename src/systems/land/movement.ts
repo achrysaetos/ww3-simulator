@@ -3,7 +3,7 @@ import { atWar, type SimContext, type System } from '../../core/engine';
 import type { GameMap } from '../../core/map';
 import { findPath } from '../../core/path';
 import type { Formation, NationId, NodeId, Order, PlatformId, World } from '../../core/types';
-import type { OrderCommand, OrderOutcome } from '../orders';
+import { keepPlayer, type OrderCommand, type OrderOutcome } from '../orders';
 import { allied, canEnter, hostilesAt, indexByNode, isLandFormation, keepDeception, landSlice } from './state';
 import { cannotDrop, insert, supplyAirheads } from './airborne';
 import { airlift, debarkation, embarkation, lifted, liftMode, overseas } from './strategic';
@@ -51,7 +51,7 @@ function riverCost(world: World, map: GameMap, from: NodeId, to: NodeId, hostile
 }
 
 /** Effective km of entering `to` from `from`: terrain friction, hostile ground, rivers, minus rail boost, and today's mud or snow there. Infinity when closed to this nation. */
-function edgeKm(world: World, map: GameMap, f: Formation, from: NodeId, to: NodeId, km: number, seize = canSeize(f), toGateway = f.order.lift !== undefined): number {
+export function edgeKm(world: World, map: GameMap, f: Formation, from: NodeId, to: NodeId, km: number, seize = canSeize(f), toGateway = f.order.lift !== undefined): number {
   const holder = world.control[to];
   // A force on its way to a port or airfield of embarkation crosses allied ground under host-nation support (the 173rd to Aviano).
   if (!canEnter(world, map, f.nation, to) && !(toGateway && holder && !map.isSea(to) && allied(world, f.nation, holder))) return Infinity;
@@ -77,7 +77,7 @@ export function applyLandOrder(world: World, cmd: OrderCommand, ctx: SimContext)
     if (target === undefined) return { ok: false, code: 'no_target', reason: 'no drop zone' };
     const why = cannotDrop(world, ctx.map, ctx.catalog, f, target);
     if (why) return { ok: false, ...why };
-    insert(world, ctx, f, target);
+    insert(world, ctx, f, target, keepPlayer(cmd.order));
     return { ok: true, etaHours: 0 };
   }
   const order: Order = { ...cmd.order, issuedTick: world.tick };
@@ -114,7 +114,7 @@ function reachable(world: World, map: GameMap, nation: NationId, target: NodeId)
 
 /** Shortest move that counts as a deployment between theatres rather than a march blocked at the front (judgement call: Vicenza to Korea, not Kharkiv to Izium). */
 // param: tag=judgment range=[1000,2500] source=judgment: Vicenza to Korea, not Kharkiv to Izium
-const THEATRE_KM = 1500;
+export const THEATRE_KM = 1500;
 
 /** A move with no land route that lift can make instead: far off, into ground the formation may enter and its side holds. */
 function betweenTheatres(world: World, map: GameMap, f: Formation, target: NodeId): boolean {
@@ -209,7 +209,8 @@ function march(world: World, ctx: SimContext, f: Formation, byNode: Map<number, 
   if (lifted(map, f.node, f.order)) return;
   const holder = world.control[f.node];
   const contesting = f.order.posture === 'attack' && holder && atWar(world, f.nation, holder);
-  if (!contesting && f.order.posture !== 'reserve') f.order = { posture: 'defend', issuedTick: world.tick, ...keepDeception(f.order) };
+  // The player sent it here to hold the ground, so arriving keeps it the player's; an attack that arrives is done.
+  if (!contesting && f.order.posture !== 'reserve') f.order = { posture: 'defend', issuedTick: world.tick, ...keepDeception(f.order), ...(f.order.posture === 'attack' ? {} : keepPlayer(f.order)) };
   delete f.order.path;
 }
 

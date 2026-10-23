@@ -152,6 +152,11 @@ export interface Order {
   lift?: 'air' | 'sea';
   /** Deception and concealment the formation keeps while it carries out this order (c2 and intel). */
   deception?: Deception;
+  /**
+   * The player gave this order (stamped by the order router from Command.byPlayer). The player commands the formation
+   * while it stands; an engine rewrite of the order drops it unless the rewrite carries the player's order on.
+   */
+  byPlayer?: true;
   issuedTick: number;
 }
 
@@ -398,6 +403,8 @@ export type Command =
   | { type: 'produce'; nation: NationId; item: ItemId; ratePerMonth: number }
   /** Form a new brigade from trained reserves and stockpiled kit, modelled on `template` (default: the lightest fielded brigade); it takes the field after training (logistics). */
   | { type: 'raise_formation'; nation: NationId; template?: FormationId }
+  /** Put the nation's supply transport behind its land forces near `node`, at the rest's expense, or clear the priority with null (logistics). */
+  | { type: 'supply_priority'; nation: NationId; node: NodeId | null }
   | { type: 'nuclear_release'; nation: NationId; target: NodeId; warheads: number; munition: MunitionId }
   /** Order stored warheads mated to their launchers (see strategic/alert.ts). */
   | { type: 'nuclear_alert'; nation: NationId; reason?: string }
@@ -411,6 +418,8 @@ export type Command =
   | { type: 'grant_access'; nation: NationId; target: NationId; on: boolean }
   /** `nation` helps the belligerent `target` without joining its war: its air defence covers `target`. */
   | { type: 'set_aid'; nation: NationId; target: NationId; on: boolean }
+  /** `nation` asks `target` for help in its war; an AI-run target answers at once (diplomacy/help.ts). Allies are asked, never commanded. */
+  | { type: 'request_help'; nation: NationId; target: NationId }
   /** Build access into a sector of `target`'s networks, fire the payload that access unlocks, or stand the intrusion down (nonkinetic). */
   | { type: 'cyber_op'; nation: NationId; target: NationId; sector: 'grid' | 'telecom' | 'satcom'; action: 'build' | 'attack' | 'stop' }
   /** Run, or end, a covert sabotage campaign against `target`'s rail, depots and plant (nonkinetic). */

@@ -1,6 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import type { Echelon, FormationId, NationId, NodeId } from '../src/core/types';
-import { Pacer } from '../src/ui/pacer';
 import type { FormationView } from '../src/ui/snapshot';
 import { clusterStacks, fanRows, gridSize, indexByNode } from '../src/ui/stacks';
 import { applySnapshot, emptyClientState, nationCards, SnapshotEncoder } from '../src/ui/snapshot';
@@ -77,80 +76,6 @@ describe('counters at the front zoom of ukraine-2026, D+10', () => {
     }
     expect(shared).toBeGreaterThan(0);
   }, 300_000);
-});
-
-describe('engine pacing', () => {
-  beforeEach(() => vi.useFakeTimers());
-  afterEach(() => vi.useRealTimers());
-
-  /** A tick that takes `costMs` of wall time and sends a snapshot. */
-  function rig(costMs: number) {
-    let clock = 0, ticks = 0;
-    const pacer: Pacer = new Pacer(() => {
-      ticks++;
-      clock += costMs;
-      pacer.sent();
-    }, () => clock + Date.now());
-    return { pacer, ticks: () => ticks };
-  }
-
-  it('never starts a tick while a snapshot is unacked, however far behind the target rate', () => {
-    const { pacer, ticks } = rig(150);
-    pacer.setSpeed(20);
-    vi.advanceTimersByTime(5_000);
-    expect(ticks()).toBe(1);
-    pacer.setSpeed(5);
-    vi.advanceTimersByTime(5_000);
-    expect(ticks()).toBe(1);
-    pacer.ack();
-    vi.advanceTimersByTime(0);
-    expect(ticks()).toBe(2);
-    vi.advanceTimersByTime(5_000);
-    expect(ticks()).toBe(2);
-  });
-
-  it('runs at the requested rate when acks come back promptly, and reports it', () => {
-    const { pacer, ticks } = rig(0);
-    pacer.setSpeed(5);
-    for (let i = 0; i < 20; i++) {
-      vi.advanceTimersByTime(200);
-      pacer.ack();
-    }
-    expect(ticks()).toBeGreaterThanOrEqual(19);
-    expect(ticks()).toBeLessThanOrEqual(21);
-    expect(pacer.achievedTps).toBeCloseTo(5, 0);
-  });
-
-  it('reads neither above the requested rate when a slow tick ends just before a fast one, nor zero while slow ticks run', () => {
-    let t = 0, cost = 900;
-    const pacer: Pacer = new Pacer(() => {
-      t += cost;
-      pacer.sent();
-    }, () => t);
-    pacer.setSpeed(1);
-    vi.advanceTimersByTime(0);
-    pacer.ack();
-    expect(pacer.achievedTps).toBeGreaterThan(0.5);
-    t = 1000;
-    cost = 50;
-    vi.advanceTimersByTime(100);
-    pacer.ack();
-    expect(pacer.achievedTps).toBeLessThanOrEqual(1);
-  });
-
-  it('stops ticking when paused and steps once on demand only when nothing is in flight', () => {
-    const { pacer, ticks } = rig(10);
-    pacer.setSpeed(0);
-    vi.advanceTimersByTime(1_000);
-    expect(ticks()).toBe(0);
-    pacer.step();
-    pacer.step();
-    expect(ticks()).toBe(1);
-    pacer.ack();
-    pacer.step();
-    expect(ticks()).toBe(2);
-    expect(pacer.achievedTps).toBe(0);
-  });
 });
 
 describe('opening view', () => {

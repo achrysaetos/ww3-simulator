@@ -2,6 +2,7 @@ import { currentDate, relationKey, type System } from '../../core/engine';
 import type { FormationId, NationId, PlatformId } from '../../core/types';
 import { grantAccess, pledgeAid, setAccess, setAid, treatyPartners } from './access';
 import { assess, enemyMap } from './assess';
+import { grantedAid, pactsOf, requestHelp } from './help';
 import { processEvents } from './escalation';
 import { trackWarGround } from './aims';
 import { leaderChanges } from './leaders';
@@ -13,7 +14,8 @@ import { adoptWars, declareWar, invasions, neutralEntry, resolveJoins, treatyCal
 
 export * from './types';
 export { enemyMap } from './assess';
-export { warSupport } from './support';
+export { helpAnswer, type HelpAnswer, type HelpBasis, type NoAsk } from './help';
+export { peaceAnswer, warSupport, type NoDeal, type PeaceAnswer, type Terms } from './support';
 export { members, sideOf } from './wars';
 export { mayEnter, warAimsOf } from './aims';
 
@@ -27,21 +29,23 @@ export function createDiplomacy(input: DiplomacyInput = {}): System {
   const peace = input.peace ?? [];
   const partners = treatyPartners(alliances);
   // Treaties in force on a run's date: a historical case dated before a treaty does not have it.
-  let today: { day: string; d: Diplomacy } | undefined;
-  const treatiesOn = (day: string): Diplomacy => {
+  let today: { day: string; d: Diplomacy; pacts: Record<string, string> } | undefined;
+  const treatiesOn = (day: string) => {
     if (today?.day !== day) {
       const inForce = (t: { inForce?: string }) => !t.inForce || t.inForce <= day;
+      const treaties = alliances.filter(inForce);
       today = {
         day,
-        d: { alliances: alliances.filter(inForce), profiles: input.profiles ?? {}, peace: new Set(peace.filter(inForce).map((p) => relationKey(...p.between))) },
+        d: { alliances: treaties, profiles: input.profiles ?? {}, peace: new Set(peace.filter(inForce).map((p) => relationKey(...p.between))) },
+        pacts: pactsOf(treaties),
       };
     }
-    return today.d;
+    return today;
   };
   const pledges = input.aid ?? [];
   return {
     id: 'diplomacy',
-    commands: ['declare_war', 'offer_peace', 'grant_access', 'set_aid'],
+    commands: ['declare_war', 'offer_peace', 'grant_access', 'set_aid', 'request_help'],
     init(world) {
       world.slices.diplomacy = { wars: [], joins: [], records: {}, assessment: {}, pressure: {}, offers: {}, access: {}, aid: {}, rev: 0, ssbnFormations: [], invoked: [], umbrella: [] };
     },
@@ -51,10 +55,12 @@ export function createDiplomacy(input: DiplomacyInput = {}): System {
       else if (cmd.type === 'offer_peace') offerPeace(world, ctx, s, cmd.nation, cmd.target);
       else if (cmd.type === 'grant_access') setAccess(s, cmd.nation, cmd.target, cmd.on);
       else if (cmd.type === 'set_aid') setAid(s, cmd.nation, cmd.target, cmd.on);
+      else if (cmd.type === 'request_help') requestHelp(world, ctx, s, cmd.nation, cmd.target);
     },
     step(world, ctx) {
       const s = world.slices.diplomacy;
-      const d = treatiesOn(currentDate(world).toISOString().slice(0, 10));
+      const { d, pacts } = treatiesOn(currentDate(world).toISOString().slice(0, 10));
+      s.pacts = pacts;
       const enemies = enemyMap(world);
       adoptWars(world, s, enemies);
       const prevThreatened = new Set(Object.entries(s.assessment).filter(([, a]) => a.capitalThreatened).map(([n]) => n as NationId));
@@ -84,7 +90,7 @@ export function createDiplomacy(input: DiplomacyInput = {}): System {
       if (daily) reviewOffers(world, ctx, s);
       if (daily) warOnset(world, ctx, s, d);
       grantAccess(world, s, partners);
-      pledgeAid(world, s, pledges);
+      pledgeAid(world, s, [...pledges, ...grantedAid(s)]);
     },
   };
 }

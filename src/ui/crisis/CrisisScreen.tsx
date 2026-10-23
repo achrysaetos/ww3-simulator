@@ -4,7 +4,6 @@ import { Flag } from '../flags';
 import { advisorOf } from '../staff/advisors';
 import type { Sent } from '../staff/desk';
 import { Portrait } from '../staff/Portrait';
-import { AnswerLine } from '../staff/WarRoom';
 import type { Crisis, CrisisOption } from './crisis';
 import './crisis.css';
 
@@ -13,6 +12,27 @@ const pad = (n: number) => String(n).padStart(2, '0');
 /** NATO date-time group: day, hour, minute, zone, month, year. */
 const dtg = (d: Date) => `${pad(d.getUTCDate())}${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}Z ${MONTHS[d.getUTCMonth()]} ${String(d.getUTCFullYear()).slice(2)}`;
 const SEGMENTS = 10;
+
+/** What became of the player's choice: waiting, in transit, done, refused, or never answered. */
+function AnswerLine({ sent, paused }: { sent: Sent; paused: boolean }) {
+  const a = sent.answer;
+  if (sent.silent && !a) return <div className="ww-answer silent" data-testid="card-answer"><span className="ww-chip">No answer</span><span>The staff heard nothing back.</span></div>;
+  if (!a) {
+    return (
+      <div className="ww-answer waiting" data-testid="card-answer">
+        <i className="ww-pulse" aria-hidden="true" />
+        <span>{paused ? `${sent.action.label}: queued, it goes out when the clock runs` : `${sent.action.label}: sent, waiting for the answer`}</span>
+      </div>
+    );
+  }
+  const tone = !a.ok ? 'red' : a.final ? 'green' : 'blue';
+  return (
+    <div className={`ww-answer ${tone}`} data-testid="card-answer">
+      <span className={`ww-chip ${tone}`}>{!a.ok ? 'Refused' : a.final ? 'Done' : 'In transit'}</span>
+      <span>{a.text}</span>
+    </div>
+  );
+}
 
 interface Props {
   crisis: Crisis;

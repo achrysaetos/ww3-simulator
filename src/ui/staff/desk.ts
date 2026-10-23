@@ -1,26 +1,19 @@
 /**
- * The player's staff over time: the events it keeps in mind, a day-by-day record for the brief
- * and the top bar, the cards in front of the player, and what became of each card the player
- * acted on. One desk per game session; it holds UI state only and never touches the World.
+ * The player's staff over time: the events it keeps in mind, a day-by-day record for the top
+ * bar, the cards behind crises and alerts, and what became of each card the player acted on.
+ * One desk per game session; it holds UI state only and never touches the World.
  */
 import type { GameMap } from '../../core/map';
-import type { FormationId, MunitionKind, NationId, NodeId, SimEvent } from '../../core/types';
+import type { FormationId, MunitionKind, NationId, SimEvent } from '../../core/types';
 import type { Namer } from '../events';
-import type { ClientState, MunitionGroup, NationDetail, SessionMeta } from '../snapshot';
-import { advise, answerOf, isDecision, RAID_KINDS, RECENT_TICKS, type Action, type Answer, type Card, type CommandAction, type Situation } from './advice';
+import type { ClientState, NationDetail, SessionMeta } from '../snapshot';
+import { advise, answerOf, isDecision, RECENT_TICKS, type Action, type Answer, type Card, type CommandAction, type Situation } from './advice';
 
 /** One game day, as the staff saw it. */
 export interface Day {
   day: number;
   /** Land cells held at the latest tick of the day. */
   held: number;
-  warSupport: number;
-  ammo: number;
-  /** Rounds held per munition family (warehoused and loaded) at the latest tick of the day. */
-  stock: Partial<Record<MunitionGroup, number>>;
-  raids: { fired: number; intercepted: number };
-  gained: NodeId[];
-  lost: NodeId[];
 }
 
 /** What became of a card the player acted on. */
@@ -33,22 +26,18 @@ export interface Sent {
   silent: boolean;
 }
 
-export const BRIEF_CADENCES = ['matters', 'daily', 'weekly'] as const;
-export type BriefCadence = (typeof BRIEF_CADENCES)[number];
-
 const DAYS_KEPT = 15;
 /** Ticks to wait for an answer that is not an order in transit. */
 const ANSWER_TICKS = 3;
 /** Ticks an answered card stays on the table before it folds away. */
 const SHOW_ANSWER_TICKS = 4;
-const BRIEF_HOUR = 6;
 /** New decisions put in front of the player per game day, at most; the rest wait their turn. Urgent ones never wait. */
-export const NEW_DECISIONS_PER_DAY = 2;
-/** Days before the staff raises the same subject again (the key's first two parts: "opstall|op12"). */
-export const SUBJECT_REST_DAYS = 3;
+const NEW_DECISIONS_PER_DAY = 2;
+/** Days before the staff raises the same subject again (the key's first two parts: "peace|RUS"). */
+const SUBJECT_REST_DAYS = 3;
 const subjectOf = (key: string) => key.split('|').slice(0, 2).join('|');
 /** Which waiting decisions take the day's allowance first: a threat before a chance. Stable sort keeps the staff's order within a topic. */
-const FIRST: Record<Card['topic'], number> = { nuclear: 0, threat: 1, diplomacy: 2, command: 3, supply: 4, opportunity: 5, news: 6 };
+const FIRST: Record<Card['topic'], number> = { nuclear: 0, threat: 1, diplomacy: 2 };
 
 const KEPT: ReadonlySet<SimEvent['type']> = new Set(['strike', 'nuclear_detonation', 'nuclear_alert', 'node_captured', 'command_result', 'war_declared', 'peace', 'capitulation', 'message', 'shortage', 'formation_destroyed']);
 
@@ -62,9 +51,10 @@ export class StaffDesk {
   /** Cards the player acted on whose answer has been shown and folded away: the decision is taken. */
   private readonly done = new Set<string>();
   private readonly sent = new Map<string, Sent>();
-  /** Decisions already put in front of the player in a brief. */
-  private readonly briefed = new Set<string>();
-  private lastBriefDay = -1;
+  /** Live alerts already raised, so each is raised once. */
+  private readonly alerted = new Set<string>();
+  /** Live alerts new in the latest snapshot, for the page to raise as a toast. */
+  alerts: Card[] = [];
   /** When each decision was first put on the table, for the daily allowance. */
   private readonly debut = new Map<string, number>();
   /** When each subject last had a new decision put on the table. */
@@ -92,15 +82,15 @@ export class StaffDesk {
       if (e.type === 'nuclear_detonation') this.nuclearStep = 2;
       else if (e.type === 'nuclear_alert' && (enemies.has(e.nation) || e.nation === this.me)) this.nuclearStep = Math.max(this.nuclearStep, 1);
     }
-    this.record(state, events, d);
+    this.record(state, d);
     const situation: Situation = {
       me: this.me, ongoing: this.ongoing, tick: state.tick, dtHours: this.meta.dtHours, map: this.map, nationIds: this.meta.nationIds, control: state.control,
-      formations: state.formations, nations: state.nations, d, recent: this.recent, namer: this.namer, ammoPerDay: this.ammoPerDay(), burnPerDay: this.burnPerDay(),
-      ops: state.ops, contest: state.contest, known: this.known(),
+      formations: state.formations, nations: state.nations, d, recent: this.recent, namer: this.namer,
       munitionKind: (id) => this.meta.munitions[id]?.kind as MunitionKind | undefined,
-      unitCostUsdM: (id) => this.meta.munitions[id]?.costUsdM ?? this.meta.platforms[id]?.costUsdM ?? 0,
     };
     this.pool = this.allow(advise(situation), state.tick);
+    this.alerts = this.pool.filter((c) => c.tone === 'live' && state.tick - c.tick <= 1 && !this.alerted.has(c.key));
+    for (const c of this.alerts) this.alerted.add(c.key);
     this.inTransit = new Map();
     for (const e of this.recent) {
       if (e.type !== 'command_result' || e.nation !== this.me || e.command !== 'order' || !e.formation) continue;
@@ -129,45 +119,15 @@ export class StaffDesk {
       || e.effects.some((x) => x.kind === 'ship_hits' && state.formations.some((f) => f.entry.id === x.formation && f.entry.nation === this.me));
   }
 
-  private record(state: ClientState, events: readonly SimEvent[], d: NationDetail): void {
+  private record(state: ClientState, d: NationDetail): void {
     const day = Math.floor((state.tick * this.meta.dtHours) / 24);
     let rec = this.days[this.days.length - 1];
     if (!rec || rec.day !== day) {
-      rec = { day, held: d.nodesHeld, warSupport: 0, ammo: 0, stock: {}, raids: { fired: 0, intercepted: 0 }, gained: [], lost: [] };
+      rec = { day, held: d.nodesHeld };
       this.days.push(rec);
       if (this.days.length > DAYS_KEPT) this.days.shift();
     }
     rec.held = d.nodesHeld;
-    rec.warSupport = state.nations.get(this.me)?.warSupport ?? 0;
-    rec.ammo = d.bulk?.ammo ?? 0;
-    rec.stock = Object.fromEntries(d.munitions.map((m) => [m.group, (m.warehoused ?? 0) + m.loaded]));
-    const mine = this.meta.nationIds.indexOf(this.me);
-    for (const e of events) {
-      if (e.type === 'strike' && e.by !== this.me && state.control[e.target] === mine && RAID_KINDS[this.meta.munitions[e.munition]?.kind as MunitionKind]) {
-        rec.raids.fired += e.fired;
-        rec.raids.intercepted += e.intercepted;
-      } else if (e.type === 'node_captured' && !this.map.isSea(e.node)) {
-        if (e.to === this.me) rec.gained.push(e.node);
-        else if (e.from === this.me) rec.lost.push(e.node);
-      }
-    }
-  }
-
-  /** Net national ammunition used per day over the last full days on record. */
-  private ammoPerDay(): number | null {
-    const full = this.days.slice(0, -1).slice(-4);
-    if (full.length < 2) return null;
-    return (full[0].ammo - full[full.length - 1].ammo) / (full.length - 1);
-  }
-
-  /** Rounds of each munition family used per day over the last full days on record, net of what was made. */
-  private burnPerDay(): Partial<Record<MunitionGroup, number>> {
-    const full = this.days.slice(0, -1).slice(-4);
-    if (full.length < 2) return {};
-    const [first, last] = [full[0], full[full.length - 1]];
-    const out: Partial<Record<MunitionGroup, number>> = {};
-    for (const g of Object.keys(first.stock) as MunitionGroup[]) out[g] = ((first.stock[g] ?? 0) - (last.stock[g] ?? 0)) / (full.length - 1);
-    return out;
   }
 
   /**
@@ -209,19 +169,9 @@ export class StaffDesk {
     return this.pool.filter((c) => !this.dismissed.has(c.key) && !this.sent.has(c.key) && !this.done.has(c.key));
   }
 
-  private known(): Situation['known'] {
-    const table = new Set(this.pool.map((c) => c.key));
-    return (key) => (this.dismissed.has(key) || this.sent.has(key) || this.done.has(key) ? 'done' : table.has(key) ? 'table' : undefined);
-  }
-
   /** Cards the player acted on, newest first, with the engine's answer once it comes. */
   get answered(): Sent[] {
     return [...this.sent.values()].sort((a, b) => b.tick - a.tick);
-  }
-
-  /** Decisions for the Daily Brief, most pressing first. */
-  get decisions(): Card[] {
-    return this.cards.filter(isDecision);
   }
 
   /** The player chose an action: record a command so its answer can be shown, or put the card away. */
@@ -229,43 +179,5 @@ export class StaffDesk {
     if (action.kind === 'command') this.sent.set(card.key, { card, action, tick: this.tick, answer: null, silent: false });
     else if (action.kind === 'later') this.dismissed.add(card.key);
     this.version++;
-  }
-
-  dismiss(key: string): void {
-    this.dismissed.add(key);
-    this.sent.delete(key);
-    this.version++;
-  }
-
-  /**
-   * Whether the Daily Brief should open now: at once for an urgent decision not yet briefed;
-   * otherwise at 06:00 by the chosen cadence, and under 'matters' only with a new decision waiting.
-   */
-  briefDue(date: Date, cadence: BriefCadence): boolean {
-    const fresh = this.decisions.filter((c) => !this.briefed.has(c.key));
-    if (fresh.some((c) => c.urgent)) return true;
-    const day = Math.floor((this.tick * this.meta.dtHours) / 24);
-    if (date.getUTCHours() !== BRIEF_HOUR || day === this.lastBriefDay || day === 0) return false;
-    if (cadence === 'daily') return true;
-    if (cadence === 'weekly') return day % 7 === 0;
-    return fresh.length > 0;
-  }
-
-  /** One decision was put to the player on its own (a crisis), so the brief does not open for it again. */
-  markBriefed(key: string): void {
-    this.briefed.add(key);
-    this.version++;
-  }
-
-  /** The brief is open: what it shows now counts as briefed. */
-  briefOpened(): void {
-    for (const c of this.decisions) this.briefed.add(c.key);
-    this.lastBriefDay = Math.floor((this.tick * this.meta.dtHours) / 24);
-    this.version++;
-  }
-
-  /** The days since the last brief, for the brief's overnight column (at least the last one). */
-  since(days: number): Day[] {
-    return this.days.slice(-Math.max(1, days));
   }
 }

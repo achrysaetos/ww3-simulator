@@ -122,6 +122,10 @@ function parse(world: World, map: GameMap, catalog: Catalog, player: NationId, r
       return { type: 'grant_access', nation, target: other(raw.target), on: bool(raw.on, 'on') };
     case 'set_aid':
       return { type: 'set_aid', nation, target: other(raw.target), on: bool(raw.on, 'on') };
+    case 'supply_priority':
+      return { type: 'supply_priority', nation, node: raw.node === null ? null : (Math.floor(node(raw.node, 'node')) as NodeId) };
+    case 'request_help':
+      return { type: 'request_help', nation, target: other(raw.target) };
     case 'plan_operation': {
       const cmd: Extract<Command, { type: 'plan_operation' }> = {
         type: 'plan_operation', nation, kind: oneOf(raw.kind, OPERATION_KINDS, 'kind of operation'),

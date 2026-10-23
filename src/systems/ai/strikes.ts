@@ -10,8 +10,8 @@ import { aimKey, ATTRITABLE_COST_USD_M, dailyRounds, effectPk, futileAim, PENETR
 import { ANTISHIP_KINDS } from '../naval';
 import type { HqLevel } from '../c2/state';
 import { isGround, issue, sighted } from './forces';
-import { CURRENT_CONFIDENCE } from '../intel/view';
-import type { Plan } from './types';
+import { CURRENT_CONFIDENCE, formationList } from '../intel/view';
+import type { ForceIndex, Plan } from './types';
 
 export interface StrikeTarget {
   node: NodeId;
@@ -118,7 +118,7 @@ function hulls(p: Plan, f: Formation): number {
 /** Each enemy ship's embarked cargo, by cost. */
 function cargoUsdM(p: Plan): Map<FormationId, number> {
   const out = new Map<FormationId, number>();
-  for (const f of Object.values(p.world.formations))
+  for (const f of formationList(p.world))
     if (f.status === 'embarked' && f.embarkedOn && p.enemies.has(f.nation)) out.set(f.embarkedOn, (out.get(f.embarkedOn) ?? 0) + costUsdM(p, f));
   return out;
 }
@@ -186,24 +186,42 @@ export function battleAreaOf(p: Plan): Set<number> {
 
 const CELL_DEG = 10;
 const ROWS = 180 / CELL_DEG, COLS = 360 / CELL_DEG;
+const FEW_CELLS = 4;
 
-/** Strike targets bucketed by 10-degree cells, so each shooter only looks at what is near it. */
+/**
+ * Strike targets by 10-degree cell, so each shooter only looks at what is near it. A query walks the targets in value
+ * order and yields those in its cells, so a caller that stops at the first worth taking (pickTarget) reads few.
+ */
 export class TargetGrid {
-  private readonly cells = new Map<number, number[]>();
+  private readonly rows: Uint8Array;
+  private readonly cols: Uint8Array;
+  private cellLists?: Map<number, number[]>;
 
   /** `targets` must be sorted by value, descending. */
   constructor(readonly targets: StrikeTarget[], private readonly map: GameMap) {
-    targets.forEach((t, i) => {
-      const k = this.row(map.lat[t.node]) * COLS + this.col(map.lon[t.node]);
-      (this.cells.get(k) ?? this.cells.set(k, []).get(k)!).push(i);
-    });
+    this.rows = new Uint8Array(targets.length);
+    this.cols = new Uint8Array(targets.length);
+    for (let i = 0; i < targets.length; i++) {
+      this.rows[i] = this.row(map.lat[targets[i].node]);
+      this.cols[i] = this.col(map.lon[targets[i].node]);
+    }
+  }
+
+  private get cells(): Map<number, number[]> {
+    if (this.cellLists) return this.cellLists;
+    this.cellLists = new Map();
+    for (let i = 0; i < this.targets.length; i++) {
+      const k = this.rows[i] * COLS + this.cols[i];
+      (this.cellLists.get(k) ?? this.cellLists.set(k, []).get(k)!).push(i);
+    }
+    return this.cellLists;
   }
 
   private row(lat: number) { return Math.min(ROWS - 1, Math.max(0, Math.floor((lat + 90) / CELL_DEG))); }
   private col(lon: number) { return ((Math.floor((lon + 180) / CELL_DEG) % COLS) + COLS) % COLS; }
 
   /** Targets in the cells overlapping a `km` radius around `node`, still sorted by value. */
-  near(node: NodeId, km: number): StrikeTarget[] {
+  *near(node: NodeId, km: number): Generator<StrikeTarget, void, undefined> {
     const lat = this.map.lat[node], lon = this.map.lon[node];
     const dLat = km / 111;
     const worstLat = Math.min(89, Math.max(Math.abs(lat - dLat), Math.abs(lat + dLat)));
@@ -211,10 +229,16 @@ export class TargetGrid {
     const wide = dLon >= 180;
     const cols = wide ? COLS : Math.min(COLS, Math.floor((lon + dLon + 180) / CELL_DEG) - Math.floor((lon - dLon + 180) / CELL_DEG) + 1);
     const c0 = wide ? 0 : this.col(lon - dLon);
-    const idx: number[] = [];
-    for (let r = this.row(lat - dLat); r <= this.row(lat + dLat); r++)
-      for (let c = 0; c < cols; c++) for (const i of this.cells.get(r * COLS + ((c0 + c) % COLS)) ?? []) idx.push(i);
-    return idx.sort((a, b) => a - b).map((i) => this.targets[i]);
+    const r0 = this.row(lat - dLat), r1 = this.row(lat + dLat);
+    // A short reach reads its few cells' lists; a long one scans the whole list in order.
+    if ((r1 - r0 + 1) * cols <= FEW_CELLS) {
+      const idx: number[] = [];
+      for (let r = r0; r <= r1; r++) for (let c = 0; c < cols; c++) for (const i of this.cells.get(r * COLS + ((c0 + c) % COLS)) ?? []) idx.push(i);
+      for (const i of Int32Array.from(idx).sort()) yield this.targets[i];
+      return;
+    }
+    for (let i = 0; i < this.targets.length; i++)
+      if (this.rows[i] >= r0 && this.rows[i] <= r1 && (this.cols[i] - c0 + COLS) % COLS < cols) yield this.targets[i];
   }
 }
 
@@ -228,6 +252,7 @@ export function strikeTargets(p: Plan, battleArea: Set<number>): TargetGrid {
     const usd = (costUsdM(p, f) + (cargo.get(f.id) ?? 0)) / (f.kind === 'surface_group' ? Math.max(1, hulls(p, f)) : 1);
     return Math.min(WORTH.max, Math.max(WORTH.min, Math.sqrt(usd / ref)));
   };
+  let fields: NodeId[] | undefined;
   // Aimed where intelligence last fixed each formation, worth less as the fix goes stale.
   for (const e of p.enemies)
     for (const { f, node, confidence, contact } of sighted(p, e)) {
@@ -238,7 +263,7 @@ export function strikeTargets(p: Plan, battleArea: Set<number>): TargetGrid {
       if (!map.isSea(node) && holder && !p.enemies.has(holder) && !p.friends.has(holder) && f.kind !== 'air_wing' && !isBomberForce(p, f)) continue;
       const v = VALUE_BY_KIND[f.kind] ?? (isBomberForce(p, f) ? VALUE_BY_KIND.air_wing : isGround(f) && battleArea.has(node) ? FRONT_FORCES : undefined);
       if (!v) continue;
-      const base = f.kind === 'missile' && reachesHome(p, f, node) ? TEL_HUNT : f.kind === 'missile' && guardsMinefield(p, f, node) ? MINE_GUARD : v.value;
+      const base = f.kind === 'missile' && reachesHome(p, f, node) ? TEL_HUNT : f.kind === 'missile' && guardsMinefield(p, f, node, (fields ??= enemyMinefields(p))) ? MINE_GUARD : v.value;
       const value = base * worth(f) * confidence;
       if (f.kind !== 'surface_group') out.push({ node, cls: v.cls, value, formation: f.id, assigned: 0 });
       else {
@@ -286,16 +311,23 @@ export function strikeTargets(p: Plan, battleArea: Set<number>): TargetGrid {
  */
 const MINE_GUARD = VALUE_BY_KIND.air_defense!.value;
 
-function guardsMinefield(p: Plan, f: Formation, node: NodeId): boolean {
+function guardsMinefield(p: Plan, f: Formation, node: NodeId, fields: readonly NodeId[]): boolean {
+  if (!fields.length) return false;
   let reach = 0;
   for (const [id, n] of Object.entries(f.magazine)) {
     const m = p.ctx.catalog.munition(id as MunitionId);
     if (n > 0 && ANTISHIP_KINDS.has(m.kind)) reach = Math.max(reach, m.rangeKm);
   }
   if (!reach) return false;
-  for (const [z, laid] of Object.entries(p.view.minefields()))
-    if (Object.keys(laid).some((layer) => p.enemies.has(layer as NationId)) && p.ctx.map.distanceKm(node, Number(z) as NodeId) <= reach) return true;
+  for (const z of fields) if (p.ctx.map.distanceKm(node, z) <= reach) return true;
   return false;
+}
+
+/** Charted minefields an enemy of the planner laid. */
+function enemyMinefields(p: Plan): NodeId[] {
+  const out: NodeId[] = [];
+  for (const [z, laid] of Object.entries(p.view.minefields())) if (Object.keys(laid).some((layer) => p.enemies.has(layer as NationId))) out.push(Number(z) as NodeId);
+  return out;
 }
 
 /** Whether a missile `f`'s launchers carry reaches the planner's capital from `node`. */
@@ -508,12 +540,45 @@ function interceptorReach(p: Plan, f: Formation): number {
   return km;
 }
 
-export class SamCover {
-  /** Widest envelope per node; several batteries at one site cover no more ground than the longest-ranged. */
-  private readonly reach = new Map<NodeId, number>();
+interface Envelopes {
   /** Sites sorted by latitude, so a query scans only the band an envelope can reach. */
-  private sams: { node: NodeId; km: number; lat: number }[] = [];
-  private maxKm = 0;
+  sams: { node: NodeId; km: number; lat: number }[];
+  maxKm: number;
+}
+
+/** Envelopes by the force index and the enemies they belong to: coalition partners face the same ones. */
+const envelopeCache = new WeakMap<ForceIndex, Map<string, Envelopes>>();
+
+function envelopesOf(p: Plan): Envelopes {
+  let byEnemies = envelopeCache.get(p.index);
+  if (!byEnemies) envelopeCache.set(p.index, (byEnemies = new Map()));
+  const key = [...p.enemies].sort().join();
+  let out = byEnemies.get(key);
+  if (out) return out;
+  // Widest envelope per node; several batteries at one site cover no more ground than the longest-ranged.
+  const reach = new Map<NodeId, number>();
+  const cover = (node: NodeId, km: number) => reach.set(node, Math.max(km, reach.get(node) ?? 0));
+  for (const e of p.enemies)
+    for (const f of p.index.byNation.get(e) ?? []) {
+      if (f.kind === 'air_wing') {
+        cover(f.node, AIRBASE_DEFENSE_KM);
+        continue;
+      }
+      if (f.kind !== 'air_defense' && f.kind !== 'surface_group') continue;
+      const km = interceptorReach(p, f);
+      if (km > 0) cover(f.node, km);
+    }
+  const { map } = p.ctx;
+  const sams = [...reach].map(([node, km]) => ({ node, km, lat: map.lat[node] })).sort((a, b) => a.lat - b.lat);
+  let maxKm = 0;
+  for (const s of sams) maxKm = Math.max(maxKm, s.km);
+  byEnemies.set(key, (out = { sams, maxKm }));
+  return out;
+}
+
+export class SamCover {
+  private readonly sams: Envelopes['sams'];
+  private readonly maxKm: number;
   /** Enemy-held cells touching a friendly front: the contact zone strike aviation may overfly. */
   private readonly contact = new Set<number>();
   /** Own front cells, and the enemies holding ground across from them. */
@@ -527,19 +592,7 @@ export class SamCover {
         this.across.add(p.world.control[n]);
       }
     }
-    for (const e of p.enemies)
-      for (const f of p.index.byNation.get(e) ?? []) {
-        if (f.kind === 'air_wing') {
-          this.cover(f.node, AIRBASE_DEFENSE_KM);
-          continue;
-        }
-        if (f.kind !== 'air_defense' && f.kind !== 'surface_group') continue;
-        const km = interceptorReach(p, f);
-        if (km > 0) this.cover(f.node, km);
-      }
-    const { map } = p.ctx;
-    this.sams = [...this.reach].map(([node, km]) => ({ node, km, lat: map.lat[node] })).sort((a, b) => a.lat - b.lat);
-    for (const s of this.sams) this.maxKm = Math.max(this.maxKm, s.km);
+    ({ sams: this.sams, maxKm: this.maxKm } = envelopesOf(p));
   }
 
   /** Whether some site's envelope, scaled by `visibility` and shrunk by `marginKm`, reaches `at`. */
@@ -559,10 +612,6 @@ export class SamCover {
       if (need > 0 && withinKm(map, s.node, at, need)) return true;
     }
     return false;
-  }
-
-  private cover(node: NodeId, km: number): void {
-    this.reach.set(node, Math.max(km, this.reach.get(node) ?? 0));
   }
 
   /**
@@ -664,7 +713,7 @@ export function reachKm(p: Plan, f: Formation): number {
  * is sorted by value and effect is at most 1, so the scan stops once no later target could beat the
  * best found.
  */
-export function pickTarget(targets: StrikeTarget[], effect: (t: StrikeTarget) => number): StrikeTarget | undefined {
+export function pickTarget(targets: Iterable<StrikeTarget>, effect: (t: StrikeTarget) => number): StrikeTarget | undefined {
   let best: StrikeTarget | undefined, bestScore = 0;
   for (const t of targets) {
     if (t.value <= bestScore) break;

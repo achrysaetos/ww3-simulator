@@ -13,16 +13,18 @@ import type { Catalog } from '../core/catalog';
 import { greenfieldCeilingPerMonth } from '../systems/economy';
 import { NUCLEAR_ALERT } from '../data/nations';
 import { BMD_SYSTEMS } from '../systems/strategic/tables';
-import { supplyFactor } from '../systems/logistics';
-import { cellDepthKm } from '../systems/land/state';
+import { supplyFactor, type PriorityEffect } from '../systems/logistics';
+import { allied, cellDepthKm } from '../systems/land/state';
 import { geography } from '../systems/naval/geography';
 import { compose } from '../systems/naval/state';
 import { liftShare } from '../systems/naval/amphibious';
 import { boardable } from '../systems/naval/orders';
 import { isSealift } from '../systems/naval/sealift';
 import { airliftTonsPerDay, airPortable, airTons, awaitingLift, deckSlots, liftMode, overseas } from '../systems/land/strategic';
-import { authority } from '../systems/orders';
+import { authority, playerCommands } from '../systems/orders';
 import { members, sideOf } from '../systems/diplomacy/wars';
+import { helpAnswer, type HelpAnswer } from '../systems/diplomacy/help';
+import { peaceAnswer, type PeaceAnswer } from '../systems/diplomacy/support';
 import { deliveryReachKm, isLive } from '../systems/strategic/nuclear';
 import { hostedBy } from '../systems/civil/state';
 import type { ElectionResult, OpinionDrivers } from '../systems/politics/state';
@@ -34,12 +36,14 @@ import { OutputsRecorder } from '../outputs';
 import { nationName } from './placeNames';
 import { outputsView, type OutputsView } from './outputs/view';
 import type { OperationForecastInput, OperationPlan } from '../forecast/operation';
-import type { OptionsResult } from './orders/options';
+import type { DragKit } from './drag/kit';
 import type {
   Command, CommandDomain, Echelon, Formation, FormationId, FormationKind, ItemId, MunitionId, MunitionKind, Nation, NationId, NodeId, Operation, PlatformId, Posture, SimEvent, World,
 } from '../core/types';
 
 export const NO_NATION = 0xffff;
+/** Floats per record of Snapshot.contest. */
+export const CONTEST_STRIDE = 5;
 export const NO_NODE = 0xffff;
 /** fPosture of a formation known only from intelligence: enemy orders are never sent. */
 export const NO_POSTURE = 0xff;
@@ -84,25 +88,18 @@ export type ToWorker =
   | { type: 'save' }
   /** End the session and go back to the start screen. */
   | { type: 'quit' }
-  /** Target ticks per second; 0 pauses. The worker never runs ahead of the UI's acks. */
-  | { type: 'speed'; ticksPerSec: number }
+  /** Run one tick. The page's clock asks for the next only once this one's snapshot has landed. */
   | { type: 'step' }
-  | { type: 'ack' }
   /** Untrusted until the worker's boundary (commands.ts) has checked it. */
   | { type: 'command'; command: Command }
   | { type: 'play_as'; nation: NationId }
   | { type: 'focus'; nation?: NationId; formation?: FormationId }
-  /** Which orders the selection (or, with none, the staff's nearest units) can be given at `node`; answered with 'options'. */
-  | { type: 'options'; seq: number; formations: FormationId[]; node: NodeId }
+  /** What the page needs to aim a drag of these formations, from the player's beliefs; answered with 'drag_kit'. */
+  | { type: 'drag_kit'; seq: number; formations: FormationId[] }
   /** Build the staff forecast's input for a battle plan, from the player's picture of the war; answered with 'forecast_input'. */
-  | { type: 'forecast'; seq: number; plan: OperationPlan; days: number };
-
-export interface RunStats {
-  /** Wall time of the latest engine step. */
-  stepMs: number;
-  /** Ticks actually completed per second over the last few seconds. */
-  achievedTps: number;
-}
+  | { type: 'forecast'; seq: number; plan: OperationPlan; days: number }
+  /** What giving this cell supply priority would move; answered with 'supply_effect'. */
+  | { type: 'supply_effect'; seq: number; node: NodeId };
 
 export type FromWorker =
   | { type: 'hello'; scenarios: ScenarioCard[]; nations: NationCard[] }
@@ -112,10 +109,13 @@ export type FromWorker =
   | { type: 'closed' }
   /** A command the boundary rejected, and why. */
   | { type: 'refused'; reason: string }
-  | { type: 'snapshot'; snapshot: Snapshot; stats: RunStats }
-  | { type: 'options'; seq: number; tick: number; result: OptionsResult }
+  | { type: 'snapshot'; snapshot: Snapshot }
+  /** The drag kit, its typed arrays transferred; null when none of the formations asked about can be dragged. */
+  | { type: 'drag_kit'; seq: number; kit: DragKit | null; reason?: string }
   /** The input to run the forecast on, or why the plan cannot be forecast. */
   | { type: 'forecast_input'; seq: number; input: OperationForecastInput | null; reason?: string }
+  /** The player's supply priority moved to that cell (logistics priorityEffect), or null when the player does not hold it. */
+  | { type: 'supply_effect'; seq: number; effect: PriorityEffect | null }
   | { type: 'error'; message: string };
 
 export interface SessionMeta {
@@ -257,11 +257,15 @@ export interface TreatyCall {
 
 export interface NationDetail {
   id: NationId;
-  /** Which domains the AI delegate runs and which formations the player holds (a human nation). */
+  /** Which domains the AI delegate runs and which formations the player commands (a human nation): taken under command, or on the player's own order until it ends. */
   authority: { ai: Record<CommandDomain, boolean>; held: FormationId[] };
   treatyCalls: TreatyCall[];
   /** Open peace offers between this nation and its enemies. */
   peaceOffers: { from: NationId; to: NationId }[];
+  /** What each enemy would answer an offer of peace from this nation now (diplomacy peaceAnswer), weighed on the viewer's beliefs; empty for any nation but the viewer. */
+  peace: { nation: NationId; answer: PeaceAnswer }[];
+  /** What each nation not at war with this one would answer its ask for help now (diplomacy helpAnswer), weighed as `peace` is; empty at peace. */
+  help: { nation: NationId; answer: HelpAnswer }[];
   /** Nations it has sanctions in force with. */
   sanctions: NationId[];
   /** Nations whose troops it lets cross its land, nations whose land its troops may cross, and belligerents its air defence covers. */
@@ -423,7 +427,11 @@ export interface Snapshot {
   /** Flat (node, value) pairs for nodes with infrastructure < 1. */
   infra: Float32Array;
   fallout: Float32Array;
-  /** Flat (node, nationIndex, share) triples: cells an enemy is pushing into, and how far across it has got, 0..1. */
+  /**
+   * Flat CONTEST_STRIDE records (node, nationIndex, share, east, north) for the cells an enemy is pushing into that the
+   * viewer takes part in or watches (watchedBy): how far across the attacker has got, 0..1, and the unit vector its
+   * advance moves along, from the cells its side holds next door (0, 0 when it holds none).
+   */
   contest: Float32Array;
   /** Today's weather per region (weather/effects.ts packWeather), sent when the day changes. */
   weather?: Uint8Array;
@@ -435,6 +443,8 @@ export interface Snapshot {
   outputs?: OutputsView;
   /** The viewer's operations (ops/state.ts), ended ones while the engine keeps them; sent when any changed. Never another nation's. */
   ops?: Operation[];
+  /** The cell the viewer has given supply priority (logistics), if any. Never another nation's. */
+  supplyPriority?: NodeId;
 }
 
 /** What the viewer's intelligence holds on a foreign formation: never its orders, supply or magazines. */
@@ -547,7 +557,7 @@ export class SnapshotEncoder {
       sea: this.sparseControl(world.theater.seaControl),
       infra: sparseBelow(world.theater.infrastructure, 1),
       fallout: sparseRecord(world.theater.fallout),
-      contest: this.contested(world, map),
+      contest: this.contested(world, map, view),
     };
     this.events = [];
     this.dropped = 0;
@@ -623,6 +633,8 @@ export class SnapshotEncoder {
         this.opsKey = key;
         snap.ops = structuredClone(ops);
       }
+      const priority = world.slices.logistics?.priority?.[viewer];
+      if (priority !== undefined) snap.supplyPriority = priority;
     }
 
     if (focus.nation && world.nations[focus.nation]) snap.focusNation = this.nationDetail(world, map, focus.nation, view);
@@ -674,15 +686,21 @@ export class SnapshotEncoder {
     return out;
   }
 
-  private contested(world: World, map: GameMap): Float32Array {
+  private contested(world: World, map: GameMap, view: View | undefined): Float32Array {
     const rec = world.slices.land?.contest ?? {};
-    const keys = Object.keys(rec);
-    const out = new Float32Array(keys.length * 3);
-    keys.forEach((k, i) => {
-      const c = rec[+k];
-      out[i * 3] = +k;
-      out[i * 3 + 1] = this.nationIndex.get(c.by) ?? NO_NATION;
-      out[i * 3 + 2] = Math.min(1, c.km / cellDepthKm(map, +k as NodeId));
+    const seen = Object.keys(rec).map(Number).filter((n) => !view || view.friends.has(rec[n].by) || watchedBy(world, map, view, n as NodeId));
+    const out = new Float32Array(seen.length * CONTEST_STRIDE);
+    seen.forEach((n, i) => {
+      const c = rec[n], o = i * CONTEST_STRIDE;
+      let east = 0, north = 0;
+      for (const m of map.neighbors(n as NodeId)) {
+        const holder = world.control[m];
+        if (m >= map.landCount || !holder || !allied(world, c.by, holder)) continue;
+        east += (((map.lon[n] - map.lon[m] + 540) % 360) - 180) * Math.cos((map.lat[n] * Math.PI) / 180);
+        north += map.lat[n] - map.lat[m];
+      }
+      const len = Math.hypot(east, north) || 1;
+      out.set([n, this.nationIndex.get(c.by) ?? NO_NATION, Math.min(1, c.km / cellDepthKm(map, n as NodeId)), east / len, north / len], o);
     });
     return out;
   }
@@ -773,6 +791,7 @@ export class SnapshotEncoder {
     const strategic = world.slices.strategic;
     const space = strategic?.space[id];
     const diplomacy = world.slices.diplomacy;
+    const weighedOn = diplomacy && (!view || view.nation === id) ? (view ? believedWorld(world, map, view.nation, catalog) : world) : undefined;
     const auth = authority(world, id);
     const sanctions: NationId[] = [];
     for (const [k, r] of Object.entries(world.relations)) {
@@ -782,7 +801,7 @@ export class SnapshotEncoder {
     }
     return {
       id,
-      authority: { ai: { ...auth.ai }, held: Object.keys(auth.held) as FormationId[] },
+      authority: { ai: { ...auth.ai }, held: believed ? [] : Object.values(world.formations).filter((f) => f.nation === id && f.status !== 'destroyed' && playerCommands(world, f)).map((f) => f.id) },
       treatyCalls: (diplomacy?.joins ?? []).filter((j) => j.nation === id).map((j) => ({
         war: j.war, treaty: j.treaty, victim: j.victim, aggressor: j.aggressor, dueTick: j.dueTick, reconsidered: !!j.reconsidered,
       })),
@@ -791,6 +810,8 @@ export class SnapshotEncoder {
         return a === id || b === id ? [{ from, to: from === a ? b : a }] : [];
       }),
       sanctions,
+      peace: weighedOn ? this.peace(weighedOn, map, id) : [],
+      help: weighedOn ? this.help(weighedOn, map, id) : [],
       access: diplomacy?.access[id] ?? [],
       accessFrom: Object.entries(diplomacy?.access ?? {}).flatMap(([host, guests]) => (guests.includes(id) ? [host as NationId] : [])),
       aid: diplomacy?.aid[id] ?? [],
@@ -833,6 +854,24 @@ export class SnapshotEncoder {
       if (lines[id] || !e.producers.includes(n.id)) continue;
       const ceiling = greenfieldCeilingPerMonth(n, e.unitCostUsdM, id);
       if (ceiling > 0) out[id] = ceiling;
+    }
+    return out;
+  }
+
+  private peace(world: World, map: GameMap, id: NationId): NationDetail['peace'] {
+    const out: NationDetail['peace'] = [];
+    for (const e of enemiesOf(world, id)) {
+      const answer = peaceAnswer(world, map, world.slices.diplomacy!, id, e);
+      if (answer) out.push({ nation: e, answer });
+    }
+    return out;
+  }
+
+  private help(world: World, map: GameMap, id: NationId): NationDetail['help'] {
+    const out: NationDetail['help'] = [];
+    for (const n of Object.keys(world.nations) as NationId[]) {
+      const answer = helpAnswer(world, map, world.slices.diplomacy!, id, n);
+      if (answer && !(answer.give === 'none' && answer.no.why === 'enemy')) out.push({ nation: n, answer });
     }
     return out;
   }
@@ -989,6 +1028,14 @@ function formationDetail(world: World, map: GameMap, catalog: Catalog, f: Format
   };
 }
 
+/** Whether `view`'s side watches `node`: it holds the cell or one next to it, or its intelligence holds a contact there. */
+function watchedBy(world: World, map: GameMap, view: View, node: NodeId): boolean {
+  const holder = world.control[node];
+  if (holder && view.friends.has(holder)) return true;
+  for (const n of map.neighbors(node)) if (n < map.landCount && world.control[n] && view.friends.has(world.control[n])) return true;
+  return view.contactsAt(node).length > 0;
+}
+
 /**
  * Whether `view`'s nation learns of an event. Wars, peace, escalation, captures (the control map is public) and
  * nuclear detonations are public. A battle, strike or loss reaches it when its side took part, or when it happened on
@@ -996,20 +1043,14 @@ function formationDetail(world: World, map: GameMap, catalog: Catalog, f: Format
  */
 export function knownTo(world: World, map: GameMap, view: View, e: SimEvent): boolean {
   const { friends } = view;
-  const watched = (node: NodeId) => {
-    const holder = world.control[node];
-    if (holder && friends.has(holder)) return true;
-    for (const n of map.neighbors(node)) if (n < map.landCount && world.control[n] && friends.has(world.control[n])) return true;
-    return view.contactsAt(node).length > 0;
-  };
   switch (e.type) {
     case 'battle':
-      return friends.has(e.attacker) || friends.has(e.defender) || watched(e.node);
+      return friends.has(e.attacker) || friends.has(e.defender) || watchedBy(world, map, view, e.node);
     case 'strike':
-      return friends.has(e.by) || e.effects.some((x) => x.kind === 'ship_hits' && friends.has(world.formations[x.formation]?.nation)) || watched(e.target);
+      return friends.has(e.by) || e.effects.some((x) => x.kind === 'ship_hits' && friends.has(world.formations[x.formation]?.nation)) || watchedBy(world, map, view, e.target);
     case 'formation_destroyed': {
       const f = world.formations[e.formation];
-      return friends.has(e.nation) || (!!f && watched(f.node));
+      return friends.has(e.nation) || (!!f && watchedBy(world, map, view, f.node));
     }
     case 'production':
     case 'shortage':
@@ -1097,6 +1138,7 @@ export interface ClientState {
   focusNation?: NationDetail;
   focusFormation?: FormationDetail;
   focusContact?: ContactDetail;
+  supplyPriority: NodeId | null;
   /** The latest War Cost reading; it arrives once a day. */
   outputs?: OutputsView;
   /** Events from the latest snapshot only. */
@@ -1114,6 +1156,7 @@ export function emptyClientState(size: number): ClientState {
     air: new Float32Array(0), sea: new Float32Array(0), infra: new Float32Array(0), fallout: new Float32Array(0), contest: new Float32Array(0), weather: new Uint8Array(0),
     latestEvents: [],
     ops: [],
+    supplyPriority: null,
     packed: {
       fNode: new Uint16Array(0), fStrength: new Uint8Array(0), fPosture: new Uint8Array(0), fStatus: new Uint8Array(0), fTarget: new Uint16Array(0),
       cConfidence: new Uint8Array(0), cAgeHours: new Uint16Array(0), cErrorKm: new Uint16Array(0), nations: new Float32Array(0),
@@ -1184,6 +1227,7 @@ export function applySnapshot(state: ClientState, snap: Snapshot, nationIds: rea
   state.focusNation = snap.focusNation;
   state.focusFormation = snap.focusFormation;
   state.focusContact = snap.focusContact;
+  state.supplyPriority = snap.supplyPriority ?? null;
   if (snap.outputs) state.outputs = snap.outputs;
   if (snap.ops) state.ops = snap.ops;
   state.latestEvents = snap.events;

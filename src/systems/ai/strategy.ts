@@ -10,6 +10,7 @@ import { CITY_POP_SHARE } from '../diplomacy/escalation';
 import type { Assessment, DiplomacyState, WarRecord } from '../diplomacy/types';
 import { rung } from '../diplomacy/wars';
 import { aiMayIssue, delegated } from '../orders';
+import { formationList } from '../intel/view';
 import type { LaunchWarning, ReleaseRequest } from '../strategic/state';
 import { launcherFor, nuclearLaunchers, targetList, type NuclearLauncher } from '../strategic/targeting';
 import { isGround } from './forces';
@@ -168,7 +169,7 @@ const THEATRE_KM = 2000;
 /** Share of the nation's land and air forces destroyed, measured against the platforms each formation had when first seen. */
 function forcesLost(p: Plan): number {
   let base = 0, lost = 0;
-  for (const f of Object.values(p.world.formations)) {
+  for (const f of formationList(p.world)) {
     if (f.nation !== p.nation || (!isGround(f) && f.kind !== 'air_wing')) continue;
     const now = platformCount(f);
     const b = (p.ai.baseStrength[f.id] ??= now);
@@ -178,11 +179,29 @@ function forcesLost(p: Plan): number {
   return base > 0 ? lost / base : 0;
 }
 
+/**
+ * The force-loss threshold reads a collapse: the share of land and air forces destroyed within this many days. Attrition
+ * spread over a long war does not reach it; Russia lost more tanks than its pre-war active fleet over 2022-25 (Oryx)
+ * without a nuclear alert, while Israel's alert of October 1973 came days into a front-line collapse (Cohen 2010).
+ * The span of a defensive operation, an estimate.
+ */
+const COLLAPSE_DAYS = 30;
+
+/** Share of the nation's land and air forces destroyed in the last COLLAPSE_DAYS, from daily marks kept on its ladder. */
+function recentForcesLost(p: Plan, ladder: NuclearLadder): number {
+  const lost = forcesLost(p);
+  const day = Math.floor((p.world.tick * p.world.dtHours) / 24);
+  const marks = (ladder.lossMarks ??= []);
+  if (!marks.length || marks[marks.length - 1][0] < day) marks.push([day, lost]);
+  while (marks.length > 1 && marks[1][0] <= day - COLLAPSE_DAYS) marks.shift();
+  return Math.max(0, lost - marks[0][1]);
+}
+
 /** How far the fleet's losses have gone toward the naval criteria: the larger of the SSBN, attack-submarine and cruiser ratios. */
 function navalLost(p: Plan, t: NonNullable<NuclearThreshold['navalLoss']>): number {
   const base = { ssbn: 0, ssn: 0 }, lost = { ssbn: 0, ssn: 0 };
   let cruisers = 0;
-  for (const f of Object.values(p.world.formations)) {
+  for (const f of formationList(p.world)) {
     if (f.nation !== p.nation || (f.kind !== 'submarine' && f.kind !== 'surface_group' && f.kind !== 'strategic')) continue;
     for (const [pid, now] of Object.entries(f.equipment) as [PlatformId, number][]) {
       const cls = p.ctx.catalog.platform(pid).class;
@@ -212,7 +231,7 @@ function strategicForcesHit(p: Plan, rec: WarRecord | undefined): boolean {
   if ((rec?.ssbnLost ?? 0) > 0) return true;
   let base = 0;
   let now = 0;
-  for (const f of Object.values(p.world.formations)) {
+  for (const f of formationList(p.world)) {
     if (f.nation !== p.nation || f.kind !== 'strategic') continue;
     const n = platformCount(f);
     base += p.ai.baseStrength[f.id] ??= n;
@@ -255,11 +274,11 @@ function enemyDepthKm(p: Plan, a: Assessment): number {
  * presses in proportion to how close it stands to the capital, reaching the threshold at
  * CAPITAL_DANGER_KM; any enemy-held homeland at all reaches the warning rung.
  */
-function nuclearPressure(p: Plan, t: NuclearThreshold, a: Assessment | undefined, rec: WarRecord | undefined): number {
+function nuclearPressure(p: Plan, t: NuclearThreshold, ladder: NuclearLadder, a: Assessment | undefined, rec: WarRecord | undefined): number {
   if (!t.firstUse || !a) return 0;
   let pressure = a.capitalLost ? 2 : 0;
   if (t.coreLossShare !== null) pressure = Math.max(pressure, a.popLost / t.coreLossShare);
-  if (t.forceLossShare !== null) pressure = Math.max(pressure, forcesLost(p) / t.forceLossShare);
+  if (t.forceLossShare !== null) pressure = Math.max(pressure, recentForcesLost(p, ladder) / t.forceLossShare);
   if (t.navalLoss) pressure = Math.max(pressure, navalLost(p, t.navalLoss));
   const gdp = p.world.slices.economy?.nations[p.nation]?.gdpIndex;
   if (t.economicLossShare !== null && gdp !== undefined) pressure = Math.max(pressure, (1 - gdp) / t.economicLossShare);
@@ -447,7 +466,7 @@ export function nuclearDecision(p: Plan, d: DiplomacyState | undefined): void {
   const rec = d.records[p.nation];
   const a = d.assessment[p.nation];
   const t = nuclearThreshold(p.nation);
-  const pressure = nuclearPressure(p, t, a, rec);
+  const pressure = nuclearPressure(p, t, ladder, a, rec);
   signal(p, t, ladder, pressure, a, rec);
   if (nation.nuclear.deployed <= 0) return;
 

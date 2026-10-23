@@ -2,11 +2,9 @@ import { useEffect, useState } from 'react';
 import type { NationId } from '../../core/types';
 import type { Briefing, Objective } from '../briefing';
 import { Flag } from '../flags';
-import type { Card } from '../staff/advice';
 import { advisorOf } from '../staff/advisors';
 import { Portrait } from '../staff/Portrait';
 import type { CommandRole } from '../staff/roles';
-import { TopicIcon } from '../staff/WarRoom';
 import type { OpeningFacts } from './openingFacts';
 import './opening.css';
 
@@ -63,7 +61,6 @@ interface SituationProps {
   role: CommandRole | null;
   staffRuns: string[];
   youRun: string[];
-  cards: readonly Card[];
   onShow?(): void;
   onClose(): void;
 }
@@ -82,7 +79,6 @@ export function SituationCard(p: SituationProps) {
   const d = p.date;
   const atWar = f.enemies.length > 0;
   const foes = f.enemies.map(p.name);
-  const first = p.cards.filter((c) => c.tone !== 'report').slice(0, 3);
   const tiles: { label: string; value: string; unit?: string; caption: string; tone?: 'red' | 'gold' | 'blue' }[] = [
     { label: 'At war with', value: atWar ? (foes.length > 2 ? `${foes.length} nations` : foes.join(' & ')) : 'No one', caption: atWar ? (f.enemyWarheads ? `${f.enemyWarheads.toLocaleString('en-US')} enemy warheads` : 'No enemy warheads') : f.treatyCalls ? `${f.treatyCalls} ${f.treatyCalls === 1 ? 'ally calls' : 'allies call'} on us to fight` : 'At peace, for now', tone: atWar || f.treatyCalls ? 'red' : undefined },
     { label: 'Our forces', value: String(f.own.land), unit: 'formations', caption: `${f.own.air} air wings · ${f.own.naval} naval groups`, tone: 'blue' },
@@ -128,21 +124,6 @@ export function SituationCard(p: SituationProps) {
                 </div>
               ))}
             </div>
-            <div className="op-first">
-              <span className="ww-label">On your desk</span>
-              {first.length ? first.map((c) => {
-                const who = c.role ? advisorOf(p.me, c.role) : null;
-                return (
-                  <div key={c.key} className="op-item">
-                    <TopicIcon topic={c.topic} />
-                    <div>
-                      <b>{c.title}</b>
-                      <span>{c.ask ?? c.text}{who && <em> · {who.title}</em>}</span>
-                    </div>
-                  </div>
-                );
-              }) : <div className="op-item ww-muted">Nothing needs you yet. Your staff will bring you what does.</div>}
-            </div>
           </div>
           <aside className="op-side">
             <div className="ww-brief-sec">
@@ -158,7 +139,7 @@ export function SituationCard(p: SituationProps) {
               <ul className="op-keys">
                 <li><span className="ww-kbd">Space</span>Run or stop the clock</li>
                 <li><span className="ww-kbd">Click</span>A counter to command it</li>
-                <li><span className="ww-kbd">B</span>Your staff's Daily Brief</li>
+                <li><span className="ww-kbd">N</span>Nation: hand a domain to your staff or take it back</li>
               </ul>
             </div>
             <p className="op-note ww-muted">{p.briefing.reminder}</p>

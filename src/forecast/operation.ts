@@ -120,7 +120,7 @@ export function theatreWorld(world: World, map: GameMap, catalog: Catalog, natio
   if (logistics)
     slices.logistics = {
       networks: logistics.networks, networkOf: logistics.networkOf, seen: logistics.seen, captured: logistics.captured,
-      establishment: {}, fallen: {}, lift: {}, short: {}, raised: {}, raising: [], peaceBurn: {},
+      establishment: {}, fallen: {}, lift: {}, short: {}, raised: {}, raising: [], peaceBurn: {}, priority: {},
     };
   const nations = { ...world.nations };
   for (const id of Object.keys(nations) as NationId[]) if (!friends.has(id)) nations[id] = { ...nations[id], stockpile: {}, bulk: { fuel: 0, ammo: 0, food: 0 } };

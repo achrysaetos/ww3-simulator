@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react';
-import type { Command, CommandDomain, ItemId, NationId } from '../core/types';
+import { COMMAND_DOMAINS, type Command, type CommandDomain, type ItemId, type NationId } from '../core/types';
 import type { SimClient } from './client';
 import type { Palette } from './colors';
 import type { EconomyView, HomeFrontView, NuclearAlertView, MunitionGroup, NationDetail, WarEntry, WarView } from './snapshot';
 import type { Objective } from './briefing';
 import { ObjectiveList } from './GameFlow';
+import { delegateCommands, type Delegation } from './staff/roles';
 import { Bar, Section, Stat, fmtNum, fmtUsdB } from './widgets';
 
 interface Props {
@@ -15,6 +16,11 @@ interface Props {
   /** Send a command; `label` is what the toast says was done. */
   onCommand(c: Command, label: string): void;
   onNuclear(): void;
+  /** Which domains the AI staff runs, as the engine last confirmed. */
+  ai: Delegation;
+  /** Domains the player has just switched and the engine has not confirmed yet. */
+  delegating: Partial<Delegation>;
+  onDelegate(commands: Command[]): void;
 }
 
 export const DOMAIN_LABEL: Record<CommandDomain, { name: string; what: string }> = {
@@ -24,6 +30,31 @@ export const DOMAIN_LABEL: Record<CommandDomain, { name: string; what: string }>
   homefront: { name: 'Home front', what: 'mobilisation and war production' },
   strategic: { name: 'Strategic decisions', what: 'war, peace, treaty calls and nuclear release' },
 };
+
+const AI_RUNS: Record<CommandDomain, string> = { land: 'Land', air: 'Air', naval: 'Navy', homefront: 'Home front', strategic: 'War & peace' };
+
+/** "AI runs": one toggle per domain, lit while the AI staff decides it. */
+function Delegate({ me, ai, delegating, onDelegate }: { me: NationId } & Pick<Props, 'ai' | 'delegating' | 'onDelegate'>) {
+  const want = { ...ai, ...delegating };
+  return (
+    <div className="nation-ai" role="group" aria-label="AI runs" data-testid="delegation">
+      <span className="ww-label">AI runs</span>
+      {COMMAND_DOMAINS.map((k) => (
+        <button
+          key={k}
+          type="button"
+          className={`${want[k] ? 'on' : ''} ${delegating[k] !== undefined ? 'waiting' : ''}`}
+          aria-pressed={want[k]}
+          title={want[k] ? `Your AI staff decides ${DOMAIN_LABEL[k].what}. Click to take it yourself.` : `You decide ${DOMAIN_LABEL[k].what}. Click to hand it to your AI staff.`}
+          onClick={() => onDelegate(delegateCommands(me, want, { ...want, [k]: !want[k] }))}
+          data-testid={`staff-${k}`}
+        >
+          {AI_RUNS[k]}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 const GROUP_LABEL: Record<MunitionGroup, string> = {
   interceptor: 'SAM / ABM interceptors',
@@ -42,7 +73,7 @@ const RESOURCE_LABEL: Record<string, string> = {
   energy: 'Energy', food: 'Food', semiconductors: 'Semiconductors', rare_earths: 'Rare earths', energetics: 'Explosives / propellant', steel: 'Steel',
 };
 
-export function NationPanel({ client, palette, playAs, objectives, onCommand, onNuclear }: Props) {
+export function NationPanel({ client, palette, playAs, objectives, onCommand, onNuclear, ai, delegating, onDelegate }: Props) {
   const nations = client.state.nations;
   const n = nations.get(playAs);
   const d = client.state.focusNation?.id === playAs ? client.state.focusNation : undefined;
@@ -63,8 +94,6 @@ export function NationPanel({ client, palette, playAs, objectives, onCommand, on
   const eco = d?.economy;
   const sanctions = d?.sanctions ?? [];
   const sanctioned = target !== '' && sanctions.includes(target);
-  const myOffer = target !== '' && !!d?.peaceOffers.some((o) => o.from === n.id && o.to === target);
-  const theirOffer = target !== '' && !!d?.peaceOffers.some((o) => o.from === target && o.to === n.id);
   const letsIn = target !== '' && !!d?.access.includes(target);
   const letsUsIn = target !== '' && !!d?.accessFrom.includes(target);
   const aiding = target !== '' && !!d?.aid.includes(target);
@@ -81,6 +110,7 @@ export function NationPanel({ client, palette, playAs, objectives, onCommand, on
           <div className="nation-sub">{n.id} · {n.blocs.slice(0, 4).join(', ') || 'non-aligned'} · <span className={`status ${n.status}`}>{n.status}</span></div>
         </div>
       </div>
+      <Delegate me={playAs} ai={ai} delegating={delegating} onDelegate={onDelegate} />
 
       <Section title={`Objectives · ${objectives.filter((o) => o.met).length} of ${objectives.length} met`}>
         <ObjectiveList items={objectives} />
@@ -204,7 +234,6 @@ export function NationPanel({ client, palette, playAs, objectives, onCommand, on
         </label>
         <div className="row gap">
           <button className="danger" disabled={!target || atWarWithTarget} onClick={() => target && onCommand({ type: 'declare_war', nation: n.id, target, reason: 'declared by national command authority' }, `War declared on ${name(target)}`)}>Declare war</button>
-          <button disabled={!target || !atWarWithTarget || myOffer} onClick={() => target && onCommand({ type: 'offer_peace', nation: n.id, target }, `Peace offered to ${name(target)}`)} data-testid="offer-peace">{myOffer ? 'Offer pending' : theirOffer ? 'Accept peace' : 'Offer peace'}</button>
           <button disabled={!target || atWarWithTarget} onClick={() => target && onCommand({ type: 'sanction', nation: n.id, target, on: !sanctioned }, `${sanctioned ? 'Sanctions lifted on' : 'Sanctions imposed on'} ${name(target)}`)} data-testid="sanction">{sanctioned ? 'Lift sanctions' : 'Sanction'}</button>
         </div>
         <div className="row gap">
@@ -226,8 +255,7 @@ export function NationPanel({ client, palette, playAs, objectives, onCommand, on
             {[letsIn && `${name(target)}'s troops may cross your land.`, letsUsIn && `${name(target)} lets your troops cross its land.`, aiding && `Your air defence covers ${name(target)}, short of joining its war.`].filter(Boolean).join(' ')}
           </p>
         )}
-        {target && myOffer && <p className="small tt-warn" data-testid="peace-status">{name(target)} has not accepted your offer. It stays on the table; they may take it if the war turns against them.</p>}
-        {target && theirOffer && <p className="small tt-hint">{name(target)} has offered peace. Accepting ends the war on current lines.</p>}
+        {target && atWarWithTarget && <p className="small muted">To offer {name(target)} peace, drag your flag onto theirs in the top bar.</p>}
         {target && sanctioned && <p className="small muted">Sanctions in force: most trade between you stops, a share leaks through third countries.</p>}
         <button className="nuke" disabled={n.deployed <= 0} onClick={onNuclear} data-testid="nuclear-release">
           ☢ Nuclear release…
@@ -281,7 +309,7 @@ function HomeFront({ h }: { h: HomeFrontView }) {
 /** Who runs which domain is set on the staff panel; the drawer only says what the player holds by hand. */
 function HeldByHand({ d }: { d: NationDetail }) {
   if (!d.authority.held.length) return null;
-  return <p className="muted small" data-testid="held-by-hand">{d.authority.held.length} formations under your personal command. Your staff panel sets which domains the AI runs.</p>;
+  return <p className="muted small" data-testid="held-by-hand">{d.authority.held.length} formations under your personal command. The AI runs row above sets which domains your staff runs.</p>;
 }
 
 function NuclearAlert({ alert, nation, tick, dtHours, onCommand }: { alert: NuclearAlertView; nation: NationId; tick: number; dtHours: number; onCommand: Props['onCommand'] }) {

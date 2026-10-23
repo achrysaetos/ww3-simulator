@@ -1,9 +1,10 @@
 import { atWar, enemiesOf, relationKey, relationMut, type SimContext } from '../../core/engine';
+import type { GameMap } from '../../core/map';
 import type { Government, NationId, World } from '../../core/types';
 import { DEFAULT_PROFILE, type Assessment, type DiplomacyState, type Side, type StrategicProfile, type War, type WarRecord } from './types';
 import { delegated } from '../orders';
 import { economicMeans } from '../economy';
-import { aimStatus, unbounded } from './aims';
+import { aimStatus, unbounded, walkAway } from './aims';
 import { endWar, leaveWar, members, sideOf, sideWith, warBetween } from './wars';
 
 /**
@@ -179,30 +180,46 @@ export function negotiatedPeace(world: World, ctx: SimContext, s: DiplomacyState
 }
 
 /**
+ * Why `to` takes or refuses an offer, and the war support it turns on: `line` is the support below which it takes terms
+ * (null when its answer does not hinge on support). `aim` is the engine's own sentence when a limited aim decides it.
+ */
+export interface Terms {
+  takes: boolean;
+  basis: 'offered' | 'human' | 'separate' | 'regime_change' | 'aim' | 'support' | 'losing';
+  support: number;
+  line: number | null;
+  aim?: string;
+}
+
+/**
  * Whether `to`, its strategic decisions in the AI's hands, takes `from`'s offer. A side fighting for a punitive or
  * limited aim takes it once it has what it fought for or has passed its walk-away point (aimStatus). A side fighting for
  * everything takes it when its support is low or it is losing ground, and one fighting to bring down the other's
  * government takes nothing short of exhaustion while that capital stands.
  */
-function aiAccepts(world: World, s: DiplomacyState, from: NationId, to: NationId): boolean {
-  if (!delegated(world, to, 'strategic')) return false;
+function aiTerms(world: World, s: DiplomacyState, from: NationId, to: NationId): Terms {
+  const support = world.nations[to].warSupport;
+  if (!delegated(world, to, 'strategic')) return { takes: false, basis: 'human', support, line: null };
   const war = warBetween(s, from, to);
   const side = war ? sideOf(war, to) : -1;
-  const support = world.nations[to].warSupport;
   if (war && side !== -1) {
     const aim = war.sides[side].aim;
-    if (aim.kind === 'regime_change' && world.control[world.nations[from].capital] === from) return support < EXHAUSTED_BELOW;
+    if (aim.kind === 'regime_change' && world.control[world.nations[from].capital] === from)
+      return { takes: support < EXHAUSTED_BELOW, basis: 'regime_change', support, line: EXHAUSTED_BELOW };
     // A side fighting for less than everything settles by its aim alone: ground lost elsewhere is not what it fights over.
-    if (!unbounded(aim)) return aimStatus(world, war, side).status !== 'fighting';
+    if (!unbounded(aim)) {
+      const st = aimStatus(world, war, side);
+      return { takes: st.status !== 'fighting', basis: 'aim', support, line: walkAway(aim), ...(st.status !== 'fighting' ? { aim: st.why } : {}) };
+    }
   }
   const losing = (s.assessment[to]?.popLost ?? 0) > (s.assessment[from]?.popLost ?? 0);
-  return support < 0.4 || (losing && support < 0.55);
+  const line = losing ? 0.55 : 0.4;
+  return { takes: support < line, basis: losing ? 'losing' : 'support', support, line };
 }
 
 /** Whether an ally's ground forces stand on `n`'s homeland while an enemy holds part of it. */
-function defendedOnItsSoil(world: World, ctx: SimContext, s: DiplomacyState, side: Side, n: NationId): boolean {
+function defendedOnItsSoil(world: World, map: GameMap, s: DiplomacyState, side: Side, n: NationId): boolean {
   if ((s.assessment[n]?.areaLost ?? 0) <= 0) return false;
-  const { map } = ctx;
   return Object.values(world.formations).some((f) =>
     f.nation !== n && f.nation in side.members && f.status === 'active' && f.node < map.landCount && map.owner[f.node] === n
     && (f.kind === 'maneuver' || f.kind === 'artillery'));
@@ -215,29 +232,35 @@ function defendedOnItsSoil(world: World, ctx: SimContext, s: DiplomacyState, sid
  * member goes alone only with its will to fight gone, never while allies fight on its soil, and
  * never while treaty allies are in the war on its behalf.
  */
-export function mayLeaveAlone(world: World, ctx: SimContext, s: DiplomacyState, side: Side, n: NationId): boolean {
+export function mayLeaveAlone(world: World, map: GameMap, s: DiplomacyState, side: Side, n: NationId): boolean {
   if (world.nations[n].warSupport >= CAPITULATE_BELOW) return false;
   if (members(side).some((m) => side.members[m].defends === n)) return false;
-  return !defendedOnItsSoil(world, ctx, s, side, n);
+  return !defendedOnItsSoil(world, map, s, side, n);
 }
 
 /** Opinion each ally loses of a member that makes a separate peace; as for a refused treaty call (see wars.ts resolveJoins). */
 const SEPARATE_PEACE_COST = 30;
 
-/** What an offer between `from` and `to` settles: the whole war between the side leaders, or a separate peace for `leaver`. */
-type Deal = { war: War; leaver?: { nation: NationId; side: Side } } | { refused: string };
+/** Why no offer between two nations can settle anything: peace is made by the side leaders, and a bound member cannot go alone. */
+export type NoDeal = { leaders: [NationId, NationId]; war: string } | { bound: NationId };
 
-function dealFor(world: World, ctx: SimContext, s: DiplomacyState, from: NationId, to: NationId): Deal | undefined {
+/** What an offer between `from` and `to` settles: the whole war between the side leaders, or a separate peace for `leaver`. */
+type Deal = { war: War; leaver?: { nation: NationId; side: Side } } | { refused: NoDeal };
+
+function dealFor(world: World, map: GameMap, s: DiplomacyState, from: NationId, to: NationId): Deal | undefined {
   const war = warBetween(s, from, to);
   const [fromSide, toSide] = war ? [sideWith(war, from), sideWith(war, to)] : [];
   if (!war || !fromSide || !toSide) return undefined;
   const [fromLeads, toLeads] = [fromSide.leader === from, toSide.leader === to];
   if (fromLeads && toLeads) return { war };
   const leaver = fromLeads ? { nation: to, side: toSide } : toLeads ? { nation: from, side: fromSide } : undefined;
-  if (!leaver) return { refused: `peace in the ${war.name} is made between ${war.sides[0].leader} and ${war.sides[1].leader}` };
-  if (!mayLeaveAlone(world, ctx, s, leaver.side, leaver.nation)) return { refused: `${leaver.nation} cannot make a separate peace while its allies fight on` };
+  if (!leaver) return { refused: { leaders: [war.sides[0].leader, war.sides[1].leader], war: war.name } };
+  if (!mayLeaveAlone(world, map, s, leaver.side, leaver.nation)) return { refused: { bound: leaver.nation } };
   return { war, leaver };
 }
+
+const noDealText = (r: NoDeal) =>
+  'bound' in r ? `${r.bound} cannot make a separate peace while its allies fight on` : `peace in the ${r.war} is made between ${r.leaders[0]} and ${r.leaders[1]}`;
 
 function settle(world: World, ctx: SimContext, s: DiplomacyState, deal: { war: War; leaver?: { nation: NationId; side: Side } }): void {
   if (!deal.leaver) {
@@ -254,27 +277,46 @@ function settle(world: World, ctx: SimContext, s: DiplomacyState, deal: { war: W
   leaveWar(world, ctx, s, war, leaver, `separate peace: armistice on current lines`, 'separate_peace');
 }
 
-/** An AI-run counterpart takes a separate peace from a spent member, and a peace between leaders per aiAccepts. */
-const accepts = (world: World, s: DiplomacyState, deal: { leaver?: unknown }, from: NationId, to: NationId) =>
-  delegated(world, to, 'strategic') && (deal.leaver !== undefined || aiAccepts(world, s, from, to));
+/** An AI-run counterpart takes a separate peace from a spent member, and a peace between leaders per aiTerms. */
+function termsFor(world: World, s: DiplomacyState, deal: { leaver?: unknown }, from: NationId, to: NationId): Terms {
+  const t = aiTerms(world, s, from, to);
+  return deal.leaver !== undefined && t.basis !== 'human' ? { ...t, takes: true, basis: 'separate', line: null } : t;
+}
+
+/**
+ * What `to` answers if `from` offers peace now, by the rule offerPeace applies: undefined when they are not at war,
+ * the reason when no offer between them can settle anything, else what it would settle (the whole war, or a separate
+ * peace) and the terms it is weighed on. A standing offer from `to` is taken at once.
+ */
+export type PeaceAnswer = { deal: 'none'; why: NoDeal } | { deal: 'war' | 'separate'; terms: Terms };
+
+export function peaceAnswer(world: World, map: GameMap, s: DiplomacyState, from: NationId, to: NationId): PeaceAnswer | undefined {
+  if (!atWar(world, from, to)) return undefined;
+  const deal = dealFor(world, map, s, from, to);
+  if (!deal) return undefined;
+  if ('refused' in deal) return { deal: 'none', why: deal.refused };
+  const kind = deal.leaver ? 'separate' : 'war';
+  if (s.offers[relationKey(from, to)] === to) return { deal: kind, terms: { takes: true, basis: 'offered', support: world.nations[to].warSupport, line: null } };
+  return { deal: kind, terms: termsFor(world, s, deal, from, to) };
+}
 
 /**
  * Peace is made between side leaders and ends the war for every member of both sides. A member
  * that does not lead its side can only make a separate peace, and only when mayLeaveAlone allows.
- * A target whose strategic decisions the AI makes accepts per `accepts`; a human who kept
+ * A target whose strategic decisions the AI makes accepts per `termsFor`; a human who kept
  * strategic control accepts by sending its own offer back. A refused offer stays on the table
  * (see reviewOffers).
  */
 export function offerPeace(world: World, ctx: SimContext, s: DiplomacyState, from: NationId, to: NationId): void {
   if (!atWar(world, from, to)) return;
-  const deal = dealFor(world, ctx, s, from, to);
+  const deal = dealFor(world, ctx.map, s, from, to);
   if (!deal) return;
   if ('refused' in deal) {
-    ctx.emit({ type: 'message', tick: world.tick, nation: from, text: `${from} offers peace to ${to}, but ${deal.refused}` });
+    ctx.emit({ type: 'message', tick: world.tick, nation: from, text: `${from} offers peace to ${to}, but ${noDealText(deal.refused)}` });
     return;
   }
   const k = relationKey(from, to);
-  if (s.offers[k] === to || accepts(world, s, deal, from, to)) settle(world, ctx, s, deal);
+  if (s.offers[k] === to || termsFor(world, s, deal, from, to).takes) settle(world, ctx, s, deal);
   else {
     s.offers[k] = from;
     ctx.emit({ type: 'message', tick: world.tick, nation: from, text: `${from} offers peace to ${to}` });
@@ -287,9 +329,9 @@ export function reviewOffers(world: World, ctx: SimContext, s: DiplomacyState): 
     if (s.offers[k] !== from) continue;
     const [a, b] = k.split('|') as [NationId, NationId];
     const to = a === from ? b : a;
-    const deal = atWar(world, from, to) ? dealFor(world, ctx, s, from, to) : undefined;
+    const deal = atWar(world, from, to) ? dealFor(world, ctx.map, s, from, to) : undefined;
     if (!deal || 'refused' in deal) delete s.offers[k];
-    else if (accepts(world, s, deal, from, to)) settle(world, ctx, s, deal);
+    else if (termsFor(world, s, deal, from, to).takes) settle(world, ctx, s, deal);
   }
 }
 

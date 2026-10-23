@@ -3,7 +3,7 @@ import type { GameMap } from '../../core/map';
 import type { Formation, FormationId, MunitionId, NationId, NodeId, PlatformClass, PlatformId } from '../../core/types';
 import { liftShare } from '../naval/amphibious';
 import { geography, sameWaters, seaNeighbour } from '../naval/geography';
-import { minedClosed, navalDestination, sailable, seaPath, straitBarred } from '../naval/movement';
+import { minedClosed, navalDestination, sailable, seaRoutes } from '../naval/movement';
 import { areaDefenseShare, boardable, mostlyDamaged, REARMED, SEAWORTHY } from '../naval/orders';
 import { isSealift } from '../naval/sealift';
 import { compose, fleetLosses } from '../naval/state';
@@ -11,6 +11,7 @@ import { ANTISHIP_KINDS } from '../naval/tables';
 import { dominant, isGround, issue, sighted } from './forces';
 import { enemyPowerAt, landMass } from './fronts';
 import { reachKm } from './strikes';
+import { formationList } from '../intel/view';
 import type { Plan } from './types';
 
 /** Nearest sea zone to a node, breadth-first; chokepoints often fall on a land cell at 1-degree resolution. */
@@ -77,6 +78,14 @@ function coast(map: GameMap): NodeId[] {
     for (let n = 0; n < map.landCount; n++) if (seaNeighbour(map, n as NodeId) !== undefined) c.push(n as NodeId);
     coastCache.set(map, c);
   }
+  return c;
+}
+
+const coastByLat = new WeakMap<GameMap, NodeId[]>();
+/** coast(map) sorted by latitude. */
+function coastNorthward(map: GameMap): NodeId[] {
+  let c = coastByLat.get(map);
+  if (!c) coastByLat.set(map, (c = [...coast(map)].sort((a, b) => map.lat[a] - map.lat[b])));
   return c;
 }
 
@@ -199,14 +208,25 @@ function maritimeFocus(p: Plan, assault: Assault | undefined): { node: NodeId; e
   const capitals = [...p.friends].map((n) => p.world.nations[n].capital);
   const bases = new Set<NodeId>(capitals);
   for (const f of p.index.byNation.get(p.nation) ?? []) if (f.kind === 'surface_group' || f.kind === 'submarine') bases.add(f.home);
+  // By latitude: a base more than FAR_SEAS_KM / 111 degrees north or south is farther than FAR_SEAS_KM.
+  const byLat = [...bases].sort((a, b) => map.lat[a] - map.lat[b]);
+  const nearBase = (node: NodeId) => {
+    const lat = map.lat[node], band = FAR_SEAS_KM / 111;
+    let lo = 0, hi = byLat.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (map.lat[byLat[mid]] < lat - band) lo = mid + 1;
+      else hi = mid;
+    }
+    for (let i = lo; i < byLat.length && map.lat[byLat[i]] <= lat + band; i++) if (map.distanceKm(node, byLat[i]) <= FAR_SEAS_KM) return true;
+    return false;
+  };
   let best: NodeId | undefined, bestScore = 0;
   for (const e of p.enemies)
     for (const { f, node } of sighted(p, e)) {
       // Boats ashore in a port cell (shore-launched USVs) are struck from the air, not hunted at sea.
       if (f.kind !== 'surface_group' || !map.isSea(node)) continue;
-      let reach = Infinity;
-      for (const b of bases) reach = Math.min(reach, map.distanceKm(node, b));
-      if (reach > FAR_SEAS_KM) continue;
+      if (!nearBase(node)) continue;
       let value = 0;
       for (const [pid, n] of Object.entries(f.equipment)) value += n * p.ctx.catalog.platform(pid as PlatformId).unitCostUsdM;
       let d = Infinity;
@@ -246,13 +266,22 @@ const SURFACE_STANDOFF_KM = 400;
 /** Distance from each sea zone to the nearest coast cell held by an enemy of the planning nation; Infinity with none. */
 function shoreClearance(p: Plan): (z: NodeId) => number {
   const { map } = p.ctx;
-  const hostileShore = coast(map).filter((n) => p.enemies.has(p.world.control[n]));
+  // By latitude, so a search walks out from the zone's own latitude and stops where a degree (over 111 km) of it alone is farther than the nearest found.
+  const hostileShore = coastNorthward(map).filter((n) => p.enemies.has(p.world.control[n]));
   const memo = new Map<NodeId, number>();
   return (z) => {
     let d = memo.get(z);
     if (d === undefined) {
       d = Infinity;
-      for (const n of hostileShore) if (Math.abs(map.lat[n] - map.lat[z]) * 111 < d) d = Math.min(d, map.distanceKm(n, z));
+      const lat = map.lat[z];
+      let lo = 0, hi = hostileShore.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (map.lat[hostileShore[mid]] < lat) lo = mid + 1;
+        else hi = mid;
+      }
+      for (let i = lo; i < hostileShore.length && (map.lat[hostileShore[i]] - lat) * 111 < d; i++) d = Math.min(d, map.distanceKm(hostileShore[i], z));
+      for (let i = lo - 1; i >= 0 && (lat - map.lat[hostileShore[i]]) * 111 < d; i--) d = Math.min(d, map.distanceKm(hostileShore[i], z));
       memo.set(z, d);
     }
     return d;
@@ -314,7 +343,7 @@ function runAssault(p: Plan, a: Assault, lifts: Formation[]): void {
   const { world } = p;
   const portZone = geography(map).portZone.get(a.port);
   const aboard = new Map<FormationId, Formation[]>();
-  for (const f of Object.values(world.formations))
+  for (const f of formationList(world))
     if (f.nation === p.nation && f.status === 'embarked' && f.embarkedOn) (aboard.get(f.embarkedOn) ?? aboard.set(f.embarkedOn, []).get(f.embarkedOn)!).push(f);
 
   const mass = landMass(map);
@@ -396,20 +425,19 @@ export function planNaval(p: Plan): void {
   // fights where open water takes it; a station it cannot reach falls back to its home waters.
   // Open water joins the two, and once enemy minefields close some zones, a route around them does too.
   const minefields = p.view.minefields();
-  const closing = Object.keys(minefields).some((z) => minedClosed(p.world, Number(z), p.nation, minefields)) || map.straits.some((s) => straitBarred(p.world, s, p.nation));
-  const routes = new Map<string, boolean>();
+  const routes = seaRoutes(p.world, map, p.nation, minefields);
   // Only sweepers go into an enemy minefield: a station or chokepoint inside one is a minefield, not a patrol line
   // (NWP 3-15; in 1991 carriers and SSNs kept out of the northern Gulf until lanes were cleared).
+  // Every group planned here is the nation's own, so whether one can sail from a cell to a target holds for all of them.
+  const reachable = new Map<number, boolean>();
   const sails = (g: Formation, n: NodeId, intoMines = false) => {
-    if (!sailable(p.world, map, g, n, minefields)) return false;
+    const key = g.node * map.size + n;
+    let ok = reachable.get(key);
+    if (ok === undefined) reachable.set(key, (ok = sailable(p.world, map, g, n, routes)));
+    if (!ok) return false;
     const dest = navalDestination(p.world, map, g.nation, n)!;
     if (!intoMines && minedClosed(p.world, dest, g.nation, minefields)) return false;
-    if (beyondCoastalReach(g, dest)) return false;
-    if (!closing) return true;
-    const key = `${g.node}|${dest}`;
-    let ok = routes.get(key);
-    if (ok === undefined) routes.set(key, (ok = seaPath(p.world, map, g.nation, g.node, dest, undefined, minefields) !== null));
-    return ok;
+    return !beyondCoastalReach(g, dest);
   };
   // Coastal craft (patrol boats and coast-guard cutters, corvettes, sweepers) carry no replenishment-at-sea rig and
   // stay within half their unrefuelled range of home: the China Coast Guard works the near seas.
@@ -440,22 +468,32 @@ export function planNaval(p: Plan): void {
   const mined = Object.values(minefields).some((laid) => Object.keys(laid).some((layer) => isAtWar(p.world, layer as NationId, p.nation)));
   // What keeps sweepers off a minefield: an enemy surface group or a submarine known to be about, or a shore battery
   // whose anti-ship missiles reach it (Gulf 1991: the sweepers waited on the Silkworm sites being hit).
-  const enemyArmed = [...p.enemies].flatMap((e) => (p.index.byNation.get(e) ?? []).filter((f) => f.status === 'active' && f.kind !== 'submarine'));
-  const shoreReach = new Map<Formation, number>();
-  for (const f of enemyArmed) {
-    if (f.kind === 'surface_group' || map.isSea(f.node)) continue;
-    let reach = 0;
-    for (const [id, n] of Object.entries(f.magazine)) {
-      const m = p.ctx.catalog.munition(id as MunitionId);
-      // A believed magazine is an estimate scaled by the fix's confidence: any rounds believed there are a threat.
-      if (n > 0 && ANTISHIP_KINDS.has(m.kind)) reach = Math.max(reach, m.rangeKm);
+  // Built on the first minefield a sweeper weighs: most plans have none.
+  let threats: { enemyArmed: Formation[]; shoreReach: Map<Formation, number> } | undefined;
+  const fieldThreats = () => {
+    if (threats) return threats;
+    const enemyArmed = [...p.enemies].flatMap((e) => (p.index.byNation.get(e) ?? []).filter((f) => f.status === 'active' && f.kind !== 'submarine'));
+    const shoreReach = new Map<Formation, number>();
+    for (const f of enemyArmed) {
+      if (f.kind === 'surface_group' || map.isSea(f.node)) continue;
+      let reach = 0;
+      for (const [id, n] of Object.entries(f.magazine)) {
+        const m = p.ctx.catalog.munition(id as MunitionId);
+        // A believed magazine is an estimate scaled by the fix's confidence: any rounds believed there are a threat.
+        if (n > 0 && ANTISHIP_KINDS.has(m.kind)) reach = Math.max(reach, m.rangeKm);
+      }
+      if (reach > 0) shoreReach.set(f, reach);
     }
-    if (reach > 0) shoreReach.set(f, reach);
-  }
-  const fieldGuarded = (n: number) =>
-    enemyArmed.some((f) => f.kind === 'surface_group' && km(f.node, n) <= MCM_STANDOFF_KM) ||
-    [...enemySubZones].some((z) => km(z, n) <= MCM_STANDOFF_KM) ||
-    [...shoreReach].some(([f, reach]) => km(f.node, n) <= reach);
+    return (threats = { enemyArmed, shoreReach });
+  };
+  const fieldGuarded = (n: number) => {
+    const { enemyArmed, shoreReach } = fieldThreats();
+    return (
+      enemyArmed.some((f) => f.kind === 'surface_group' && km(f.node, n) <= MCM_STANDOFF_KM) ||
+      [...enemySubZones].some((z) => km(z, n) <= MCM_STANDOFF_KM) ||
+      [...shoreReach].some(([f, reach]) => km(f.node, n) <= reach)
+    );
+  };
 
   const enemySubZones = new Set<NodeId>();
   for (const e of p.enemies) for (const { f, node } of sighted(p, e)) if (f.kind === 'submarine' && map.isSea(node)) enemySubZones.add(node);

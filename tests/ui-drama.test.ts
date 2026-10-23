@@ -7,13 +7,13 @@ import { NUCLEAR_ALERT, profiles } from '../src/data/nations';
 import { authority } from '../src/systems/orders';
 import { coachDue, markCoachDone, resetCoach } from '../src/ui/coach/coach';
 import { SCENARIO_CARDS, SimHost } from '../src/ui/host';
-import { autoAcceptOn, crisesOn, setAutoAccept, setCrises, type KeyValue } from '../src/ui/prefs';
+import { autoAcceptOn, setAutoAccept, type KeyValue } from '../src/ui/prefs';
 import { nationCards, type FromWorker } from '../src/ui/snapshot';
 import { featuredNations, scenarioInfo, threatOf } from '../src/ui/start/scenarioInfo';
 import { COMMAND_ROLES } from '../src/ui/staff/roles';
 import { CrisisScreen } from '../src/ui/crisis/CrisisScreen';
-import { answered, crisisOf, nextCrisis, staffAnswer, type Crisis, type CrisisContext, type CrisisOption } from '../src/ui/crisis/crisis';
-import { staffApproves, type Card } from '../src/ui/staff/advice';
+import { answered, crisisOf, nextCrisis, returnsIn, staffAnswer, type Crisis, type CrisisContext, type CrisisOption } from '../src/ui/crisis/crisis';
+import type { Card } from '../src/ui/staff/advice';
 import { momentsOf } from '../src/ui/moments/moments';
 import { playWithStaff } from './staff-mirror';
 
@@ -68,7 +68,6 @@ describe('start screen', () => {
       const ready = sent.find((m) => m.type === 'ready');
       expect(ready && ready.type === 'ready' && ready.playing).toBe('UKR');
       expect(host.world!.nations[N('UKR')].controlledBy).toBe('human');
-      host.handle({ type: 'ack' });
       host.handle({ type: 'step' });
       expect(authority(host.world!, N('UKR')).ai, role.id).toEqual(role.ai);
       host.handle({ type: 'quit' });
@@ -78,7 +77,6 @@ describe('start screen', () => {
   it('ignores a role it does not know and leaves the default delegation', () => {
     const host = new SimHost(() => {});
     host.handle({ type: 'start', scenario: 'ukraine-2026', nation: N('UKR'), seed: 1, role: 'dictator' });
-    host.handle({ type: 'ack' });
     host.handle({ type: 'step' });
     expect(authority(host.world!, N('UKR')).ai).toEqual(COMMAND_ROLES[0].ai);
     host.handle({ type: 'quit' });
@@ -95,14 +93,6 @@ describe('settings that persist', () => {
     expect(coachDue(store)).toBe(true);
     expect(() => markCoachDone(broken)).not.toThrow();
     expect(coachDue(broken)).toBe(true);
-  });
-
-  it('crises are on until the player turns them off', () => {
-    const store = memory();
-    expect(crisesOn(store)).toBe(true);
-    setCrises(false, store);
-    expect(crisesOn(store)).toBe(false);
-    expect(crisesOn(broken)).toBe(true);
   });
 
   it('auto-accept is off until the player turns it on, and stays off when storage is blocked', () => {
@@ -125,22 +115,15 @@ describe('auto-accept takes the staff advice without stopping the clock', () => 
   const show = { kind: 'show', label: 'Show me', node: 0 as NodeId } as CrisisOption['action'];
   const nuke = { kind: 'command', label: 'Launch', command: { type: 'nuclear_release', nation: N('USA') } } as unknown as CrisisOption['action'];
 
-  it('takes the recommended answer, a command or a hold', () => {
+  it('takes the recommended answer, whether an order, a hold, a look first or a wait', () => {
     expect(staffAnswer(crisis([opt('Go to war', join, true), opt('Stand aside', hold, false)]))?.title).toBe('Go to war');
     expect(staffAnswer(crisis([opt('Raise', join, false), opt('Hold', hold, true)]))?.title).toBe('Hold');
+    expect(staffAnswer(crisis([opt('Look first', show, true), opt('Hold', hold, false)]))?.title).toBe('Look first');
+    expect(staffAnswer(crisis([opt('Wait', hold, true, { defer: true }), opt('Go', join, false)]))?.title).toBe('Wait');
   });
 
-  it('leaves the decision on the table when the advice is to look first or to wait', () => {
-    expect(staffAnswer(crisis([opt('Look first', show, true), opt('Hold', hold, false)]))).toBeNull();
-    expect(staffAnswer(crisis([opt('Wait', hold, true, { defer: true }), opt('Go', join, false)]))).toBeNull();
-  });
-
-  it('never releases a nuclear weapon on its own', () => {
+  it('never releases a nuclear weapon on its own: that crisis goes to the player', () => {
     expect(staffAnswer(crisis([opt('Launch', nuke, true), opt('Hold', hold, false)]))).toBeNull();
-    const card = (primary: Card['primary']) => ({ key: 'k', primary }) as Card;
-    expect(staffApproves(card(join as Card['primary']))).toBe(true);
-    expect(staffApproves(card(nuke as Card['primary']))).toBe(false);
-    expect(staffApproves(card({ kind: 'show', label: 'Show me', node: 0 as NodeId }))).toBe(false);
   });
 
   it('answers a real treaty call (ww3-2027 as the United States) with the staff advice', () => {
@@ -221,13 +204,31 @@ describe('crises stop the clock with one decision', () => {
     expect(again?.key).not.toBe(c.key);
   }, 300_000);
 
-  it('Wait and consult leaves the call on the table to answer later', () => {
+  it('Wait and consult leaves the call on the table and asks again within a day, before the deadline', () => {
     const g = play('ww3-2027', 'USA');
     g.step();
     const c = nextCrisis(g.desk.cards, new Set(), contextOf(g))!;
     expect(c.options[1].defer).toBe(true);
     g.step();
     expect(g.desk.cards.some((x) => x.key === c.key), 'deferring sends nothing and keeps the card').toBe(true);
+    const back = returnsIn(c, c.options[1], 6);
+    expect(back).toBeGreaterThanOrEqual(1);
+    expect(back).toBeLessThanOrEqual(4);
+    expect(back * 6).toBeLessThan(c.hoursLeft!);
+    expect(returnsIn({ ...c, hoursLeft: 12 }, c.options[1], 6), 'with half a day left it asks on the next turn').toBe(1);
+  }, 300_000);
+
+  it('with auto-accept on the staff answers a treaty call with its recommendation, so the call never lapses unanswered', () => {
+    const g = play('ww3-2027', 'USA');
+    g.step();
+    const c = nextCrisis(g.desk.cards, new Set(), contextOf(g))!;
+    const o = staffAnswer(c)!;
+    expect(o.recommended).toBe(true);
+    expect(o.action).toMatchObject({ kind: 'command', command: { type: 'answer_treaty', nation: 'USA' } });
+    g.desk.act(c.card, o.action);
+    if (o.action.kind === 'command') g.send(o.action.command);
+    g.step();
+    expect(g.desk.answered.find((s) => s.card.key === c.key)!.answer).toMatchObject({ ok: true, final: true });
   }, 300_000);
 
   it('an enemy nuclear alert (south-asia-2027 as India): Raise the alert mates Indian warheads', () => {
@@ -247,14 +248,14 @@ describe('crises stop the clock with one decision', () => {
   it('an armistice offer becomes a crisis with Accept issuing offer_peace', () => {
     const g = play('ukraine-2026', 'UKR');
     g.step();
-    const card: Card = { key: 'peace|RUS', topic: 'diplomacy', role: 'foreign', tone: 'advice', tick: g.state.tick, title: '', text: '', primary: { kind: 'later', label: 'Fight on' } };
+    const card: Card = { key: 'peace|RUS', topic: 'diplomacy', tone: 'advice', tick: g.state.tick, title: '', text: '', primary: { kind: 'later', label: 'Fight on' } };
     const c = crisisOf(card, contextOf(g))!;
     expect(c.kind).toBe('peace');
     expect(c.options[0].action).toEqual({ kind: 'command', label: 'Accept peace', command: { type: 'offer_peace', nation: 'UKR', target: 'RUS' } });
     expect(c.options[1]).toMatchObject({ title: 'Fight on', recommended: true });
   }, 300_000);
 
-  it('ordinary advice never stops the clock', () => {
+  it('alerts never stop the clock', () => {
     const g = play('ukraine-2026', 'UKR');
     g.step(4);
     const routine = g.desk.cards.filter((c) => !/^(treaty|nalert|peace|capital)\|/.test(c.key));
@@ -300,6 +301,13 @@ describe('moments land only when the player would know them', () => {
     expect(momentsOf([hit('tur-fleet', 9)], ctx)).toEqual([]);
   });
 
+  it('a naval group wrecked by a nuclear detonation at its cell is part of that one moment, not a second flash', () => {
+    const lost = { type: 'formation_destroyed' as const, tick: 7, formation: 'ukr-boats' as FormationId, nation: N('UKR') };
+    const burst = (node: NodeId) => ({ type: 'nuclear_detonation' as const, tick: 7, by: N('RUS'), node, yieldKt: 150, casualties: 1000 });
+    expect(momentsOf([burst(sea), lost], ctx)).toMatchObject([{ kind: 'nuclear' }]);
+    expect(momentsOf([burst(10 as NodeId), lost], ctx), 'a group lost elsewhere that turn is its own moment').toMatchObject([{ kind: 'nuclear' }, { kind: 'fleet' }]);
+  });
+
   it('a capital changing hands in a war we are not in, and a carrier lost in a battle we did not fight, are not ours to see', () => {
     expect(momentsOf([{ type: 'node_captured', tick: 5, node: capital, from: N('PER'), to: N('BOL') }], { ...ctx, capitals: new Map([[capital, N('PER')]]) })).toEqual([]);
     const battle = (attacker: string, defender: string, loser: string) => ({ type: 'battle' as const, tick: 5, node: 3 as NodeId, attacker: N(attacker), defender: N(defender), domain: 'sea' as const, losses: { [loser]: { cvn: 1 } }, casualties: {} });
@@ -309,17 +317,19 @@ describe('moments land only when the player would know them', () => {
   });
 });
 
-describe('the biggest events reach the War Room (P1 H5)', () => {
-  it('gulf-2027 as Iran: the United States entering the war is a live War Room card and a moment, not a line in the ticker only', () => {
+describe('the biggest events are raised as alerts (P1 H5)', () => {
+  it('gulf-2027 as Iran: the United States entering the war is raised once as an alert and is a moment, not a line in the ticker only', () => {
     const g = play('gulf-2027', 'IRN');
     let card: Card | undefined;
     const events: SimEvent[] = [];
     for (let i = 0; i < 28 && !card; i++) {
       g.step();
       events.push(...g.state.latestEvents);
-      card = g.desk.cards.find((c) => c.key.startsWith('wire|war|') && c.title.includes('United States'));
+      card = g.desk.alerts.find((c) => c.key.startsWith('wire|war|') && c.title.includes('United States'));
     }
-    expect(card, 'a war card for the United States entering').toMatchObject({ tone: 'live', topic: 'threat' });
+    expect(card, 'an alert for the United States entering').toMatchObject({ tone: 'live', topic: 'threat' });
+    g.step();
+    expect(g.desk.alerts.map((c) => c.key), 'raised once').not.toContain(card!.key);
     const opening = new Set(SCENARIO_CARDS.find((s) => s.id === 'gulf-2027')!.wars.map(([a, b]) => `${a}>${b}`));
     const capitalOf = (id: NationId) => map.data.nations[map.nationIds.indexOf(id)]?.capital?.cell as NodeId | undefined;
     const found = momentsOf(events, {
@@ -329,13 +339,13 @@ describe('the biggest events reach the War Room (P1 H5)', () => {
     expect(found.filter((m) => m.kind === 'war').map((m) => m.title)).toContain('United States declares war on us');
   }, 240_000);
 
-  it('ww3-2027 as the United States: a naval group hit in port is a live card that opens the unit', () => {
+  it('ww3-2027 as the United States: a naval group hit in port is raised as an alert', () => {
     const g = play('ww3-2027', 'USA');
     let card: Card | undefined;
     for (let i = 0; i < 24 && !card; i++) {
       g.step();
       for (const c of g.state.focusNation?.treatyCalls ?? []) g.send({ type: 'answer_treaty', nation: N('USA'), war: c.war, treaty: c.treaty, join: true });
-      card = g.desk.cards.find((c) => c.key.startsWith('shiphit|'));
+      card = g.desk.alerts.find((c) => c.key.startsWith('shiphit|'));
     }
     expect(card).toMatchObject({ tone: 'live', primary: { kind: 'unit' } });
     const id = card!.key.split('|')[1] as FormationId;

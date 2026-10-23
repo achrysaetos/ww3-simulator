@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { NationId } from '../src/core/types';
 import { CURRENT_CONFIDENCE } from '../src/systems/intel/view';
 import { ContactPanel } from '../src/ui/map/ContactPanel';
-import { contactLabel, contactRing, isStale } from '../src/ui/map/contacts';
+import { AGE_TAG_HOURS, contactAlpha, contactLabel, contactRing, isStale } from '../src/ui/map/contacts';
 import { playWithStaff } from './staff-mirror';
 
 const N = (s: string) => s as NationId;
@@ -25,8 +25,20 @@ describe('contacts on the map: where intelligence last fixed a foreign formation
     expect(isStale({ ...old, confidence: CURRENT_CONFIDENCE })).toBe(false);
     expect(contactRing(old, 2, false)!.stroke).not.toBe(contactRing(fresh, 2, false)!.stroke);
     expect(contactLabel(old, false)).toBe('4d old');
-    expect(contactLabel({ ...fresh, ageHours: 1 }, false), 'a fix this hour needs no age').toBeNull();
     expect(contactLabel(fresh, true)).toBe('seen 6h ago · ±40 km');
+  });
+
+  it('fades a contact as its fix ages and names its age on the map only once it is a day old; the selected one always', () => {
+    const fresh = { ageHours: 6, confidence: 0.92, errorKm: 30 };
+    expect(contactLabel(fresh, false), 'a fix from the last pass is the normal state of a front').toBeNull();
+    expect(contactLabel({ ...fresh, ageHours: AGE_TAG_HOURS - 1 }, false)).toBeNull();
+    expect(contactLabel({ ...fresh, ageHours: AGE_TAG_HOURS }, false)).toBe('24h old');
+    expect(contactLabel(fresh, true)).toBe('seen 6h ago · ±30 km');
+    const day = { ...fresh, ageHours: 24, confidence: 0.7 }, week = { ...fresh, ageHours: 168, confidence: 0.1 };
+    expect(contactAlpha({ ...fresh, confidence: 1 })).toBe(1);
+    expect(contactAlpha(fresh)).toBeGreaterThan(contactAlpha(day));
+    expect(contactAlpha(day)).toBeGreaterThan(contactAlpha(week));
+    expect(contactAlpha(week), 'an old contact is a ghost, still there to see').toBeGreaterThan(0.3);
   });
 
   it('picking a Russian contact as Ukraine shows its fix, error and age, never its orders or true position (ukraine-2026)', () => {

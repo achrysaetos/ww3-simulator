@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { chromium } from '/opt/node-tools/node_modules/playwright/index.mjs';
-import { newGame } from './e2e-start.mjs';
+import { newGame, runTo } from './e2e-start.mjs';
 
 const [, , url, out, play = 'ukraine-2026:UKR'] = process.argv;
 fs.mkdirSync(out, { recursive: true });
@@ -25,18 +25,7 @@ const check = (ok, what) => {
 const { page, errors } = await newGame(browser, url, scenario, nation);
 await page.waitForFunction(() => window.__map && window.__client?.state.formations.length > 0, null, { timeout: 120_000 });
 
-for (;;) {
-  const s = await page.evaluate(() => ({ tick: window.__client.state.tick, brief: !!document.querySelector('[data-testid="daily-brief"]') }));
-  if (s.brief) {
-    await page.click('[data-testid="brief-close"]');
-    continue;
-  }
-  if (s.tick >= TICKS) break;
-  await page.evaluate(() => window.__client.ticksPerSec || window.__client.setSpeed(20));
-  await page.waitForFunction(([t]) => window.__client.state.tick >= t || document.querySelector('[data-testid="daily-brief"]'), [TICKS], { timeout: 600_000 });
-}
-await page.evaluate(() => window.__client.setSpeed(0));
-if (await page.locator('[data-testid="brief-close"]').count()) await page.click('[data-testid="brief-close"]');
+await runTo(page, TICKS);
 
 // The contact to pick: a current enemy manoeuvre contact a few hours old, its ring tens of km across.
 const target = await page.evaluate((me) => {
@@ -75,7 +64,7 @@ await page.mouse.move(canvas.x + canvas.width - 20, canvas.y + canvas.height - 6
 await page.waitForTimeout(600);
 const fix = await page.locator('[data-testid="contact-fix"]').innerText();
 check(/Last fixed \d+[hd] ago/.test(fix) && /km of that fix/.test(fix), `${tag}: the panel gives the fix age and error: ${fix}`);
-check(!(await page.locator('[data-testid^="posture-"]').count()), `${tag}: no orders offered for an enemy contact`);
+check(!(await page.locator('[data-testid="command-line"], [data-testid="drag-hint"]').count()), `${tag}: no orders offered for an enemy contact`);
 await page.screenshot({ path: path.join(out, `contact-${tag}.png`) });
 check(errors.length === 0, `${tag}: no page errors ${errors.join(' | ')}`);
 await browser.close();

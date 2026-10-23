@@ -1,0 +1,18 @@
+.ww-ownflag { display: inline-flex; cursor: grab; touch-action: none; }
+.ww-ownflag:active { cursor: grabbing; }
+.ww-flagrow {
+  position: absolute; left: 20px; top: 70px; display: flex; gap: 6px; padding: 4px 6px; border-radius: 3px; pointer-events: auto;
+  background: rgba(6, 10, 18, 0.62); border: 1px solid var(--ww-line);
+}
+.ww-flagrow-flag { position: relative; display: inline-flex; padding: 2px; border-radius: 2px; border-bottom: 2px solid transparent; }
+.ww-flagrow-flag svg { display: block; }
+.ww-flagrow-flag.enemy { border-bottom-color: var(--ww-red); }
+.ww-flagrow-flag.ally { border-bottom-color: var(--ww-blue); }
+.ww-flagrow-flag.pending { border-bottom-color: rgba(74, 163, 255, 0.45); }
+.ww-flagrow-flag.friend { border-bottom-color: rgba(74, 163, 255, 0.45); border-bottom-style: dashed; }
+.ww-flagrow-flag.neutral { border-bottom-color: var(--ww-faint); opacity: 0.8; }
+.ww-flagrow.live .ww-flagrow-flag { outline: 1px dashed rgba(150, 195, 240, 0.3); }
+.ww-flagrow-flag.over { outline: 2px solid var(--ww-gold) !important; opacity: 1; }
+.ww-flagrow-offer { position: absolute; right: -2px; top: -3px; width: 8px; height: 8px; border-radius: 50%; border: 1px solid #04070c; }
+.ww-flagrow-offer.ours { background: var(--ww-gold); }
+.ww-flagrow-offer.theirs { background: var(--ww-green); }

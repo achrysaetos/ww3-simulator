@@ -1,0 +1,26 @@
+# Start a game
+
+## Sub-features
+
+- Scenario list (eight cards, `scenario-<id>`), nation picks on each card (`pick-<NATION>`), and a search for any other nation (`nation-search-open`, `nation-search`, `search-<NATION>`).
+- Command role: `start-role-cinc` (AI runs the war), `start-role-marshal`, `start-role-brigade` (player runs every domain).
+- `start`, then the opening: a title beat (`opening-title`), the situation report (`briefing`, closed by `briefing-close`): the chief of staff's summary, four tiles (at war with, our forces, enemy contacts, war support), objectives and how you command. It lists no staff advice; the staff speaks through crises and alerts only.
+- The coach tour on a first session (`coach`, `coach-next`, `coach-skip`, one `coach-<id>` per step), remembered in `localStorage['ww3.coach']`. Four steps: the map (drag a counter to order it), the clock, the Nation drawer (who runs which domain), and the flag row (drag your flag onto an enemy's to offer peace). A step whose target is missing is skipped.
+- Start-screen settings (`start-settings`, `settings`): `setting-auto-accept` writes `localStorage['ww3.autoAccept']` (off by default; on lets the staff answer crises with a toast, also toggled in-game by `menu-auto-accept` in the Game menu), `setting-coach` replays the tour. Saved games: `start-quickload`, `start-load-file`, with `start-notice` for load results.
+
+## How to get to it (user POV)
+
+Load the page. Click a scenario card, pick a nation, pick a role, press Start. Watch the title, read the report, close it. The map shell (`shell`) appears.
+
+## Driving it with Playwright
+
+`open({ play: 'ukraine-2026:UKR', role })` in `scripts/play.mjs` does all of this through clicks via `tests/e2e-start.mjs`, with the tour and crisis screens pre-dismissed in localStorage. To test the tour or crises themselves, drive the page without that init script (see `tests/ui-drama.e2e.mjs`).
+
+Proof: `[data-testid="shell"]` visible, `window.__client.state.tick >= 1` (the first turn runs under the title), `__client.state.formations.length > 0`, and no page errors.
+
+## Gotchas
+
+- The scenario load is slow on first visit (map and orbat data); waits use 60 to 120 s timeouts.
+- A nation not on the card needs the search path; `newGame` falls back to it automatically.
+- `ww3.autoAccept='on'` has the staff answer each crisis (treaty call, peace offer, nuclear alert, capital threat) with its recommended option and say so in a toast, instead of a blocking crisis screen. A recommended nuclear release still opens the crisis screen. Remember this when a crisis-related change seems to do nothing.
+- `tests/ui-drama.e2e.mjs` covers the tour, the opening, crises and moments (it installs a fake clock; drive moments with `page.clock.runFor`).

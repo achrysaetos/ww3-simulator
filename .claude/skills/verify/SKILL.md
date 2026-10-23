@@ -1,0 +1,90 @@
+---
+name: verify
+description: Builds, launches and plays the ww3-simulator browser game (Vite + React, simulation in a web worker) through the real UI with Playwright, and runs its headless checks (sim, realism, validate, perf). This skill should be used to "verify", "playtest", "screenshot the game", "prove this change works in the game", or check any change to the map, orders, clock, panels or simulation before a PR.
+---
+
+# Verify ww3-simulator
+
+The player surface is the browser game: a start screen, then a world map with a top bar, a dock of drawers, and orders given by dragging your counters. A second surface is the headless CLI and test suites, which prove simulation behaviour without a browser. Prove UI changes on the game and engine changes headlessly, and run both when a change crosses the worker boundary.
+
+Paths below are relative to the repo root. Evidence goes to `/tmp/ww3-verify/runs/<run>/` and survives cleanup. Instance state (pid, logs) lives in `/tmp/ww3-verify/state/`; set `VERIFY_STATE` to run a second instance with its own `PORT`.
+
+## Launch
+
+```bash
+.claude/skills/verify/scripts/launch.sh            # npm ci if needed, npm run build, vite preview on PORT (4650)
+PORT=4651 VERIFY_STATE=/tmp/ww3-verify/state-b .claude/skills/verify/scripts/launch.sh   # a second, isolated instance
+SKIP_BUILD=1 .claude/skills/verify/scripts/launch.sh   # reuse dist/ when src is unchanged
+```
+
+It is ready when it prints `ready http://localhost:4650/`. It refuses to start when the port already answers: run the doctor, and never drive a server it did not start (the user may have `npm run dev` on 5173). The preview serves the production build, so rebuild after every source change: `cleanup.sh`, then `launch.sh`.
+
+## Doctor
+
+```bash
+.claude/skills/verify/scripts/doctor.sh
+```
+
+Read-only. Checks the recorded pid is alive, the port answers 200, `dist/` is newer than `src/`, and Chromium exists. A `WARN src changed after the build` means the instance shows stale code. Run it first whenever a drive misbehaves.
+
+## Drive
+
+`scripts/play.mjs` starts a game the way a returning player does (tour skipped, crises answered by the staff's recommendation with a toast), runs the clock, opens drawers and writes `summary.json`:
+
+```bash
+node .claude/skills/verify/scripts/play.mjs --play ukraine-2026:UKR --role cinc --ticks 8 --drawers forces,nation,log,cost --run smoke
+```
+
+`--play` is `<scenario>:<NATION>` (scenarios: peace-2027, ukraine-2026, taiwan-2027, baltic-2027, korea-2027, gulf-2027, south-asia-2027, ww3-2027). `--role` is cinc (the AI runs the war), marshal, or brigade (the player commands every unit; use it for order tests). It exits non-zero on page errors or a drawer that does not open.
+
+For a feature-specific drive, import it:
+
+```js
+import { open } from './.claude/skills/verify/scripts/play.mjs';
+const s = await open({ play: 'ukraine-2026:UKR', role: 'brigade', run: 'orders' });
+await s.runTo(8);              // ticks are 6 game hours
+await s.flyTo(node, -0.5);     // waits for the camera to settle
+const a = await s.at(unitNode), b = await s.at(targetNode);   // page coordinates of map nodes
+await s.page.mouse.move(a.x, a.y); await s.page.mouse.down();  // press on your own counter
+await s.page.mouse.move(b.x, b.y, { steps: 12 });                // drag: the pill (data-testid="pill") follows the cursor
+await s.shot('pill.png');
+await s.page.mouse.up();                                         // release sends the order
+await s.close();
+```
+
+Handles: every control has a `data-testid` (grep `data-testid` in `src/ui`). The page exposes `window.__client` (the sim client: `state`, `meta.nationIds`, `setSpeed(gameHoursPerSec)`, `speed`, `step`, `clock.shown`, `ticksPerSec`, `glides`, `dragKit(ids)`, `supplyEffect(node)`, `tracks`), `window.__map` (the renderer: `flyTo`, `viewCamera`, `screenOf`, `hits`, `animating`, `cam`, `map`, `kmPerPx`, `pick`) and `window.__drag` (`lastAimMs`, `maxAimMs`, `totalAimMs`, `aims`: the pure aim per pointer move). Read state through these; give orders only through clicks, drags and keys. The feature map in `features/` names the handles and gotchas per feature.
+
+Drag orders have their own drive: `node tests/ui-drag.e2e.mjs http://localhost:4650/ drag` (evidence in `/tmp/ww3-verify/runs/drag/`). Feature suites live in `tests/*.e2e.mjs` and take two argument styles. ui-drag, ui-front, ui-diplomacy and ui-supply take a run name and write to `/tmp/ww3-verify/runs/<run>`: `node tests/ui-drag.e2e.mjs http://localhost:4650/ drag`. ui-shell, ui-contacts, ui-outputs, ui-drama and ui-orders take an output directory and optional `scenario:NATION` plays: `node tests/ui-shell.e2e.mjs http://localhost:4650/ /tmp/ww3-verify/runs/shell ukraine-2026:UKR`. `TICKS=n` sets the run length for ui-shell, ui-contacts, ui-outputs and ui-orders. ui-orders now covers only the Nation drawer's passage grant; unit orders are ui-drag.
+
+Headless checks need no server:
+
+```bash
+npm run typecheck && npm test                     # vitest, about 1,150 tests, 15-25 minutes
+npm run sim -- --scenario ukraine-2026 --days 3 --quiet --report
+npm run realism                                   # REALISM=1 calibration suite
+npm run validate -- --cases kursk-2024 --runs 4   # held-out historical cases
+npm run perf                                      # PERF=1 timing budgets
+```
+
+## Evidence
+
+A proof is the before and after of a player action on the real path: start a game from the start screen, act with mouse or keyboard, then screenshot and read the resulting state from `__client` (the formation's order track, the tick, control of the cell). Calling `__client` command methods directly proves the engine, not the UI. Capture `summary.json` with `errors`; a run with page errors is a failed proof even when the screenshot looks right. For engine changes, keep the CLI output (`--report`) or the vitest summary in the run directory. Name the run after the feature (`--run drag-attack`) and cite its path in the PR. Reusing a run name replaces that directory.
+
+## Cleanup
+
+```bash
+.claude/skills/verify/scripts/cleanup.sh   # stops only the pid launch.sh recorded; keeps /tmp/ww3-verify/runs
+```
+
+Run it after every drive, including failed ones. It never kills by process name.
+
+## Helpers
+
+| Script | Does |
+|---|---|
+| `scripts/launch.sh` | Build, serve the bundle on `PORT`, record the pid, wait until it answers |
+| `scripts/doctor.sh` | Read-only health check of that instance |
+| `scripts/play.mjs` | CLI smoke playthrough, and an importable `open()` session with `runTo`, `flyTo`, `at`, `settle`, `shot`, `summary` |
+| `scripts/cleanup.sh` | Stop our instance, keep the evidence |
+
+Feature map: `features/README.md`. When a change adds, moves or removes a user-facing feature, update its file in the same PR.

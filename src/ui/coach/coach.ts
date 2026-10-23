@@ -17,12 +17,10 @@ export interface CoachStep {
 }
 
 export const COACH_STEPS: readonly CoachStep[] = [
-  { id: 'map', target: '[data-testid="map"]', side: 'centre', title: 'This is your war', text: 'Your forces in blue, the enemy in red as your intelligence last saw them. Drag to move, scroll to zoom, click a counter to command it.' },
-  { id: 'clock', target: '[data-testid="clock"]', side: 'below', key: 'Space', title: 'Time is stopped', text: 'Each turn is six hours. Press Space or pick a speed to run the clock; Step moves one turn.' },
-  { id: 'staff', target: '[data-testid="staff-panel"]', side: 'right', title: 'Your staff runs the rest', text: 'Take any domain into your own hands, or give it back. Your role is only a starting point.' },
-  { id: 'warroom', target: '[data-testid="war-room"]', side: 'left', title: 'The War Room', text: 'Advisers bring what needs you, each with a recommendation. One click approves it.' },
-  { id: 'brief', target: '[data-testid="open-brief"]', side: 'above', key: 'B', title: 'The Daily Brief', text: 'Decisions gather here each morning. A crisis stops the clock and asks you at once.' },
-  { id: 'cost', target: '[data-testid="drawer-cost"]', side: 'above', key: 'C', title: 'What it costs', text: 'Lives, money and munitions spent, for you and your enemy, as your intelligence counts them.' },
+  { id: 'map', target: '[data-testid="map"]', side: 'centre', title: 'This is your war', text: 'Your forces in blue, the enemy in red as your intelligence last saw them. Drag the map to move it, scroll to zoom. Drag one of your counters onto a target to order it.' },
+  { id: 'clock', target: '[data-testid="clock"]', side: 'below', key: 'Space', title: 'Time is stopped', text: 'Press Space or pick a speed to run the clock, from one game hour a second up to twenty. Step moves one six-hour turn.' },
+  { id: 'staff', target: '[data-testid="drawer-nation"]', side: 'above', key: 'N', title: 'Your staff runs the rest', text: 'Under Nation, take any domain into your own hands or give it back. Your role is only a starting point. A crisis stops the clock and asks you at once.' },
+  { id: 'peace', target: '[data-testid="flag-row"]', side: 'below', title: 'Ending it', text: 'Drag your flag onto an enemy\'s to offer peace. The card tells you before you let go whether they would take it, and the Peace dial shows how close they are.' },
 ];
 
 export const COACH_KEY = 'ww3.coach';

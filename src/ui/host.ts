@@ -6,9 +6,9 @@ import { resumeRun, saveRun, type ResumedSession } from '../scenarios/save';
 import { authority, isOperationCommand } from '../systems/orders';
 import { checkCommand } from './commands';
 import { COMMAND_LABEL } from './events';
-import { Pacer } from './pacer';
 import { forecastInput } from '../forecast/operation';
-import { orderOptions } from './orders/options';
+import { priorityEffect } from '../systems/logistics';
+import { beliefOf, buildKit, buffersOf, type Belief } from './drag/kit';
 import { delegateCommands, roleById } from './staff/roles';
 import { nationCards, sessionMeta, SnapshotEncoder, type FromWorker, type ScenarioCard, type ToWorker } from './snapshot';
 
@@ -21,8 +21,8 @@ export const SCENARIO_CARDS: ScenarioCard[] = SCENARIOS.map((s) => {
   return { id: s.id, name: s.name, summary: s.summary, startDate: s.startDate, suggestedNation: s.suggestedNation as NationId, belligerents: [...belligerents], wars, ongoing };
 });
 
-/** Most formations one radial menu works out orders for. */
-const MAX_SELECTION = 24;
+/** Most formations one drag carries. */
+const MAX_DRAG = 24;
 /** Longest forecast the staff runs: two weeks covers an operation's first bounds (A2b's checks use 7 days). */
 export const MAX_FORECAST_DAYS = 14;
 
@@ -31,8 +31,8 @@ const setPlayer = (world: World, nation: NationId) => {
 };
 
 /**
- * The simulation side of the worker: owns the running World, paces it against the UI's
- * acks, and treats every message from the page as untrusted input. The player commands one
+ * The simulation side of the worker: owns the running World, steps it when the page's clock
+ * asks, and treats every message from the page as untrusted input. The player commands one
  * nation, chosen at start or by the save, for the whole session.
  */
 export class SimHost {
@@ -40,13 +40,10 @@ export class SimHost {
   private encoder: SnapshotEncoder | null = null;
   private player: NationId | null = null;
   private focus: { nation?: NationId; formation?: FormationId } = {};
-  private readonly pacer = new Pacer(() => {
-    if (!this.session || !this.encoder) return;
-    this.encoder.collect(this.session.engine.step(this.session.world).filter((e) => this.forPlayer(e)), this.session.world, this.session.engine.map);
-    this.send();
-  });
+  /** The player's believed world as of one tick: every press in that tick aims from it, and the kit's field is cached on it. */
+  private belief: { tick: number; world: Belief } | null = null;
 
-  constructor(private readonly post: (m: FromWorker) => void) {
+  constructor(private readonly post: (m: FromWorker, transfer?: Transferable[]) => void) {
     post({ type: 'hello', scenarios: SCENARIO_CARDS, nations: nationCards(loadMap(), profiles) });
   }
 
@@ -58,7 +55,6 @@ export class SimHost {
     try {
       this.dispatch(msg);
     } catch (e) {
-      this.pacer.stop();
       this.post({ type: 'error', message: e instanceof Error ? `${e.message}\n${e.stack ?? ''}` : String(e) });
     }
   }
@@ -90,37 +86,51 @@ export class SimHost {
         this.post({ type: 'saved', text: saveRun(this.session.scenario.id, this.session.world), scenario: this.session.scenario.id, tick: this.session.world.tick });
         return;
       case 'quit':
-        this.pacer.setSpeed(0);
         this.session = null;
         this.encoder = null;
         this.player = null;
         this.post({ type: 'closed' });
         return;
-      case 'ack':
-        this.pacer.ack();
-        return;
-      case 'speed':
-        if (typeof msg.ticksPerSec === 'number' && Number.isFinite(msg.ticksPerSec)) this.pacer.setSpeed(Math.max(0, Math.min(60, msg.ticksPerSec)));
-        return;
       case 'step':
-        this.pacer.step();
-        return;
+        return this.step();
       case 'command':
         return this.command(msg.command);
       case 'focus':
         this.focus = { nation: msg.nation, formation: msg.formation };
         this.send();
         return;
-      case 'options': {
-        const { session, player } = this;
-        if (!session || !player || !Number.isInteger(msg.node) || msg.node < 0 || msg.node >= session.map.size || !Array.isArray(msg.formations)) return;
-        const own = msg.formations.filter((id): id is FormationId => typeof id === 'string' && session.world.formations[id as FormationId]?.nation === player).slice(0, MAX_SELECTION);
-        this.post({ type: 'options', seq: msg.seq, tick: session.world.tick, result: orderOptions(session.world, session.engine, player, own, msg.node as NodeId) });
-        return;
-      }
+      case 'drag_kit':
+        return this.dragKit(msg.seq, msg.formations);
       case 'forecast':
         return this.forecast(msg.seq, msg.plan, msg.days);
+      case 'supply_effect':
+        return this.supplyEffect(msg.seq, msg.node);
     }
+  }
+
+  /** The kit for a drag of the player's own active formations, built from what the player believes and transferred, not copied. */
+  private dragKit(seq: unknown, raw: unknown): void {
+    const { session, player } = this;
+    if (!session || !player || typeof seq !== 'number') return;
+    const { world } = session;
+    const own = (Array.isArray(raw) ? raw : [])
+      .filter((id): id is FormationId => typeof id === 'string' && Object.hasOwn(world.formations, id) && world.formations[id as FormationId].nation === player && world.formations[id as FormationId].status === 'active')
+      .slice(0, MAX_DRAG);
+    if (!own.length) {
+      this.post({ type: 'drag_kit', seq, kit: null, reason: 'none of those formations is yours to order' });
+      return;
+    }
+    if (this.belief?.tick !== world.tick) this.belief = { tick: world.tick, world: beliefOf(world, session.map, player, session.catalog) };
+    const kit = buildKit(this.belief.world, session.engine, player, own);
+    this.post({ type: 'drag_kit', seq, kit, ...(kit ? {} : { reason: 'nothing there can be dragged' }) }, kit ? buffersOf(kit) : []);
+  }
+
+  /** What a supply priority at `raw` would move for the player's own forces; null for a cell the player does not hold. */
+  private supplyEffect(seq: unknown, raw: unknown): void {
+    const { session, player } = this;
+    if (!session || !player || typeof seq !== 'number') return;
+    const ok = typeof raw === 'number' && Number.isInteger(raw) && raw >= 0 && raw < session.map.landCount && session.world.control[raw] === player;
+    this.post({ type: 'supply_effect', seq, effect: ok ? priorityEffect(session.world, session.map, player, raw as NodeId) : null });
   }
 
   /** The plan, checked at the command boundary like any order, cut into the forecast's input from the player's beliefs. */
@@ -168,14 +178,21 @@ export class SimHost {
     return e.type !== 'command_result' || (e.nation === this.player && !!e.byPlayer);
   }
 
+  /** One tick, when the page's clock asks for it: the page holds one request at a time, so nothing queues. */
+  private step(): void {
+    const { session, encoder } = this;
+    if (!session || !encoder) return;
+    encoder.collect(session.engine.step(session.world).filter((e) => this.forPlayer(e)), session.world, session.engine.map);
+    this.send();
+  }
+
   private open(session: ResumedSession, nation: NationId, resumed = false): void {
-    this.pacer.setSpeed(0);
     this.session = session;
     this.player = nation;
+    this.belief = null;
     const { world, engine, scenario } = session;
     this.encoder = new SnapshotEncoder(engine.map.nationIds, engine.catalog, engine.map.size);
     this.focus = { nation };
-    this.pacer.sent();
     const card = SCENARIO_CARDS.find((c) => c.id === scenario.id)!;
     const history = resumed ? this.encoder.resumed(world, engine.map) : [];
     const snapshot = this.encoder.encode(world, engine.map, this.focus);
@@ -186,7 +203,6 @@ export class SimHost {
   private send(): void {
     const { session, encoder } = this;
     if (!session || !encoder) return;
-    this.pacer.sent();
-    this.post({ type: 'snapshot', snapshot: encoder.encode(session.world, session.engine.map, this.focus), stats: { stepMs: this.pacer.stepMs, achievedTps: this.pacer.achievedTps } });
+    this.post({ type: 'snapshot', snapshot: encoder.encode(session.world, session.engine.map, this.focus) });
   }
 }

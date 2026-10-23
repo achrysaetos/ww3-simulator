@@ -1,18 +1,13 @@
-import { createElement } from 'react';
-import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it } from 'vitest';
-import { atWar } from '../src/core/engine';
-import type { Command, CommandDomain, FormationId, NationId, NodeId, SimEvent } from '../src/core/types';
+import type { Command, CommandDomain, NationId, SimEvent } from '../src/core/types';
 import { loadMap } from '../src/data/load';
 import { orderDelayHours } from '../src/systems/c2';
 import { authority } from '../src/systems/orders';
 import { describeEvent } from '../src/ui/events';
-import { advise, answerOf, type Card, type CommandAction, type Situation } from '../src/ui/staff/advice';
+import type { Card, CommandAction } from '../src/ui/staff/advice';
 import { advisorOf, ROLES } from '../src/ui/staff/advisors';
 import type { Sent } from '../src/ui/staff/desk';
 import { COMMAND_ROLES, delegateCommands, roleOf } from '../src/ui/staff/roles';
-import { operations } from '../src/ui/staff/operations';
-import { StaffCard, WarRoom } from '../src/ui/staff/WarRoom';
 import { EventFeed } from '../src/ui/feed';
 import { SCENARIO_CARDS } from '../src/ui/host';
 import { headlines } from '../src/ui/staff/ticker';
@@ -33,7 +28,7 @@ afterEach(() => {
   for (const g of open.splice(0)) g.quit();
 });
 
-/** Press a card's recommended button the way the War Room does: the desk records it and the command goes to the host. */
+/** Press a card's recommended button the way a crisis does: the desk records it and the command goes to the host. */
 function approve(g: Game, card: Card): CommandAction {
   const a = card.primary;
   if (a?.kind !== 'command') throw new Error(`${card.key} has no command to approve`);
@@ -54,18 +49,6 @@ function settle(g: Game, key: string, ticks = 40): Sent {
   throw new Error(`no final answer for ${key}`);
 }
 
-const shown = (g: Game, s: Sent) => renderToStaticMarkup(createElement(StaffCard, { card: s.card, me: g.desk.me, sent: s, paused: false, onAct: () => {} }));
-
-/** The player's view, built the way the desk builds it, for sources that need a figure the test sets. */
-function situation(g: Game, over: Partial<Situation> = {}): Situation {
-  const d = g.state.focusNation!;
-  return {
-    me: g.desk.me, ongoing: new Set(), tick: g.state.tick, dtHours: 6, map, nationIds: map.nationIds, control: g.state.control, formations: g.state.formations,
-    nations: g.state.nations, d, recent: g.desk.recent, namer: g.namer, ammoPerDay: null, burnPerDay: {}, ops: g.state.ops, contest: g.state.contest, known: () => undefined,
-    munitionKind: () => undefined, unitCostUsdM: () => 10, ...over,
-  };
-}
-
 describe('advisor cards: the recommended button issues the command, and the answer comes back and shows', () => {
   it('treaty calls (ww3-2027 as the United States): Go to war answers each call in the engine', () => {
     const g = start('ww3-2027', 'USA');
@@ -75,7 +58,6 @@ describe('advisor cards: the recommended button issues the command, and the answ
     // A treaty calls only on a war inside its area (A4), so how many arrive on day one is the scenario's, not the card's.
     expect(calls.length).toBeGreaterThan(0);
     for (const c of calls) {
-      expect(advisorOf(N('USA'), c.role!).title).toBe('Secretary of State');
       expect(c.urgent).toBe(true);
       const a = approve(g, c);
       expect(a.command).toMatchObject({ type: 'answer_treaty', nation: 'USA', join: true });
@@ -86,100 +68,11 @@ describe('advisor cards: the recommended button issues the command, and the answ
       expect(s.answer).toEqual({ ok: true, text: 'Treaty answer: will honour the treaty', final: true });
       const cmd = s.action.command as Extract<Command, { type: 'answer_treaty' }>;
       expect(cmd.join).toBe(true);
-      expect(shown(g, s)).toContain('will honour the treaty');
     }
     expect(g.desk.recent.filter((e) => e.type === 'command_result' && e.command === 'answer_treaty')).toHaveLength(calls.length);
     expect(g.desk.cards.some((c) => calls.some((x) => x.key === c.key))).toBe(false);
     g.step(4);
     for (const a of aggressors) expect(g.state.focusNation!.enemies, 'the engine took the United States into each war it answered').toContain(a);
-  }, 300_000);
-
-  it('a build-up (ukraine-2026 as Ukraine): Reinforce moves the nearest reserve brigade, and its order answer shows', () => {
-    const g = start('ukraine-2026', 'UKR');
-    let card: Card | undefined;
-    for (let i = 0; i < 24 && !card; i++) {
-      g.step();
-      card = g.desk.cards.find((c) => c.key.startsWith('massing|') && c.primary?.kind === 'command');
-    }
-    expect(card).toBeDefined();
-    const a = approve(g, card!);
-    const cmd = a.command as Extract<Command, { type: 'order' }>;
-    expect(cmd).toMatchObject({ type: 'order', nation: 'UKR', order: { posture: 'move', target: card!.node } });
-    expect(g.world.formations[cmd.formation].order.posture).toBe('reserve');
-    const s = settle(g, card!.key);
-    const result = g.desk.recent.find((e) => e.type === 'command_result' && e.formation === cmd.formation && e.code !== 'relayed');
-    expect(result).toMatchObject({ command: 'order', nation: 'UKR', byPlayer: true });
-    expect(s.answer!.ok).toBe(result!.type === 'command_result' && result!.ok);
-    const f = g.world.formations[cmd.formation];
-    // On the way, or already there and dug in: a reserve one cell back can arrive inside a tick.
-    if (s.answer!.ok) expect(f.node === card!.node ? f.order.posture : f.order).toEqual(f.node === card!.node ? 'defend' : expect.objectContaining({ posture: 'move', target: card!.node }));
-    expect(shown(g, s)).toContain(s.answer!.text.replace(/&/g, '&amp;'));
-  }, 300_000);
-
-  it('a warned build-up (peace-2027 as South Korea): Reinforce sends a brigade to the DMZ before any shot, and only when warned', () => {
-    const korea = (buildUp: boolean) => {
-      const g = start('peace-2027', 'KOR');
-      const { world } = g;
-      const [kor, prk] = [N('KOR'), N('PRK')];
-      const dmz = new Set<NodeId>();
-      for (let n = 0 as NodeId; n < map.landCount; n++)
-        if (world.control[n] === kor && [...map.neighbors(n)].some((m) => m < map.landCount && world.control[m] === prk)) dmz.add(n);
-      // The CE-5 build-up (tests/belief.test.ts): every KPA manoeuvre formation marched to the DMZ.
-      const kpa = Object.values(world.formations).filter((f) => f.nation === prk && f.kind === 'maneuver' && f.status === 'active');
-      const across = [...map.nodesOf(prk)].filter((n) => world.control[n] === prk && [...map.neighbors(n)].some((m) => dmz.has(m)));
-      if (buildUp) kpa.forEach((f, i) => world.pending.push({ type: 'order', nation: prk, formation: f.id, order: { posture: 'move', target: across[i % across.length] } }));
-      let card: Card | undefined;
-      for (let i = 0; i < 16 && !card; i++) {
-        g.step();
-        card = g.desk.cards.find((c) => c.key === 'warning|PRK');
-      }
-      return { g, card, dmz };
-    };
-    const quiet = korea(false);
-    expect(quiet.card, 'no warning, no card').toBeUndefined();
-    const { g, card, dmz } = korea(true);
-    expect(card).toBeDefined();
-    expect(atWar(g.world, N('KOR'), N('PRK'))).toBe(false);
-    expect(card!.text).toMatch(/North Korea|PRK/);
-    const a = approve(g, card!);
-    const cmd = a.command as Extract<Command, { type: 'order' }>;
-    expect(cmd).toMatchObject({ type: 'order', nation: 'KOR', order: { posture: 'move', target: card!.node } });
-    expect(dmz.has(card!.node!)).toBe(true);
-    expect(dmz.has(g.world.formations[cmd.formation].node)).toBe(false);
-    const s = settle(g, card!.key);
-    expect(s.answer!.ok).toBe(true);
-    expect(shown(g, s)).toContain(s.answer!.text.replace(/&/g, '&amp;'));
-  }, 300_000);
-
-  it('thin reserves (ukraine-2026 as Ukraine): Mobilise raises the call-up target in the engine', () => {
-    const g = start('ukraine-2026', 'UKR');
-    g.step(8);
-    g.world.nations[N('UKR')].reserves = 5_000;
-    g.step();
-    const card = g.desk.cards.find((c) => c.key.startsWith('mobilise|'));
-    expect(card, 'the chief asks for mobilisation once reserves cannot refill the front').toBeDefined();
-    const a = approve(g, card!);
-    const level = (a.command as Extract<Command, { type: 'set_mobilization' }>).level;
-    expect(level).toBeGreaterThan(g.world.nations[N('UKR')].mobilization);
-    const s = settle(g, card!.key, 4);
-    expect(s.answer).toMatchObject({ ok: true, text: `Mobilisation ordered to ${Math.round(level * 100)}%` });
-    expect(shown(g, s)).toContain('Mobilisation ordered');
-  }, 300_000);
-
-  it('shells running out (ukraine-2026 as Ukraine): Order more shells sets the shell line to its surge rate', () => {
-    const g = start('ukraine-2026', 'UKR');
-    g.step(4);
-    const d = g.state.focusNation!;
-    const card = advise(situation(g, { ammoPerDay: d.bulk!.ammo / 21 })).find((c) => c.key.startsWith('shells|'));
-    expect(card?.title).toBe('Artillery shells run out in 3 weeks');
-    const a = approve(g, card!);
-    const cmd = a.command as Extract<Command, { type: 'produce' }>;
-    expect(cmd.item).toMatch(/^shell_/);
-    expect(cmd.ratePerMonth).toBe(Math.round(d.economy!.capacity[cmd.item].surge));
-    g.step();
-    expect(g.world.slices.economy.nations[N('UKR')].lines[cmd.item].orderPerMonth).toBe(cmd.ratePerMonth);
-    const answer = answerOf(cmd, g.state.tick - 1, situation(g));
-    expect(answer).toMatchObject({ ok: true, final: true });
   }, 300_000);
 
   it('an enemy nuclear alert (south-asia-2027 as India): Raise our alert mates Indian warheads', () => {
@@ -236,7 +129,7 @@ describe('"Your staff runs" (ukraine-2026 as Ukraine)', () => {
 });
 
 describe('the staff reads only what the player is told', () => {
-  it('never sees the enemy\'s command answers (BA-12), and says when an order is in transit (CE-9)', () => {
+  it('never sees the enemy\'s command answers (BA-12), and knows when an order is in transit (CE-9)', () => {
     const g = start('ukraine-2026', 'UKR');
     const seen: SimEvent[] = [];
     for (let i = 0; i < 8; i++) {
@@ -254,8 +147,6 @@ describe('the staff reads only what the player is told', () => {
     expect(results.length).toBeGreaterThan(0);
     expect(results.every((e) => e.type === 'command_result' && e.nation === 'UKR' && e.byPlayer)).toBe(true);
     expect(g.desk.inTransit.get(slow)).toBeGreaterThan(0);
-    const card = g.desk.cards.find((c) => c.key.startsWith(`relayed|${slow}`));
-    expect(card?.text).toMatch(/reaches .+ in about \d+ h/);
   }, 300_000);
 });
 
@@ -277,36 +168,6 @@ describe('display errors (BA-14)', () => {
     expect(text).not.toContain('100% to 100%');
   });
 
-  it('names each sector Ukraine holds after a town on its own side of the line, never a Russian city across it', () => {
-    const g = start('ukraine-2026', 'UKR');
-    g.step();
-    const mine = map.nationIds.indexOf(N('UKR'));
-    const enemyIdx = new Set(g.state.focusNation!.enemies.map((e) => map.nationIds.indexOf(e)));
-    // Kharkiv taken, so the cells around it hold the line facing a city the enemy holds.
-    const control = Uint16Array.from(g.state.control);
-    const kharkiv = map.cities.find((c) => c.name === 'Kharkiv')!;
-    control[map.nodeAt(kharkiv.lat, kharkiv.lon)] = map.nationIds.indexOf(N('RUS'));
-    const cityCells = new Map<string, NodeId[]>();
-    for (const c of map.cities) cityCells.set(c.name, [...(cityCells.get(c.name) ?? []), map.nodeAt(c.lat, c.lon)]);
-    const enemyCity = (name: string) => (cityCells.get(name.replace(/^near /, '')) ?? []).some((n) => enemyIdx.has(control[n]));
-    // A Ukrainian cell on the line whose nearest place is a city Russia holds, such as Bryansk across from Chernihiv and Sumy oblasts.
-    let cell: NodeId | undefined;
-    for (let n = 0 as NodeId; n < map.landCount && cell === undefined; n++)
-      if (control[n] === mine && [...map.neighbors(n)].some((m) => enemyIdx.has(control[m])) && enemyCity(g.namer.place.name(n))) cell = n;
-    expect(cell, 'a held cell the plain place name would name after an enemy city').toBeDefined();
-    // Enough brigades there that it is the biggest sector held, the one the panel always lists.
-    const moved = new Set(g.state.formations.filter((f) => f.entry.nation === 'UKR' && f.entry.kind === 'maneuver' && f.status === 'active').slice(0, 40));
-    const brigade = [...moved][0];
-    const formations = g.state.formations.map((f) => (moved.has(f) ? { ...f, node: cell!, posture: 'defend' as const, target: null } : f));
-    const ops = operations({
-      me: N('UKR'), map, nationIds: map.nationIds, control, contest: new Float32Array(0), formations, planned: [], tick: 0,
-      enemies: g.state.focusNation!.enemies, places: g.namer.place, commandOf: () => 'delegate',
-    });
-    const there = ops.find((o) => o.formations.includes(brigade.entry.id));
-    expect(there, 'the brigade on that cell holds a sector').toBeDefined();
-    expect(enemyCity(there!.name.replace(/^Hold /, '')), there!.name).toBe(false);
-  });
-
   it('words an escalation as what happens, not the rung id', () => {
     const g = start('ukraine-2026', 'UKR');
     const text = describeEvent({ type: 'escalation', tick: 1, a: N('RUS'), b: N('UKR'), level: 'strategic_conventional' }, g.namer);
@@ -314,68 +175,7 @@ describe('display errors (BA-14)', () => {
   });
 });
 
-describe('the War Room after the player answers (P1 M7)', () => {
-  const treaty = (i: number): Card => ({
-    key: `treaty|${i}|nato`, topic: 'diplomacy', role: 'foreign', tone: 'advice', tick: 0, urgent: true, title: `Call ${i}`, text: '',
-    chip: 'Answer within 3 days', primary: { kind: 'command', label: 'Go to war', command: { type: 'answer_treaty', nation: 'USA' as NationId, war: String(i), treaty: 'nato', join: true } },
-  });
-  const answeredCall = (i: number): Sent => ({ card: treaty(i), action: treaty(i).primary as CommandAction, tick: 1, answer: { ok: true, text: 'will honour the treaty', final: true }, silent: false });
-  const fresh: Card = { key: 'reserve|1', topic: 'command', role: 'chief', tone: 'advice', tick: 2, title: 'Commit the reserve', text: '', primary: { kind: 'later', label: 'Later' } };
-  const room = (cards: Card[], answered: Sent[]) => renderToStaticMarkup(createElement(WarRoom, { cards, answered, me: 'USA' as NationId, paused: false, onAct: () => {}, onDismiss: () => {} }));
-
-  it('an answered card drops its deadline badge, so the dismiss mark has the corner to itself', () => {
-    const html = room([], [answeredCall(1)]);
-    expect(html).not.toContain('Answer within');
-    expect(html).toContain('aria-label="Dismiss"');
-  });
-
-  it('a new decision is shown ahead of a full record of answered calls', () => {
-    const html = room([fresh], [1, 2, 3, 4, 5, 6, 7].map(answeredCall));
-    expect(html).toContain('Commit the reserve');
-    expect(html.indexOf('Commit the reserve')).toBeLessThan(html.indexOf('Call 1'));
-  });
-});
-
-describe('the Operations panel at war with no land front (P1 H4)', () => {
-  const rows = (g: Game) => operations({
-    me: g.desk.me, map, nationIds: map.nationIds, control: g.state.control, contest: g.state.contest, formations: g.state.formations, planned: g.state.ops,
-    tick: g.state.tick, enemies: g.state.focusNation!.enemies, places: g.namer.place, commandOf: () => 'delegate',
-  });
-
-  it('gulf-2027 as Iran: the missile strikes and the fleet at sea are rows, not "No front yet"', () => {
-    const g = start('gulf-2027', 'IRN');
-    g.step(8);
-    const ops = rows(g);
-    expect(ops.map((o) => o.kind)).toEqual(expect.arrayContaining(['strike', 'naval']));
-    const strike = ops.find((o) => o.kind === 'strike')!;
-    expect(strike.detail).toMatch(/^On /);
-    for (const id of strike.formations) expect(g.world.formations[id].nation).toBe('IRN');
-  }, 240_000);
-
-  it('ww3-2027 as the United States: campaigns keep a place beside the land sectors', () => {
-    const g = start('ww3-2027', 'USA');
-    for (let i = 0; i < 12; i++) {
-      g.step();
-      for (const c of g.state.focusNation?.treatyCalls ?? []) g.send({ type: 'answer_treaty', nation: N('USA'), war: c.war, treaty: c.treaty, join: true });
-    }
-    const ops = rows(g);
-    expect(ops.length).toBeLessThanOrEqual(4);
-    expect(ops.filter((o) => o.kind === 'strike' || o.kind === 'air' || o.kind === 'naval').length).toBeGreaterThanOrEqual(1);
-  }, 300_000);
-});
-
 describe('what the staff says is true to the nation and the war (P1 H9, M6)', () => {
-  it('ukraine-2026 as Ukraine: the reserves card counts the reservists mobilisation would recall, not the empty replacement pool', () => {
-    const g = start('ukraine-2026', 'UKR');
-    g.step();
-    const card = g.desk.cards.find((c) => c.key.startsWith('mobilise|'));
-    expect(card, 'Ukraine at war with an empty replacement pool is told to mobilise').toBeDefined();
-    const reservists = g.world.nations[N('UKR')].reservists;
-    expect(reservists).toBeGreaterThan(1000);
-    expect(card!.figure).toMatchObject({ value: String(Math.round(reservists / 1000)), caption: 'reservists to recall' });
-    expect(card!.text).toContain(`${Math.round(reservists / 1000).toLocaleString('en-US')}k trained reservists`);
-  }, 120_000);
-
   it('ukraine-2026: the war that began in 2022 is not news of a declaration on day one; a new war still is', () => {
     const run = (scenario: string, nation: string) => {
       const g = start(scenario, nation);

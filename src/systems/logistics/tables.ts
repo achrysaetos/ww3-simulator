@@ -95,6 +95,18 @@ export const PEACETIME_READINESS_HOURS_PER_DAY: Record<PlatformClass, number> = 
 export const MAX_REFILL_FRACTION_PER_DAY = 0.5;
 
 /**
+ * A supply priority (`supply_priority`) puts the nation's transport behind one sector, as a commander gives
+ * the main effort first call on trucks and trains (FM 4-0, priorities of support; the Soviet front's shift of
+ * motor transport to the axis of the main blow). The chain can then push up to PRIORITY_BOOST times the usual
+ * tons a day to formations within PRIORITY_KM of the chosen cell, and the lift comes off the rest of the nation's
+ * formations, at most PRIORITY_DIVERT of theirs, since units elsewhere still need their daily loads moved.
+ * Estimates: about a corps sector, and a third of the lift held back.
+ */
+export const PRIORITY_KM = 100;
+export const PRIORITY_BOOST = 2;
+export const PRIORITY_DIVERT = 0.3;
+
+/**
  * Tons per day one map cell can receive at a supply factor of 1, shared by every
  * formation there. Estimate: one double-track military rail line moves roughly
  * 15,000 t/day (24 trains of ~600 t). For scale, Russian artillery firing about
