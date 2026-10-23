@@ -51,7 +51,7 @@ function riverCost(world: World, map: GameMap, from: NodeId, to: NodeId, hostile
 }
 
 /** Effective km of entering `to` from `from`: terrain friction, hostile ground, rivers, minus rail boost, and today's mud or snow there. Infinity when closed to this nation. */
-function edgeKm(world: World, map: GameMap, f: Formation, from: NodeId, to: NodeId, km: number, seize = canSeize(f), toGateway = f.order.lift !== undefined): number {
+export function edgeKm(world: World, map: GameMap, f: Formation, from: NodeId, to: NodeId, km: number, seize = canSeize(f), toGateway = f.order.lift !== undefined): number {
   const holder = world.control[to];
   // A force on its way to a port or airfield of embarkation crosses allied ground under host-nation support (the 173rd to Aviano).
   if (!canEnter(world, map, f.nation, to) && !(toGateway && holder && !map.isSea(to) && allied(world, f.nation, holder))) return Infinity;
@@ -114,7 +114,7 @@ function reachable(world: World, map: GameMap, nation: NationId, target: NodeId)
 
 /** Shortest move that counts as a deployment between theatres rather than a march blocked at the front (judgement call: Vicenza to Korea, not Kharkiv to Izium). */
 // param: tag=judgment range=[1000,2500] source=judgment: Vicenza to Korea, not Kharkiv to Izium
-const THEATRE_KM = 1500;
+export const THEATRE_KM = 1500;
 
 /** A move with no land route that lift can make instead: far off, into ground the formation may enter and its side holds. */
 function betweenTheatres(world: World, map: GameMap, f: Formation, target: NodeId): boolean {

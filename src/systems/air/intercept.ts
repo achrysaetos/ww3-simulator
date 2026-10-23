@@ -34,6 +34,9 @@ export interface SalvoResult {
 
 const MACH_MS = 340;
 
+/** Draws that return their expectation, so interceptSalvo gives the mean outcome of a salvo instead of one sample. */
+export const MEAN_RNG: Pick<Rng, 'binomial'> = { binomial: (n, p) => (n > 0 ? n * Math.max(0, Math.min(1, p)) : 0) };
+
 /** Seconds a threat spends crossing the defended envelope. */
 function crossingS(rangeKm: number, speedMach: number): number {
   return (rangeKm * 1000) / (Math.max(0.05, speedMach) * MACH_MS);
@@ -59,7 +62,7 @@ export function engagementCycles(rangeKm: number, speedMach: number, arrivalWind
  * a 2-round salvo instead, which burns interceptors twice as fast.
  * Reused by the naval and strategic systems; pure apart from the rng draws.
  */
-export function interceptSalvo(threat: SalvoThreat, defense: SalvoDefense, rng: Rng): SalvoResult {
+export function interceptSalvo(threat: SalvoThreat, defense: SalvoDefense, rng: Pick<Rng, 'binomial'>): SalvoResult {
   const none: SalvoResult = { intercepted: 0, leaked: threat.count, interceptorsUsed: 0, channelsUsed: 0 };
   const p = Math.max(0, Math.min(1, defense.pk * (1 - threat.interceptDifficulty)));
   if (threat.count <= 0 || p <= 0 || defense.interceptors < 1 || defense.channels <= 0 || defense.rangeKm <= 0) return none;
