@@ -32,7 +32,7 @@ export function writePref(key: string, value: string, store: KeyValue | null = s
   }
 }
 
-/** Crises stop the clock and take the screen; off, the staff answers each with its recommendation and says so. */
-export const CRISES_KEY = 'ww3.crises';
-export const crisesOn = (store?: KeyValue | null) => readPref(CRISES_KEY, store) !== 'off';
-export const setCrises = (on: boolean, store?: KeyValue | null) => writePref(CRISES_KEY, on ? 'on' : 'off', store);
+/** The staff answers crises with its recommendation and says so, so the clock never waits on the player. Off by default. */
+export const AUTO_ACCEPT_KEY = 'ww3.autoAccept';
+export const autoAcceptOn = (store?: KeyValue | null) => readPref(AUTO_ACCEPT_KEY, store) === 'on';
+export const setAutoAccept = (on: boolean, store?: KeyValue | null) => writePref(AUTO_ACCEPT_KEY, on ? 'on' : 'off', store);

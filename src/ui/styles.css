@@ -312,6 +312,8 @@ button.primary { background: #0f3a52; border-color: var(--accent); color: #fff; 
 .game-menu-list { position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; display: flex; flex-direction: column; min-width: 240px; background: var(--panel); border: 1px solid var(--line-2); border-radius: 4px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
 .game-menu-list button { text-align: left; border: 0; border-radius: 0; background: transparent; padding: 8px 12px; }
 .game-menu-list button:hover:not(:disabled) { background: var(--line); }
+.game-menu-toggle { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); cursor: pointer; }
+.game-menu-toggle:hover { background: var(--line); }
 .danger-text { color: var(--red); }
 .modal.briefing { width: min(680px, 94vw); max-height: 90vh; overflow: auto; }
 .modal-h { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; margin: 14px 0 6px; opacity: 0.8; }

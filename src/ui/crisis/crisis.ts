@@ -258,8 +258,6 @@ export function answered(crisis: Crisis, c: CrisisContext): Crisis {
 }
 
 /** The option the staff recommends, which it takes itself when the player has turned crises off. */
-export const staffChoice = (crisis: Crisis): CrisisOption => crisis.options.find((o) => o.recommended) ?? crisis.options[0];
-
 /**
  * Ticks until a crisis closed without an answer is put to the player again: a look at the map
  * comes back on the next turn, a deferral a day later, and a deadline is never let pass unasked.
@@ -268,6 +266,15 @@ export function returnsIn(crisis: Crisis, option: CrisisOption, dtHours: number)
   if (option.action.kind === 'show') return 1;
   const day = Math.round(24 / dtHours);
   return crisis.hoursLeft === null ? day : Math.max(1, Math.min(day, Math.floor(crisis.hoursLeft / dtHours) - 1));
+}
+
+/**
+ * The answer the staff gives on its own when the player has left decisions to it: the recommended option (a look first
+ * or a wait is taken as a hold). A nuclear release is never the staff's, so that crisis still goes to the player.
+ */
+export function staffAnswer(c: Crisis): CrisisOption | null {
+  const o = c.options.find((x) => x.recommended) ?? c.options[0];
+  return o.action.kind === 'command' && o.action.command.type === 'nuclear_release' ? null : o;
 }
 
 /** The first card on the table that should stop the clock, if any, skipping those already shown. */
