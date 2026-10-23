@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { runWithOutputs } from '../src/cli/outputs-run';
 import type { NationId, World } from '../src/core/types';
+import { ITEMS } from '../src/data/industry/items';
 import { runOne } from '../src/forecast';
 import { outputRanges, outputRows, outputsOf, OutputsRecorder, sampleOutputs, type ItemRace, type Outputs, type RaceItem } from '../src/outputs';
 import { createSession } from '../src/scenarios';
@@ -9,6 +10,17 @@ import { SnapshotEncoder } from '../src/ui/snapshot';
 
 const RUS = 'RUS' as NationId, UKR = 'UKR' as NationId, USA = 'USA' as NationId, DEU = 'DEU' as NationId, POL = 'POL' as NationId;
 const PER_DAY = 4;
+
+/**
+ * ukraine-2026 with Ukraine's long-range strike drones left to their magazines: a stock with no line, which the
+ * run-out projection must see falling and call dry. Ukraine builds them (src/data/industry/lines.ts), so the real
+ * scenario has no stock that empties this early.
+ */
+function ukraineWithoutDroneLine(seed: number): ReturnType<typeof createSession> {
+  const s = createSession('ukraine-2026', seed);
+  delete s.world.slices.economy.nations[UKR].lines[ITEMS.lyutyi.id];
+  return s;
+}
 
 const race = (o: Outputs, n: NationId, item: RaceItem): ItemRace => {
   const r = o.nations[n]?.race.find((x) => x.item === item);
@@ -26,7 +38,7 @@ describe('outputs of ukraine-2026', () => {
   let fork: World;
 
   beforeAll(() => {
-    s = createSession('ukraine-2026', 1);
+    s = ukraineWithoutDroneLine(1);
     const rec = new OutputsRecorder(s.catalog);
     rec.observe(s.world);
     start = rec.outputs(s.world, s.map);
@@ -233,7 +245,7 @@ describe('the run-out projection on ukraine-2026, seeds 1-3', () => {
   it(`flags every stock that runs dry within ${HORIZON} days, never more than ${LATE} days after it does`, () => {
     let warned = 0;
     for (const seed of [1, 2, 3]) {
-      const s = createSession('ukraine-2026', seed);
+      const s = ukraineWithoutDroneLine(seed);
       const rec = new OutputsRecorder(s.catalog);
       rec.observe(s.world);
       const projected = new Map<number, Outputs>();
