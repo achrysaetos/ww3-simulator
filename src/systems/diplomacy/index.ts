@@ -13,7 +13,7 @@ import { adoptWars, declareWar, invasions, neutralEntry, resolveJoins, treatyCal
 
 export * from './types';
 export { enemyMap } from './assess';
-export { warSupport } from './support';
+export { peaceAnswer, warSupport, type NoDeal, type PeaceAnswer, type Terms } from './support';
 export { members, sideOf } from './wars';
 export { mayEnter, warAimsOf } from './aims';
 
