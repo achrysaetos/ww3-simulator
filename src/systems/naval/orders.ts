@@ -1,6 +1,6 @@
 import { newId, type SimContext } from '../../core/engine';
 import type { Command, Formation, NodeId, Order, PlatformId, RefusalCode, World } from '../../core/types';
-import { authority, delegated, DOMAIN_OF_KIND, type OrderOutcome } from '../orders';
+import { delegated, DOMAIN_OF_KIND, keepPlayer, playerCommands, type OrderOutcome } from '../orders';
 import { engages } from '../air/tables';
 import { canBoard, liftShare, liftUsed } from './amphibious';
 import { tickEnv } from './env';
@@ -51,7 +51,7 @@ export function applyNavalOrder(world: World, cmd: OrderCommand, ctx: SimContext
     boarding.status = 'embarked';
     boarding.embarkedOn = lift.id;
     boarding.node = lift.node;
-    boarding.order = { posture: 'embark', targetFormation: lift.id, issuedTick: world.tick };
+    boarding.order = { posture: 'embark', targetFormation: lift.id, issuedTick: world.tick, ...keepPlayer(order) };
     (env.embarked.get(lift.id) ?? env.embarked.set(lift.id, []).get(lift.id)!).push(boarding);
     return { ok: true, etaHours: 0 };
   }
@@ -179,27 +179,26 @@ function homeward(ctx: SimContext, f: Formation): string | undefined {
   return undefined;
 }
 
-/**
- * Whether the human player commands `f`: its nation's player took it under their own command, or did not delegate its
- * domain to the AI.
- */
-function playerCommands(world: World, f: Formation): boolean {
+/** Whether the human player commands `f`, or did not delegate its domain to the AI. */
+function answersToPlayer(world: World, f: Formation): boolean {
   return playerHolds(world, f) || !delegated(world, f.nation, DOMAIN_OF_KIND[f.kind]);
 }
 
 /**
  * The naval system replaces a group's order on its own: crippled, or out of fuel, stores or weapons. A player commanding
- * the group hears why, as a refusal of the order it overrode.
+ * the group hears why, as a refusal of the order it overrode, and the delegate has the group back.
  */
 export function overrule(world: World, ctx: SimContext, f: Formation, order: Order, why: string): void {
-  f.order = order;
-  if (playerCommands(world, f))
+  const told = answersToPlayer(world, f);
+  const { byPlayer: _overruled, ...own } = order;
+  f.order = own;
+  if (told)
     ctx.emit({ type: 'command_result', tick: world.tick, nation: f.nation, command: 'order', formation: f.id, byPlayer: true, ok: false, code: 'not_ready', reason: why });
 }
 
-/** Whether the human player took `f` under their own command, so the naval system's own routines leave its orders alone. */
+/** Whether the human player commands `f`, so the naval system's own routines leave its orders alone. */
 export function playerHolds(world: World, f: Formation): boolean {
-  return world.nations[f.nation]?.controlledBy === 'human' && !!authority(world, f.nation).held[f.id];
+  return world.nations[f.nation]?.controlledBy === 'human' && playerCommands(world, f);
 }
 
 export function mostlyDamaged(f: Formation): boolean {

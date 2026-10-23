@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { Command, CommandResult, Formation, FormationId, NationId, NodeId } from '../src/core/types';
 import { loadMap } from '../src/data/load';
 import { orderDelayHours } from '../src/systems/c2';
-import { authority } from '../src/systems/orders';
+import { authority, playerCommands } from '../src/systems/orders';
 import { SimHost } from '../src/ui/host';
 import { degradeChain } from './c2.fixture';
 import type { FromWorker, ToWorker } from '../src/ui/snapshot';
@@ -78,6 +78,7 @@ describe('one player nation per game (BA-1)', () => {
     expect(g.results().at(-1)).toMatchObject({ formation: pak.id, ok: false, code: 'not_yours' });
     expect(pak.order).toEqual(before);
     expect(authority(g.world, N('IND')).held[pak.id]).toBeUndefined();
+    expect(pak.order.byPlayer).toBeUndefined();
   }, 120_000);
 });
 
@@ -94,7 +95,7 @@ describe('every order answers back (BB-4, BA-5)', () => {
     for (const [f, order, code] of cases) {
       g.send({ type: 'order', nation: 'RUS', formation: f.id, order });
       expect(g.finalAnswer(f.id), f.name).toMatchObject({ ok: false, code, byPlayer: true });
-      expect(authority(g.world, N('RUS')).held[f.id], f.name).toBeUndefined();
+      expect(playerCommands(g.world, f), f.name).toBe(false);
       expect(f.order.posture === order.posture && f.order.target === order.target, f.name).toBe(false);
     }
   }, 180_000);
@@ -110,9 +111,27 @@ describe('orders in transit down a degraded chain of command', () => {
     g.send({ type: 'order', nation: 'UKR', formation: f.id, order: { posture: 'attack', target: map.nodeAt(51.5, -0.1) } });
     g.step();
     expect(g.results().filter((r) => r.formation === f.id)).toEqual([expect.objectContaining({ ok: true, code: 'relayed', etaHours: expect.any(Number) })]);
-    expect(authority(g.world, N('UKR')).held[f.id]).toBe(true);
+    expect(authority(g.world, N('UKR')).taking?.[f.id]).toBe(true);
+    expect(playerCommands(g.world, f)).toBe(true);
     expect(g.finalAnswer(f.id)).toMatchObject({ ok: false, code: 'no_route' });
-    expect(authority(g.world, N('UKR')).held[f.id]).toBeUndefined();
+    expect(authority(g.world, N('UKR')).taking?.[f.id]).toBeUndefined();
+    expect(playerCommands(g.world, f)).toBe(false);
+  }, 180_000);
+
+  it('keeps the delegate off the unit until a relayed order lands, then the standing order carries the player', () => {
+    const g = play('ukraine-2026', 'UKR');
+    g.step();
+    const f = degradeChain(g.world, N('UKR'));
+    g.step();
+    g.send({ type: 'order', nation: 'UKR', formation: f.id, order: { posture: 'reserve' } });
+    g.step();
+    expect(g.results().filter((r) => r.formation === f.id)).toEqual([expect.objectContaining({ ok: true, code: 'relayed' })]);
+    expect(authority(g.world, N('UKR')).taking?.[f.id]).toBe(true);
+    expect(f.order.posture).not.toBe('reserve');
+    expect(g.finalAnswer(f.id)).toMatchObject({ ok: true, code: 'accepted' });
+    expect(authority(g.world, N('UKR')).taking?.[f.id]).toBeUndefined();
+    expect(f.order).toMatchObject({ posture: 'reserve', byPlayer: true });
+    expect(playerCommands(g.world, f)).toBe(true);
   }, 180_000);
 });
 
@@ -129,6 +148,7 @@ describe('air wings rebase from the command path (BA-6)', () => {
     g.send({ type: 'order', nation: 'RUS', formation: wing.id, order: { posture: 'move', target: base } });
     expect(g.finalAnswer(wing.id)).toMatchObject({ ok: true, code: 'accepted' });
     expect(wing.node).toBe(base);
-    expect(authority(g.world, N('RUS')).held[wing.id]).toBe(true);
+    expect(wing.order).toMatchObject({ posture: 'defend', byPlayer: true });
+    expect(authority(g.world, N('RUS')).held[wing.id]).toBeUndefined();
   }, 120_000);
 });

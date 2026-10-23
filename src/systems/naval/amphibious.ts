@@ -8,6 +8,7 @@ import type { Catalog } from '../../core/catalog';
 import { amphibiousFactorAt } from '../weather/effects';
 import { openTo } from '../land/state';
 import { hostsTroops } from './sealift';
+import { keepPlayer } from '../orders';
 
 /** Kinds that defend a beach. */
 const GROUND_KINDS = new Set<Formation['kind']>(['maneuver', 'artillery', 'air_defense', 'missile', 'logistics']);
@@ -138,7 +139,7 @@ function disembark(env: TickEnv, f: Formation, node: NodeId, loss: number): void
   f.progressKm = 0;
   f.entrenchment = 0;
   f.fatigue = Math.min(1, f.fatigue + 0.3);
-  f.order = { posture: loss > 0 ? 'attack' : 'defend', target: node, issuedTick: world.tick };
+  f.order = { posture: loss > 0 ? 'attack' : 'defend', target: node, issuedTick: world.tick, ...keepPlayer(f.order) };
   env.invalidate(f);
   if (loss > 0) ctx.emit({ type: 'message', tick: world.tick, nation: f.nation, text: `${f.name} landed at node ${node}, losing ${Math.round(loss * 100)}% in the assault` });
 }

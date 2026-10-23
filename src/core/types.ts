@@ -152,6 +152,11 @@ export interface Order {
   lift?: 'air' | 'sea';
   /** Deception and concealment the formation keeps while it carries out this order (c2 and intel). */
   deception?: Deception;
+  /**
+   * The player gave this order (stamped by the order router from Command.byPlayer). The player commands the formation
+   * while it stands; an engine rewrite of the order drops it unless the rewrite carries the player's order on.
+   */
+  byPlayer?: true;
   issuedTick: number;
 }
 

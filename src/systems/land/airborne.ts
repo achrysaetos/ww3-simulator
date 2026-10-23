@@ -1,7 +1,7 @@
 import type { Catalog } from '../../core/catalog';
 import { atWar, type SimContext } from '../../core/engine';
 import type { GameMap } from '../../core/map';
-import type { Formation, FormationId, NationId, NodeId, PlatformId, RefusalCode, World } from '../../core/types';
+import type { Formation, FormationId, NationId, NodeId, Order, PlatformId, RefusalCode, World } from '../../core/types';
 import { AIRFRAME } from '../air/tables';
 import { supplyFactor } from '../logistics';
 import { detach } from '../naval/orders';
@@ -196,7 +196,7 @@ export function cannotDrop(world: World, map: GameMap, catalog: Catalog, f: Form
 }
 
 /** Fly the formation, or the assault echelon of it the transports can carry, in and land it, minus what the defence shoots down. */
-export function insert(world: World, ctx: SimContext, whole: Formation, target: NodeId): void {
+export function insert(world: World, ctx: SimContext, whole: Formation, target: NodeId, stamp: Pick<Order, 'byPlayer'>): void {
   const { map, catalog } = ctx;
   const share = dropShare(world, catalog, whole);
   const f = share < 1 ? detach(world, ctx, whole, share, 'assault echelon') : whole;
@@ -208,7 +208,7 @@ export function insert(world: World, ctx: SimContext, whole: Formation, target: 
   f.progressKm = 0;
   for (const k of ['fuel', 'ammo', 'food'] as const) f.supply[k] = Math.min(f.supply[k], f.supplyCapacity[k] * CARRIED_SHARE);
   const holder = world.control[target];
-  f.order = holder && atWar(world, f.nation, holder) && !isSof(f) ? { posture: 'attack', target, issuedTick: world.tick } : { posture: 'defend', issuedTick: world.tick };
+  f.order = { ...(holder && atWar(world, f.nation, holder) && !isSof(f) ? { posture: 'attack', target } : { posture: 'defend' }), issuedTick: world.tick, ...stamp };
   landSlice(world).airheads[f.id] = world.tick;
   ctx.emit({ type: 'message', tick: world.tick, nation: f.nation, text: `${f.name} inserted by air, ${Math.round(loss * 100)}% lost on the way in` });
 }

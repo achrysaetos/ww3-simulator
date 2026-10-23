@@ -3,7 +3,7 @@ import { atWar, type SimContext, type System } from '../../core/engine';
 import type { GameMap } from '../../core/map';
 import { findPath } from '../../core/path';
 import type { Formation, NationId, NodeId, Order, PlatformId, World } from '../../core/types';
-import type { OrderCommand, OrderOutcome } from '../orders';
+import { keepPlayer, type OrderCommand, type OrderOutcome } from '../orders';
 import { allied, canEnter, hostilesAt, indexByNode, isLandFormation, keepDeception, landSlice } from './state';
 import { cannotDrop, insert, supplyAirheads } from './airborne';
 import { airlift, debarkation, embarkation, lifted, liftMode, overseas } from './strategic';
@@ -77,7 +77,7 @@ export function applyLandOrder(world: World, cmd: OrderCommand, ctx: SimContext)
     if (target === undefined) return { ok: false, code: 'no_target', reason: 'no drop zone' };
     const why = cannotDrop(world, ctx.map, ctx.catalog, f, target);
     if (why) return { ok: false, ...why };
-    insert(world, ctx, f, target);
+    insert(world, ctx, f, target, keepPlayer(cmd.order));
     return { ok: true, etaHours: 0 };
   }
   const order: Order = { ...cmd.order, issuedTick: world.tick };
@@ -209,7 +209,8 @@ function march(world: World, ctx: SimContext, f: Formation, byNode: Map<number, 
   if (lifted(map, f.node, f.order)) return;
   const holder = world.control[f.node];
   const contesting = f.order.posture === 'attack' && holder && atWar(world, f.nation, holder);
-  if (!contesting && f.order.posture !== 'reserve') f.order = { posture: 'defend', issuedTick: world.tick, ...keepDeception(f.order) };
+  // The player sent it here to hold the ground, so arriving keeps it the player's; an attack that arrives is done.
+  if (!contesting && f.order.posture !== 'reserve') f.order = { posture: 'defend', issuedTick: world.tick, ...keepDeception(f.order), ...(f.order.posture === 'attack' ? {} : keepPlayer(f.order)) };
   delete f.order.path;
 }
 

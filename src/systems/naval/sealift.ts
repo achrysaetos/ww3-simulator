@@ -3,6 +3,7 @@ import type { GameMap } from '../../core/map';
 import { findPath } from '../../core/path';
 import type { Formation, FormationId, NationId, NodeId, World } from '../../core/types';
 import { applyLandOrder } from '../land/movement';
+import { keepPlayer } from '../orders';
 import { openTo } from '../land/state';
 import { awaitingLift, debarkation, deckSlots, landMass, lifted, liftMode } from '../land/strategic';
 import type { TickEnv } from './env';
@@ -169,7 +170,7 @@ export function sealift(env: TickEnv): void {
       boarding.status = 'embarked';
       boarding.embarkedOn = g.id;
       boarding.node = g.node;
-      boarding.order = { posture: 'embark', targetFormation: g.id, issuedTick: world.tick };
+      boarding.order = { posture: 'embark', targetFormation: g.id, issuedTick: world.tick, ...keepPlayer(f.order) };
       (env.embarked.get(g.id) ?? env.embarked.set(g.id, []).get(g.id)!).push(boarding);
       aboard.push(boarding);
       used += deckSlots(catalog, boarding) / comp.vehicleLift;
@@ -191,7 +192,7 @@ function marchOn(world: World, ctx: SimContext, v: SealiftState['voyages'][Forma
   for (const [id, target] of Object.entries(v.onward ?? {}) as [FormationId, NodeId][]) {
     const f = world.formations[id];
     if (!f || f.status !== 'active' || f.node !== v.to || f.node === target) continue;
-    applyLandOrder(world, { type: 'order', nation: f.nation, formation: f.id, order: { posture: 'move', target } }, ctx);
+    applyLandOrder(world, { type: 'order', nation: f.nation, formation: f.id, order: { posture: 'move', target, ...keepPlayer(f.order) } }, ctx);
   }
 }
 

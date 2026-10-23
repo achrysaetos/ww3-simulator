@@ -6,7 +6,7 @@
 import { atWar, type SimContext, type System } from '../../core/engine';
 import type { Catalog } from '../../core/catalog';
 import type { Formation, FormationId, FormationKind, MunitionId, NationId, NodeId, PlatformId, Posture, RefusalCode, World } from '../../core/types';
-import type { OrderCommand, OrderOutcome } from '../orders';
+import { keepPlayer, type OrderCommand, type OrderOutcome } from '../orders';
 import { navalPosition } from '../naval';
 import { combatRadiusKm } from './combat';
 import { buildPicture, type AirPicture } from './picture';
@@ -138,7 +138,7 @@ export function applyAirOrder(world: World, cmd: OrderCommand, ctx: SimContext):
     if (dist > ferry) return refuse('out_of_range', `base is ${Math.round(dist)} km away, beyond ferry range of ${Math.round(ferry)} km`);
     if (ctx.map.isSea(target!)) return refuse('no_airfield', 'no airfield at sea');
     f.node = f.home = target!;
-    f.order = { posture: 'defend', issuedTick: world.tick };
+    f.order = { posture: 'defend', issuedTick: world.tick, ...keepPlayer(order) };
     return { ok: true, etaHours: 0 };
   }
 

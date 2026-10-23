@@ -21,7 +21,7 @@ import { liftShare } from '../systems/naval/amphibious';
 import { boardable } from '../systems/naval/orders';
 import { isSealift } from '../systems/naval/sealift';
 import { airliftTonsPerDay, airPortable, airTons, awaitingLift, deckSlots, liftMode, overseas } from '../systems/land/strategic';
-import { authority } from '../systems/orders';
+import { authority, playerCommands } from '../systems/orders';
 import { members, sideOf } from '../systems/diplomacy/wars';
 import { deliveryReachKm, isLive } from '../systems/strategic/nuclear';
 import { hostedBy } from '../systems/civil/state';
@@ -257,7 +257,7 @@ export interface TreatyCall {
 
 export interface NationDetail {
   id: NationId;
-  /** Which domains the AI delegate runs and which formations the player holds (a human nation). */
+  /** Which domains the AI delegate runs and which formations the player commands (a human nation): taken under command, or on the player's own order until it ends. */
   authority: { ai: Record<CommandDomain, boolean>; held: FormationId[] };
   treatyCalls: TreatyCall[];
   /** Open peace offers between this nation and its enemies. */
@@ -782,7 +782,7 @@ export class SnapshotEncoder {
     }
     return {
       id,
-      authority: { ai: { ...auth.ai }, held: Object.keys(auth.held) as FormationId[] },
+      authority: { ai: { ...auth.ai }, held: believed ? [] : Object.values(world.formations).filter((f) => f.nation === id && f.status !== 'destroyed' && playerCommands(world, f)).map((f) => f.id) },
       treatyCalls: (diplomacy?.joins ?? []).filter((j) => j.nation === id).map((j) => ({
         war: j.war, treaty: j.treaty, victim: j.victim, aggressor: j.aggressor, dueTick: j.dueTick, reconsidered: !!j.reconsidered,
       })),
