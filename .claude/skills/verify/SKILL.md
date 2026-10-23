@@ -52,14 +52,14 @@ await s.page.mouse.up();                                         // release send
 await s.close();
 ```
 
-Handles: every control has a `data-testid` (grep `data-testid` in `src/ui`). The page exposes `window.__client` (the sim client: `state`, `meta.nationIds`, `setSpeed`, `step`, `dragKit(ids)`, `tracks`), `window.__map` (the renderer: `flyTo`, `screenOf`, `hits`, `animating`, `cam`, `map`, `pick`) and `window.__drag` (`lastAimMs`, `maxAimMs`, `totalAimMs`, `aims`: the pure aim per pointer move). Read state through these; give orders only through clicks, drags and keys. The feature map in `features/` names the handles and gotchas per feature.
+Handles: every control has a `data-testid` (grep `data-testid` in `src/ui`). The page exposes `window.__client` (the sim client: `state`, `meta.nationIds`, `setSpeed(gameHoursPerSec)`, `speed`, `step`, `clock.shown`, `ticksPerSec`, `glides`, `dragKit(ids)`, `tracks`), `window.__map` (the renderer: `flyTo`, `viewCamera`, `screenOf`, `hits`, `animating`, `cam`, `map`, `kmPerPx`, `pick`) and `window.__drag` (`lastAimMs`, `maxAimMs`, `totalAimMs`, `aims`: the pure aim per pointer move). Read state through these; give orders only through clicks, drags and keys. The feature map in `features/` names the handles and gotchas per feature.
 
-Drag orders have their own drive: `node tests/ui-drag.e2e.mjs http://localhost:4650/ drag` (evidence in `/tmp/ww3-verify/runs/drag/`). The older suites in `tests/*.e2e.mjs` still run: `node tests/ui-orders.e2e.mjs http://localhost:4650/ /tmp/ww3-verify/runs/orders [scenario:NATION]` (also ui-shell, ui-contacts, ui-drama, ui-outputs; `TICKS=n` sets the run length).
+Drag orders have their own drive: `node tests/ui-drag.e2e.mjs http://localhost:4650/ drag` (evidence in `/tmp/ww3-verify/runs/drag/`). Feature suites live in `tests/*.e2e.mjs` and take two argument styles. ui-drag, ui-front and ui-diplomacy take a run name and write to `/tmp/ww3-verify/runs/<run>`: `node tests/ui-drag.e2e.mjs http://localhost:4650/ drag`. ui-shell, ui-contacts, ui-outputs, ui-drama and ui-orders take an output directory and optional `scenario:NATION` plays: `node tests/ui-shell.e2e.mjs http://localhost:4650/ /tmp/ww3-verify/runs/shell ukraine-2026:UKR`. `TICKS=n` sets the run length for ui-shell, ui-contacts, ui-outputs and ui-orders. ui-orders now covers only the Nation drawer's passage grant; unit orders are ui-drag.
 
 Headless checks need no server:
 
 ```bash
-npm run typecheck && npm test                     # vitest, about 1,100 tests, several minutes
+npm run typecheck && npm test                     # vitest, about 1,150 tests, 15-25 minutes
 npm run sim -- --scenario ukraine-2026 --days 3 --quiet --report
 npm run realism                                   # REALISM=1 calibration suite
 npm run validate -- --cases kursk-2024 --runs 4   # held-out historical cases

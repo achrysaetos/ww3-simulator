@@ -29,5 +29,5 @@ Proof: exit code 0, and for sim the report's numbers move the way the change pre
 
 - A 3-day Ukraine run takes a few seconds (about 180 ms mean per tick); ww3-2027 is several times slower.
 - Runs are deterministic per seed, so before/after comparisons need the same seed and scenario.
-- The full `npm test` takes several minutes (95 files, 1,108 tests; 15 min when sharing the CPU with browser runs). While iterating, run the touched files: `npx vitest run tests/land.test.ts`.
+- The full `npm test` takes several minutes (about 101 files and 1,155 tests; 15 to 25 min when sharing the CPU with browser runs). While iterating, run the touched files: `npx vitest run tests/land.test.ts`.
 - realism, validate and perf take minutes too; run them for engine changes, not for pure UI work.

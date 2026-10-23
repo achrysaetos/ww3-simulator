@@ -9,7 +9,7 @@
   - Onto an ally, pending or neutral flag: ask for help. The engine has no command for it (allies join by treaty when the call falls due, neutrals by their own choice), so the pill always refuses and says which, and release sends nothing.
 - Esc or a pointer cancel drops the drag and sends nothing.
 - The peace needle (`peace-needle`, in the top bar's stats): the main enemy's war support against the line below which it takes terms. The dial fills from 0 (full support) to 1 (would take terms now); the text says "N pts off", "They'd sign", or "Their call" for a human opponent. Its `title` says the terms in words and `data-value` holds the dial value.
-- The nukes needle (`defcon`) sits beside it: DEFCON 5 at peace, 3 at war, 2 once warheads are on alert, 1 after a nuclear detonation.
+- The nukes needle (`defcon`) sits beside it: DEFCON 5 at peace, 3 at war, 2 once the player's or an enemy's warheads are on alert, 1 after a nuclear detonation.
 - The nation drawer keeps declare war, sanctions, passage and aid. It no longer offers peace; it points to the drag.
 
 ## How to get to it (user POV)
@@ -24,6 +24,6 @@ Proof: `pill-peace.png` (the pill over the enemy flag), `topbar.png` and `after-
 
 ## Gotchas
 
-- A war flash (`moment`) or a crisis card hides the top bar (`.ww-shell.hud-off`) and swallows the press. Click the moment and wait for it to clear before dragging.
+- A crisis card hides the top bar (`.ww-shell.hud-off`), and a war flash (`moment`, the `.mo-root` overlay) covers it; either swallows the press. Click the moment and wait for it to clear before dragging.
 - Under ww3-2027 the row fills with enemies and allies; neutrals drop off the end.
 - The pill is deterministic: the engine's rule has no dice in it, so "They accept" means the offer ends the war when the next tick runs.

@@ -14,7 +14,7 @@ The page's clock is the master (`src/ui/clock.ts`, `GameClock`). It runs the hou
 
 ## How to get to it (user POV)
 
-In a running game, press Space or a speed button and watch the hour advance in the top bar. Zoom to the front and watch your counters slide between cells. The clock stops by itself when a crisis takes the screen (with crises on).
+In a running game, press Space or a speed button and watch the hour advance in the top bar. Zoom to the front and watch your counters slide between cells. The clock stops by itself when a crisis takes the screen (with crises on) and when the game reaches its end.
 
 ## Driving it with Playwright
 
@@ -29,4 +29,4 @@ In a running game, press Space or a speed button and watch the hour advance in t
 - Applying a tick redraws only the terrain the snapshot changed (`GlobeGL` keeps its buffer and stencils the damaged boxes); with a still camera the tick's frame stays near or under 50 ms on ukraine-2026 and ww3-2027 in headless Chromium, and 5 h/s holds about 4.9 h/s. A whole redraw (about 100 to 200 ms there, since Chromium composites WebGL in software and reads the canvas back) still follows a camera move, a tile arriving, or a tick that repaints whole countries, such as ww3-2027's opening war.
 - To measure a tick, stub `__map.flyTo` first: dramatic moments fly the camera and stream tiles, which costs whole redraws that are not the tick's.
 - The clock runs on `requestAnimationFrame`, so it stops while the tab is hidden.
-- Keyboard shortcuts are ignored while a crisis, opening or coach is open, and inside inputs.
+- Keyboard shortcuts are ignored while a crisis, opening or coach is open, and inside inputs, except Esc, which still closes a drawer from an input.
