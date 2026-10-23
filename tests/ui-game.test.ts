@@ -7,7 +7,7 @@ import { createSession } from '../src/scenarios';
 import { briefingFor, objectives, outcome } from '../src/ui/briefing';
 import { checkCommand } from '../src/ui/commands';
 import { SimHost } from '../src/ui/host';
-import { emptyClientState, SnapshotEncoder, applySnapshot, type FromWorker, type ToWorker } from '../src/ui/snapshot';
+import { CONTEST_STRIDE, emptyClientState, SnapshotEncoder, applySnapshot, type FromWorker, type ToWorker } from '../src/ui/snapshot';
 
 const N = id.nation;
 
@@ -90,15 +90,32 @@ describe('strategic lift choice', () => {
 });
 
 describe('fronts inside a cell', () => {
-  it('sends how far an attacker has pushed across each contested cell', () => {
+  const contested = () => {
     const w = testWorld();
+    w.war('RUS', 'UKR');
     const enc = new SnapshotEncoder(w.map.nationIds, w.catalog, w.map.size);
-    const kharkiv = w.nodeAt(50, 36.2);
+    const kharkiv = w.nodeAt(49.75, 36.25);
+    w.world.control[w.nodeAt(50.25, 36.25)] = N('RUS');
     w.world.slices.land = { baseline: {}, isolatedDays: {}, contest: { [kharkiv]: { by: N('RUS'), km: 1e6 } }, fortified: {}, origin: [], shellsFired: {}, airlifted: {}, airheads: {} };
-    const snap = enc.encode(w.world, w.map);
-    expect([...snap.contest]).toEqual([kharkiv, w.map.nationIds.indexOf(N('RUS')), 1]);
+    return { w, enc, kharkiv };
+  };
+
+  it('sends how far an attacker has pushed across each contested cell, and which way, from the ground its side holds next door', () => {
+    // Russia holds the cell north of Kharkiv, and only that one: the push runs due south.
+    const { w, enc, kharkiv } = contested();
+    const [node, by, share, east, north] = enc.encode(w.world, w.map).contest;
+    expect(CONTEST_STRIDE).toBe(5);
+    expect([node, by, share]).toEqual([kharkiv, w.map.nationIds.indexOf(N('RUS')), 1]);
+    expect(east).toBeCloseTo(0, 5);
+    expect(north).toBeCloseTo(-1, 5);
     w.world.slices.land.contest[kharkiv].km = 0;
     expect(enc.encode(w.world, w.map).contest[2]).toBe(0);
+  });
+
+  it('shows a contest to its two sides and keeps it from a nation that neither fights nor watches there', () => {
+    const { w, enc, kharkiv } = contested();
+    for (const viewer of ['UKR', 'RUS']) expect([...enc.encode(w.world, w.map, {}, N(viewer)).contest.subarray(0, 1)]).toEqual([kharkiv]);
+    expect(enc.encode(w.world, w.map, {}, N('FRA')).contest).toHaveLength(0);
   });
 });
 

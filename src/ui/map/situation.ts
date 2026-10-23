@@ -6,7 +6,7 @@
  */
 import type { GameMap } from '../../core/map';
 import { LAYER } from '../../systems/weather/effects';
-import { NO_NATION } from '../snapshot';
+import { CONTEST_STRIDE, NO_NATION } from '../snapshot';
 
 export const Rel = { None: 0, Own: 1, Friend: 2, Enemy: 3, War: 4 } as const;
 export type Rel = (typeof Rel)[keyof typeof Rel];
@@ -75,41 +75,77 @@ function boxPass(a: Float32Array, w: number, h: number, r: number, alongX: boole
   }
 }
 
+const NO_CONTEST = new Float32Array(0);
+/** How a cell is painted: holder code, attacker code, share pushed across, and the push's east and north. */
+type Painting = [held: number, by: number, share: number, east: number, north: number];
+
 /**
  * Control mask, RGBA per texel: R friendly side, G enemy, B occupied, A
- * someone else's war. Repaints only cells whose holder or relation changed,
- * smooths around them, and reports the touched rectangle so the upload stays
- * small. `data` is the smoothed mask the shader samples.
+ * someone else's war. A contested cell is painted as its attacker's from the
+ * side the attack comes in, as far across as it has got, so the front line the
+ * shader draws where the sides meet bulges into the cell as the attack presses.
+ * Repaints only cells whose holder, relation or contest changed, smooths around
+ * them, and reports the touched rectangle so the upload stays small. `data` is
+ * the smoothed mask the shader samples.
  */
 export class ControlMask {
   private readonly raw = new Uint8Array(MASK_W * MASK_H * 4);
   readonly data = new Uint8Array(MASK_W * MASK_H * 4);
   private readonly ownerIdx: Int32Array;
-  private readonly painted: Uint32Array;
+  /** Each land cell's last Painting. */
+  private readonly painted: Float32Array;
   private readonly rects: Rect[];
 
   constructor(private readonly map: GameMap, nationIds: readonly string[]) {
     this.ownerIdx = Int32Array.from({ length: map.landCount }, (_, n) => nationIds.indexOf(map.owner[n]));
-    this.painted = new Uint32Array(map.landCount).fill(0xffffffff);
+    this.painted = new Float32Array(map.landCount * 5).fill(NaN);
     this.rects = Array.from({ length: map.landCount }, (_, n) => texels(map, n, MASK_RES, MASK_W, MASK_H));
   }
 
-  /** Returns the dirty rectangle, or null when nothing changed. */
-  update(control: Uint16Array, rel: Uint8Array): Rect | null {
+  /** Returns the dirty rectangle, or null when nothing changed. `contest` is Snapshot.contest. */
+  update(control: Uint16Array, rel: Uint8Array, contest: Float32Array = NO_CONTEST): Rect | null {
+    const pushed = new Map<number, number>();
+    for (let i = 0; i < contest.length; i += CONTEST_STRIDE) if (contest[i + 2] > 0 && (contest[i + 3] || contest[i + 4])) pushed.set(contest[i], i);
     let dirty: Rect | null = null;
     for (let n = 0; n < this.map.landCount; n++) {
-      const holder = control[n];
-      const r: number = holder === NO_NATION ? Rel.None : rel[holder];
-      const occupied = r !== Rel.None && holder !== this.ownerIdx[n] && this.ownerIdx[n] >= 0 && rel[this.ownerIdx[n]] !== Rel.None ? 1 : 0;
-      const code = r | (occupied << 3);
-      if (this.painted[n] === code) continue;
-      this.painted[n] = code;
-      const px = [r === Rel.Own || r === Rel.Friend ? 255 : 0, r === Rel.Enemy ? 255 : 0, occupied ? 255 : 0, r === Rel.War ? 255 : 0];
+      const at = pushed.get(n);
+      const held = this.code(n, control[n], rel);
+      const now: Painting = at === undefined ? [held, 0, 0, 0, 0] : [held, this.code(n, contest[at + 1], rel), contest[at + 2], contest[at + 3], contest[at + 4]];
+      const was = this.painted.subarray(n * 5, n * 5 + 5);
+      if (now.every((v, k) => v === was[k])) continue;
+      was.set(now);
+      this.paint(n, ...now);
       const t = this.rects[n];
-      for (let y = t.y0; y < t.y1; y++) for (let x = t.x0; x < t.x1; x++) this.raw.set(px, (y * MASK_W + x) * 4);
       dirty = dirty ? { x0: Math.min(dirty.x0, t.x0), y0: Math.min(dirty.y0, t.y0), x1: Math.max(dirty.x1, t.x1), y1: Math.max(dirty.y1, t.y1) } : { ...t };
     }
     return dirty && this.smooth(dirty);
+  }
+
+  /** The holder's relation to the viewer, with bit 3 set where it holds another side's ground. */
+  private code(n: number, holder: number, rel: Uint8Array): number {
+    const r: number = holder === NO_NATION ? Rel.None : rel[holder];
+    const occupied = r !== Rel.None && holder !== this.ownerIdx[n] && this.ownerIdx[n] >= 0 && rel[this.ownerIdx[n]] !== Rel.None ? 1 : 0;
+    return r | (occupied << 3);
+  }
+
+  /** Cell `n` in `held`'s colours, with the attacker's (`by`) over the `share` of it nearest where the attack comes from. */
+  private paint(n: number, held: number, by: number, share: number, east: number, north: number) {
+    const px = (code: number) => {
+      const r = code & 7;
+      return [r === Rel.Own || r === Rel.Friend ? 255 : 0, r === Rel.Enemy ? 255 : 0, code & 8 ? 255 : 0, r === Rel.War ? 255 : 0];
+    };
+    const h = px(held), a = px(by), t = this.rects[n];
+    // Distance along the attack, in degrees of latitude, from the cell's centre; the attacker holds what lies behind `edge`.
+    const k = Math.cos((this.map.lat[n] * Math.PI) / 180), along = k * Math.abs(east) + Math.abs(north);
+    const edge = this.map.halfDeg[n] * along * (2 * share - 1), texel = MASK_RES * along;
+    const out = [0, 0, 0, 0];
+    for (let y = t.y0; y < t.y1; y++)
+      for (let x = t.x0; x < t.x1; x++) {
+        const s = ((x + 0.5) * MASK_RES - 180 - this.map.lon[n]) * k * east + (90 - (y + 0.5) * MASK_RES - this.map.lat[n]) * north;
+        const w = share > 0 ? Math.min(1, Math.max(0, (edge - s) / texel + 0.5)) : 0;
+        for (let c = 0; c < 4; c++) out[c] = Math.round(h[c] + (a[c] - h[c]) * w);
+        this.raw.set(out, (y * MASK_W + x) * 4);
+      }
   }
 
   /** Re-smooths around a repainted rectangle; returns the rectangle of `data` that changed. */
