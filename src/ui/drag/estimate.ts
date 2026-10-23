@@ -7,7 +7,7 @@ import type { GameMap } from '../../core/map';
 import type { NodeId } from '../../core/types';
 import { QUICK, type QuickCell, type QuickTable, type QuickTables } from '../../forecast/quick';
 import { interceptSalvo, MEAN_RNG } from '../../systems/air/intercept';
-import { CELL_FRONT_KM, FRONTAGE_PLATFORMS, KILL_ZONE_COMMIT, KILL_ZONE_DENSITY, TERRAIN, URBAN_MANOEUVRE } from '../../systems/land/tables';
+import { CELL_FRONT_KM, FRONTAGE_PLATFORMS, KILL_ZONE_COMMIT, KILL_ZONE_DENSITY, SCREEN_DENSITY, TERRAIN, URBAN_MANOEUVRE } from '../../systems/land/tables';
 import { cellDepthKm } from '../../systems/land/state';
 import type { PublicRefusal, Target } from './gesture';
 import { assaultPath, FORCE, LAND_TARGETS, routeKm, type BeliefField, type DragKit, type LandForce, type SubjectUnit } from './kit';
@@ -100,7 +100,7 @@ export function axesAt(map: GameMap, n: NodeId, att: LandForce, def: LandForce, 
  */
 export function coverAxes(map: GameMap, n: NodeId, att: LandForce, cover: LandForce, pace = 1, depthKm = QUICK.depthKm): Pick<Axes, 'r' | 's'> {
   const depth = cellDepthKm(map, n);
-  const sector = Math.min(1, platformsOf(att) / ((FRONTAGE_PLATFORMS() * depth) / CELL_FRONT_KM));
+  const sector = Math.min(1, platformsOf(att) / (SCREEN_DENSITY() * depth));
   return { r: fireRatio(att, cover, true), s: (sector * pace * depthKm) / (TERRAIN[map.terrain[n]].moveCost * depth) };
 }
 

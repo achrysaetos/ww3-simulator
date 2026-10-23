@@ -13,7 +13,7 @@ import { groundFactorAt } from '../weather/effects';
 import {
   AIR_SUPPRESSION, AMMO_DAYS_INTENSE, ATTRITION_KM_PER_DAY, ATTRITION_MAX_KM_PER_DAY, BREAKTHROUGH_KM_PER_DAY, CONTEST_RECOVERY_KM_PER_DAY, COVERED_KM_PER_DAY, HOSTILE_GROUND_COST,
   ASSAULT_EXPOSURE, BELT_DRAG, DELIBERATE_ASSAULT_RATIO, FRONTAGE_PLATFORMS, WITHDRAWAL_KM, POSITIONAL_INTENSITY, AMMO_RATION_BELOW, AREA_FIRE_REF_DENSITY, CAS_BONUS, DIRECT_DENSITY_EXP, COMBAT_FUEL_DUTY, COMBINED_ARMS,
-  CELL_FRONT_KM, ENGAGED_HOURS_PER_DAY, HASTY_BARRIER, ENTRENCH_MAX_BONUS, KILL_ZONE_COMMIT, KILL_ZONE_DENSITY, MASSED_ASSAULT_RATIO, NEXT_LINE_ENTRENCHMENT, NO_FUEL_SPEED, EXPERIENCE_PER_COMBAT_DAY, FATIGUE_COMBAT_PER_DAY, INDIRECT_FIRE, RETREAT_LOSS, fireScaleOf,
+  CELL_FRONT_KM, ENGAGED_HOURS_PER_DAY, HASTY_BARRIER, ENTRENCH_MAX_BONUS, KILL_ZONE_COMMIT, KILL_ZONE_DENSITY, MASSED_ASSAULT_RATIO, NEXT_LINE_ENTRENCHMENT, SCREEN_DENSITY, NO_FUEL_SPEED, EXPERIENCE_PER_COMBAT_DAY, FATIGUE_COMBAT_PER_DAY, INDIRECT_FIRE, RETREAT_LOSS, fireScaleOf,
   RETREAT_MORALE, RIVER_DEFENSE, RIVER_TEMPO, ROUT_ABANDON, ROUT_MORALE, SHELL_TONS, SHELLS_PER_TUBE_DAY, TERRAIN, TUBE_ARTILLERY, URBAN_MANOEUVRE, exposureOf, infiltrating, targetClassOf,
 } from './tables';
 
@@ -515,7 +515,7 @@ function advanceKm(world: World, ctx: SimContext, node: NodeId, attackers: Forma
     const side = (fs: Formation[]) => summarize(world, ctx.catalog, { nation: fs[0].nation, fighters: fs, support: [] }, node, closed);
     const mine = side(movers);
     const ratio = fireRatio(mine, side(cover), true);
-    const sector = Math.min(1, mine.total / frontPlatforms(ctx.map, node));
+    const sector = Math.min(1, mine.total / (SCREEN_DENSITY() * cellDepthKm(ctx.map, node)));
     // Infiltration moves only the sector the force fills. Cover too weak to matter is no cover: from the deliberate-assault ratio to
     // the massed one the pace climbs to the road march across the whole cell.
     const exploit = Math.min(1, Math.max(0, (ratio - DELIBERATE_ASSAULT_RATIO()) / (MASSED_ASSAULT_RATIO() - DELIBERATE_ASSAULT_RATIO())));

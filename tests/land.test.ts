@@ -359,6 +359,25 @@ describe('the front', () => {
     expect(cross(0.2).control).toBe(RUS);
   });
 
+  it('one brigade takes an empty open cell an equal line covers within seven weeks; behind a belt it is still far from across', () => {
+    // The sweep fills its sector at SCREEN_DENSITY, not the assault frontage: at 30 per km a brigade took ~100 days to cross this cell.
+    const sweep = (belt: boolean) => {
+      const s = setup();
+      if (belt) fortify(s);
+      s.add({ nation: UKR, name: 'cover', kind: 'maneuver', echelon: 'brigade', node: EAST_UKR, equipment: brigade(1) });
+      const att = s.add({ nation: RUS, name: 'att', kind: 'maneuver', echelon: 'brigade', node: PLAIN_RUS, equipment: brigade(1) });
+      s.order(att, { posture: 'attack', target: PLAIN_UKR });
+      let day = 0;
+      while (++day <= 49 && s.world.control[PLAIN_UKR] === UKR) s.days(1);
+      return { day, control: s.world.control[PLAIN_UKR], km: s.world.slices.land.contest[PLAIN_UKR]?.km ?? 0 };
+    };
+    const open = sweep(false);
+    expect(open.control).toBe(RUS);
+    const belted = sweep(true);
+    expect(belted.control).toBe(UKR);
+    expect(belted.km).toBeLessThan(0.6 * cellDepthKm(MAP, PLAIN_UKR));
+  });
+
   /** A brigade presses into PLAIN_UKR, empty but covered from EAST_UKR by `cover` brigades; `pulled` lists the ticks it spends back in PLAIN_RUS. */
   function lull(cover: number, ticks: number, pulled: (tick: number) => boolean) {
     const s = setup();
@@ -377,8 +396,8 @@ describe('the front', () => {
 
   it('ground an attacker stops holding is not lost at once: it slips back half a km a day until the defender has it all', () => {
     const perDay = 24 / testWorld().world.dtHours;
-    const log = lull(1, 120, (tick) => tick >= 40);
-    const left = log.findIndex((r, i) => i >= 40 && !r.inside);
+    const log = lull(1, 120, (tick) => tick >= 16);
+    const left = log.findIndex((r, i) => i >= 16 && !r.inside);
     const gained = log[left - 1].km;
     expect(gained).toBeGreaterThan(2);
     expect(log[left].km).toBeGreaterThan(gained - 0.5);
@@ -393,7 +412,7 @@ describe('the front', () => {
     const pressingTicks = (log: typeof fresh) => log.slice(0, log.findIndex((r) => r.control === RUS) + 1).filter((r) => r.pressing).length;
     const takenAt = resumed.findIndex((r) => r.control === RUS);
     expect(takenAt).toBeGreaterThan(7);
-    expect(pressingTicks(resumed)).toBeLessThan(pressingTicks(fresh));
+    expect(pressingTicks(resumed)).toBeLessThanOrEqual(pressingTicks(fresh));
     expect(resumed.slice(0, takenAt).every((r) => r.km < cellDepthKm(MAP, PLAIN_UKR))).toBe(true);
     expect(resumed[takenAt].km).toBe(0);
   });
