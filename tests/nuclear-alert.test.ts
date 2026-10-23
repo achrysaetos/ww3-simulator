@@ -76,6 +76,38 @@ describe('nuclear alerts', () => {
     expect(t.world.nations[ISR].nuclear.deployed).toBeGreaterThan(0);
   });
 
+  function russiaAbroad() {
+    const t = testWorld([createStrategic({ alerts: { RUS: spec } }), createDiplomacy(), createAi()]);
+    t.world.nations[RUS].nuclear = { warheads: 100, deployed: 0, doctrine: 'escalate_to_deescalate' };
+    const army = t.add({ nation: RUS, name: 'Combined arms army', kind: 'maneuver', echelon: 'corps', node: t.nodeAt(48.0, 37.8), equipment: { [id.platform('t_mbt')]: 1000 } });
+    t.war('RUS', 'UKR');
+    run(t, DAY);
+    const lose = (share: number) => { army.equipment[id.platform('t_mbt')]! -= Math.round(1000 * share); };
+    return { t, lose };
+  }
+
+  it('does not mate warheads over a grinding war abroad that wears down a fifth of its forces in a year', () => {
+    // ukraine-2026 at caa08de: Russia lost ~12% of its land and air platforms by day 50 and ~24% by day 325 while gaining
+    // ground, and its alert fired on day 50. Russia lost more than its pre-war tank fleet in 2022-25 (Oryx) with no alert.
+    const { t, lose } = russiaAbroad();
+    for (let day = 0; day < 360; day += 3) {
+      lose(0.2 / 120);
+      run(t, 3 * DAY);
+    }
+    expect(of(t.world.history, 'nuclear_alert').filter((e) => e.nation === RUS)).toEqual([]);
+    expect(t.world.nations[RUS].nuclear.deployed).toBe(0);
+  }, 240_000);
+
+  it('mates warheads when its forces collapse within weeks', () => {
+    const { t, lose } = russiaAbroad();
+    expect(of(t.world.history, 'nuclear_alert').filter((e) => e.nation === RUS)).toEqual([]);
+    for (let day = 0; day < 6; day++) {
+      lose(0.03);
+      run(t, DAY);
+    }
+    expect(of(t.world.history, 'nuclear_alert').filter((e) => e.nation === RUS)[0]).toMatchObject({ stage: 'ordered', reason: 'first-use threshold approaching' });
+  });
+
   it("a human player's warheads stay in storage until the player orders the alert", () => {
     const t = southAsia();
     t.world.nations[PAK].controlledBy = 'human';
