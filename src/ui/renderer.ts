@@ -317,23 +317,27 @@ export class MapRenderer {
     }
     if (relChanged || this.maskFor.control !== state.controlVersion || this.maskFor.contest !== state.contest) {
       const dirty = this.mask.update(state.control, this.rel, state.contest);
-      if (dirty) this.globe.setMask(this.mask.data, dirty);
+      if (dirty.length) {
+        this.globe.setMask(this.mask.data, dirty);
+        this.globeDirty = true;
+      }
       this.maskFor = { control: state.controlVersion, contest: state.contest };
-      this.globeDirty = true;
     }
     const o = this.overlayFor;
     if (relChanged || o.overlays !== overlays || o.air !== state.air || o.sea !== state.sea || o.infra !== state.infra || o.fallout !== state.fallout || o.weather !== state.weather) {
       if (this.weatherFor.packed !== state.weather) this.weatherFor = { packed: state.weather, pairs: state.weather.length ? weatherLayer(this.map, state.weather) : new Float32Array(0) };
-      this.overlay.paint({
+      const dirty = this.overlay.paint({
         air: overlays.air ? state.air : null,
         sea: overlays.sea ? state.sea : null,
         infra: overlays.infra ? state.infra : null,
         fallout: overlays.fallout ? state.fallout : null,
         weather: overlays.weather ? this.weatherFor.pairs : null,
       }, this.rel);
-      this.globe.setOverlay(this.overlay.data);
+      if (dirty.length) {
+        this.globe.setOverlay(this.overlay.data, dirty);
+        this.globeDirty = true;
+      }
       this.overlayFor = { state, air: state.air, sea: state.sea, infra: state.infra, fallout: state.fallout, weather: state.weather, overlays };
-      this.globeDirty = true;
     }
   }
 

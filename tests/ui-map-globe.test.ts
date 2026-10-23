@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { loadMap } from '../src/data/load';
-import { ControlMask, MASK_RES, MASK_W, Rel, relations } from '../src/ui/map/situation';
+import { ControlMask, MASK_RES, MASK_W, OVERLAY_W, OverlayRaster, Rel, relations, type Rect } from '../src/ui/map/situation';
 import { levelFor, spanOf, TileIndex, wantedTiles, type TileKey } from '../src/ui/map/tiles';
 import { scaleBar } from '../src/ui/map/ZoomControl';
 import { NO_NATION } from '../src/ui/snapshot';
@@ -40,7 +40,7 @@ describe('control mask', () => {
     const ctl = control();
     const melitopol = at(46.85, 35.37);
     ctl[melitopol] = rus;
-    expect(mask.update(ctl, rel)).not.toBeNull();
+    expect(mask.update(ctl, rel)).not.toEqual([]);
     expect(texel(mask, 50.45, 30.52)).toEqual([255, 0, 0, 0]);
     expect(texel(mask, 55.75, 37.62)).toEqual([0, 255, 0, 0]);
     const [, enemy, occupied] = texel(mask, map.lat[melitopol], map.lon[melitopol]);
@@ -56,10 +56,11 @@ describe('control mask', () => {
     const mask = new ControlMask(map, ids);
     const ctl = control();
     mask.update(ctl, rel);
-    expect(mask.update(ctl, rel)).toBeNull();
+    expect(mask.update(ctl, rel)).toEqual([]);
     const kharkiv = at(49.99, 36.23);
     ctl[kharkiv] = rus;
-    const dirty = mask.update(ctl, rel)!;
+    const [dirty, ...more] = mask.update(ctl, rel);
+    expect(more).toEqual([]);
     const x = (map.lon[kharkiv] + 180) / MASK_RES, y = (90 - map.lat[kharkiv]) / MASK_RES;
     expect(dirty.x0).toBeLessThan(x);
     expect(dirty.x1).toBeGreaterThan(x);
@@ -80,7 +81,7 @@ describe('control mask', () => {
     const enemyRows = () => Array.from({ length: 20 }, (_, k) => texel(mask, map.lat[kharkiv] + 0.24 - k * 0.025, map.lon[kharkiv])).filter(([f, e]) => e > f).length;
     const pressed = (share: number) => Float32Array.from([kharkiv, rus, share, 0, -1]);
     const before = enemyRows();
-    expect(mask.update(ctl, rel, pressed(0.25))).not.toBeNull();
+    expect(mask.update(ctl, rel, pressed(0.25))).not.toEqual([]);
     const quarter = enemyRows();
     mask.update(ctl, rel, pressed(0.75));
     const most = enemyRows();
@@ -88,9 +89,58 @@ describe('control mask', () => {
     expect(most).toBeGreaterThan(quarter + 5);
     expect(most).toBeLessThan(20);
     expect(texel(mask, map.lat[kharkiv] - 0.24, map.lon[kharkiv])[0]).toBeGreaterThan(128);
-    expect(mask.update(ctl, rel, pressed(0.75))).toBeNull();
+    expect(mask.update(ctl, rel, pressed(0.75))).toEqual([]);
     mask.update(ctl, rel);
     expect(enemyRows()).toBe(before);
+  });
+});
+
+describe('incremental repaint', () => {
+  const map = loadMap();
+  const ids = map.nationIds as readonly string[];
+  const rel = relations(ids, [['RUS', 'UKR']], 'UKR');
+  const rus = ids.indexOf('RUS');
+  /** Every texel where `a` and `b` differ lies inside one of `rects`. */
+  const covered = (a: Uint8Array, b: Uint8Array, width: number, rects: readonly Rect[]) => {
+    for (let i = 0; i < a.length; i += 4) {
+      if (a[i] === b[i] && a[i + 1] === b[i + 1] && a[i + 2] === b[i + 2] && a[i + 3] === b[i + 3]) continue;
+      const x = (i / 4) % width, y = Math.floor(i / 4 / width);
+      if (!rects.some((r) => x >= r.x0 && x < r.x1 && y >= r.y0 && y < r.y1)) return false;
+    }
+    return true;
+  };
+
+  it('repaints far-apart changes as separate rectangles, matching a mask painted from scratch', () => {
+    const ctl = Uint16Array.from({ length: map.size }, (_, n) => ids.indexOf(map.owner[n]));
+    const mask = new ControlMask(map, ids);
+    mask.update(ctl, rel);
+    const before = mask.data.slice();
+    ctl[map.nodeAt(49.99, 36.23)] = rus;
+    ctl[map.nodeAt(46.48, 30.73)] = rus;
+    const dirty = mask.update(ctl, rel);
+    expect(dirty).toHaveLength(2);
+    expect(covered(before, mask.data, MASK_W, dirty)).toBe(true);
+    const fresh = new ControlMask(map, ids);
+    fresh.update(ctl, rel);
+    expect(Buffer.compare(mask.data, fresh.data)).toBe(0);
+  });
+
+  it('repaints only the overlay cells whose layers changed, matching a raster painted from scratch', () => {
+    const kyiv = map.nodeAt(50.45, 30.52), odesa = map.nodeAt(46.48, 30.73), lviv = map.nodeAt(49.84, 24.03);
+    const none = { air: null, sea: null, fallout: null, weather: null };
+    const a = { ...none, infra: Float32Array.from([kyiv, 0.5, odesa, 0.7]) };
+    const b = { ...none, infra: Float32Array.from([kyiv, 0.5, lviv, 0.2]) };
+    const raster = new OverlayRaster(map);
+    expect(raster.paint(a, rel).length).toBeGreaterThan(0);
+    expect(raster.paint(a, rel)).toEqual([]);
+    const before = raster.data.slice();
+    const dirty = raster.paint(b, rel);
+    expect(dirty.length).toBeGreaterThan(0);
+    expect(covered(before, raster.data, OVERLAY_W, dirty)).toBe(true);
+    const fresh = new OverlayRaster(map);
+    fresh.paint(b, rel);
+    expect(Buffer.compare(raster.data, fresh.data)).toBe(0);
+    expect(raster.data.some((v) => v > 0)).toBe(true);
   });
 });
 
