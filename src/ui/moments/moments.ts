@@ -56,9 +56,11 @@ export function momentsOf(events: readonly SimEvent[], c: MomentContext): Moment
   const party = (n: NationId) => mine(n) || c.enemies.has(n);
   const gained: NodeId[] = [], lost: NodeId[] = [];
   const sunk = new Set<FormationId>();
+  // A group wrecked where a warhead burst is part of that detonation's moment, not a second flash after it.
+  const blasted = new Set(events.flatMap((e) => (e.type === 'nuclear_detonation' ? [e.node] : [])));
   const fleetLost = (id: FormationId, tick: number, fallback: NodeId) => {
     const f = c.formation(id);
-    if (!f || !NAVAL.has(f.kind) || sunk.has(id) || (!mine(f.nation) && !c.enemies.has(f.nation))) return;
+    if (!f || !NAVAL.has(f.kind) || sunk.has(id) || blasted.has(f.node) || (!mine(f.nation) && !c.enemies.has(f.nation))) return;
     sunk.add(id);
     const ours = mine(f.nation);
     const node = c.isSea(f.node) || !c.isSea(fallback) ? f.node : fallback;

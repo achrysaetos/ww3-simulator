@@ -253,6 +253,13 @@ describe('moments land only when the player would know them', () => {
     expect(momentsOf([hit('tur-fleet', 9)], ctx)).toEqual([]);
   });
 
+  it('a naval group wrecked by a nuclear detonation at its cell is part of that one moment, not a second flash', () => {
+    const lost = { type: 'formation_destroyed' as const, tick: 7, formation: 'ukr-boats' as FormationId, nation: N('UKR') };
+    const burst = (node: NodeId) => ({ type: 'nuclear_detonation' as const, tick: 7, by: N('RUS'), node, yieldKt: 150, casualties: 1000 });
+    expect(momentsOf([burst(sea), lost], ctx)).toMatchObject([{ kind: 'nuclear' }]);
+    expect(momentsOf([burst(10 as NodeId), lost], ctx), 'a group lost elsewhere that turn is its own moment').toMatchObject([{ kind: 'nuclear' }, { kind: 'fleet' }]);
+  });
+
   it('a capital changing hands in a war we are not in, and a carrier lost in a battle we did not fight, are not ours to see', () => {
     expect(momentsOf([{ type: 'node_captured', tick: 5, node: capital, from: N('PER'), to: N('BOL') }], { ...ctx, capitals: new Map([[capital, N('PER')]]) })).toEqual([]);
     const battle = (attacker: string, defender: string, loser: string) => ({ type: 'battle' as const, tick: 5, node: 3 as NodeId, attacker: N(attacker), defender: N(defender), domain: 'sea' as const, losses: { [loser]: { cvn: 1 } }, casualties: {} });
