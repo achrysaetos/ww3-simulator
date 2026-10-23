@@ -138,6 +138,7 @@ export const ITEMS = {
   javelin: item('javelin', 'atgm'),
   stinger: item('stinger', 'atgm'),
   shahed_136: item('shahed136', 'one_way_drone'),
+  lyutyi: item('lyutyi', 'one_way_drone'),
   fpv_drone: item('fpv', 'fpv_drone'),
   fab500_umpk: item('fab500_umpk', 'glide_kit'),
   m1a2: item('m1a2_sepv3', 'armor'),
