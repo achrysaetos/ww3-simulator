@@ -183,6 +183,24 @@ The slowest Ukraine run of the base took 1,340 km2 a year and the fastest 23,848
 
 **Karabakh's ATGMs were skipped**, as instructed, for want of a sourced count.
 
+## An empty covered cell is swept, not assaulted
+
+A brigade pressing into an empty enemy cell that the line next door covers filled its sector at `FRONTAGE_PLATFORMS`' 30 exposed platforms per km, the density for assaulting a manned line. So a Russian brigade (355 platforms) crossed an empty 45 km plain cell at 0.2 km a day, 0.08 behind a belt, and never took it. `land.SCREEN_DENSITY` now sets that sector at 12 exposed platforms per km: a brigade's 112-123 exposed platforms on its ~10 km FM 3-90 sector. Manned-line paths keep `FRONTAGE_PLATFORMS`, and the drag pill's `coverAxes` reads the same density.
+
+`npm run validate -- --cases kursk-2024,ukraine-2026-60d --runs 4 --sweep none` (seeds 1-4, defaults), p10 / p50 / p90:
+
+| `SCREEN_DENSITY` | `ukr_ground_km2` (800-1,300) | `rus_km2_per_year` (3,500-5,000) | RUS casualties/day | RUS tanks/day |
+| --- | --- | --- | --- | --- |
+| none (30/km, c45a0ae) | 861 / 962 / 1,127 | 3,030 / 4,264 / 6,858 | 1,702 | 5.6 |
+| 8 | 1,399 / 1,449 / 1,705 | 3,120 / 4,919 / 8,146 | 1,702 | 5.6 |
+| 10 | 1,216 / 1,295 / 1,530 | 3,299 / 4,741 / 7,797 | 1,691 | 5.5 |
+| **12** | 1,088 / 1,127 / 1,238 | 3,013 / 4,622 / 7,563 | 1,702 | 5.6 |
+| 15 | 980 / 1,097 / 1,304 | 2,990 / 4,503 / 7,330 | 1,702 | 5.5 |
+
+At 10 the Kursk median sits on the band's top and half the runs land above it, so 12 is the default. The Ukraine median stays in its band at every density, but one more of the four runs lands above 5,000 km2 a year, so one of four runs lands inside rather than two. That is the cost of this change, and it is a tuned-on band.
+
+One brigade against an empty cell one Ukrainian brigade covers, 60 days on the theatre engine (km gained, base then 12/km): plain 11.7 then 29.3, plain behind a belt 4.7 then 11.7, forest 7.0 then 17.6, forest behind a belt 2.8 then 7.0. The cell still does not fall inside 60 days on a 45 km cell; at 0.5 km a day a plain one takes about three months (inferred). `tests/land.test.ts` pins the faster sweep on the test map.
+
 ## Long horizons are out of reach today
 
 The bands and cases run 4 to 90 days. Questions about production races need runs of three to five years, since warships and new production lines take years. Nothing in the repository runs or checks that long, and a year of ukraine-2026 is about 1,460 ticks, five to ten minutes a run on a four-core machine. Treat any output past 90 days as unvalidated.
