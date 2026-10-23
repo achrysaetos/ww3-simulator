@@ -30,7 +30,7 @@ export async function open({ url = 'http://localhost:4650/', play = 'ukraine-202
       await page.waitForTimeout(400);
     },
     /** Runs the clock to `tick` and pauses. Ticks are 6 game hours. */
-    runTo: (tick, speed = 20) => runTo(page, tick, { speed }),
+    runTo: (tick, speed = Infinity) => runTo(page, tick, { speed }),
     /** A map node's position on the page, or null when it is off screen. */
     at: (node) => page.evaluate((n) => {
       const p = window.__map.screenOf(n);

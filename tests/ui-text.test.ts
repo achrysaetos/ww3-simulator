@@ -39,10 +39,7 @@ describe('a resumed game keeps its news', () => {
     const posts: FromWorker[] = [];
     const host = new SimHost((m) => posts.push(m));
     host.handle({ type: 'start', scenario: 'ukraine-2026', nation: 'UKR' as NationId, seed: 1 });
-    for (let i = 0; i < 16; i++) {
-      host.handle({ type: 'ack' });
-      host.handle({ type: 'step' });
-    }
+    for (let i = 0; i < 16; i++) host.handle({ type: 'step' });
     host.handle({ type: 'save' });
     const saved = posts.find((m) => m.type === 'saved');
     if (saved?.type !== 'saved') throw new Error('no save');

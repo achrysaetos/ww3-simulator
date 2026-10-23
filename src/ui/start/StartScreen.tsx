@@ -106,7 +106,7 @@ export function StartScreen({ client, palette }: { client: SimClient; palette: P
   const q = search?.trim().toLowerCase() ?? '';
   const found = search === null ? [] : all.filter((n) => !q || n.name.toLowerCase().includes(q) || n.id.toLowerCase() === q).slice(0, 8);
   const slotScenario = client.slot ? scenarios.find((s) => s.id === client.slot!.scenario) : undefined;
-  const slotDay = client.slot ? Math.floor((client.slot.tick * 6) / 24) : 0;
+  const slotDay = client.slot ? Math.floor((client.slot.tick * client.slot.dtHours) / 24) : 0;
 
   return (
     <div className="st-root" data-testid="start-screen">

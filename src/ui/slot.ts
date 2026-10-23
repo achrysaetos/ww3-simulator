@@ -7,8 +7,14 @@ const DB = 'ww3-saves';
 const STORE = 'slots';
 const KEY = 'quick';
 
-export interface SlotInfo { scenario: string; tick: number; savedAt: string }
-interface Slot extends SlotInfo { text: string }
+export interface SlotInfo { scenario: string; tick: number; savedAt: string; dtHours: number }
+interface Slot extends Omit<SlotInfo, 'dtHours'> { text: string }
+
+/** A save's hours per tick, read off its text rather than parsing several MB of JSON for one number. */
+export function dtHoursIn(text: string): number {
+  const m = /"dtHours":(\d+(?:\.\d+)?)/.exec(text);
+  return m ? Number(m[1]) : NaN;
+}
 
 function open(): Promise<IDBDatabase | null> {
   return new Promise((resolve) => {

@@ -1,18 +1,20 @@
 import { loadMap } from '../data/load';
-import { COMMAND_DOMAINS, type Command, type FormationId, type NationId, type SimEvent } from '../core/types';
+import { COMMAND_DOMAINS, type Command, type FormationId, type NationId, type NodeId, type SimEvent } from '../core/types';
 import type { OperationForecast, OperationForecastInput, OperationPlan } from '../forecast/operation';
 import { FORECAST_RUNS, Forecaster, type DrawWorker } from './orders/forecaster';
 import type { DragKit } from './drag/kit';
 import { OrderTracks } from './orders/tracks';
+import { GameClock } from './clock';
 import { describeResult, humanizeReason, PlaceNamer, type Namer } from './events';
 import { EventFeed } from './feed';
+import { glidesFrom, nodesOf } from './glide';
 import { nationName } from './placeNames';
-import { readSlot, writeSlot, type SlotInfo } from './slot';
+import { dtHoursIn, readSlot, writeSlot, type SlotInfo } from './slot';
 import type { Action, Card } from './staff/advice';
 import { StaffDesk } from './staff/desk';
 import { roleById, type Delegation, type RoleId } from './staff/roles';
 import {
-  applySnapshot, emptyClientState, type ClientState, type FromWorker, type NationCard, type RunStats, type ScenarioCard, type SessionMeta, type ToWorker,
+  applySnapshot, emptyClientState, type ClientState, type FromWorker, type NationCard, type ScenarioCard, type SessionMeta, type ToWorker,
 } from './snapshot';
 
 export interface Notice { text: string; tone: 'info' | 'error'; seq: number }
@@ -22,8 +24,8 @@ const forecastWorkers = () => Math.max(1, Math.min(3, (navigator.hardwareConcurr
 
 /**
  * Main-thread handle on the simulation worker. Holds the decoded mirror of the
- * World and notifies React and the map renderer when a snapshot lands. Every
- * snapshot is acked once applied, which is what paces the worker.
+ * World and notifies React and the map renderer when a snapshot lands. Its clock
+ * paces the game: the worker steps only when the clock asks for the next tick.
  */
 export class SimClient {
   readonly map = loadMap();
@@ -43,8 +45,10 @@ export class SimClient {
   private formationNames = new Map<FormationId, string>();
   private namesVersion = -1;
   version = 0;
-  stats: RunStats = { stepMs: 0, achievedTps: 0 };
-  ticksPerSec = 0;
+  /** The time the player sees, for the session; null on the start screen. */
+  clock: GameClock | null = null;
+  /** Where each formation that stepped to a neighbouring node in the latest tick came from, for the map to glide it. */
+  glides: ReadonlyMap<FormationId, NodeId> = new Map();
   error: string | null = null;
   /** The latest thing the engine answered to a command, or a save or load reported, for a toast. */
   notice: Notice | null = null;
@@ -65,6 +69,8 @@ export class SimClient {
   private asked = 0;
   private readonly waiting = new Map<number, { resolve(v: never): void; reject(e: Error): void }>();
   private forecaster: Forecaster | null = null;
+  private readonly clockListeners = new Set<() => void>();
+  private frame = 0;
 
   constructor() {
     this.worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
@@ -75,7 +81,7 @@ export class SimClient {
     };
     void readSlot().then((s) => {
       if (!s) return;
-      this.slot = { scenario: s.scenario, tick: s.tick, savedAt: s.savedAt };
+      this.slot = { scenario: s.scenario, tick: s.tick, savedAt: s.savedAt, dtHours: dtHoursIn(s.text) };
       this.notify();
     });
   }
@@ -84,7 +90,7 @@ export class SimClient {
     switch (msg.type) {
       case 'error':
         this.error = msg.message;
-        this.ticksPerSec = 0;
+        this.clock?.setRate(0, performance.now());
         this.starting = false;
         break;
       case 'hello':
@@ -112,7 +118,7 @@ export class SimClient {
         else this.settle(msg.seq, new Error(msg.reason ?? 'the staff cannot forecast this plan'));
         return;
       case 'ready':
-      case 'snapshot':
+      case 'snapshot': {
         if (msg.type === 'ready') {
           this.reset();
           this.sessionId++;
@@ -120,16 +126,22 @@ export class SimClient {
           this.playing = msg.playing;
           this.starting = false;
           this.desk = new StaffDesk(this.map, msg.meta, msg.playing, this.namer);
-        } else this.stats = msg.stats;
+          this.clock = new GameClock(msg.meta.dtHours, msg.snapshot.tick, performance.now());
+        }
+        const before = nodesOf(this.state.formations);
         applySnapshot(this.state, msg.snapshot, this.meta!.nationIds, this.nationCards);
         if (msg.type === 'ready') this.openingDelegation = this.pendingDelegation();
-        this.send({ type: 'ack' });
+        if (this.clock?.delivered(msg.snapshot.tick)) {
+          this.glides = glidesFrom(before, this.state.formations, this.map);
+          this.run(performance.now());
+        }
         if (msg.snapshot.history) this.record(msg.snapshot.history);
         this.record(msg.snapshot.events);
         this.answer(msg.snapshot.events);
         this.tracks.observe(msg.snapshot.events, this.state.tick, (r) => humanizeReason(r, this.namer));
         this.desk?.observe(this.state, msg.snapshot.events, this.state.focusNation?.id === this.playing ? this.state.focusNation : undefined);
         break;
+      }
     }
     this.notify();
   }
@@ -221,15 +233,18 @@ export class SimClient {
     this.namesVersion = -1;
     this.meta = null;
     this.playing = null;
-    this.ticksPerSec = 0;
-    this.stats = { stepMs: 0, achievedTps: 0 };
+    this.clock = null;
+    this.glides = new Map();
+    cancelAnimationFrame(this.frame);
+    this.frame = 0;
     this.error = null;
   }
 
   private async store(text: string, scenario: string, tick: number) {
     const to = this.saveTo;
     this.saveTo = null;
-    const name = `ww3-${scenario}-D${Math.floor((tick * (this.meta?.dtHours ?? 6)) / 24)}.json`;
+    const dtHours = dtHoursIn(text);
+    const name = `ww3-${scenario}-D${Math.floor((tick * dtHours) / 24)}.json`;
     if (to === 'download') {
       const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
       const a = document.createElement('a');
@@ -241,7 +256,7 @@ export class SimClient {
     } else if (to === 'slot') {
       const info = { scenario, tick, savedAt: new Date().toISOString() };
       if (await writeSlot({ ...info, text })) {
-        this.slot = info;
+        this.slot = { ...info, dtHours };
         this.say("Saved to this browser's quick-save slot.", 'info');
       } else this.say('This browser would not store the save. Use Download instead.', 'error');
     }
@@ -265,6 +280,7 @@ export class SimClient {
   getVersion = () => this.version;
 
   start(scenario: string, nation: NationId, role?: RoleId, seed = 1) {
+    this.clock?.setRate(0, performance.now());
     this.starting = true;
     this.notify();
     this.startRole = role ?? null;
@@ -286,6 +302,7 @@ export class SimClient {
       this.notify();
       return;
     }
+    this.clock?.setRate(0, performance.now());
     this.starting = true;
     this.startRole = null;
     this.notify();
@@ -297,15 +314,45 @@ export class SimClient {
     this.send({ type: 'quit' });
   }
 
-  setSpeed(ticksPerSec: number) {
-    this.ticksPerSec = ticksPerSec;
-    this.send({ type: 'speed', ticksPerSec });
+  /** Game hours per real second the clock runs at: 0 pauses, Infinity runs as fast as the engine steps. */
+  get speed(): number {
+    return this.clock?.rate ?? 0;
+  }
+
+  /** The clock's pace in engine ticks, for tests that think in ticks. */
+  get ticksPerSec(): number {
+    return this.clock ? this.clock.rate / this.clock.dtHours : 0;
+  }
+
+  setSpeed(hoursPerSec: number) {
+    if (!this.clock) return;
+    this.clock.setRate(hoursPerSec, performance.now());
+    this.run(performance.now());
     this.notify();
   }
 
   step() {
-    if (this.meta && !this.ticksPerSec) this.send({ type: 'step' });
+    if (this.clock?.step()) this.send({ type: 'step' });
   }
+
+  /** The clock's whole hours since tick 0, which change far more often than snapshots land. */
+  shownHour = () => (this.clock ? Math.floor(this.clock.shown) : 0);
+
+  subscribeClock = (fn: () => void) => {
+    this.clockListeners.add(fn);
+    return () => void this.clockListeners.delete(fn);
+  };
+
+  /** One frame of the clock: run the shown time, ask for the next tick when it is due, and keep going while the clock runs. */
+  private readonly run = (now: number) => {
+    this.frame = 0;
+    const c = this.clock;
+    if (!c) return;
+    const hour = this.shownHour();
+    if (c.advance(now)) this.send({ type: 'step' });
+    if (this.shownHour() !== hour) for (const l of this.clockListeners) l();
+    if (c.rate && !this.frame) this.frame = requestAnimationFrame(this.run);
+  };
 
   command(c: Command) {
     this.send({ type: 'command', command: c });

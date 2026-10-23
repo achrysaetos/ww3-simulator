@@ -68,7 +68,6 @@ describe('start screen', () => {
       const ready = sent.find((m) => m.type === 'ready');
       expect(ready && ready.type === 'ready' && ready.playing).toBe('UKR');
       expect(host.world!.nations[N('UKR')].controlledBy).toBe('human');
-      host.handle({ type: 'ack' });
       host.handle({ type: 'step' });
       expect(authority(host.world!, N('UKR')).ai, role.id).toEqual(role.ai);
       host.handle({ type: 'quit' });
@@ -78,7 +77,6 @@ describe('start screen', () => {
   it('ignores a role it does not know and leaves the default delegation', () => {
     const host = new SimHost(() => {});
     host.handle({ type: 'start', scenario: 'ukraine-2026', nation: N('UKR'), seed: 1, role: 'dictator' });
-    host.handle({ type: 'ack' });
     host.handle({ type: 'step' });
     expect(authority(host.world!, N('UKR')).ai).toEqual(COMMAND_ROLES[0].ai);
     host.handle({ type: 'quit' });

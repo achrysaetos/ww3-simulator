@@ -138,7 +138,6 @@ describe('aiming a stack', () => {
       for (const m of posts.splice(0)) {
         if (m.type !== 'ready' && m.type !== 'snapshot') continue;
         events.push(...m.snapshot.events);
-        host.handle({ type: 'ack' });
       }
     };
     host.handle({ type: 'load', text: saveRun('ukraine-2026', s.world) });
@@ -177,7 +176,6 @@ describe('the drag_kit message', () => {
     const posts: { m: FromWorker; transfer?: Transferable[] }[] = [];
     const host = new SimHost((m, transfer) => posts.push({ m, transfer }));
     host.handle({ type: 'load', text: saveRun('ukraine-2026', s.world) });
-    host.handle({ type: 'ack' });
     const ask = (formations: unknown, seq = 1) => {
       posts.length = 0;
       host.handle({ type: 'drag_kit', seq, formations } as never);

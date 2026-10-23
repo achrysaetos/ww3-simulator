@@ -6,7 +6,6 @@ import { resumeRun, saveRun, type ResumedSession } from '../scenarios/save';
 import { authority, isOperationCommand } from '../systems/orders';
 import { checkCommand } from './commands';
 import { COMMAND_LABEL } from './events';
-import { Pacer } from './pacer';
 import { forecastInput } from '../forecast/operation';
 import { beliefOf, buildKit, buffersOf, type Belief } from './drag/kit';
 import { delegateCommands, roleById } from './staff/roles';
@@ -31,8 +30,8 @@ const setPlayer = (world: World, nation: NationId) => {
 };
 
 /**
- * The simulation side of the worker: owns the running World, paces it against the UI's
- * acks, and treats every message from the page as untrusted input. The player commands one
+ * The simulation side of the worker: owns the running World, steps it when the page's clock
+ * asks, and treats every message from the page as untrusted input. The player commands one
  * nation, chosen at start or by the save, for the whole session.
  */
 export class SimHost {
@@ -42,11 +41,6 @@ export class SimHost {
   private focus: { nation?: NationId; formation?: FormationId } = {};
   /** The player's believed world as of one tick: every press in that tick aims from it, and the kit's field is cached on it. */
   private belief: { tick: number; world: Belief } | null = null;
-  private readonly pacer = new Pacer(() => {
-    if (!this.session || !this.encoder) return;
-    this.encoder.collect(this.session.engine.step(this.session.world).filter((e) => this.forPlayer(e)), this.session.world, this.session.engine.map);
-    this.send();
-  });
 
   constructor(private readonly post: (m: FromWorker, transfer?: Transferable[]) => void) {
     post({ type: 'hello', scenarios: SCENARIO_CARDS, nations: nationCards(loadMap(), profiles) });
@@ -60,7 +54,6 @@ export class SimHost {
     try {
       this.dispatch(msg);
     } catch (e) {
-      this.pacer.stop();
       this.post({ type: 'error', message: e instanceof Error ? `${e.message}\n${e.stack ?? ''}` : String(e) });
     }
   }
@@ -92,21 +85,13 @@ export class SimHost {
         this.post({ type: 'saved', text: saveRun(this.session.scenario.id, this.session.world), scenario: this.session.scenario.id, tick: this.session.world.tick });
         return;
       case 'quit':
-        this.pacer.setSpeed(0);
         this.session = null;
         this.encoder = null;
         this.player = null;
         this.post({ type: 'closed' });
         return;
-      case 'ack':
-        this.pacer.ack();
-        return;
-      case 'speed':
-        if (typeof msg.ticksPerSec === 'number' && Number.isFinite(msg.ticksPerSec)) this.pacer.setSpeed(Math.max(0, Math.min(60, msg.ticksPerSec)));
-        return;
       case 'step':
-        this.pacer.step();
-        return;
+        return this.step();
       case 'command':
         return this.command(msg.command);
       case 'focus':
@@ -182,15 +167,21 @@ export class SimHost {
     return e.type !== 'command_result' || (e.nation === this.player && !!e.byPlayer);
   }
 
+  /** One tick, when the page's clock asks for it: the page holds one request at a time, so nothing queues. */
+  private step(): void {
+    const { session, encoder } = this;
+    if (!session || !encoder) return;
+    encoder.collect(session.engine.step(session.world).filter((e) => this.forPlayer(e)), session.world, session.engine.map);
+    this.send();
+  }
+
   private open(session: ResumedSession, nation: NationId, resumed = false): void {
-    this.pacer.setSpeed(0);
     this.session = session;
     this.player = nation;
     this.belief = null;
     const { world, engine, scenario } = session;
     this.encoder = new SnapshotEncoder(engine.map.nationIds, engine.catalog, engine.map.size);
     this.focus = { nation };
-    this.pacer.sent();
     const card = SCENARIO_CARDS.find((c) => c.id === scenario.id)!;
     const history = resumed ? this.encoder.resumed(world, engine.map) : [];
     const snapshot = this.encoder.encode(world, engine.map, this.focus);
@@ -201,7 +192,6 @@ export class SimHost {
   private send(): void {
     const { session, encoder } = this;
     if (!session || !encoder) return;
-    this.pacer.sent();
-    this.post({ type: 'snapshot', snapshot: encoder.encode(session.world, session.engine.map, this.focus), stats: { stepMs: this.pacer.stepMs, achievedTps: this.pacer.achievedTps } });
+    this.post({ type: 'snapshot', snapshot: encoder.encode(session.world, session.engine.map, this.focus) });
   }
 }

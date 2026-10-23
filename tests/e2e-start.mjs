@@ -23,8 +23,8 @@ export async function newGame(browser, url, scenario, nation, { role = 'cinc' } 
   return { page, errors };
 }
 
-/** Runs the clock to `tick` and pauses. */
-export async function runTo(page, tick, { speed = 20 } = {}) {
+/** Runs the clock to `tick` and pauses. Speed is game hours a second; the default steps the engine as fast as it goes. */
+export async function runTo(page, tick, { speed = Infinity } = {}) {
   if ((await page.evaluate(() => window.__client.state.tick)) < tick) {
     await page.evaluate((v) => window.__client.setSpeed(v), speed);
     await page.waitForFunction((t) => window.__client.state.tick >= t, tick, { timeout: 900_000 });

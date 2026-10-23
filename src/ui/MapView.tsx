@@ -126,8 +126,11 @@ export function MapView(props: MapViewProps) {
 
     let raf = 0;
     let shown = { band: '', km: 0 };
+    let drawnAt = 1;
     const loop = (now: number) => {
-      if (dirty.current || r.animating) {
+      const t = client.clock?.fraction ?? 1;
+      if (dirty.current || r.animating || t !== drawnAt) {
+        drawnAt = t;
         const changed = dirty.current;
         dirty.current = false;
         const p = propsRef.current;
@@ -142,6 +145,7 @@ export function MapView(props: MapViewProps) {
           drag: dragRef.current.overlay.current,
           tracks: client.tracks.list(),
           dtHours: client.meta?.dtHours ?? 6,
+          glide: { from: client.glides, t },
         }, now, changed);
         const km = Number(r.kmPerPx.toPrecision(2));
         if (r.band !== shown.band || km !== shown.km) {

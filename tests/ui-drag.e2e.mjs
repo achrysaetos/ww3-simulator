@@ -111,7 +111,7 @@ try {
 
   // The engine takes the order, the unit is the player's while the attack runs, and goes back once it ends.
   const t0 = await page.evaluate(() => window.__client.state.tick);
-  await s.runTo(t0 + 2, 1);
+  await s.runTo(t0 + 2, 6);
   const answer = (await tracks()).find((t) => t.formation === front.id);
   check(answer?.state === 'accepted' || answer?.state === 'relayed', `the engine accepted the attack (${answer?.state})`);
   check((await held()).includes(front.id), 'the attacking brigade is held by its player order');
@@ -260,20 +260,20 @@ try {
     for (let attempt = 0; attempt < 3; attempt++) {
       await page.evaluate(() => window.__client.setSpeed(5));
       await page.waitForTimeout(800);
-      const start = await page.evaluate(() => ({ tick: window.__client.state.tick, at: performance.now() }));
+      const start = await page.evaluate(() => ({ hours: window.__client.clock.shown, at: performance.now() }));
       if (wiggle) {
         await page.mouse.move(own.x, own.y);
         await page.mouse.down();
         const end = Date.now() + 5000;
         for (let i = 0; Date.now() < end; i++) await page.mouse.move(own.x + 140 * Math.cos(i / 6), own.y + 80 * Math.sin(i / 4));
       } else await page.waitForTimeout(5000);
-      const stop = await page.evaluate(() => ({ tick: window.__client.state.tick, at: performance.now(), paused: window.__client.ticksPerSec === 0 }));
+      const stop = await page.evaluate(() => ({ hours: window.__client.clock.shown, at: performance.now(), paused: window.__client.speed === 0 }));
       if (wiggle) {
         await page.keyboard.press('Escape');
         await page.mouse.up();
       }
       await page.evaluate(() => window.__client.setSpeed(0));
-      if (!stop.paused) return ((stop.tick - start.tick) * 1000) / (stop.at - start.at);
+      if (!stop.paused) return ((stop.hours - start.hours) * 1000) / (stop.at - start.at);
     }
     return NaN;
   };
@@ -285,8 +285,8 @@ try {
     dragging.push(await pace(true));
   }
   const median = (xs) => [...xs].sort((x, y) => x - y)[1];
-  facts.ticksPerSec = { idle, dragging };
-  check(median(dragging) >= median(idle) * 0.8, `ticks a second hold steady during 5 s drag wiggles: median ${median(dragging).toFixed(2)} dragging against ${median(idle).toFixed(2)} idle (${dragging.map((x) => x.toFixed(2))} / ${idle.map((x) => x.toFixed(2))})`);
+  facts.hoursPerSec = { idle, dragging };
+  check(median(dragging) >= median(idle) * 0.8, `game hours a second hold steady during 5 s drag wiggles: median ${median(dragging).toFixed(2)} dragging against ${median(idle).toFixed(2)} idle (${dragging.map((x) => x.toFixed(2))} / ${idle.map((x) => x.toFixed(2))})`);
   check((await sent()) === n3, 'the wiggle, cancelled, sent nothing');
 
   check(s.errors.length === 0, `no page errors${s.errors.length ? `: ${s.errors.slice(0, 3).join(' | ')}` : ''}`);

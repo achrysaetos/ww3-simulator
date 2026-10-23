@@ -47,10 +47,7 @@ export function playWithStaff(scenario: string, nation: string, seed = 1, role?:
     namer,
     send: (command: Command) => host.handle({ type: 'command', command }),
     step: (n = 1) => {
-      for (let i = 0; i < n; i++) {
-        host.handle({ type: 'ack' });
-        host.handle({ type: 'step' });
-      }
+      for (let i = 0; i < n; i++) host.handle({ type: 'step' });
     },
     quit: () => host.handle({ type: 'quit' }),
   };

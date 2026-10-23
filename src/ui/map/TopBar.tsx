@@ -18,6 +18,7 @@ export interface TopBarProps {
   date: Date | null;
   /** Days since the scenario began. */
   day: number;
+  /** Game hours a real second; 0 is paused. */
   speed: number;
   speeds: readonly number[];
   onSpeed(speed: number): void;
@@ -67,11 +68,14 @@ export function TopBar(p: TopBarProps) {
           <span className="ww-mono ww-clock-date">{d ? `${pad(d.getUTCDate())} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}` : '--'}</span>
           <span className="ww-mono ww-clock-time">{d ? `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}` : '--:--'}</span>
           <div className="ww-speeds" role="group" aria-label="Game speed">
-            {p.speeds.map((s, i) => (
-              <button key={s} type="button" className={p.speed === s ? 'on' : ''} aria-label={s ? `Speed ${i}` : 'Pause, Space'} aria-pressed={p.speed === s} onClick={() => p.onSpeed(s)} data-testid={`speed-${s}`}>
-                <SpeedIcon n={i} />
-              </button>
-            ))}
+            {p.speeds.map((s, i) => {
+              const label = s ? `${s} game ${s === 1 ? 'hour' : 'hours'} a second, ${i}` : 'Pause, Space';
+              return (
+                <button key={s} type="button" className={p.speed === s ? 'on' : ''} aria-label={label} title={label} aria-pressed={p.speed === s} onClick={() => p.onSpeed(s)} data-testid={`speed-${s}`}>
+                  <SpeedIcon n={i} />
+                </button>
+              );
+            })}
           </div>
         </div>
       </div>

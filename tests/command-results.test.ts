@@ -19,10 +19,7 @@ function play(scenario: string, nation: string) {
   const results = (): CommandResult[] =>
     posts.flatMap((m) => (m.type === 'snapshot' || m.type === 'ready' ? m.snapshot.events : [])).filter((e): e is CommandResult => e.type === 'command_result');
   const send = (command: unknown) => host.handle({ type: 'command', command: command as Command });
-  const step = () => {
-    host.handle({ type: 'ack' });
-    host.handle({ type: 'step' });
-  };
+  const step = () => host.handle({ type: 'step' });
   /** Step until the engine gives a final answer (not 'relayed') about this formation, for at most two weeks. */
   const finalAnswer = (formation: FormationId): CommandResult => {
     for (let i = 0; i < 56; i++) {

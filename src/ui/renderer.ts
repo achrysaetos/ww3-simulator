@@ -10,6 +10,7 @@ import type { Palette } from './colors';
 import { eventNode } from './events';
 import { contactLabel, contactRing, isStale, type ContactInfo } from './map/contacts';
 import { seenOnMap } from './map/feedback';
+import { along, gliders } from './glide';
 import type { OrderTrack } from './orders/tracks';
 import type { DragOverlay } from './drag/useDrag';
 import { GlobeGL } from './map/globe';
@@ -48,6 +49,8 @@ export interface RenderInput {
   /** The player's orders on their way to their units, or just answered. */
   tracks: readonly OrderTrack[];
   dtHours: number;
+  /** Formations that stepped to a neighbouring node in the latest tick, by the node they left, and how far through the tick the clock is. */
+  glide: { from: ReadonlyMap<FormationId, NodeId>; t: number } | null;
 }
 
 /** A place a staff card points at: where something landed, from where it came, or a site to look at. */
@@ -143,6 +146,10 @@ export class MapRenderer {
   private tilesPending = false;
   private byNode = new Map<NodeId, FormationView[]>();
   private indexedFrom: readonly FormationView[] | null = null;
+  private indexedGlides: ReadonlyMap<FormationId, NodeId> | null = null;
+  /** Formations standing at a node; while a tick plays, the gliding ones are drawn on their way instead. */
+  private standing = new Map<NodeId, FormationView[]>();
+  private gliding = new Map<Stack, NodeId>();
   private stacks: Stack[] = [];
   private stacksGrid = -1;
   private readonly labels = new Map<string, Label>();
@@ -865,15 +872,21 @@ export class MapRenderer {
     const placed: [number, number, number, number][] = [];
     const { ctx, cam } = this;
     const { nationIds } = input;
-    if (input.state.formations !== this.indexedFrom) {
-      this.indexedFrom = input.state.formations;
-      this.byNode = indexByNode(input.state.formations);
+    const band = this.band, ppd = pxPerDeg(cam);
+    // At the world zoom a stack spans many nodes: gliding there would only pull counters out of their stacks.
+    const glide = band !== 'world' && input.glide && input.glide.t < 1 && input.glide.from.size ? input.glide : null;
+    const { formations } = input.state;
+    if (formations !== this.indexedFrom || (glide?.from ?? null) !== this.indexedGlides) {
+      if (formations !== this.indexedFrom) this.byNode = indexByNode(formations);
+      this.indexedFrom = formations;
+      this.indexedGlides = glide?.from ?? null;
+      this.standing = glide ? indexByNode(formations.filter((f) => !glide.from.has(f.entry.id))) : this.byNode;
+      this.gliding = glide ? gliders(formations, glide.from) : new Map();
       this.stacksGrid = -1;
     }
-    const band = this.band, ppd = pxPerDeg(cam);
     const grid = gridSize(CELL_PX[band], ppd);
     if (grid !== this.stacksGrid) {
-      this.stacks = clusterStacks(this.byNode, (n) => [this.map.lon[n], -this.map.lat[n]], grid);
+      this.stacks = clusterStacks(this.standing, (n) => [this.map.lon[n], -this.map.lat[n]], grid);
       this.stacksGrid = grid;
     }
     const scale = COUNTER_SCALE[band];
@@ -885,7 +898,7 @@ export class MapRenderer {
     });
     const own = (s: Stack) => this.sideOf(s.members[0], s.nation, nationIds) === 'friend';
     // Enemies under friends, so the player's own counters are never hidden.
-    const order = [...this.stacks].sort((a, b) => Number(own(a)) - Number(own(b)));
+    const order = [...this.stacks, ...this.gliding.keys()].sort((a, b) => Number(own(a)) - Number(own(b)));
     this.hits = [];
     let selectedBox: CounterBox | null = null;
     let focusRing: { c: ContactInfo; x: number; y: number } | null = null;
@@ -894,7 +907,8 @@ export class MapRenderer {
     /** Designator numbers drawn beside counters, kept clear of the age tags. */
     const marks: [number, number, number, number][] = [];
     for (const stack of order) {
-      const p = this.screenOf(stack.node);
+      const from = this.gliding.get(stack);
+      const p = from === undefined ? this.screenOf(stack.node) : project(cam, this.vp, ...along(this.map, from, stack.node, glide?.t ?? 1));
       if (!p) continue;
       const [cx, cy] = p;
       if (cx < -80 || cy < -80 || cx > this.vp.width + 80 || cy > this.vp.height + 80) continue;
@@ -902,8 +916,8 @@ export class MapRenderer {
       const side = this.sideOf(lead, stack.nation, nationIds);
       // Far out, only the sides at war; forces of nations out of it appear from the front zoom in.
       if (side === 'neutral' && band !== 'front') continue;
-      const nth = atNode.get(stack.node) ?? 0;
-      atNode.set(stack.node, nth + 1);
+      const nth = from === undefined ? atNode.get(stack.node) ?? 0 : 0;
+      if (from === undefined) atNode.set(stack.node, nth + 1);
       const nodePx = 2 * this.map.halfDeg[stack.node] * ppd;
       if (side !== 'friend') {
         const picked = input.selected ? stack.members.find((f) => f.entry.id === input.selected && f.contact) : undefined;

@@ -84,10 +84,8 @@ export type ToWorker =
   | { type: 'save' }
   /** End the session and go back to the start screen. */
   | { type: 'quit' }
-  /** Target ticks per second; 0 pauses. The worker never runs ahead of the UI's acks. */
-  | { type: 'speed'; ticksPerSec: number }
+  /** Run one tick. The page's clock asks for the next only once this one's snapshot has landed. */
   | { type: 'step' }
-  | { type: 'ack' }
   /** Untrusted until the worker's boundary (commands.ts) has checked it. */
   | { type: 'command'; command: Command }
   | { type: 'play_as'; nation: NationId }
@@ -97,13 +95,6 @@ export type ToWorker =
   /** Build the staff forecast's input for a battle plan, from the player's picture of the war; answered with 'forecast_input'. */
   | { type: 'forecast'; seq: number; plan: OperationPlan; days: number };
 
-export interface RunStats {
-  /** Wall time of the latest engine step. */
-  stepMs: number;
-  /** Ticks actually completed per second over the last few seconds. */
-  achievedTps: number;
-}
-
 export type FromWorker =
   | { type: 'hello'; scenarios: ScenarioCard[]; nations: NationCard[] }
   | { type: 'ready'; meta: SessionMeta; playing: NationId; snapshot: Snapshot }
@@ -112,7 +103,7 @@ export type FromWorker =
   | { type: 'closed' }
   /** A command the boundary rejected, and why. */
   | { type: 'refused'; reason: string }
-  | { type: 'snapshot'; snapshot: Snapshot; stats: RunStats }
+  | { type: 'snapshot'; snapshot: Snapshot }
   /** The drag kit, its typed arrays transferred; null when none of the formations asked about can be dragged. */
   | { type: 'drag_kit'; seq: number; kit: DragKit | null; reason?: string }
   /** The input to run the forecast on, or why the plan cannot be forecast. */

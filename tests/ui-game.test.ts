@@ -186,7 +186,6 @@ describe('worker host', () => {
     host.handle({ type: 'command', command: { type: 'set_mobilization', nation: N('KOR'), level: 0.9 } });
     expect(world.pending.at(-1)).toEqual({ type: 'set_mobilization', nation: 'KOR', level: 0.9 });
     host.handle({ type: 'step' });
-    host.handle({ type: 'ack' });
     host.handle({ type: 'save' });
     const saved = last('saved')!;
     expect(saved).toMatchObject({ scenario: 'korea-2027', tick: world.tick });

@@ -15,7 +15,8 @@ import { crisesOn } from './prefs';
 import { EventLog } from './EventLog';
 import { FormationList, FormationPanel, type Command as CommandHolder } from './FormationPanel';
 import { MapView, openingFocus } from './MapView';
-import { frontStat, TopBar, type TopBarStat } from './map/TopBar';
+import { LiveTopBar } from './map/LiveTopBar';
+import { frontStat, type TopBarStat } from './map/TopBar';
 import { ContactPanel } from './map/ContactPanel';
 import { DOMAIN_LABEL, NationPanel } from './NationPanel';
 import { NuclearDialog } from './NuclearDialog';
@@ -31,6 +32,7 @@ import { roleOf } from './staff/roles';
 import { headlines } from './staff/ticker';
 import './staff/staff.css';
 
+/** Game hours a real second, paused first. */
 const SPEEDS = [0, 1, 5, 20] as const;
 const OVERLAY_LABELS: Record<keyof Overlays, string> = { air: 'Air control', sea: 'Sea control', infra: 'Infrastructure damage', fallout: 'Fallout', weather: 'Weather', cities: 'Cities', seaZones: 'Sea zones' };
 /** Air, sea and weather draw as blocky squares at theatre zoom, so they start off. */
@@ -88,7 +90,8 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
   const coachOffered = useRef(false);
   const watch = useRef<Watch | null>(null);
   const lastSeq = () => client.feed.newest(new Set(), null, 1)[0]?.seq ?? -1;
-  const speed = client.ticksPerSec;
+  const speed = client.speed;
+  const dtHours = client.meta?.dtHours ?? 6;
 
   const d = client.state.focusNation?.id === playAs ? client.state.focusNation : undefined;
   const ai = d?.authority.ai ?? DEFAULT_DELEGATION;
@@ -145,11 +148,11 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
   const ending = d ? outcomeOf(client.state, playAs, d.enemies, everEnemies.current, objectives) : null;
   const endKey = ending ? `${ending.kind}|${ending.text}` : null;
   useEffect(() => {
-    if (endKey && endKey !== endSeen && client.ticksPerSec) client.setSpeed(0);
+    if (endKey && endKey !== endSeen && client.speed) client.setSpeed(0);
   }, [client, endKey, endSeen]);
 
   const crisisContext = (): CrisisContext | null => d ? {
-    me: playAs, tick: client.state.tick, dtHours: client.meta?.dtHours ?? 6, d, nations: client.state.nations,
+    me: playAs, tick: client.state.tick, dtHours, d, nations: client.state.nations,
     name: (id) => shortName(id, client.nationCards),
     capital: (id) => {
       const i = client.map.nationIds.indexOf(id);
@@ -179,7 +182,7 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
       const next = nextCrisis(desk.cards, waiting, ctx);
       if (next) {
         shownCrises.current.set(next.key, Infinity);
-        setCrisis({ c: next, resume: client.ticksPerSec, chosen: null });
+        setCrisis({ c: next, resume: client.speed, chosen: null });
         client.setSpeed(0);
         if (next.node !== undefined) focusHandle.current?.(next.node, 'wide');
         return;
@@ -201,7 +204,7 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
   const chooseCrisis = (i: number) => {
     if (!crisis) return;
     const o = crisis.c.options[i];
-    if (o.defer || o.action.kind === 'show') shownCrises.current.set(crisis.c.key, client.state.tick + returnsIn(crisis.c, o, client.meta?.dtHours ?? 6));
+    if (o.defer || o.action.kind === 'show') shownCrises.current.set(crisis.c.key, client.state.tick + returnsIn(crisis.c, o, dtHours));
     if (o.defer) return closeCrisis();
     if (o.action.kind === 'show') {
       setCrisis(null);
@@ -212,7 +215,7 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
     if (o.action.kind !== 'command') return closeCrisis();
     setCrisis({ ...crisis, chosen: i });
     // The engine answers on the next turn: run it now, so the answer shows while the crisis is still open.
-    if (!client.ticksPerSec) client.step();
+    if (!client.speed) client.step();
   };
   const closeCrisis = () => {
     if (crisis?.resume) client.setSpeed(crisis.resume);
@@ -258,7 +261,7 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
       }
       if (FORM_CONTROLS.has((e.target as HTMLElement).tagName)) return;
       const k = e.key.toLowerCase();
-      if (e.key === ' ') { e.preventDefault(); client.setSpeed(client.ticksPerSec ? 0 : 1); }
+      if (e.key === ' ') { e.preventDefault(); client.setSpeed(client.speed ? 0 : 1); }
       else if (e.key === '.') client.step();
       else if (k >= '1' && k <= '3') client.setSpeed(SPEEDS[Number(k)]);
       else {
@@ -291,7 +294,7 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
   const day = date && client.meta ? Math.max(0, Math.floor((date.getTime() - new Date(client.meta.scenario.startDate).getTime()) / 864e5)) : 0;
   const sendCommand = (c: Command, label: string) => {
     client.command(c);
-    setToast({ tone: 'info', text: `${label}. ${client.ticksPerSec ? 'Takes effect next tick.' : 'Takes effect when the clock runs.'}` });
+    setToast({ tone: 'info', text: `${label}. ${client.speed ? 'Takes effect next tick.' : 'Takes effect when the clock runs.'}` });
   };
 
   /** The map click after arming a nuclear release is its aim point. */
@@ -316,7 +319,7 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
     }
     if (!Object.keys(want).length) return;
     setDelegating((p) => ({ ...p, ...want }));
-    if (!client.ticksPerSec) setToast({ tone: 'info', text: 'Your staff takes the change when the clock runs.' });
+    if (!client.speed) setToast({ tone: 'info', text: 'Your staff takes the change when the clock runs.' });
   };
 
   const selectedView = selected ? client.state.formations.find((f) => f.entry.id === selected) : undefined;
@@ -363,7 +366,7 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
 
   const dock = (
     <div className="ww-dock" role="toolbar" aria-label="Game">
-      <button type="button" className="ww-dock-btn" onClick={() => client.step()} disabled={speed !== 0} title="Advance six hours (.)" data-testid="step" aria-label="Step six hours">
+      <button type="button" className="ww-dock-btn" onClick={() => client.step()} disabled={speed !== 0} title={`Advance ${dtHours} hours (.)`} data-testid="step" aria-label={`Step ${dtHours} hours`}>
         <svg width="14" height="12" viewBox="0 0 14 12" aria-hidden="true"><path d="M1 1 L8 6 L1 11 Z" fill="currentColor" /><rect x="10" y="1" width="2.4" height="10" fill="currentColor" /></svg>
       </button>
       <i className="ww-dock-sep" aria-hidden="true" />
@@ -400,11 +403,10 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
         onTarget={onTarget}
         focusHandle={focusHandle}
       />
-      <TopBar
+      <LiveTopBar
+        client={client}
         nation={{ id: playAs, name: client.namer.nation(playAs) }}
         subtitle={`${role?.name ?? 'Supreme Commander'} · ${client.meta?.scenario.name ?? ''}`}
-        date={date}
-        day={day}
         speed={speed}
         speeds={SPEEDS}
         onSpeed={(s) => client.setSpeed(s)}
