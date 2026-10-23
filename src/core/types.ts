@@ -403,6 +403,8 @@ export type Command =
   | { type: 'produce'; nation: NationId; item: ItemId; ratePerMonth: number }
   /** Form a new brigade from trained reserves and stockpiled kit, modelled on `template` (default: the lightest fielded brigade); it takes the field after training (logistics). */
   | { type: 'raise_formation'; nation: NationId; template?: FormationId }
+  /** Put the nation's supply transport behind its land forces near `node`, at the rest's expense, or clear the priority with null (logistics). */
+  | { type: 'supply_priority'; nation: NationId; node: NodeId | null }
   | { type: 'nuclear_release'; nation: NationId; target: NodeId; warheads: number; munition: MunitionId }
   /** Order stored warheads mated to their launchers (see strategic/alert.ts). */
   | { type: 'nuclear_alert'; nation: NationId; reason?: string }

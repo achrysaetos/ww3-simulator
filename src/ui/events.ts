@@ -298,7 +298,7 @@ export function etaText(hours: number): string {
 export const COMMAND_LABEL: Record<CommandResult['command'], string> = {
   order: 'Order', declare_war: 'Declaration of war', offer_peace: 'Peace offer', sanction: 'Sanctions', set_mobilization: 'Mobilisation',
   produce: 'Production order', nuclear_release: 'Nuclear release', nuclear_alert: 'Nuclear alert', delegate: 'Delegation', hold: 'Command change',
-  answer_treaty: 'Treaty answer', grant_access: 'Right of passage', set_aid: 'Aid', raise_formation: 'New formation',
+  answer_treaty: 'Treaty answer', grant_access: 'Right of passage', set_aid: 'Aid', raise_formation: 'New formation', supply_priority: 'Supply priority',
   cyber_op: 'Cyber operation', sabotage: 'Sabotage campaign', cut_cable: 'Cable cut',
   plan_operation: 'Operation plan', launch_operation: 'Launch', cancel_operation: 'Cancellation', adjust_operation: 'Re-plan',
 };
