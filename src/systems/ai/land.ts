@@ -385,9 +385,15 @@ function landPicture(p: Plan): LandPicture | undefined {
     }
     return false;
   };
+  const fitness = new Map<Formation, boolean>();
   const fit = (f: Formation) => {
-    const cap = f.supplyCapacity.fuel + f.supplyCapacity.ammo;
-    return f.kind === 'maneuver' && strength(p.ai, f) >= FIT_TO_ATTACK.strength && (cap <= 0 || (f.supply.fuel + f.supply.ammo) / cap >= FIT_TO_ATTACK.supply);
+    let ok = fitness.get(f);
+    if (ok === undefined) {
+      const cap = f.supplyCapacity.fuel + f.supplyCapacity.ammo;
+      ok = f.kind === 'maneuver' && strength(p.ai, f) >= FIT_TO_ATTACK.strength && (cap <= 0 || (f.supply.fuel + f.supply.ammo) / cap >= FIT_TO_ATTACK.supply);
+      fitness.set(f, ok);
+    }
+    return ok;
   };
   const friendlyPowerAt = (n: number) => {
     let v = 0;
@@ -486,7 +492,7 @@ class Allocation {
   }
 
   inRange(f: Formation, n: number): boolean {
-    return this.km(f.node, n) <= MAX_COMMIT_KM && this.region[f.node] >= 0 && this.region[f.node] === this.region[n];
+    return this.region[f.node] >= 0 && this.region[f.node] === this.region[n] && this.km(f.node, n) <= MAX_COMMIT_KM;
   }
 
   own(s: Sector): boolean {
@@ -580,7 +586,9 @@ function holdTheLine(a: Allocation, reserved: number): Map<number, number> {
     };
     const candidates = [...free]
       .filter((f) => a.mayServe(f, s) && (post(f) !== undefined || a.inRange(f, s.key)))
-      .sort((x, y) => a.km(x.node, s.key) - a.km(y.node, s.key) || (x.id < y.id ? -1 : 1));
+      .map((f) => ({ f, d: a.km(f.node, s.key) }))
+      .sort((x, y) => x.d - y.d || (x.f.id < y.f.id ? -1 : 1))
+      .map(({ f }) => f);
     const pressure = new Map<number, number>();
     for (const n of s.nodes) {
       pressure.set(n, pressureOn(p, n));

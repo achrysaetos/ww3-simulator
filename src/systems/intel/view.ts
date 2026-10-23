@@ -50,15 +50,15 @@ export function friendsOf(world: World, nation: NationId): Set<NationId> {
 const live = (f: Formation) => f.status === 'active' || f.status === 'routed';
 
 /**
- * world.formations as a list, kept while no formation is added (formations are never removed,
- * only destroyed, and every one added in a run takes its id from newId, which advances nextId).
- * Object.values over a dictionary of thousands of ids costs about a millisecond, and every View
- * and belief would otherwise pay it.
+ * world.formations as a list, kept within a tick while no formation is added (formations are never
+ * removed, only destroyed, and every one added in a run takes its id from newId, which advances
+ * nextId). Object.values over a dictionary of thousands of ids costs about a millisecond, and every
+ * View, belief and AI planner would otherwise pay it. Shared: callers must not change it.
  */
-const lists = new WeakMap<World['formations'], { nextId: number; list: Formation[] }>();
-function formationList(world: World): Formation[] {
+const lists = new WeakMap<World['formations'], { tick: number; nextId: number; list: Formation[] }>();
+export function formationList(world: World): readonly Formation[] {
   let l = lists.get(world.formations);
-  if (!l || l.nextId !== world.nextId) lists.set(world.formations, (l = { nextId: world.nextId, list: Object.values(world.formations) }));
+  if (!l || l.tick !== world.tick || l.nextId !== world.nextId) lists.set(world.formations, (l = { tick: world.tick, nextId: world.nextId, list: Object.values(world.formations) }));
   return l.list;
 }
 
@@ -93,6 +93,8 @@ export function viewOf(world: World, map: GameMap, nation: NationId): View {
 interface Truth {
   byId: Map<FormationId, ContactView>;
   atNode: Map<NodeId, ContactView[]>;
+  /** Contacts by friend set: coalition partners see the same formations. */
+  seenBy: Map<string, Map<FormationId, ContactView>>;
 }
 
 function truthOf(world: World): Truth {
@@ -107,14 +109,24 @@ function truthOf(world: World): Truth {
     byId.set(c.id, c);
     (atNode.get(c.node) ?? atNode.set(c.node, []).get(c.node)!).push(c);
   }
-  return { byId, atNode };
+  return { byId, atNode, seenBy: new Map() };
 }
 
 /** A world run without the intel system: perfect intelligence of every live formation. */
 function truthView(world: World, nation: NationId, truth: () => Truth): View {
   const friends = friendsOf(world, nation);
   let contacts: Map<FormationId, ContactView> | undefined;
-  return assemble(world, nation, friends, () => (contacts ??= new Map([...truth().byId].filter(([, c]) => !friends.has(c.nation)))), (node) =>
+  const all = () => {
+    if (contacts) return contacts;
+    const { byId, seenBy } = truth();
+    const key = [...friends].sort().join();
+    contacts = seenBy.get(key);
+    if (contacts) return contacts;
+    seenBy.set(key, (contacts = new Map()));
+    for (const [id, c] of byId) if (!friends.has(c.nation)) contacts.set(id, c);
+    return contacts;
+  };
+  return assemble(world, nation, friends, all, (node) =>
     (truth().atNode.get(node) ?? []).filter((c) => !friends.has(c.nation)),
   );
 }
@@ -198,20 +210,30 @@ export function believedWorld(world: World, map: GameMap, nation: NationId, cata
   const pic = world.slices.intel.pictures[nation] ?? {};
   // Null-prototype: a dictionary of thousands of ids builds several times faster.
   const formations: World['formations'] = Object.create(null);
+  const list: Formation[] = [];
+  // Object.values lists keys in insertion order unless one reads as an array index, which goes first.
+  let inOrder = true;
+  const put = (b: Formation) => {
+    formations[b.id] = b;
+    list.push(b);
+    const c = b.id.charCodeAt(0);
+    if (c >= 48 && c <= 57) inOrder = false;
+  };
   for (const f of formationList(world)) {
-    if (view.friends.has(f.nation)) formations[f.id] = f;
+    if (view.friends.has(f.nation)) put(f);
     else {
       const c = view.contacts.get(f.id);
       if (!c) continue;
-      if (c.confidence < 1) formations[f.id] = believedFormation(catalog, f, c);
+      if (c.confidence < 1) put(believedFormation(catalog, f, c));
       else {
         const fix = pic[f.id];
         let b = settled.get(fix);
         if (!b) settled.set(fix, (b = believedFormation(catalog, f, c)));
-        formations[f.id] = b;
+        put(b);
       }
     }
   }
+  if (inOrder) lists.set(formations, { tick: world.tick, nextId: world.nextId, list });
   believedWorlds.set(view, (out = { ...world, formations }));
   return out;
 }

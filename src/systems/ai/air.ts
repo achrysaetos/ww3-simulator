@@ -1,7 +1,8 @@
 import type { Formation, FormationId, Munition, MunitionId, NodeId, PlatformClass, PlatformId, TargetClass } from '../../core/types';
-import { ferryKm, tankerStretch, visibility } from '../air';
+import { ferryKm, fliesTankers, tankerStretch, visibility } from '../air';
 import { dominant, issue } from './forces';
 import { arsenal, FireBudget, pickTarget, pkAgainst, SamCover, reachKm, strikeOptions, withinKm, type StrikeTarget, type TargetGrid } from './strikes';
+import { formationList } from '../intel/view';
 import type { Plan } from './types';
 
 type AirRole = 'fighter' | 'multirole' | 'strike' | 'support';
@@ -112,9 +113,18 @@ export function planAir(p: Plan, targets: TargetGrid): void {
     const stock = arsenal(p, w);
     const vis = visibility(Math.min(...strikersOf(p, w).map((pl) => pl.protection.stealth)));
     const reach = weaponReach(w, radius, tanked);
+    // Every check below is a distance to the aim point within a reach, so the distance is measured once per target.
+    const reaches = stock.map(reach);
+    const longest = Math.max(radius, ...reaches);
+    const guns = new Map<TargetClass, boolean>();
     const canHit = (t: StrikeTarget) => {
-      for (const m of stock) if (pkAgainst(m, t) > 0 && withinKm(map, w.node, t.at ?? t.node, reach(m)) && sams.clear(w.node, t.node, m.rangeKm, vis)) return true;
-      return hasFirepower(p, w, t.cls) && withinKm(map, w.node, t.at ?? t.node, radius) && sams.clear(w.node, t.node, 0, vis);
+      const at = t.at ?? t.node;
+      if (Math.abs(map.lat[w.node] - map.lat[at]) * 111 > longest) return false;
+      const d = map.distanceKm(w.node, at);
+      for (let i = 0; i < stock.length; i++) if (d <= reaches[i] && pkAgainst(stock[i], t) > 0 && sams.clear(w.node, t.node, stock[i].rangeKm, vis)) return true;
+      let fire = guns.get(t.cls);
+      if (fire === undefined) guns.set(t.cls, (fire = hasFirepower(p, w, t.cls)));
+      return fire && d <= radius && sams.clear(w.node, t.node, 0, vis);
     };
     const t = pickTarget(targets.near(w.node, stock.reduce((best, m) => Math.max(best, reach(m)), radius)), (t) => (canHit(t) ? 1 : 0));
     if (!t) return false;
@@ -243,7 +253,7 @@ function rebasing(p: Plan, wings: Formation[], keys: NodeId[], targets: TargetGr
   const roomAt = () => {
     if (room) return room;
     room = new Map(airfields().map((n) => [n, map.airports[n] * BASING.aircraftPerAirfield]));
-    for (const f of Object.values(p.world.formations)) {
+    for (const f of formationList(p.world)) {
       if (f.kind !== 'air_wing' || f.status !== 'active') continue;
       const at = bound[f.id] ?? f.node;
       if (room.has(at)) room.set(at, room.get(at)! - size(f));
@@ -255,7 +265,7 @@ function rebasing(p: Plan, wings: Formation[], keys: NodeId[], targets: TargetGr
   let launchers: { node: NodeId; rounds: [number, number][] }[] | undefined;
   const threat = new Map<NodeId, number>();
   const threatAt = (at: NodeId) => {
-    launchers ??= Object.values(p.world.formations).filter((f) => f.kind === 'missile' && f.status === 'active' && p.enemies.has(f.nation))
+    launchers ??= formationList(p.world).filter((f) => f.kind === 'missile' && f.status === 'active' && p.enemies.has(f.nation))
       .map((f) => ({ node: f.node, rounds: Object.entries(f.magazine).map(([m, k]): [number, number] => [catalog.munition(m as MunitionId).rangeKm, k]) }));
     let t = threat.get(at);
     if (t === undefined) {
@@ -300,10 +310,15 @@ function rebasing(p: Plan, wings: Formation[], keys: NodeId[], targets: TargetGr
   };
 }
 
+/** Whether a plan's nation flies tankers, which stretch its wings' ferry range; the formations do not change while it plans. */
+const tankerFleets = new WeakMap<Plan, boolean>();
+
 /** The airfield a wing flies to on its way to `base`: the base itself in ferry range, else the field in range nearest it. */
 function stage(p: Plan, w: Formation, base: NodeId, fields: NodeId[]): NodeId | undefined {
   const { map } = p.ctx;
-  const ferry = ferryKm(p.world, p.ctx.catalog, w);
+  let tankers = tankerFleets.get(p);
+  if (tankers === undefined) tankerFleets.set(p, (tankers = fliesTankers(p.world, p.ctx.catalog, p.nation)));
+  const ferry = ferryKm(p.world, p.ctx.catalog, w, tankers);
   if (map.distanceKm(w.node, base) <= ferry) return base;
   let hop: NodeId | undefined, left = map.distanceKm(w.node, base);
   for (const n of fields) {
