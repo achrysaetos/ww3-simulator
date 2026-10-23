@@ -6,7 +6,7 @@
 - Command role: `start-role-cinc` (AI runs the war), `start-role-marshal`, `start-role-brigade` (player runs every domain).
 - `start`, then the opening: a title beat (`opening-title`), the situation report (`briefing`, closed by `briefing-close`): the chief of staff's summary, four tiles (at war with, our forces, enemy contacts, war support), objectives and how you command. It lists no staff advice; the staff speaks through crises and alerts only.
 - The coach tour on a first session (`coach`, `coach-next`, `coach-skip`, one `coach-<id>` per step), remembered in `localStorage['ww3.coach']`. Four steps: the map (drag a counter to order it), the clock, the Nation drawer (who runs which domain), and the flag row (drag your flag onto an enemy's to offer peace). A step whose target is missing is skipped.
-- Start-screen settings (`start-settings`, `settings`): `setting-crises` writes `localStorage['ww3.crises']` (on by default; off lets the staff answer crises with a toast), `setting-coach` replays the tour. Saved games: `start-quickload`, `start-load-file`, with `start-notice` for load results.
+- Start-screen settings (`start-settings`, `settings`): `setting-auto-accept` writes `localStorage['ww3.autoAccept']` (off by default; on lets the staff answer crises with a toast, also toggled in-game by `menu-auto-accept` in the Game menu), `setting-coach` replays the tour. Saved games: `start-quickload`, `start-load-file`, with `start-notice` for load results.
 
 ## How to get to it (user POV)
 
@@ -22,5 +22,5 @@ Proof: `[data-testid="shell"]` visible, `window.__client.state.tick >= 1` (the f
 
 - The scenario load is slow on first visit (map and orbat data); waits use 60 to 120 s timeouts.
 - A nation not on the card needs the search path; `newGame` falls back to it automatically.
-- `ww3.crises='off'` has the staff answer each crisis (treaty call, peace offer, nuclear alert, capital threat) with its recommended option and say so in a toast, instead of a blocking crisis screen. Remember this when a crisis-related change seems to do nothing.
+- `ww3.autoAccept='on'` has the staff answer each crisis (treaty call, peace offer, nuclear alert, capital threat) with its recommended option and say so in a toast, instead of a blocking crisis screen. A recommended nuclear release still opens the crisis screen. Remember this when a crisis-related change seems to do nothing.
 - `tests/ui-drama.e2e.mjs` covers the tour, the opening, crises and moments (it installs a fake clock; drive moments with `page.clock.runFor`).

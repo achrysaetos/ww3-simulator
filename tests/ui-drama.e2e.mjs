@@ -30,7 +30,7 @@ async function open({ seen = true, crises = true } = {}) {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   await ctx.addInitScript(([s, c]) => {
     if (s) localStorage.setItem('ww3.coach', 'done');
-    if (!c) localStorage.setItem('ww3.crises', 'off');
+    if (!c) localStorage.setItem('ww3.autoAccept', 'on');
   }, [seen, crises]);
   const page = await ctx.newPage();
   const errors = [];

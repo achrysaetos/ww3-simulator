@@ -3,7 +3,7 @@ export async function newGame(browser, url, scenario, nation, { role = 'cinc' } 
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   await page.addInitScript(() => {
     localStorage.setItem('ww3.coach', 'done');
-    localStorage.setItem('ww3.crises', 'off');
+    localStorage.setItem('ww3.autoAccept', 'on');
   });
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));

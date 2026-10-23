@@ -9,9 +9,9 @@ import { MomentOverlay } from './moments/MomentOverlay';
 import { momentsOf, type Moment } from './moments/moments';
 import { CoachMarks } from './coach/CoachMarks';
 import { CrisisScreen } from './crisis/CrisisScreen';
-import { answered, nextCrisis, returnsIn, staffChoice, type Crisis, type CrisisContext } from './crisis/crisis';
+import { answered, nextCrisis, returnsIn, staffAnswer, type Crisis, type CrisisContext } from './crisis/crisis';
 import { ConfirmDialog, EndDialog, GameMenu, type Confirmation } from './GameFlow';
-import { crisesOn } from './prefs';
+import { autoAcceptOn, setAutoAccept } from './prefs';
 import { EventLog } from './EventLog';
 import { FormationList, FormationPanel, type Command as CommandHolder } from './FormationPanel';
 import { MapView, openingFocus } from './MapView';
@@ -81,6 +81,11 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
   const [delegating, setDelegating] = useState<Partial<Record<CommandDomain, boolean>>>(() => client.openingDelegation);
   const [toast, setToast] = useState<Toast | null>(null);
   const [crisis, setCrisis] = useState<{ c: Crisis; resume: number; chosen: number | null } | null>(null);
+  const [autoAccept, setAutoAcceptState] = useState(autoAcceptOn);
+  const toggleAutoAccept = (on: boolean) => {
+    setAutoAccept(on);
+    setAutoAcceptState(on);
+  };
   /** Each crisis put to the player, with the tick it may come back: never once answered. */
   const shownCrises = useRef(new Map<string, number>());
   const [coach, setCoach] = useState(false);
@@ -162,38 +167,34 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
     },
   } : null;
 
-  // A crisis stops the clock and takes the screen. With crises off the staff takes its own
-  // recommendation, so a treaty call or a peace offer never lapses unseen.
+  // A crisis stops the clock and takes the screen. With auto-accept on the staff takes its own
+  // recommendation and says so, so the clock never waits; a nuclear release still goes to the player.
   useEffect(() => {
     if (crisis || coach || briefingOpen || (endKey && endKey !== endSeen) || !client.state.date) return;
     const ctx = crisisContext();
     if (!ctx) return;
     const waiting = new Set([...shownCrises.current].filter(([, t]) => t > client.state.tick).map(([k]) => k));
-    if (!crisesOn()) {
-      const taken: string[] = [];
-      for (let c = nextCrisis(desk.cards, waiting, ctx); c; c = nextCrisis(desk.cards, waiting, ctx)) {
-        const o = staffChoice(c);
-        waiting.add(c.key);
-        shownCrises.current.set(c.key, Infinity);
-        client.act(c.card, o.action.kind === 'command' ? o.action : { kind: 'later', label: o.button });
-        taken.push(`${c.headline}: ${o.title}`);
-      }
-      if (taken.length) setToast({ tone: 'info', text: `Your staff decided. ${taken.join('. ')}.` });
-    } else {
-      const next = nextCrisis(desk.cards, waiting, ctx);
-      if (next) {
-        shownCrises.current.set(next.key, Infinity);
-        setCrisis({ c: next, resume: client.speed, chosen: null });
+    const taken: string[] = [];
+    for (let c = nextCrisis(desk.cards, waiting, ctx); c; c = nextCrisis(desk.cards, waiting, ctx)) {
+      waiting.add(c.key);
+      shownCrises.current.set(c.key, Infinity);
+      const o = autoAccept ? staffAnswer(c) : null;
+      if (!o) {
+        if (taken.length) setToast({ tone: 'info', text: `Your staff decided. ${taken.join('. ')}.` });
+        setCrisis({ c, resume: client.speed, chosen: null });
         client.setSpeed(0);
-        if (next.node !== undefined) focusHandle.current?.(next.node, 'wide');
+        if (c.node !== undefined) focusHandle.current?.(c.node, 'wide');
         return;
       }
+      client.act(c.card, o.action.kind === 'command' ? o.action : { kind: 'later', label: o.button });
+      taken.push(`${c.headline}: ${o.title}`);
     }
+    if (taken.length) setToast({ tone: 'info', text: `Your staff decided. ${taken.join('. ')}.` });
     if (!coachOffered.current) {
       coachOffered.current = true;
       if (coachDue()) setCoach(true);
     }
-  }, [client.state.tick, desk.version, crisis, coach, briefingOpen]);
+  }, [client.state.tick, desk.version, crisis, coach, briefingOpen, autoAccept]);
 
   useEffect(() => {
     const [first, ...more] = desk.alerts;
@@ -386,7 +387,7 @@ function Command({ client, palette, playAs }: { client: SimClient; palette: Pale
           </div>
         )}
       </div>
-      <GameMenu client={client} onBriefing={() => setOpening('card')} onQuit={quit} />
+      <GameMenu client={client} onBriefing={() => setOpening('card')} onQuit={quit} autoAccept={autoAccept} onAutoAccept={toggleAutoAccept} />
     </div>
   );
 
