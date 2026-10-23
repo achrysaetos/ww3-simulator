@@ -1,6 +1,6 @@
 // Plays one game through the real UI and leaves screenshots plus summary.json in the run directory.
 //   node .claude/skills/verify/scripts/play.mjs [--play ukraine-2026:UKR] [--role cinc] [--ticks 8]
-//     [--drawers forces,nation,log,cost] [--run <name>] [--url http://localhost:4650/]
+//     [--drawers forces,nation,log,cost] [--run <name>] [--url http://localhost:$PORT/]
 // Import it instead to drive a feature of your own: `const s = await open({...}); ...; await s.close()`.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -10,7 +10,7 @@ import { newGame, runTo } from '../../../../tests/e2e-start.mjs';
 
 export const RUNS = '/tmp/ww3-verify/runs';
 
-export async function open({ url = 'http://localhost:4650/', play = 'ukraine-2026:UKR', role = 'cinc', run = `run-${Date.now()}` } = {}) {
+export async function open({ url = `http://localhost:${process.env.PORT ?? 4650}/`, play = 'ukraine-2026:UKR', role = 'cinc', run = `run-${Date.now()}` } = {}) {
   const out = path.join(RUNS, run);
   fs.rmSync(out, { recursive: true, force: true });
   fs.mkdirSync(out, { recursive: true });
