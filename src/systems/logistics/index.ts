@@ -234,7 +234,11 @@ function sustain(world: World, ctx: SimContext, s: LogisticsState, forces: Forma
     for (let c = 0; c < 3; c++) want[i * 3 + c] *= ration;
     if (ashore[i]) beachTons.set(f.nation, (beachTons.get(f.nation) ?? 0) + want[i * 3] + want[i * 3 + 1] + want[i * 3 + 2]);
   }
-  for (const id in s.priority) prioritize(ctx.map, forces, factor, ashore, want, refill, id as NationId, s.priority[id as NationId]);
+  for (const id in s.priority) {
+    const nation = id as NationId, at = s.priority[nation];
+    if (world.control[at] !== nation) delete s.priority[nation];
+    else prioritize(ctx.map, forces, factor, ashore, want, refill, nation, at);
+  }
   for (const f of forces) nodeTons[f.node] = nodeFactor[f.node] = 0;
   const beachRation = new Map<NationId, number>();
   for (const [id, tons] of beachTons) {

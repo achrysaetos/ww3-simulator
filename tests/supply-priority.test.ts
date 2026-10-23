@@ -82,6 +82,16 @@ describe('supply_priority', () => {
     expect(t.world.slices.logistics.priority[pol]).toBeUndefined();
   });
 
+  it('lapses once the enemy takes the priority cell', () => {
+    const { t, pol, east } = setup();
+    t.world.pending.push({ type: 'supply_priority', nation: pol, node: east.node });
+    t.engine.step(t.world);
+    expect(t.world.slices.logistics.priority[pol]).toBe(east.node);
+    t.world.control[east.node] = id.nation('UKR');
+    t.engine.step(t.world);
+    expect(t.world.slices.logistics.priority[pol]).toBeUndefined();
+  });
+
   it('refuses a cell the nation does not hold', () => {
     const { t, pol } = setup();
     t.world.pending.push({ type: 'supply_priority', nation: pol, node: t.nodeAt(50.45, 30.5) });
