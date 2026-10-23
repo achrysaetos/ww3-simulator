@@ -23,8 +23,8 @@ function forceFor(world: World, map: Engine['map'], target: NodeId, n: number, t
 }
 
 /**
- * ukraine-2026 at D+10 with Ukraine under a player, who plans two offensives: six brigades into the Russian cell at
- * Tokmak, covered by the 58th Army's line on every side (P1 H3), and twelve formations into a thinly screened Russian
+ * ukraine-2026 at D+10 with Ukraine under a player, who plans two offensives: two brigades into the empty, belted Russian
+ * cell at Tokmak, covered by the 58th Army's line on every side (P1 H3), and twelve formations into a thinly screened Russian
  * border cell in Bryansk oblast. Ukraine's picture of the Russian forces is made fresh and exact first, so the forecast and
  * the run differ only in what the forecast leaves out (the enemy's reactions, air and the swept calibration), not in
  * what the planner got wrong.
@@ -41,7 +41,7 @@ function setup() {
       picture[f.id] = { node: f.node, tick: world.tick, kind: f.kind, strength: platforms(f), equipment: { ...f.equipment }, source: 'satellite' };
   const taken = new Set<FormationId>();
   const plan = (target: NodeId, n: number): Plan => ({ nation: UKR, kind: 'offensive', objectives: [target], formations: forceFor(world, map, target, n, taken), byPlayer: true });
-  return { engine, world, map, hopeless: plan(map.nodeAt(47.25, 35.75), 6), strong: plan(map.nodeAt(52.5, 32.5), 12) };
+  return { engine, world, map, hopeless: plan(map.nodeAt(47.25, 35.75), 2), strong: plan(map.nodeAt(52.5, 32.5), 12) };
 }
 
 describe('a player offensive in ukraine-2026 advances when it can, stalls honestly when it cannot, and the forecast agrees', () => {
@@ -76,7 +76,8 @@ describe('a player offensive in ukraine-2026 advances when it can, stalls honest
   });
 
   it('a thrust into a cell the enemy line covers from every side stalls, says how slowly it is gaining, and is called off', () => {
-    // Base: it crept a few hundred metres a day and reported "fighting for bound 1 of 1" for three weeks (P1 H3).
+    // Base: it crept a few hundred metres a day and reported "fighting for bound 1 of 1" for three weeks (P1 H3). Six brigades
+    // now sweep the empty cell's whole width (land.SCREEN_DENSITY) at about 1.2 km a day, which is progress, so two are sent.
     expect(op('hopeless').progress.advance - 1).toBeLessThan(0.15);
     expect(phases.hopeless).toContain('stalled');
     expect(notes.some((n) => /^stalled at cell \d+: [\d.]+ km gained in 2 days$/.test(n))).toBe(true);
