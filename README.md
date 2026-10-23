@@ -8,8 +8,7 @@ how a war actually goes.
 You can play any of the 193 nations in the browser, save and resume a war from the Game
 menu, or run scenarios headless and measure the outcome.
 
-**[Play it in the browser](https://achrysaetos.github.io/ww3-simulator/)**. Every push to `main` that passes CI is
-published there.
+**[Play it in the browser](https://ww3-simulator-sigma.vercel.app/)**. Vercel publishes every push to `main`.
 
 [![The first days of the Russo-Ukrainian war, played as Ukraine](docs/media/demo.gif)](docs/media/demo.mp4)
 
