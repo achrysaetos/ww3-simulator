@@ -309,7 +309,7 @@ function HomeFront({ h }: { h: HomeFrontView }) {
 /** Who runs which domain is set on the staff panel; the drawer only says what the player holds by hand. */
 function HeldByHand({ d }: { d: NationDetail }) {
   if (!d.authority.held.length) return null;
-  return <p className="muted small" data-testid="held-by-hand">{d.authority.held.length} formations under your personal command. Your staff panel sets which domains the AI runs.</p>;
+  return <p className="muted small" data-testid="held-by-hand">{d.authority.held.length} formations under your personal command. The AI runs row above sets which domains your staff runs.</p>;
 }
 
 function NuclearAlert({ alert, nation, tick, dtHours, onCommand }: { alert: NuclearAlertView; nation: NationId; tick: number; dtHours: number; onCommand: Props['onCommand'] }) {
