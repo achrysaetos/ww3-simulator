@@ -9,6 +9,7 @@ import type { FormationId, NodeId, Operation, SimEvent } from '../core/types';
 import type { Palette } from './colors';
 import { eventNode } from './events';
 import { contactAlpha, contactLabel, contactRing, isStale, type ContactInfo } from './map/contacts';
+import { fightToShow } from './map/fighting';
 import { seenOnMap } from './map/feedback';
 import { along, gliders } from './glide';
 import type { OrderTrack } from './orders/tracks';
@@ -18,7 +19,7 @@ import { ControlMask, OverlayRaster, Rel, relations } from './map/situation';
 import { cityName } from './placeNames';
 import type { Manifest } from './map/tiles';
 import { weatherLayer } from '../systems/weather/effects';
-import type { ClientState, FormationView } from './snapshot';
+import { CONTEST_STRIDE, type ClientState, type FormationView } from './snapshot';
 import { clusterStacks, fanRows, gridSize, indexByNode, type Stack } from './stacks';
 import { CounterSprites, ECHELON_W, LOOK, type CounterBox, type Side } from './symbols';
 import {
@@ -238,6 +239,21 @@ export class MapRenderer {
   bandCamera(band: ZoomBand, at: { lon: number; lat: number } = this.cam): Camera {
     const zoom = band === 'world' ? worldZoom(this.vp) : zoomForPxPerDeg(BAND_PRESET[band]);
     return { lon: at.lon, lat: band === 'world' ? Math.max(-30, Math.min(50, at.lat)) : at.lat, zoom };
+  }
+
+  /**
+   * Where a View button flies. World stays over where you look. Theatre and Front stay too when a
+   * land cell the player sees being fought over (`contest`) lies within that view; otherwise they
+   * go to the nearest one. Air and sea battles do not count: they are not a front.
+   */
+  viewCamera(band: ZoomBand, contest: Float32Array): Camera {
+    const here = this.bandCamera(band);
+    if (band === 'world') return here;
+    const fights: NodeId[] = [];
+    for (let i = 0; i < contest.length; i += CONTEST_STRIDE) fights.push(contest[i] as NodeId);
+    const reachKm = (kmPerPx(here) * Math.min(this.vp.width, this.vp.height)) / 2;
+    const n = fightToShow(this.map, fights, this.cam, reachKm);
+    return n === null ? here : this.bandCamera(band, { lon: this.map.lon[n], lat: this.map.lat[n] });
   }
 
   get band(): ZoomBand {
