@@ -1,7 +1,7 @@
 /**
  * How the map draws what the player's intelligence holds on a foreign formation: a ring of the
- * fix's error radius around where it was last seen, and the fix's age. Nothing here knows where
- * the formation really is.
+ * fix's error radius around where it was last seen, a counter that fades as the fix ages, and the
+ * fix's age once it is old. Nothing here knows where the formation really is.
  */
 import { CURRENT_CONFIDENCE } from '../../systems/intel/view';
 import type { FormationView } from '../snapshot';
@@ -42,8 +42,21 @@ export function fixAge(hours: number): string {
   return hours < 48 ? `${Math.max(0, Math.round(hours))}h` : `${Math.round(hours / 24)}d`;
 }
 
-/** The label beside a contact: its age once it is not fresh, and for a selected one its error too. */
+/**
+ * Intel refixes a contact it is in touch with every tick (6 h), so a fix up to a tick old is the
+ * normal state of a front and says nothing. One a day old has missed four passes in a row: that
+ * is worth words on the map.
+ */
+export const AGE_TAG_HOURS = 24;
+
+/** The faintest a contact's counter is drawn, at no confidence left. */
+const GHOST_ALPHA = 0.35;
+
+/** How solid a contact's counter is drawn: whole at a fresh fix, fading as the fix ages against how fast its kind moves. */
+export const contactAlpha = (c: ContactInfo) => GHOST_ALPHA + (1 - GHOST_ALPHA) * Math.min(1, Math.max(0, c.confidence));
+
+/** The label beside a contact: its age once a day old, and for a selected one its age and error always. */
 export function contactLabel(c: ContactInfo, focused: boolean): string | null {
   if (focused) return `seen ${fixAge(c.ageHours)} ago · ±${Math.round(c.errorKm)} km`;
-  return c.ageHours >= 2 ? `${fixAge(c.ageHours)} old` : null;
+  return c.ageHours >= AGE_TAG_HOURS ? `${fixAge(c.ageHours)} old` : null;
 }

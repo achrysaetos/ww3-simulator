@@ -8,7 +8,7 @@ import type { GameMap } from '../core/map';
 import type { FormationId, NodeId, Operation, SimEvent } from '../core/types';
 import type { Palette } from './colors';
 import { eventNode } from './events';
-import { contactLabel, contactRing, isStale, type ContactInfo } from './map/contacts';
+import { contactAlpha, contactLabel, contactRing, isStale, type ContactInfo } from './map/contacts';
 import { seenOnMap } from './map/feedback';
 import { along, gliders } from './glide';
 import type { OrderTrack } from './orders/tracks';
@@ -871,6 +871,8 @@ export class MapRenderer {
       if (side === 'neutral' && band !== 'front') continue;
       const nth = from === undefined ? atNode.get(stack.node) ?? 0 : 0;
       if (from === undefined) atNode.set(stack.node, nth + 1);
+      // A foreign counter is a ghost of its last fix: the older the fix, the fainter.
+      ctx.globalAlpha = lead.contact ? contactAlpha(lead.contact) : 1;
       const nodePx = 2 * this.map.halfDeg[stack.node] * ppd;
       if (side !== 'friend') {
         const picked = input.selected ? stack.members.find((f) => f.entry.id === input.selected && f.contact) : undefined;
@@ -889,6 +891,7 @@ export class MapRenderer {
         shown.forEach((f, i) => {
           const [x, y] = at(i);
           const s = this.sideOf(f, stack.nation, nationIds);
+          ctx.globalAlpha = f.contact ? contactAlpha(f.contact) : 1;
           const box = this.sprites.draw(ctx, x, y, ECHELON_W[f.entry.echelon] * scale * 0.85, f.entry.kind, f.entry.echelon, s, f.strength, f.status === 'routed');
           this.hits.push({ ...box, ids: [f.entry.id], node: stack.node, zoomTo: null });
           const mark = this.designator(f, x + box.w / 2 + 1, y, s);
@@ -919,6 +922,7 @@ export class MapRenderer {
       }
       else if (band !== 'world') labelled.push({ stack, box, side });
     }
+    ctx.globalAlpha = 1;
     for (const b of this.hits) placed.push([b.x, b.y, b.x + b.w, b.y + b.h]);
     placed.push(...marks);
     for (const l of labelled) this.stackLabel(l.stack, l.box, l.side, placed);
@@ -1048,9 +1052,10 @@ export class MapRenderer {
     if (members.length === 1) return this.sprites.draw(ctx, x, y, w, lead.entry.kind, lead.entry.echelon, side, lead.strength, lead.status === 'routed');
     let strength = 0;
     for (const f of members) strength += f.strength;
-    ctx.globalAlpha = 0.55;
+    const alpha = ctx.globalAlpha;
+    ctx.globalAlpha = alpha * 0.55;
     this.sprites.draw(ctx, x + 3, y - 3, w, lead.entry.kind, lead.entry.echelon, side, 0, false);
-    ctx.globalAlpha = 1;
+    ctx.globalAlpha = alpha;
     const box = this.sprites.draw(ctx, x, y, w, lead.entry.kind, lead.entry.echelon, side, strength / members.length, false);
     const label = members.length > 999 ? '999+' : String(members.length);
     const bw = 7 + label.length * 6, bx = x + w / 2 - 3, by = y - CounterSprites.half(w, side) - 8;

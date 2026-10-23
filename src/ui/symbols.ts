@@ -181,9 +181,10 @@ export class CounterSprites {
   /** Draws a counter centred on (x, y) with a strength bar beneath; returns its hit box. */
   draw(c: Ctx, x: number, y: number, w: number, kind: FormationKind, echelon: Echelon, side: Side, strength: number, faded: boolean): CounterBox {
     const s = this.sprite(Math.round(w), kind, echelon, side);
-    if (faded) c.globalAlpha = 0.5;
+    const alpha = c.globalAlpha;
+    if (faded) c.globalAlpha = alpha * 0.5;
     c.drawImage(s.img, x - s.ox, y - s.oy, s.w, s.h);
-    c.globalAlpha = 1;
+    c.globalAlpha = alpha;
     const half = CounterSprites.half(w, side), by = y + half + 3, bw = Math.max(16, w * 0.9);
     c.fillStyle = 'rgba(150,195,240,0.16)';
     c.fillRect(x - bw / 2, by, bw, 3);
