@@ -32,7 +32,7 @@ export function writePref(key: string, value: string, store: KeyValue | null = s
   }
 }
 
-/** Crises stop the clock and take the screen; off, the same decisions wait in the Daily Brief. */
+/** Crises stop the clock and take the screen; off, the staff answers each with its recommendation and says so. */
 export const CRISES_KEY = 'ww3.crises';
 export const crisesOn = (store?: KeyValue | null) => readPref(CRISES_KEY, store) !== 'off';
 export const setCrises = (on: boolean, store?: KeyValue | null) => writePref(CRISES_KEY, on ? 'on' : 'off', store);
