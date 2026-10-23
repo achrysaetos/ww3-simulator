@@ -20,5 +20,32 @@ export async function newGame(browser, url, scenario, nation, { role = 'cinc' } 
   await page.click('[data-testid="start"]');
   await page.waitForSelector('[data-testid="shell"]', { timeout: 120_000 });
   await page.click('[data-testid="briefing-close"]', { timeout: 60_000 });
+  // The Daily Brief opens whenever an urgent decision arrives, even with the clock stopped, and would swallow the next click.
+  await page.addLocatorHandler(page.locator('[data-testid="daily-brief"]'), () => closeBrief(page));
   return { page, errors };
+}
+
+/** Closes the Daily Brief if it is open. Keyboard shortcuts are ignored under it, so call this before pressing one. */
+export async function closeBrief(page) {
+  const brief = page.locator('[data-testid="daily-brief"]');
+  if (!(await brief.count())) return;
+  // Esc rather than a click: a click on the brief would re-enter the locator handler that newGame installs.
+  await page.keyboard.press('Escape');
+  await brief.waitFor({ state: 'detached', timeout: 10_000 });
+}
+
+/** Runs the clock to `tick` and pauses with no brief open. `onBrief` sees each Daily Brief before it is closed. */
+export async function runTo(page, tick, { speed = 20, onBrief = async () => {} } = {}) {
+  for (;;) {
+    if (await page.locator('[data-testid="daily-brief"]').count()) {
+      await onBrief(await page.evaluate(() => window.__client.state.tick));
+      await closeBrief(page);
+      continue;
+    }
+    if ((await page.evaluate(() => window.__client.state.tick)) >= tick) break;
+    await page.evaluate((v) => window.__client.ticksPerSec || window.__client.setSpeed(v), speed);
+    await page.waitForFunction((t) => window.__client.state.tick >= t || document.querySelector('[data-testid="daily-brief"]'), tick, { timeout: 900_000 });
+  }
+  await page.evaluate(() => window.__client.setSpeed(0));
+  await closeBrief(page);
 }

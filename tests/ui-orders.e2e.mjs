@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { chromium } from '/opt/node-tools/node_modules/playwright/index.mjs';
-import { newGame } from './e2e-start.mjs';
+import { closeBrief, newGame, runTo } from './e2e-start.mjs';
 
 const [, , url, out, play = 'ukraine-2026:UKR'] = process.argv;
 fs.mkdirSync(out, { recursive: true });
@@ -25,20 +25,6 @@ const check = (ok, what) => {
 const { page, errors } = await newGame(browser, url, scenario, nation, { role: 'brigade' });
 await page.waitForFunction(() => window.__map && window.__client?.state.formations.length > 0, null, { timeout: 120_000 });
 
-const closeBrief = async () => {
-  if (await page.locator('[data-testid="brief-close"]').count()) await page.click('[data-testid="brief-close"]');
-};
-const runTo = async (tick, speed = 20) => {
-  for (;;) {
-    const s = await page.evaluate(() => ({ tick: window.__client.state.tick, brief: !!document.querySelector('[data-testid="daily-brief"]') }));
-    if (s.brief) { await closeBrief(); continue; }
-    if (s.tick >= tick) break;
-    await page.evaluate((v) => window.__client.ticksPerSec || window.__client.setSpeed(v), speed);
-    await page.waitForFunction(([t]) => window.__client.state.tick >= t || document.querySelector('[data-testid="daily-brief"]'), [tick], { timeout: 600_000 });
-  }
-  await page.evaluate(() => window.__client.setSpeed(0));
-  await closeBrief();
-};
 const settle = async () => {
   await page.waitForFunction(() => !window.__map.animating, null, { timeout: 60_000 });
   await page.waitForTimeout(400);
@@ -73,7 +59,7 @@ const frame = async (nodes, px = 300) => {
   await settle();
 };
 
-await runTo(TICKS);
+await runTo(page, TICKS);
 
 // A brigade of ours on the line, and the enemy-held cell in front of it.
 const front = await page.evaluate((me) => {
@@ -183,7 +169,7 @@ for (let i = 0; i < 6; i++) {
   const s = await page.evaluate((id) => window.__client.tracks.get(id)?.state, front.id);
   if (s === 'accepted' || s === 'refused') break;
 }
-await closeBrief();
+await closeBrief(page);
 const answer = await page.evaluate((id) => window.__client.tracks.get(id), front.id);
 check(answer && (answer.state === 'accepted' || answer.state === 'refused' || answer.state === 'relayed'), `the engine's answer shows on the unit: ${answer?.state} ${answer?.reason ?? ''}`);
 await page.waitForTimeout(300);
@@ -245,7 +231,7 @@ await shot('battle-plan.png');
 await page.click('[data-testid="plan-launch"]');
 check(!(await page.locator('[data-testid="plan-panel"]').count()), 'Launch closes the planner');
 const before = await page.evaluate(() => window.__client.state.tick);
-await runTo(before + 2, 1);
+await runTo(page, before + 2, { speed: 1 });
 const ops = await page.evaluate(() => window.__client.state.ops.map((o) => ({ id: o.id, name: o.name, phase: o.phase, axis: o.axis.length, advance: o.progress.advance, note: o.progress.note })));
 console.log('operations:', JSON.stringify(ops));
 const mineOp = ops.find((o) => o.phase === 'launched' || o.phase === 'stalled' || o.phase === 'succeeded');
@@ -253,7 +239,7 @@ check(!!mineOp, 'the engine runs the launched operation');
 const result = await page.evaluate(() => window.__client.feed.newest(new Set(), window.__client.playing, 80).find((r) => r.event.type === 'command_result' && r.event.command === 'plan_operation'));
 check(!!result, `the plan's answer is in the feed: ${result?.text}`);
 check((await page.locator('[data-testid="planned-operation"]').count()) > 0, 'the operation is listed under Operations');
-await runTo(before + 10, 5);
+await runTo(page, before + 10, { speed: 5 });
 const axis = await page.evaluate(() => window.__client.state.ops.find((o) => o.phase !== 'cancelled')?.axis ?? []);
 await frame(axis, 260);
 await page.waitForTimeout(400);

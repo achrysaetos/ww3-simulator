@@ -7,7 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { chromium } from '/opt/node-tools/node_modules/playwright/index.mjs';
-import { newGame } from './e2e-start.mjs';
+import { closeBrief, newGame, runTo } from './e2e-start.mjs';
 
 const [, , url, out, ...plays] = process.argv;
 fs.mkdirSync(out, { recursive: true });
@@ -30,27 +30,16 @@ for (const play of plays.length ? plays : ['ukraine-2026:UKR', 'ww3-2027:USA', '
   await page.waitForFunction(() => window.__map && window.__client?.state.formations.length > 0, null, { timeout: 120_000 });
 
   let briefShot = false;
-  const runTo = async (tick) => {
-    for (;;) {
-      const s = await page.evaluate(() => ({ tick: window.__client.state.tick, brief: !!document.querySelector('[data-testid="daily-brief"]') }));
-      if (s.brief) {
-        await page.waitForTimeout(400);
-        if (!briefShot) {
-          await page.screenshot({ path: path.join(out, `brief-${tag}.png`) });
-          briefShot = true;
-          const items = await page.locator('[data-testid="brief-item"]').count();
-          console.log(`${tag}: brief opened at tick ${s.tick} with ${items} decisions`);
-        }
-        await page.click('[data-testid="brief-close"]');
-        continue;
-      }
-      if (s.tick >= tick) break;
-      await page.evaluate(() => window.__client.ticksPerSec || window.__client.setSpeed(20));
-      await page.waitForFunction(([t]) => window.__client.state.tick >= t || document.querySelector('[data-testid="daily-brief"]'), [tick], { timeout: 600_000 });
-    }
-    await page.evaluate(() => window.__client.setSpeed(0));
-  };
-  await runTo(TICKS);
+  await runTo(page, TICKS, {
+    onBrief: async (tick) => {
+      if (briefShot) return;
+      await page.waitForTimeout(400);
+      await page.screenshot({ path: path.join(out, `brief-${tag}.png`) });
+      briefShot = true;
+      const items = await page.locator('[data-testid="brief-item"]').count();
+      console.log(`${tag}: brief opened at tick ${tick} with ${items} decisions`);
+    },
+  });
   await page.waitForFunction(() => !window.__map.animating, null, { timeout: 120_000 });
   await page.waitForTimeout(600);
   await page.screenshot({ path: path.join(out, `main-${tag}.png`) });
@@ -60,12 +49,16 @@ for (const play of plays.length ? plays : ['ukraine-2026:UKR', 'ww3-2027:USA', '
   const has = async (sel) => (await page.locator(sel).count()) > 0;
   check(await has('[data-testid="war-room"]') && await has('[data-testid="staff-panel"]') && await has('[data-testid="operations"]') && await has('[data-testid="ticker"]'), `${tag}: shell panels present`);
   check(await has('[data-testid="zoom-world"]') && await has('[data-testid="zoom-front"]'), `${tag}: World / Theatre / Front view switch`);
+  await closeBrief(page);
   await page.keyboard.press('f');
   check(await has('[data-testid="drawer-panel-forces"] [data-testid="oob-item"]'), `${tag}: F opens the order of battle`);
   await page.locator('[data-testid="oob-item"]').first().click();
+  await page.waitForSelector('[data-testid="formation-name"]', { timeout: 10_000 }).catch(() => {});
   check(await has('[data-testid="formation-name"]') && await has('[data-testid^="posture-"]'), `${tag}: picking a unit shows its orders`);
+  await closeBrief(page);
   await page.keyboard.press('n');
   check(await has('[data-testid="nation-panel"]') && !(await has('[data-testid^="delegate-"]')) && await has('[data-testid="staff-land"]'), `${tag}: N opens the nation drawer; delegation lives only on the staff panel`);
+  await closeBrief(page);
   await page.keyboard.press('l');
   check(await has('[data-testid="event-log"]'), `${tag}: L opens the event log`);
   await page.keyboard.press('Escape');
@@ -76,6 +69,7 @@ for (const play of plays.length ? plays : ['ukraine-2026:UKR', 'ww3-2027:USA', '
   await page.click('[data-testid="layers"]');
   check(await has('.ww-popover input[type="checkbox"]'), `${tag}: map layers toggle`);
   await page.click('[data-testid="layers"]');
+  await closeBrief(page);
   await page.keyboard.press('b');
   check(await has('[data-testid="daily-brief"]'), `${tag}: B opens the Daily Brief`);
   if (!briefShot) {
