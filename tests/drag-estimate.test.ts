@@ -4,112 +4,160 @@ import { Rng } from '../src/core/rng';
 import { loadMap } from '../src/data/load';
 import { QUICK as TABLES } from '../src/forecast/quick';
 import { interceptSalvo, type SalvoDefense, type SalvoThreat } from '../src/systems/air/intercept';
-import { estimateHold, estimateStrike, estimateTake, pillText, quickAt, type Pill } from '../src/ui/drag/estimate';
+import { axesAt, coverAxes, coveredAt, estimateHold, estimateStrike, estimateTake, pillText, quickAt, type Pill } from '../src/ui/drag/estimate';
 import type { Target } from '../src/ui/drag/gesture';
-import type { BeliefField, DragKit, SubjectUnit } from '../src/ui/drag/kit';
+import { FORCE, LAND_TARGETS, type BeliefField, type DragKit, type SubjectUnit } from '../src/ui/drag/kit';
 
 const map = loadMap();
 const t = map.nodeAt(48.5, 37.5);
-const QUICK = TABLES.open.bare.rows;
+const T = TABLES.open.bare;
 const from = [...map.neighbors(t)][0];
 const target: Target = { kind: 'enemy_ground', node: t, contact: null };
 
-function unit(power: number, extra: Partial<SubjectUnit> = {}): SubjectUnit {
-  return { id: `u${power}` as FormationId, cls: 'ground', kind: 'maneuver', node: from, power, strength: 1, kmPerDay: 100, strikeKm: 0, patrolKm: 0, ferryKm: 0, salvo: 0, c2DelayHours: 0, ...extra };
+/** `n` armoured platforms putting out `fire` kills an engaged hour on armour, one each unless asked. */
+function force(n: number, fire = n): Float32Array {
+  const f = new Float32Array(FORCE);
+  f[1] = n;
+  f[LAND_TARGETS.length + 1] = fire;
+  return f;
 }
 
-/** A kit with one believed enemy force at the target cell and nothing else on the map. */
-function kit(enemy: { power: number; conf?: number; ageH?: number; dig?: number; defense?: number }, units: SubjectUnit[], extra: Partial<DragKit> = {}): DragKit {
-  const size = map.size;
+function unit(platforms: number, extra: Partial<SubjectUnit> = {}): SubjectUnit {
+  return { id: `u${platforms}` as FormationId, cls: 'ground', kind: 'maneuver', node: from, power: platforms, force: force(platforms), strength: 1, kmPerDay: 100, strikeKm: 0, patrolKm: 0, ferryKm: 0, salvo: 0, c2DelayHours: 0, ...extra };
+}
+
+function believe(field: BeliefField, n: number, platforms: number, conf = 1, ageH = 0, fire = platforms): void {
+  field.enemyPower[n] = fire;
+  field.enemyForce.set(force(platforms, fire), n * FORCE);
+  field.enemyLine.set(force(platforms, fire), n * FORCE);
+  field.enemyConf[n] = conf;
+  field.enemyAgeH[n] = ageH;
+  field.hostile[n] = 1;
+}
+
+/** A kit with one believed enemy force at `at` (the target cell unless asked) and nothing else on the map. */
+function kit(enemy: { platforms: number; fire?: number; conf?: number; ageH?: number; dig?: number }, units: SubjectUnit[], extra: Partial<DragKit> = {}, at = t): DragKit {
+  const size = map.size, land = map.landCount * FORCE;
   const field: BeliefField = {
-    tick: 0, enemyPower: new Float32Array(size), enemyConf: new Float32Array(size), enemyAgeH: new Float32Array(size).fill(Infinity), enemyDig: new Float32Array(size),
-    defense: new Float32Array(size).fill(1), supply: new Uint8Array(size).fill(100), hostile: new Uint8Array(size), river: new Uint8Array(size), ownPower: new Float32Array(size),
+    tick: 0, enemyPower: new Float32Array(size), enemyForce: new Float32Array(land), enemyGuns: new Float32Array(land), enemyLine: new Float32Array(land), enemyConf: new Float32Array(size), enemyAgeH: new Float32Array(size).fill(Infinity),
+    enemyDig: new Float32Array(size), ground: new Float32Array(size).fill(1), supply: new Uint8Array(size).fill(100), hostile: new Uint8Array(size), river: new Uint8Array(size), ownForce: new Float32Array(land), ownGuns: new Float32Array(land),
   };
-  field.enemyPower[t] = enemy.power;
-  field.enemyConf[t] = enemy.conf ?? 1;
-  field.enemyAgeH[t] = enemy.ageH ?? 0;
-  field.enemyDig[t] = enemy.dig ?? 0;
-  field.defense[t] = enemy.defense ?? 1;
-  field.hostile[t] = 1;
+  believe(field, at, enemy.platforms, enemy.conf, enemy.ageH, enemy.fire);
+  field.enemyDig[at] = enemy.dig ?? 0;
   const km = new Float32Array(size).fill(50);
-  return { tick: 0, player: 'RUS' as NationId, sides: new Uint8Array(0), units, field, routes: [{ from, marchKm: km, assaultKm: km, assaultVia: null, seaKm: null }], sites: [], contacts: {}, ...extra };
+  return { tick: 0, player: 'RUS' as NationId, sides: new Uint8Array(0), units, field, routes: units.map((u) => ({ from: u.node, marchKm: km, assaultKm: km, assaultVia: null, seaKm: null })).slice(0, 1), sites: [], contacts: {}, ...extra };
 }
 
-const take = (k: DragKit) => {
-  const p = estimateTake(k, k.units, target, [t], map);
+const take = (k: DragKit, at = target) => {
+  const p = estimateTake(k, k.units, at, [at.node], map);
   if (p.kind !== 'take') throw new Error(p.kind);
   return p;
 };
 
-/** A ratio in the steep middle of the table, where every input visibly moves the odds. */
-const steep = QUICK.find((q) => q.pTake > 0.2 && q.pTake < 0.8)!.r;
+/**
+ * A cell in the steep middle of the open table, where every input visibly moves the odds, with the attacking
+ * platforms and the defending platforms and fire that read as it on `at`.
+ */
+function steep(at = t): { att: number; def: number; fire: number } {
+  const p = (i: number, j: number, k: number) => T.cells[i]?.[j]?.[k]?.pTake ?? NaN;
+  const ok = (i: number, j: number, k: number) => p(i, j, k) > 0.2 && p(i, j, k) < 0.8 && p(i + 1, j, k) >= p(i, j, k) && p(i, j + 1, k) >= p(i, j, k) && !(p(i, j, k + 1) > p(i, j, k));
+  const cells = T.cells.flatMap((row, i) => row.flatMap((ms, j) => ms.map((_, k) => [i, j, k])));
+  const [i, j, k] = cells.find(([i, j, k]) => ok(i, j, k))!;
+  const unit = axesAt(map, at, force(1), force(1), 0);
+  const att = TABLES.shares[j] / unit.s, def = TABLES.manned[k] / unit.m;
+  return { att, def, fire: (def * axesAt(map, at, force(att), force(def), 0).r) / TABLES.ratios[i] };
+}
 
 describe('the take estimate', () => {
+  it('reads the duel table at the fire ratio and front share the engine fights at', () => {
+    const { att, def, fire } = steep();
+    const k = kit({ platforms: def, fire }, [unit(att)]);
+    expect(take(k).p.mid).toBeCloseTo(quickAt(axesAt(map, t, force(att), force(def, fire), 0)).pTake, 6);
+  });
+
   it('rises with more attackers and falls with more defenders, worse terrain or deeper entrenchment', () => {
-    const base = take(kit({ power: 10 }, [unit(10 * steep)])).p.mid;
+    const { att, def, fire } = steep();
+    const base = take(kit({ platforms: def, fire }, [unit(att)])).p.mid;
     expect(base).toBeGreaterThan(0.1);
     expect(base).toBeLessThan(0.9);
-    expect(take(kit({ power: 10 }, [unit(10 * steep), unit(3 * steep)])).p.mid).toBeGreaterThan(base);
-    expect(take(kit({ power: 13 }, [unit(10 * steep)])).p.mid).toBeLessThan(base);
-    expect(take(kit({ power: 10, defense: 1.5 }, [unit(10 * steep)])).p.mid).toBeLessThan(base);
-    expect(take(kit({ power: 10, dig: 1 }, [unit(10 * steep)])).p.mid).toBeLessThan(base);
-    const across = kit({ power: 10 }, [unit(10 * steep)]);
+    expect(take(kit({ platforms: def, fire }, [unit(att), unit(0.3 * att)])).p.mid).toBeGreaterThan(base);
+    expect(take(kit({ platforms: 1.3 * def, fire: 1.3 * fire }, [unit(att)])).p.mid).toBeLessThan(base);
+    expect(take(kit({ platforms: def, fire, dig: 1 }, [unit(att)])).p.mid).toBeLessThan(base);
+    const across = kit({ platforms: def, fire }, [unit(att)]);
     across.field.river[t] = 1;
     expect(take(across).p.mid).toBeLessThan(base);
+    const forest = map.nodeAt(50.25, 34.75);
+    expect(map.terrain[forest]).toBe('forest');
+    const into = { kind: 'enemy_ground' as const, node: forest, contact: null };
+    const near = [...map.neighbors(forest)][0];
+    expect(take(kit({ platforms: def, fire }, [unit(att, { node: near })], {}, forest), into).p.mid).toBeLessThan(base);
   });
 
   it('needs every enemy cell on the way taken first', () => {
-    const k = kit({ power: 10 }, [unit(30 * steep)]);
+    const { att, def, fire } = steep();
+    const k = kit({ platforms: def, fire }, [unit(3 * att)]);
     const mid = [...map.neighbors(t)].find((m) => m !== from && [...map.neighbors(from)].includes(m))!;
     const via = new Int32Array(map.size).fill(-1);
     via[t] = mid;
     via[mid] = from;
     k.routes[0].assaultVia = via;
-    expect(take(k).p.mid, 'through a friendly cell').toBe(take(kit({ power: 10 }, [unit(30 * steep)])).p.mid);
-    k.field.hostile[mid] = 1;
-    k.field.enemyPower[mid] = 10;
-    k.field.enemyConf[mid] = 1;
-    k.field.enemyAgeH[mid] = 0;
+    expect(take(k).p.mid, 'through a friendly cell').toBe(take(kit({ platforms: def, fire }, [unit(3 * att)])).p.mid);
+    believe(k.field, mid, 3 * def, 1, 0, 3 * fire);
     const through = take(k).p.mid;
     k.routes[0].assaultVia = null;
     expect(through).toBeLessThan(take(k).p.mid);
   });
 
+  it('crosses an empty cell at the odds against the line next to it, slower the stronger that line', () => {
+    const side = [...map.neighbors(t)].find((m) => m !== from && m < map.landCount)!;
+    const odds = (platforms: number) => {
+      const k = kit({ platforms: 0 }, [unit(400)]);
+      believe(k.field, side, platforms);
+      return take(k);
+    };
+    const weak = odds(20), strong = odds(400);
+    expect(weak.p.mid).toBeCloseTo(coveredAt(coverAxes(map, t, force(400), force(20))).pTake, 6);
+    expect(weak.caveats).toContain('nothing_seen');
+    expect(strong.p.mid).toBeLessThan(weak.p.mid);
+  });
+
   it('widens its band as confidence in the defenders falls or the fix ages', () => {
+    const { att, def, fire } = steep();
     const width = (p: { lo: number; hi: number }) => p.hi - p.lo;
-    const sure = take(kit({ power: 10 }, [unit(10 * steep)])).p;
+    const sure = take(kit({ platforms: def, fire }, [unit(att)])).p;
     expect(width(sure)).toBeCloseTo(0, 6);
-    const unsure = take(kit({ power: 10, conf: 0.4 }, [unit(10 * steep)])).p;
+    const unsure = take(kit({ platforms: def, fire, conf: 0.4 }, [unit(att)])).p;
     expect(width(unsure)).toBeGreaterThan(0.15);
-    expect(width(take(kit({ power: 10, conf: 0.4, ageH: 72 }, [unit(10 * steep)])).p)).toBeGreaterThan(width(unsure));
+    expect(width(take(kit({ platforms: def, fire, conf: 0.4, ageH: 72 }, [unit(att)])).p)).toBeGreaterThan(width(unsure));
     expect(unsure.lo).toBeLessThanOrEqual(unsure.mid);
     expect(unsure.mid).toBeLessThanOrEqual(unsure.hi);
   });
 
   it('reads the unopposed row and says nothing was seen when no defender is believed there', () => {
-    const p = take(kit({ power: 0 }, [unit(10)]));
+    const p = take(kit({ platforms: 0 }, [unit(10)]));
     expect(p.caveats).toContain('nothing_seen');
-    expect(p.p.mid).toBe(1);
+    expect(p.p.mid).toBe(T.unopposed.pTake);
   });
 
-  it('interpolates QUICK in ln r and clamps at its ends', () => {
-    const [a, b] = [QUICK[QUICK.length - 3], QUICK[QUICK.length - 2]];
-    const mid = quickAt(Math.sqrt(a.r * b.r));
-    expect(mid.pTake).toBeCloseTo((a.pTake + b.pTake) / 2, 6);
-    expect(quickAt(QUICK[0].r / 10).pTake).toBe(QUICK[0].pTake);
-    expect(quickAt(QUICK[QUICK.length - 1].r * 10).pTake).toBe(QUICK[QUICK.length - 1].pTake);
+  it('interpolates QUICK in the log of each axis and clamps at its ends', () => {
+    const { ratios: R, shares: S, manned: M } = TABLES;
+    const [i, j, k] = [R.length - 3, 3, 1];
+    const p = (i: number, j: number, k: number) => T.cells[i][j][k].pTake;
+    const mid = (a: readonly number[], x: number) => Math.sqrt(a[x] * a[x + 1]);
+    expect(quickAt({ r: mid(R, i), s: S[j], m: M[k] }).pTake).toBeCloseTo((p(i, j, k) + p(i + 1, j, k)) / 2, 6);
+    expect(quickAt({ r: R[i], s: mid(S, j), m: M[k] }).pTake).toBeCloseTo((p(i, j, k) + p(i, j + 1, k)) / 2, 6);
+    expect(quickAt({ r: R[i], s: S[j], m: mid(M, k) }).pTake).toBeCloseTo((p(i, j, k) + p(i, j, k + 1)) / 2, 6);
+    expect(quickAt({ r: R[0] / 10, s: S[0] / 10, m: M[0] / 10 }).pTake).toBe(p(0, 0, 0));
+    const last = (a: readonly number[]) => a.length - 1;
+    expect(quickAt({ r: R[last(R)] * 10, s: S[last(S)] * 10, m: M[last(M)] * 10 }).pTake).toBe(p(last(R), last(S), last(M)));
   });
 });
 
 describe('the hold estimate', () => {
-  const ring = (power: number) => {
-    const k = kit({ power: 0 }, [unit(10)]);
-    k.field.enemyPower[t] = 0;
-    for (const n of map.neighbors(t)) {
-      k.field.enemyPower[n] = power;
-      k.field.enemyConf[n] = 1;
-      k.field.enemyAgeH[n] = 0;
-    }
+  const ring = (platforms: number) => {
+    const k = kit({ platforms: 0 }, [unit(100)]);
+    k.field.hostile[t] = 0;
+    for (const n of map.neighbors(t)) believe(k.field, n, platforms);
     const p = estimateHold(k, k.units, { kind: 'own_ground', node: t, contact: null }, [t], map);
     if (p.kind !== 'hold') throw new Error(p.kind);
     return p.days;
@@ -117,7 +165,7 @@ describe('the hold estimate', () => {
 
   it('holds longer with less enemy around, and sees no threat when there is none', () => {
     expect(ring(0)).toEqual({ lo: Infinity, mid: Infinity, hi: Infinity });
-    const heavy = ring(40), light = ring(15);
+    const heavy = ring(120), light = ring(40);
     expect(heavy.mid).toBeLessThan(light.mid);
     expect(Number.isFinite(heavy.mid)).toBe(true);
   });
@@ -127,7 +175,7 @@ describe('the strike estimate', () => {
   const threat: SalvoThreat = { count: 0, speedMach: 0.8, interceptDifficulty: 0.2 };
   const strike = (sites: { defense: SalvoDefense; conf?: number }[], salvo: number) => {
     const u = unit(1, { cls: 'air', kind: 'air_wing', salvo, threat: { ...threat, count: salvo }, strikeKm: 1000 });
-    const k = kit({ power: 0 }, [u], { sites: sites.map((x) => ({ node: t, defense: x.defense, conf: x.conf ?? 1, ageH: 0 })) });
+    const k = kit({ platforms: 0 }, [u], { sites: sites.map((x) => ({ node: t, defense: x.defense, conf: x.conf ?? 1, ageH: 0 })) });
     const p = estimateStrike(k, k.units, target, [t], map);
     if (p.kind !== 'strike') throw new Error(p.kind);
     return p;
