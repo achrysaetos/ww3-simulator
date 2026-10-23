@@ -2,8 +2,8 @@
  * Crises: the few staff cards big enough to stop the clock and take the screen (a treaty call,
  * an enemy nuclear alert, an armistice offer, a threat to the capital), recast as one decision
  * with two or three options, each argued by an adviser. Every option is an action the card
- * already offers or a decision to wait, so choosing one issues the same command the War Room
- * and the Daily Brief would. Pure: reads the card and the player's own view.
+ * already offers or a decision to wait, so choosing one issues the card's own command.
+ * Pure: reads the card and the player's own view.
  */
 import type { NationId, NodeId } from '../../core/types';
 import { NUCLEAR_ALERT } from '../../data/nations';
@@ -25,7 +25,7 @@ export interface CrisisOption {
   quote: string;
   action: Action;
   irreversible?: boolean;
-  /** Close the crisis and leave the card on the table, to be answered later from the War Room or the brief. */
+  /** Close the crisis and leave the card on the table: the crisis comes back (`returnsIn`). */
   defer?: true;
   recommended: boolean;
 }
@@ -92,7 +92,7 @@ function treaty(card: Card, c: CrisisContext): Crisis | null {
       action: join, recommended: joinFirst,
     },
     {
-      title: 'Wait and consult', text: `No answer yet. The call stays open ${hoursLeft >= 48 ? `${Math.floor(hoursLeft / 24)} more days` : `${Math.round(hoursLeft)} more hours`}.`, button: 'Decide later', tone: 'gold', advisor: 'foreign',
+      title: 'Wait and consult', text: `No answer yet. The call stays open ${hoursLeft >= 48 ? `${Math.floor(hoursLeft / 24)} more days` : `${Math.round(hoursLeft)} more hours`}, and comes back before it lapses.`, button: 'Decide later', tone: 'gold', advisor: 'foreign',
       quote: 'Let me sound out the other members first. We have time, not much.', action: later('Decide later'), defer: true, recommended: false,
     },
     {
@@ -148,7 +148,7 @@ function nuclear(card: Card, c: CrisisContext): Crisis | null {
   });
   if (at !== undefined) {
     options.push({
-      title: 'Look first', text: look ? `See where ${them}'s launchers we know of stand, with the clock stopped, and decide from the Daily Brief.` : 'Return to the map with the clock stopped, and decide from the Daily Brief.',
+      title: 'Look first', text: look ? `See where ${them}'s launchers we know of stand, with the clock stopped. The question comes back when the clock runs.` : 'Return to the map with the clock stopped. The question comes back when the clock runs.',
       button: 'Show the launchers', tone: 'blue', advisor: 'intel',
       quote: 'One report is not a satellite fix. Look before you answer.', action: look ?? { kind: 'show', label: 'Show me', node: at }, recommended: false,
     });
@@ -255,6 +255,19 @@ export function crisisOf(card: Card, c: CrisisContext): Crisis | null {
 /** The crisis once the player has answered it: the deadline is met, and the facts read as they stand now. */
 export function answered(crisis: Crisis, c: CrisisContext): Crisis {
   return { ...crisis, hoursLeft: null, windowHours: null, clock: 'Answered', facts: crisis.factsNow(c) };
+}
+
+/** The option the staff recommends, which it takes itself when the player has turned crises off. */
+export const staffChoice = (crisis: Crisis): CrisisOption => crisis.options.find((o) => o.recommended) ?? crisis.options[0];
+
+/**
+ * Ticks until a crisis closed without an answer is put to the player again: a look at the map
+ * comes back on the next turn, a deferral a day later, and a deadline is never let pass unasked.
+ */
+export function returnsIn(crisis: Crisis, option: CrisisOption, dtHours: number): number {
+  if (option.action.kind === 'show') return 1;
+  const day = Math.round(24 / dtHours);
+  return crisis.hoursLeft === null ? day : Math.max(1, Math.min(day, Math.floor(crisis.hoursLeft / dtHours) - 1));
 }
 
 /** The first card on the table that should stop the clock, if any, skipping those already shown. */

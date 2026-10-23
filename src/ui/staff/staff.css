@@ -1,7 +1,6 @@
 /*
- * The in-game shell from the redesign (ui-redesign/screenshots/main.png and brief.png): a
- * full-window map, the kit top bar, Operations and "Your staff runs" on the left, the War Room
- * on the right, drawers over the left edge, a news ticker, and the Daily Brief.
+ * The in-game shell: a full-window map, the kit top bar, drawers over the left edge, a news
+ * ticker, and the situation report.
  */
 .ww-shell { position: fixed; inset: 0; overflow: hidden; background: var(--ww-ink); color: var(--ww-text); font-family: var(--ww-sans); -webkit-font-smoothing: antialiased; }
 .ww-shell .map-wrap { position: absolute; inset: 0; }
@@ -11,8 +10,6 @@
 /* ---------------------------------------------------------------- shared bits */
 .ww-gold { color: var(--ww-gold); }
 .ww-blue { color: #8fc6ff; }
-.ww-up { color: var(--ww-green); }
-.ww-down { color: var(--ww-red); }
 .ww-grow { flex: 1; }
 .ww-btn.small { min-height: 28px; padding: 0 10px; font-size: 12px; }
 .ww-btn.ghost { background: transparent; border-color: rgba(150, 195, 240, 0.18); color: var(--ww-muted); }
@@ -20,26 +17,16 @@
 .ww-shell .ww-btn.gold:hover:not(:disabled) { background: linear-gradient(180deg, #ffd287, #f5ad4a); border-color: #ffe0a8; }
 .ww-shell .ww-btn.gold .ww-kbd { border-color: rgba(26, 18, 4, 0.4); color: #1a1204; background: rgba(255, 255, 255, 0.18); }
 .ww-btn:disabled { opacity: 0.45; cursor: default; box-shadow: none; }
-.ww-btn:focus-visible, .ww-dock-btn:focus-visible, .ww-op:focus-visible, .ww-chip:focus-visible, .ww-seg button:focus-visible { outline: 2px solid var(--ww-gold); outline-offset: 2px; }
+.ww-btn:focus-visible, .ww-dock-btn:focus-visible, .ww-chip:focus-visible { outline: 2px solid var(--ww-gold); outline-offset: 2px; }
 .ww-link { background: none; border: 0; padding: 0; min-height: 0; color: #ffc56b; font-size: 12px; cursor: pointer; text-align: left; text-transform: none; }
 .ww-link:hover:not(:disabled) { color: #ffe0a8; background: none; }
-.ww-x { position: absolute; top: 6px; right: 8px; width: 22px; height: 22px; min-height: 0; padding: 0; border: 0; border-radius: 2px; background: transparent; color: var(--ww-faint); font-size: 16px; line-height: 1; cursor: pointer; }
-.ww-x:hover:not(:disabled) { color: var(--ww-text); background: rgba(150, 195, 240, 0.1); border: 0; }
 .ww-pulse { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--ww-gold); box-shadow: 0 0 8px var(--ww-gold); margin-right: 8px; flex: none; animation: ww-pulse 1.2s ease-in-out infinite; }
 @keyframes ww-pulse { 50% { opacity: 0.3; } }
 @keyframes ww-in { from { opacity: 0; transform: translateY(-6px); } }
 @keyframes ww-slide { from { opacity: 0; transform: translateX(-16px); } }
-.ww-seg { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 4px; }
-.ww-seg button {
-  min-height: 30px; padding: 0 6px; border-radius: 3px; border: 1px solid rgba(150, 195, 240, 0.22); background: rgba(20, 32, 50, 0.6); color: var(--ww-muted);
-  font-family: var(--ww-title); font-weight: 600; font-size: 12.5px; letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer; white-space: nowrap;
-}
-.ww-seg button:hover:not(:disabled) { color: var(--ww-text); border-color: rgba(150, 195, 240, 0.45); background: rgba(30, 46, 70, 0.7); }
-.ww-seg button.on:hover:not(:disabled) { color: #ffc56b; border-color: var(--ww-gold); background: rgba(255, 181, 71, 0.18); }
-.ww-seg button.on { border-color: var(--ww-gold); color: #ffc56b; background: rgba(255, 181, 71, 0.12); }
 .ww-check { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ww-text); cursor: pointer; white-space: nowrap; }
 
-/* ---------------------------------------------------------------- the dock: drawers, brief, layers, menu */
+/* ---------------------------------------------------------------- the dock: drawers, layers, menu */
 .ww-dock {
   position: absolute; left: 50%; bottom: 34px; transform: translateX(-50%); z-index: 4; display: flex; align-items: center; gap: 4px; height: 42px; padding: 0 6px; box-sizing: border-box;
   border-radius: 4px; background: linear-gradient(180deg, rgba(18, 28, 44, 0.84), rgba(8, 13, 22, 0.8)); border: 1px solid var(--ww-line); backdrop-filter: blur(16px); box-shadow: 0 12px 34px rgba(0, 0, 0, 0.45);
@@ -53,7 +40,6 @@
 .ww-dock-btn.on { color: var(--ww-gold); background: rgba(255, 181, 71, 0.14); box-shadow: inset 0 -2px 0 var(--ww-gold); }
 .ww-dock-btn:disabled { opacity: 0.35; cursor: default; }
 .ww-dock-btn .ww-kbd { height: 16px; min-width: 14px; font-size: 10px; }
-.ww-dock-count { position: absolute; top: 1px; right: 0; min-width: 14px; height: 14px; padding: 0 3px; box-sizing: border-box; border-radius: 7px; background: var(--ww-gold); color: #1a1204; font: 600 10px/14px var(--ww-mono); font-style: normal; text-align: center; }
 .ww-layers { position: relative; }
 .ww-popover { position: absolute; bottom: 40px; right: 0; z-index: 8; padding: 10px 12px; display: flex; flex-direction: column; gap: 7px; animation: ww-in 0.15s ease-out; }
 .ww-dock .game-menu > button {
@@ -63,38 +49,7 @@
 .ww-dock .game-menu > button:hover:not(:disabled) { color: var(--ww-text); background: rgba(150, 195, 240, 0.1); }
 .ww-dock .game-menu-list { top: auto; bottom: 40px; right: 0; z-index: 8; }
 
-/* ---------------------------------------------------------------- left column */
-.ww-hud-left { position: absolute; left: 20px; top: 92px; bottom: 150px; width: 296px; z-index: 3; display: flex; flex-direction: column; gap: 12px; pointer-events: none; }
-.ww-hud-left > * { pointer-events: auto; }
-.ww-panel { box-sizing: border-box; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
-.ww-panel-head { display: flex; justify-content: space-between; align-items: center; font-size: 11.5px; }
-.ww-ops { flex: 0 1 auto; min-height: 0; overflow: hidden auto; gap: 10px; }
-.ww-op {
-  display: flex; flex-direction: column; gap: 6px; width: 100%; text-align: left; padding: 10px 12px; border-radius: 3px; cursor: pointer;
-  border: 1px solid rgba(150, 195, 240, 0.16); background: rgba(255, 255, 255, 0.02); color: var(--ww-text); font: inherit; text-transform: none;
-}
-.ww-op:hover:not(:disabled) { border-color: rgba(150, 195, 240, 0.4); background: rgba(150, 195, 240, 0.06); }
-.ww-op.offensive:hover:not(:disabled) { border-color: rgba(255, 181, 71, 0.8); background: rgba(255, 181, 71, 0.12); }
-.ww-op.pressure:hover:not(:disabled) { border-color: rgba(255, 77, 79, 0.65); background: rgba(255, 77, 79, 0.1); }
-.ww-op.offensive { border-color: rgba(255, 181, 71, 0.5); background: rgba(255, 181, 71, 0.08); }
-.ww-op.offensive .ww-title { color: #ffc56b; }
-.ww-op.pressure { border-color: rgba(255, 77, 79, 0.35); background: rgba(255, 77, 79, 0.06); }
-.ww-op-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
-.ww-op-top .ww-title { font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ww-op-top .ww-chip { height: 18px; font-size: 10px; flex: none; }
-.ww-op-sub { font-size: 12px; color: #b9c8da; }
-.ww-op-empty { font-size: 12.5px; margin: 0; }
-.ww-op-foot { display: flex; align-items: center; background: none; border: 0; min-height: 0; padding: 2px 0 0; font-size: 12px; color: var(--ww-muted); cursor: pointer; text-align: left; text-transform: none; }
-.ww-op-foot:hover:not(:disabled) { color: var(--ww-text); background: none; }
-.ww-staff { flex: none; gap: 9px; }
-.ww-staff-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
-.ww-staff-rows li { display: flex; justify-content: space-between; align-items: center; font-size: 13px; gap: 8px; }
-.ww-staff-rows .ww-chip { height: 22px; min-width: 70px; justify-content: center; border: 1px solid transparent; cursor: pointer; }
-.ww-staff-rows .ww-chip.blue:hover:not(:disabled) { border-color: currentColor; background: rgba(74, 163, 255, 0.26); }
-.ww-staff-rows .ww-chip.gold:hover:not(:disabled) { border-color: currentColor; background: rgba(255, 181, 71, 0.26); }
-.ww-staff-rows .ww-chip.waiting { animation: ww-pulse 1s ease-in-out infinite; }
-
-/* the map's World/Theatre/Front control, moved under the left column as the View panel */
+/* the map's World/Theatre/Front control, as the View panel */
 .ww-shell .map-zoom { left: 20px; right: auto; bottom: 40px; width: 296px; box-sizing: border-box; padding: 10px 12px; gap: 8px; z-index: 3; }
 .ww-shell .map-zoom-bands { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
 .ww-shell .map-zoom-bands::before { content: 'View'; grid-column: 1 / -1; font-family: var(--ww-title); font-weight: 600; text-transform: uppercase; letter-spacing: 0.16em; font-size: 12px; color: var(--ww-muted); margin-bottom: 2px; }
@@ -103,30 +58,6 @@
 .ww-shell .map-zoom-bands button { min-height: 32px; border: 1px solid rgba(150, 195, 240, 0.28); border-radius: 3px; background: rgba(20, 32, 50, 0.6); color: var(--ww-muted); font-size: 13px; letter-spacing: 0.08em; }
 .ww-shell .map-zoom-bands button.on { border-color: var(--ww-gold); color: #ffc56b; background: rgba(255, 181, 71, 0.12); box-shadow: none; }
 .ww-shell .map-zoom-bands button:hover:not(.on) { color: var(--ww-text); border-color: rgba(150, 195, 240, 0.5); background: rgba(30, 46, 70, 0.7); }
-
-/* ---------------------------------------------------------------- war room */
-.ww-warroom { position: absolute; right: 20px; top: 92px; bottom: 40px; width: 316px; z-index: 3; display: flex; flex-direction: column; gap: 10px; pointer-events: none; }
-.ww-warroom > * { pointer-events: auto; }
-.ww-warroom-head { display: flex; justify-content: space-between; align-items: center; padding: 0 2px; font-size: 11px; }
-.ww-warroom-list { display: flex; flex-direction: column; gap: 10px; overflow: hidden auto; min-height: 0; padding-right: 2px; scrollbar-width: thin; }
-.ww-warroom-more { margin: 0; font-size: 11.5px; text-align: right; }
-.ww-card { position: relative; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; flex: none; animation: ww-in 0.25s ease-out; }
-.ww-card p { margin: 0; font-size: 13px; line-height: 1.42; color: #d3dde9; }
-.ww-card.live { border-left: 3px solid var(--ww-red); gap: 6px; }
-.ww-card.live .ww-title { font-size: 16px; color: #ff8f90; }
-.ww-card.live p { color: #c9d5e3; }
-.ww-card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
-.live-tag { font-size: 11px; color: #ff8f90; animation: ww-pulse 1.6s ease-in-out infinite; }
-.ww-card-who { display: flex; gap: 10px; align-items: center; }
-.ww-card-who > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.ww-card-name { font-size: 13px; font-weight: 600; }
-.ww-card-who .ww-label { font-size: 10px; }
-.ww-card-chip { margin-left: auto; height: 18px; font-size: 10px; align-self: flex-start; }
-.ww-card-title { font-family: var(--ww-title); font-weight: 700; font-size: 15px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ww-text); }
-.ww-card.report .ww-card-title { color: #b9d4f2; }
-.ww-card-actions { display: flex; gap: 6px; flex-wrap: wrap; }
-.ww-card.wire { flex-direction: row; align-items: center; gap: 10px; padding: 10px 30px 10px 14px; font-size: 12.5px; line-height: 1.35; color: #c9d5e3; }
-.ww-card.quiet { margin: 0; font-size: 12.5px; color: var(--ww-muted); }
 .ww-topic-icon { flex: none; color: var(--ww-muted); }
 .ww-answer { display: flex; align-items: center; gap: 8px; font-size: 12.5px; line-height: 1.35; color: #c9d5e3; padding-top: 2px; animation: ww-in 0.2s ease-out; }
 .ww-answer .ww-chip { height: 18px; font-size: 10px; flex: none; }
@@ -143,7 +74,7 @@
 .ww-drawer-body > .panel-scroll, .ww-drawer-body > .eventlog { flex: 1; min-height: 0; overflow-y: auto; }
 .ww-drawer-body .eventlog { display: flex; flex-direction: column; }
 .ww-drawer-body .ev-list { flex: 1; min-height: 0; overflow-y: auto; }
-.ww-shell.drawer-open .ww-hud-left, .ww-shell.drawer-open .map-zoom { opacity: 0; pointer-events: none; }
+.ww-shell.drawer-open .map-zoom { opacity: 0; pointer-events: none; }
 /* The dock is wider than the map left of a drawer can spare at its centre, so it centres on the map beside the drawer. */
 .ww-shell.drawer-open .ww-dock { left: calc(230px + 50%); width: max-content; }
 .in-transit { display: flex; align-items: center; margin: 0 0 10px; padding: 8px 10px; border-radius: 3px; background: rgba(255, 181, 71, 0.1); border: 1px solid rgba(255, 181, 71, 0.35); color: #ffd79a; font-size: 12.5px; line-height: 1.4; }
@@ -159,7 +90,7 @@
 .ww-toast { position: absolute; top: 84px; left: 50%; transform: translateX(-50%); z-index: 7; max-width: min(620px, calc(100vw - 32px)); padding: 10px 16px; font-size: 13px; line-height: 1.4; animation: ww-in 0.2s ease-out; border-left: 3px solid var(--ww-blue); }
 .ww-toast.error { border-left-color: var(--ww-red); color: #ffd0d0; }
 
-/* ---------------------------------------------------------------- the daily brief */
+/* ---------------------------------------------------------------- the situation report frame */
 .ww-brief-back { position: absolute; inset: 0; z-index: 9; background: radial-gradient(ellipse at 50% 45%, rgba(4, 7, 12, 0.72), rgba(2, 4, 8, 0.92)); backdrop-filter: blur(3px); display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 70px 20px 24px; box-sizing: border-box; animation: ww-in 0.25s ease-out; }
 .ww-brief-file { align-self: center; width: min(1180px, 100%); box-sizing: border-box; padding: 0 0 0 24px; font-size: 11px; }
 .ww-brief-file > span { margin-right: 10px; }
@@ -175,96 +106,23 @@
 .ww-stamp { margin-left: auto; padding: 6px 14px; border: 2px solid rgba(255, 77, 79, 0.7); color: #ff6b6d; font-family: var(--ww-title); font-weight: 700; font-size: 19px; letter-spacing: 0.16em; text-transform: uppercase; transform: rotate(-4deg); opacity: 0.85; box-shadow: inset 0 0 0 2px rgba(255, 77, 79, 0.25); white-space: nowrap; }
 .ww-brief-stopped { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; margin-left: 24px; font-size: 11.5px; }
 .ww-brief-stopped .ww-chip { height: 26px; border: 1px solid rgba(255, 181, 71, 0.6); }
-.ww-brief-body { display: grid; grid-template-columns: minmax(0, 1fr) 330px; min-height: 0; flex: 1; }
-.ww-brief-items { list-style: none; margin: 0; padding: 4px 26px; overflow-y: auto; min-height: 0; }
-.ww-brief-item { display: grid; grid-template-columns: 150px minmax(0, 1fr) 160px; gap: 18px; padding: 16px 0; border-bottom: 1px solid rgba(150, 195, 240, 0.1); animation: ww-in 0.3s ease-out; }
-.ww-brief-item:last-child { border-bottom: 0; }
-.ww-brief-thumb { position: relative; width: 150px; height: 168px; border: 1px solid rgba(150, 195, 240, 0.25); border-radius: 2px; overflow: hidden; background: #071019; }
-.ww-brief-thumb.plain { display: flex; align-items: center; justify-content: center; color: var(--ww-muted); }
-.ww-brief-thumb.plain .ww-topic-icon { width: 42px; height: 42px; }
-.ww-brief-num { position: absolute; left: 0; top: 0; z-index: 1; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; background: #c8343a; color: #fff; font: 600 13px var(--ww-mono); }
-.ww-minimap { position: relative; margin: 0; }
-.ww-minimap canvas { display: block; }
-.ww-minimap-label { position: absolute; left: 50%; top: calc(50% + 14px); transform: translateX(-50%); font-family: var(--ww-title); font-weight: 700; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: #fff; text-shadow: 0 1px 3px #000, 0 0 6px #000; white-space: nowrap; }
-.ww-minimap-coord { position: absolute; right: 6px; bottom: 5px; font-size: 10px; color: #cfe0f2; text-shadow: 0 1px 2px #000; }
-.ww-brief-main { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.ww-brief-kicker { display: flex; align-items: center; gap: 8px; color: #ff8f90; }
-.ww-brief-kicker .ww-label { color: #ff8f90; font-size: 11.5px; }
-.ww-brief-kicker .ww-chip { height: 19px; font-size: 10px; }
-.ww-brief-main h3 { margin: 2px 0 0; font-size: 26px; letter-spacing: 0.04em; color: var(--ww-text); font-weight: 700; }
-.ww-brief-main > p { margin: 0; font-size: 13.5px; line-height: 1.45; color: #c9d5e3; }
-.ww-brief-rec { display: flex; gap: 12px; align-items: center; margin-top: 4px; padding: 8px 0 0 12px; border-left: 2px solid rgba(255, 181, 71, 0.6); }
-.ww-brief-rec > div { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.ww-brief-who { font-size: 11.5px; color: var(--ww-muted); }
-.ww-brief-who b { font-family: var(--ww-title); font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: #ffc56b; margin-right: 6px; }
-.ww-brief-ask { font-size: 14px; font-weight: 600; color: var(--ww-text); }
-.ww-brief-cost { font-size: 12px; color: #b9c8da; }
-.ww-brief-cost .ww-label { font-size: 10px; color: #ff8f90; margin-right: 4px; }
-.ww-brief-side { display: flex; flex-direction: column; gap: 8px; align-items: stretch; }
-.ww-brief-fig { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; margin-bottom: 4px; }
-.ww-brief-fig .ww-mono { font-size: 32px; font-weight: 600; color: #ffc56b; line-height: 1; }
-.ww-brief-fig small { font-size: 14px; margin-left: 2px; }
-.ww-brief-fig .ww-label { font-size: 10px; text-align: right; }
-.ww-brief-side .ww-btn { min-height: 32px; font-size: 13px; justify-content: space-between; }
-.ww-brief-side .ww-btn.gold { min-height: 38px; font-size: 16px; }
-.ww-brief-empty { padding: 40px 0; color: var(--ww-muted); font-size: 14px; }
-.ww-brief-overnight { border-left: 1px solid var(--ww-line); padding: 18px 22px; display: flex; flex-direction: column; gap: 14px; overflow-y: auto; min-height: 0; }
-.ww-brief-oh { display: flex; justify-content: space-between; align-items: baseline; }
-.ww-brief-oh .ww-title { font-size: 22px; letter-spacing: 0.1em; }
-.ww-brief-oh .ww-mono { font-size: 12px; }
 .ww-brief-sec { display: flex; flex-direction: column; gap: 6px; }
 .ww-brief-sec .ww-label { font-size: 11px; }
-.ww-brief-row { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; color: #d3dde9; }
-.ww-brief-row b { font-family: var(--ww-mono); font-weight: 600; font-size: 13px; white-space: nowrap; }
-.ww-brief-news { font-size: 12.5px; line-height: 1.35; color: #c9d5e3; }
-.ww-brief-week { margin-top: 2px; padding: 12px 14px; border: 1px solid rgba(150, 195, 240, 0.16); border-radius: 3px; background: rgba(255, 255, 255, 0.02); display: flex; flex-direction: column; gap: 10px; }
-.ww-brief-week .ww-mono { font-size: 15px; font-weight: 600; }
-.ww-brief-chart { position: relative; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); height: 74px; border-top: 1px dashed transparent; }
-.ww-brief-chart::before { content: ''; position: absolute; left: 0; right: 0; top: 30px; border-top: 1px solid rgba(150, 195, 240, 0.25); }
-.ww-brief-bar { position: relative; height: 60px; }
-.ww-brief-bar i { position: absolute; left: 50%; width: 16px; transform: translateX(-50%); }
-.ww-brief-bar i.up { background: #3fd98a; box-shadow: 0 0 8px rgba(63, 217, 138, 0.5); }
-.ww-brief-bar i.down { background: #ff4d4f; box-shadow: 0 0 8px rgba(255, 77, 79, 0.5); }
-.ww-brief-bar i.flat { background: rgba(150, 195, 240, 0.35); height: 2px !important; }
-.ww-brief-bar span { position: absolute; left: 0; right: 0; bottom: -14px; text-align: center; font: 600 10px var(--ww-title); letter-spacing: 0.12em; color: var(--ww-muted); }
-.ww-brief-settled { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 12px; margin-top: auto; }
-.ww-brief-settled .ww-link { font-size: 12.5px; white-space: nowrap; }
 .ww-brief-foot { display: flex; align-items: center; gap: 14px; padding: 14px 26px; border-top: 1px solid var(--ww-line); }
 .ww-brief-foot .ww-label { font-size: 11px; }
 .ww-brief-foot .ww-label { white-space: nowrap; }
-.ww-brief-foot .ww-seg { grid-auto-columns: auto; }
-.ww-brief-foot .ww-seg button { min-height: 36px; padding: 0 14px; font-size: 13.5px; }
 .ww-brief-foot .ww-btn { white-space: nowrap; }
-.ww-brief-all { min-height: 52px; padding: 0 18px; gap: 18px; text-align: left; }
-.ww-brief-all > span:first-child { display: flex; flex-direction: column; gap: 2px; }
-.ww-brief-all-t { font-size: 19px; letter-spacing: 0.08em; white-space: nowrap; }
-.ww-brief-all small { font-family: var(--ww-sans); font-weight: 500; font-size: 11.5px; letter-spacing: 0; text-transform: none; color: #3a2a08; max-width: 380px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 @media (max-width: 1100px) {
-  .ww-warroom { width: 280px; }
-  .ww-hud-left { width: 270px; }
   .ww-shell .map-zoom { width: 270px; }
   .ww-dock-btn .ww-kbd { display: none; }
-  .ww-brief-item { grid-template-columns: 110px minmax(0, 1fr) 150px; }
-  .ww-brief-thumb { width: 110px; }
-  .ww-brief-body { grid-template-columns: minmax(0, 1fr); }
-  .ww-brief-overnight { display: none; }
   .ww-stamp { display: none; }
 }
 @media (max-width: 760px) {
-  .ww-hud-left, .ww-shell .map-zoom { display: none; }
-  .ww-warroom { left: 16px; right: 16px; width: auto; top: auto; bottom: 32px; max-height: 40vh; }
-  .ww-brief-item { grid-template-columns: minmax(0, 1fr); }
-  .ww-brief-thumb { display: none; }
+  .ww-shell .map-zoom { display: none; }
   .ww-brief-foot { flex-wrap: wrap; }
 }
 
-/* A crisis or the opening report has the screen: the HUD steps back so only the map shows behind it. */
-.ww-shell.hud-off .ww-hud-left, .ww-shell.hud-off .ww-warroom, .ww-shell.hud-off .ww-topbar, .ww-shell.hud-off .ww-dock,
-.ww-shell.hud-off .ww-ticker, .ww-shell.hud-off .map-zoom, .ww-shell.hud-off .ww-toast { opacity: 0; pointer-events: none; transition: opacity 0.3s; }
+.ww-shell.hud-off .ww-topbar, .ww-shell.hud-off .ww-dock, .ww-shell.hud-off .ww-ticker, .ww-shell.hud-off .map-zoom, .ww-shell.hud-off .ww-toast { opacity: 0; pointer-events: none; transition: opacity 0.3s; }
 
-.ww-blue { color: #8fc6ff; }
-.ww-gold { color: #ffc56b; }
-.ww-op.planned .ww-op-sub.red { color: #ffb0a8; }
 .tt-quiet { color: var(--ww-faint); }
-.ww-op-keys { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--ww-faint); }

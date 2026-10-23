@@ -29,7 +29,7 @@ Read-only. Checks the recorded pid is alive, the port answers 200, `dist/` is ne
 
 ## Drive
 
-`scripts/play.mjs` starts a game the way a returning player does (tour skipped, crisis screens left to the Daily Brief), runs the clock, opens drawers and writes `summary.json`:
+`scripts/play.mjs` starts a game the way a returning player does (tour skipped, crises answered by the staff's recommendation with a toast), runs the clock, opens drawers and writes `summary.json`:
 
 ```bash
 node .claude/skills/verify/scripts/play.mjs --play ukraine-2026:UKR --role cinc --ticks 8 --drawers forces,nation,log,cost --run smoke
@@ -42,7 +42,7 @@ For a feature-specific drive, import it:
 ```js
 import { open } from './.claude/skills/verify/scripts/play.mjs';
 const s = await open({ play: 'ukraine-2026:UKR', role: 'brigade', run: 'orders' });
-await s.runTo(8);              // ticks are 6 game hours; closes each Daily Brief that pauses the clock
+await s.runTo(8);              // ticks are 6 game hours
 await s.flyTo(node, -0.5);     // waits for the camera to settle
 const a = await s.at(unitNode), b = await s.at(targetNode);   // page coordinates of map nodes
 await s.page.mouse.move(a.x, a.y); await s.page.mouse.down();  // press on your own counter
@@ -51,8 +51,6 @@ await s.shot('pill.png');
 await s.page.mouse.up();                                         // release sends the order
 await s.close();
 ```
-
-The Daily Brief opens by itself whenever an urgent decision arrives, even with the clock stopped. `newGame` installs a Playwright locator handler that closes it before any click, but keyboard shortcuts are ignored under it: call `s.closeBrief()` before `page.keyboard.press`.
 
 Handles: every control has a `data-testid` (grep `data-testid` in `src/ui`). The page exposes `window.__client` (the sim client: `state`, `meta.nationIds`, `setSpeed`, `step`, `dragKit(ids)`, `tracks`), `window.__map` (the renderer: `flyTo`, `screenOf`, `hits`, `animating`, `cam`, `map`, `pick`) and `window.__drag` (`lastAimMs`, `maxAimMs`, `totalAimMs`, `aims`: the pure aim per pointer move). Read state through these; give orders only through clicks, drags and keys. The feature map in `features/` names the handles and gotchas per feature.
 

@@ -87,7 +87,6 @@ try {
   const picked = await select(front);
   check(picked, `a plain click on its counter selects ${front.name}`);
   check((await sent()) === before, 'a click sends no order');
-  await s.closeBrief();
   await page.keyboard.press('Escape');
 
   // Drag the brigade onto the enemy cell: the pill reads the odds before release.
@@ -147,7 +146,6 @@ try {
   check(!!ended && after.posture !== 'attack', `a unit's player stamp clears once its attack ends: ${JSON.stringify(after)}`);
 
   // A refusal: a brigade of ours on the coast dragged onto the sea says why and sends nothing.
-  await s.closeBrief();
   await page.keyboard.press('Escape');
   const coast = await page.evaluate((me) => {
     const c = window.__client, m = c.map;
@@ -187,7 +185,6 @@ try {
   } else check(false, `brigade and sea both on screen (${!!c}, ${!!w})`);
 
   // Hold the front: a stack of ours dragged onto own front cells.
-  await s.closeBrief();
   await page.keyboard.press('Escape');
   await page.click('[data-testid="zoom-theatre"]');
   await s.settle();
@@ -227,7 +224,6 @@ try {
 
     // Esc cancels the drag: the pill goes and the release sends nothing.
     const n1 = await sent();
-    await s.closeBrief();
     await page.keyboard.press('Escape');
     check(!(await page.locator('[data-testid="pill"]').count()), 'Esc takes the pill away');
     await page.mouse.up();
@@ -262,7 +258,6 @@ try {
   }, s.nation);
   const pace = async (wiggle) => {
     for (let attempt = 0; attempt < 3; attempt++) {
-      await s.closeBrief();
       await page.evaluate(() => window.__client.setSpeed(5));
       await page.waitForTimeout(800);
       const start = await page.evaluate(() => ({ tick: window.__client.state.tick, at: performance.now() }));
@@ -272,13 +267,13 @@ try {
         const end = Date.now() + 5000;
         for (let i = 0; Date.now() < end; i++) await page.mouse.move(own.x + 140 * Math.cos(i / 6), own.y + 80 * Math.sin(i / 4));
       } else await page.waitForTimeout(5000);
-      const stop = await page.evaluate(() => ({ tick: window.__client.state.tick, at: performance.now(), brief: !!document.querySelector('[data-testid="daily-brief"]') }));
+      const stop = await page.evaluate(() => ({ tick: window.__client.state.tick, at: performance.now(), paused: window.__client.ticksPerSec === 0 }));
       if (wiggle) {
         await page.keyboard.press('Escape');
         await page.mouse.up();
       }
       await page.evaluate(() => window.__client.setSpeed(0));
-      if (!stop.brief) return ((stop.tick - start.tick) * 1000) / (stop.at - start.at);
+      if (!stop.paused) return ((stop.tick - start.tick) * 1000) / (stop.at - start.at);
     }
     return NaN;
   };

@@ -21,5 +21,5 @@ Proof: `[data-testid="shell"]` visible, `window.__client.state.tick >= 1` (the f
 
 - The scenario load is slow on first visit (map and orbat data); waits use 60 to 120 s timeouts.
 - A nation not on the card needs the search path; `newGame` falls back to it automatically.
-- `ww3.crises='off'` routes treaty calls into the Daily Brief instead of a blocking crisis screen. Remember this when a crisis-related change seems to do nothing.
+- `ww3.crises='off'` has the staff answer each crisis (treaty call, peace offer, nuclear alert, capital threat) with its recommended option and say so in a toast, instead of a blocking crisis screen. Remember this when a crisis-related change seems to do nothing.
 - `tests/ui-drama.e2e.mjs` covers the tour, the opening, crises and moments (it installs a fake clock; drive moments with `page.clock.runFor`).

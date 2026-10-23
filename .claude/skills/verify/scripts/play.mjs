@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { chromium } from '/opt/node-tools/node_modules/playwright/index.mjs';
-import { closeBrief, newGame, runTo } from '../../../../tests/e2e-start.mjs';
+import { newGame, runTo } from '../../../../tests/e2e-start.mjs';
 
 export const RUNS = '/tmp/ww3-verify/runs';
 
@@ -24,13 +24,12 @@ export async function open({ url = 'http://localhost:4650/', play = 'ukraine-202
 
   const s = {
     page, errors, out, nation,
-    closeBrief: () => closeBrief(page),
     shot: (name) => page.screenshot({ path: path.join(out, name) }),
     settle: async () => {
       await page.waitForFunction(() => !window.__map.animating, null, { timeout: 60_000 });
       await page.waitForTimeout(400);
     },
-    /** Runs the clock to `tick` and pauses, closing each Daily Brief on the way. Ticks are 6 game hours. */
+    /** Runs the clock to `tick` and pauses. Ticks are 6 game hours. */
     runTo: (tick, speed = 20) => runTo(page, tick, { speed }),
     /** A map node's position on the page, or null when it is off screen. */
     at: (node) => page.evaluate((n) => {

@@ -319,11 +319,6 @@ export class SimClient {
     this.notify();
   }
 
-  /** Redraw after a change that lives only in the page, such as dismissing a card. */
-  touch() {
-    this.notify();
-  }
-
   focus(nation?: NationId, formation?: FormationId) {
     this.send({ type: 'focus', nation, formation });
   }
